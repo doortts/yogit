@@ -1,0 +1,144 @@
+#!/bin/sh
+set -eu
+
+usage() {
+  cat <<'EOF'
+Usage: yo [options] [path]
+
+Opens the yogit commit timeline for a Git repository.
+With no path, the current directory is used.
+
+Options:
+  --repo PATH   Repository path (same as the positional path; last one wins)
+  --debug       Run the Debug build instead of Release
+  --build       Rebuild the app before launching
+  --version     Print the yogit version and exit
+  --help        Show this help and exit
+EOF
+}
+
+# Resolve this script through symlinks so the project dir is found from $0.
+self=$0
+links=0
+while [ -L "$self" ]; do
+  links=$((links + 1))
+  [ "$links" -le 40 ] || {
+    echo "yo: too many symlink levels resolving $0" >&2
+    exit 1
+  }
+  link=$(readlink -- "$self")
+  case "$link" in
+    /*) self=$link ;;
+    *) self=$(dirname -- "$self")/$link ;;
+  esac
+done
+script_dir=$(CDPATH= cd -- "$(dirname -- "$self")" && pwd)
+project_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
+
+repo_arg=
+config=Release
+build_flag=--release
+force_build=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --help | -h)
+      usage
+      exit 0
+      ;;
+    --version)
+      version=$(sed -n 's/^version:[[:space:]]*//p' "$project_dir/pubspec.yaml" | head -n 1)
+      [ -n "$version" ] || {
+        echo "yo: could not read version from $project_dir/pubspec.yaml" >&2
+        exit 1
+      }
+      echo "yogit $version"
+      exit 0
+      ;;
+    --debug)
+      config=Debug
+      build_flag=--debug
+      shift
+      ;;
+    --build)
+      force_build=1
+      shift
+      ;;
+    --repo)
+      [ "$#" -ge 2 ] || {
+        echo "yo: --repo requires a path" >&2
+        exit 2
+      }
+      repo_arg=$2
+      shift 2
+      ;;
+    --repo=*)
+      repo_arg=${1#--repo=}
+      shift
+      ;;
+    --)
+      shift
+      while [ "$#" -gt 0 ]; do
+        repo_arg=$1
+        shift
+      done
+      ;;
+    -*)
+      echo "yo: unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      repo_arg=$1
+      shift
+      ;;
+  esac
+done
+
+git_bin=$(command -v git) || {
+  echo "yo requires Git." >&2
+  exit 1
+}
+case "$git_bin" in
+  /*) ;;
+  *)
+    echo "yo could not resolve an absolute Git executable." >&2
+    exit 1
+    ;;
+esac
+[ -x "$git_bin" ] || {
+  echo "yo could not execute Git." >&2
+  exit 1
+}
+
+[ -n "$repo_arg" ] || repo_arg=$PWD
+root=$("$git_bin" -C "$repo_arg" rev-parse --show-toplevel 2>/dev/null) || {
+  echo "yo: not a Git repository: $repo_arg" >&2
+  exit 1
+}
+
+app="$project_dir/build/macos/Build/Products/$config/yogit.app"
+if [ "$force_build" -eq 1 ] || [ ! -d "$app" ]; then
+  command -v flutter >/dev/null 2>&1 || {
+    echo "yo: the $config app is missing and flutter is not on PATH." >&2
+    exit 1
+  }
+  (
+    cd "$project_dir"
+    flutter build macos "$build_flag"
+  )
+fi
+
+set -- --repo "$root" --git "$git_bin"
+if gh_bin=$(command -v gh 2>/dev/null); then
+  case "$gh_bin" in
+    /*)
+      if [ -x "$gh_bin" ]; then
+        set -- "$@" --gh "$gh_bin"
+      fi
+      ;;
+  esac
+fi
+
+# YO_OPEN exists so tests can stub the launcher; default stays absolute.
+exec "${YO_OPEN:-/usr/bin/open}" -n "$app" --args "$@"
