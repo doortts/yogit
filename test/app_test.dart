@@ -2040,19 +2040,85 @@ void main() {
     expect(AvatarService.palette, const [Color(0xFF0B7285)]);
   });
 
-  test('social time spells out the elapsed distance', () {
-    expect(socialTimeLabel(const Duration(seconds: 30)), 'just now');
-    expect(socialTimeLabel(const Duration(minutes: 1)), '1 minute ago');
-    expect(socialTimeLabel(const Duration(minutes: 59)), '59 minutes ago');
-    expect(socialTimeLabel(const Duration(hours: 1)), '1 hour ago');
-    expect(socialTimeLabel(const Duration(hours: 23)), '23 hours ago');
-    expect(socialTimeLabel(const Duration(days: 1)), 'yesterday');
-    expect(socialTimeLabel(const Duration(days: 2)), '2 days ago');
-    expect(socialTimeLabel(const Duration(days: 29)), '29 days ago');
-    expect(socialTimeLabel(const Duration(days: 30)), '1 month ago');
-    expect(socialTimeLabel(const Duration(days: 364)), '12 months ago');
-    expect(socialTimeLabel(const Duration(days: 365)), '1 year ago');
-    expect(socialTimeLabel(const Duration(days: 800)), '2 years ago');
+  test('social time counts calendar days, like the date headings', () {
+    final now = DateTime(2026, 7, 26, 10);
+    String label(DateTime time) => socialTimeLabel(time, now);
+
+    // Same day keeps the fine-grained strings.
+    expect(label(DateTime(2026, 7, 26, 9, 59, 30)), 'just now');
+    expect(label(DateTime(2026, 7, 26, 9, 59)), '1 minute ago');
+    expect(label(DateTime(2026, 7, 26, 9, 1)), '59 minutes ago');
+    expect(label(DateTime(2026, 7, 26, 9)), '1 hour ago');
+    expect(label(DateTime(2026, 7, 26, 0, 1)), '9 hours ago');
+
+    // The user's repro: 34 hours back is two calendar days, not yesterday.
+    expect(label(DateTime(2026, 7, 24, 23, 19)), '2 days ago');
+    // And 1.5 hours back across midnight is yesterday, not '1 hour ago'.
+    expect(
+      socialTimeLabel(DateTime(2026, 7, 25, 23), DateTime(2026, 7, 26, 0, 30)),
+      'yesterday',
+    );
+    expect(label(DateTime(2026, 7, 25, 9)), 'yesterday');
+    expect(label(DateTime(2026, 7, 25, 23, 59)), 'yesterday');
+
+    expect(label(DateTime(2026, 6, 27)), '29 days ago');
+    expect(label(DateTime(2026, 6, 26)), '1 month ago');
+    expect(label(DateTime(2025, 7, 27)), '12 months ago');
+    expect(label(DateTime(2025, 7, 26)), '1 year ago');
+    expect(label(DateTime(2024, 5, 20)), '2 years ago');
+  });
+
+  testWidgets('every Date cell agrees with the heading above it', (
+    tester,
+  ) async {
+    final now = DateTime.now();
+    int stamp(DateTime time) => time.millisecondsSinceEpoch ~/ 1000;
+    // Late-evening commits are where elapsed hours and calendar days disagree.
+    final times = [
+      now.subtract(const Duration(hours: 2)),
+      DateTime(
+        now.year,
+        now.month,
+        now.day,
+      ).subtract(const Duration(minutes: 41)),
+      DateTime(now.year, now.month, now.day)
+          .subtract(const Duration(days: 1))
+          .add(const Duration(hours: 23, minutes: 19)),
+      DateTime(
+        now.year,
+        now.month,
+        now.day,
+      ).subtract(const Duration(days: 4)).add(const Duration(hours: 22)),
+    ];
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [
+            for (var index = 0; index < times.length; index++)
+              commit('$index', 'commit $index', timestamp: stamp(times[index])),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    for (final time in times) {
+      final social = socialTimeLabel(time, now);
+      final heading = dateGroupLabel(time, now);
+      // A row saying 'yesterday' belongs under Yesterday, 'N days ago' under a
+      // dated heading, and today's hours under Today.
+      final expected = switch (social) {
+        'yesterday' => 'Yesterday',
+        final value when value.endsWith('days ago') => isNot(
+          anyOf('Today', 'Yesterday'),
+        ),
+        _ => 'Today',
+      };
+      expect(heading, expected, reason: '$social / $heading');
+      expect(find.text(social), findsWidgets, reason: social);
+      expect(find.text(heading), findsWidgets, reason: heading);
+    }
   });
 
   test(
@@ -3949,6 +4015,46 @@ void main() {
       24,
     );
     expect(tester.getSize(find.byKey(const Key('toolbar'))).height, 56);
+  });
+
+  testWidgets('the toolbar right cluster reads bigger and still fits 960', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    // The native window stops here, so this is the tightest the cluster gets.
+    tester.view.physicalSize = const Size(960, 700);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          root: '/Users/ada/some/deep/project/path/that/keeps/going',
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    double sizeOf(String label) =>
+        tester.widget<Text>(find.text(label)).style!.fontSize!;
+    expect(sizeOf('미리보기'), 14);
+    expect(sizeOf('하단'), 14);
+    expect(sizeOf('Enter'), 13);
+    expect(sizeOf(' 이동 · '), 14);
+    expect(tester.widget<Icon>(find.byIcon(Icons.settings_outlined)).size, 22);
+    // Rendering at all is the fit assertion: an overflow would have thrown.
+    expect(tester.getSize(find.byKey(const Key('toolbar'))).width, 960);
+    expect(
+      tester.getRect(find.byIcon(Icons.settings_outlined)).right,
+      lessThanOrEqualTo(960),
+    );
+    // The placement buttons grew but still respond.
+    await tester.tap(find.text('하단'));
+    await tester.pumpAndSettle();
+    expect(controller.previewPlacement, PreviewPlacement.bottom);
   });
 
   // ------------------------------------------------------------------ §18.4

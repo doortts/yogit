@@ -39,13 +39,22 @@ const _main = Color(0xFF8AD6A1);
 
 const _weekdayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+/// Whole local calendar days from [day] to [now]. Counted in hours and rounded,
+/// so a DST shift cannot turn yesterday into today. Every relative label in the
+/// timeline measures with this, which is what keeps the Date column and the group
+/// headings telling the same story.
+int calendarDaysBetween(DateTime day, DateTime now) {
+  final from = DateTime(day.year, day.month, day.day);
+  final to = DateTime(now.year, now.month, now.day);
+  return (to.difference(from).inHours / 24).round();
+}
+
 /// The heading over a day's commits: Today, Yesterday, `MM.DD Www` inside this
 /// year, and `YY.MM.DD Www` beyond it.
 String dateGroupLabel(DateTime day, DateTime now) {
   final today = DateTime(now.year, now.month, now.day);
   final date = DateTime(day.year, day.month, day.day);
-  // Hours over days: a DST shift must not turn yesterday into today.
-  final elapsed = (today.difference(date).inHours / 24).round();
+  final elapsed = calendarDaysBetween(day, now);
   if (elapsed == 0) return 'Today';
   if (elapsed == 1) return 'Yesterday';
   String pad(int value) => value.toString().padLeft(2, '0');
@@ -738,10 +747,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
           child: Row(
             children: [
               const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 5),
+                padding: EdgeInsets.symmetric(horizontal: 7),
                 child: Text(
                   '미리보기',
-                  style: TextStyle(color: _muted, fontSize: 11),
+                  style: TextStyle(color: _muted, fontSize: 14),
                 ),
               ),
               _placementButton('좌측', PreviewPlacement.left),
@@ -757,7 +766,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
           tooltip: 'Settings',
           visualDensity: VisualDensity.compact,
           onPressed: widget.onOpenSettings,
-          icon: const Icon(Icons.settings_outlined, size: 16, color: _muted),
+          icon: const Icon(Icons.settings_outlined, size: 22, color: _muted),
         ),
       ],
     ),
@@ -774,18 +783,18 @@ class _TimelineScreenState extends State<TimelineScreen> {
         _focusNode.requestFocus();
       },
       child: Container(
-        height: 24,
+        height: 30,
         alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 11),
         decoration: BoxDecoration(
           color: pressed ? _selectedRow : null,
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(5),
         ),
         child: Text(
           label,
           style: TextStyle(
             color: pressed ? Colors.white : _muted,
-            fontSize: 11,
+            fontSize: 14,
           ),
         ),
       ),
@@ -793,7 +802,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 
   Widget _shortcutHint() => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
     decoration: BoxDecoration(
       border: Border.all(color: _border),
       borderRadius: BorderRadius.circular(6),
@@ -802,22 +811,22 @@ class _TimelineScreenState extends State<TimelineScreen> {
       children: [
         _kbd('↑'),
         _kbd('↓'),
-        const Text(' 이동 · ', style: TextStyle(color: _muted, fontSize: 10)),
+        const Text(' 이동 · ', style: TextStyle(color: _muted, fontSize: 14)),
         _kbd('Enter'),
-        const Text(' 상세', style: TextStyle(color: _muted, fontSize: 10)),
+        const Text(' 상세', style: TextStyle(color: _muted, fontSize: 14)),
       ],
     ),
   );
 
   Widget _kbd(String label) => Container(
-    margin: const EdgeInsets.symmetric(horizontal: 2),
-    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+    margin: const EdgeInsets.symmetric(horizontal: 3),
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
     decoration: BoxDecoration(
       color: _panelSoft,
       border: Border.all(color: _border),
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(5),
     ),
-    child: Text(label, style: const TextStyle(color: _text, fontSize: 10)),
+    child: Text(label, style: const TextStyle(color: _text, fontSize: 13)),
   );
 
   // ---------------------------------------------------------------- sidebar
@@ -2926,20 +2935,25 @@ String exactCommitTime(int timestamp) {
 }
 
 String _socialTime(int timestamp) => socialTimeLabel(
-  DateTime.now().difference(
-    DateTime.fromMillisecondsSinceEpoch(timestamp * 1000),
-  ),
+  DateTime.fromMillisecondsSinceEpoch(timestamp * 1000),
+  DateTime.now(),
 );
 
-/// Long-form relative time, as the mockup spells it out.
-String socialTimeLabel(Duration elapsed) {
+/// Long-form relative time, as the mockup spells it out. Days come from the
+/// calendar, not from elapsed hours, so a commit late on Friday reads "2 days
+/// ago" on Sunday instead of contradicting its own "07.24 Fri" heading.
+String socialTimeLabel(DateTime time, DateTime now) {
   String ago(int value, String unit) =>
       '$value $unit${value == 1 ? '' : 's'} ago';
-  if (elapsed.inMinutes < 1) return 'just now';
-  if (elapsed.inHours < 1) return ago(elapsed.inMinutes, 'minute');
-  if (elapsed.inDays < 1) return ago(elapsed.inHours, 'hour');
-  if (elapsed.inDays == 1) return 'yesterday';
-  if (elapsed.inDays < 30) return ago(elapsed.inDays, 'day');
-  if (elapsed.inDays < 365) return ago(elapsed.inDays ~/ 30, 'month');
-  return ago(elapsed.inDays ~/ 365, 'year');
+  final days = calendarDaysBetween(time, now);
+  if (days == 0) {
+    final elapsed = now.difference(time);
+    if (elapsed.inMinutes < 1) return 'just now';
+    if (elapsed.inHours < 1) return ago(elapsed.inMinutes, 'minute');
+    return ago(elapsed.inHours, 'hour');
+  }
+  if (days == 1) return 'yesterday';
+  if (days < 30) return ago(days, 'day');
+  if (days < 365) return ago(days ~/ 30, 'month');
+  return ago(days ~/ 365, 'year');
 }
