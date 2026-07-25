@@ -15,6 +15,12 @@ const _addedFill = Color(0xFF8AD6A1);
 const _deleted = Color(0xFFF29AB2);
 const _renamed = Color(0xFFB6A0EA);
 
+/// D2Coding is monospace *and* covers Hangul, so Korean commit messages keep
+/// their columns aligned instead of falling back to a proportional face. Shared
+/// with the timeline's data columns.
+const cellFont = 'D2Coding';
+const cellFontFallback = ['Menlo'];
+
 enum DiffViewMode { unified, sideBySide }
 
 typedef DiffCacheKey = ({
@@ -44,6 +50,7 @@ class _DiffScreenState extends State<DiffScreen> {
   final _diffCache = <DiffCacheKey, Future<List<DiffLine>>>{};
   final _algorithmTooltipKey = GlobalKey<TooltipState>();
   final _algorithmFocusNode = FocusNode();
+  final _diffScroll = ScrollController();
 
   late int _selectedIndex;
   String? _parent;
@@ -73,6 +80,7 @@ class _DiffScreenState extends State<DiffScreen> {
   @override
   void dispose() {
     _algorithmFocusNode.dispose();
+    _diffScroll.dispose();
     super.dispose();
   }
 
@@ -82,8 +90,36 @@ class _DiffScreenState extends State<DiffScreen> {
       Navigator.of(context).maybePop();
       return KeyEventResult.handled;
     }
-    return KeyEventResult.ignored;
+    // Arrows repeat while held, like the timeline's.
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final step = switch (event.logicalKey) {
+      LogicalKeyboardKey.arrowDown => 1,
+      LogicalKeyboardKey.arrowUp => -1,
+      _ => 0,
+    };
+    if (step == 0) return KeyEventResult.ignored;
+    // Meta walks the commits beside the diff; bare arrows walk this commit's
+    // files, which is the move you make far more often.
+    if (HardwareKeyboard.instance.isMetaPressed) {
+      _stepCommit(step);
+    } else {
+      _stepFile(step);
+    }
+    return KeyEventResult.handled;
   }
+
+  void _stepFile(int delta) {
+    if (_files.isEmpty) return;
+    final index = _files.indexWhere((file) => file.path == _selectedPath);
+    final next = (index + delta).clamp(0, _files.length - 1);
+    _selectFile(_files[next].path);
+  }
+
+  void _stepCommit(int delta) => _selectCommit(
+    (_selectedIndex + delta).clamp(0, widget.commits.length - 1),
+  );
 
   Future<void> _loadFiles() async {
     final request = ++_fileRequest;
@@ -173,6 +209,8 @@ class _DiffScreenState extends State<DiffScreen> {
   void _selectFile(String path) {
     if (path == _selectedPath) return;
     setState(() => _selectedPath = path);
+    // A new file reads from its first line, not from wherever the last one sat.
+    if (_diffScroll.hasClients) _diffScroll.jumpTo(0);
     _loadDiff(keepCurrent: false);
   }
 
@@ -183,28 +221,47 @@ class _DiffScreenState extends State<DiffScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: _background,
-    body: Focus(
-      autofocus: true,
-      onKeyEvent: _handleKey,
-      child: Row(
-        children: [
-          SizedBox(
-            key: const Key('nearby-column'),
-            width: 210,
-            child: _nearbyCommits(),
-          ),
-          SizedBox(
-            key: const Key('details-files-column'),
-            width: 290,
-            child: _detailsAndFiles(),
-          ),
-          Expanded(key: const Key('diff-column'), child: _diff()),
-        ],
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    // Every word on this screen is code or a path, so the whole screen reads in
+    // the same Hangul-capable monospace the timeline's columns use.
+    return Theme(
+      data: theme.copyWith(
+        textTheme: theme.textTheme.apply(
+          fontFamily: cellFont,
+          fontFamilyFallback: cellFontFallback,
+        ),
       ),
-    ),
-  );
+      child: Scaffold(
+        backgroundColor: _background,
+        body: DefaultTextStyle.merge(
+          style: const TextStyle(
+            fontFamily: cellFont,
+            fontFamilyFallback: cellFontFallback,
+          ),
+          child: Focus(
+            autofocus: true,
+            onKeyEvent: _handleKey,
+            child: Row(
+              children: [
+                SizedBox(
+                  key: const Key('nearby-column'),
+                  width: 210,
+                  child: _nearbyCommits(),
+                ),
+                SizedBox(
+                  key: const Key('details-files-column'),
+                  width: 290,
+                  child: _detailsAndFiles(),
+                ),
+                Expanded(key: const Key('diff-column'), child: _diff()),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _nearbyCommits() => DecoratedBox(
     decoration: const BoxDecoration(
@@ -339,7 +396,8 @@ class _DiffScreenState extends State<DiffScreen> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontFamily: 'monospace',
+                        fontFamily: cellFont,
+                        fontFamilyFallback: cellFontFallback,
                         fontSize: 12,
                       ),
                     ),
@@ -494,6 +552,7 @@ class _DiffScreenState extends State<DiffScreen> {
 
   Widget _unifiedDiff() => ListView.builder(
     key: const Key('unified-diff-list'),
+    controller: _diffScroll,
     itemCount: _lines.length,
     itemBuilder: (context, index) => _unifiedLine(_lines[index]),
   );
@@ -518,7 +577,8 @@ class _DiffScreenState extends State<DiffScreen> {
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: color,
-                fontFamily: 'monospace',
+                fontFamily: cellFont,
+                fontFamilyFallback: cellFontFallback,
                 fontSize: 12,
               ),
             ),
@@ -528,7 +588,8 @@ class _DiffScreenState extends State<DiffScreen> {
               line.text,
               style: TextStyle(
                 color: color,
-                fontFamily: 'monospace',
+                fontFamily: cellFont,
+                fontFamilyFallback: cellFontFallback,
                 fontSize: 12,
               ),
             ),
@@ -540,6 +601,7 @@ class _DiffScreenState extends State<DiffScreen> {
 
   Widget _sideBySideDiff() => ListView.builder(
     key: const Key('side-by-side-diff-list'),
+    controller: _diffScroll,
     itemCount: _pairs.length,
     itemBuilder: (context, index) {
       final pair = _pairs[index];
@@ -578,7 +640,8 @@ class _DiffScreenState extends State<DiffScreen> {
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: color,
-                fontFamily: 'monospace',
+                fontFamily: cellFont,
+                fontFamilyFallback: cellFontFallback,
                 fontSize: 12,
               ),
             ),
@@ -588,7 +651,8 @@ class _DiffScreenState extends State<DiffScreen> {
               line?.text ?? '',
               style: TextStyle(
                 color: color,
-                fontFamily: 'monospace',
+                fontFamily: cellFont,
+                fontFamilyFallback: cellFontFallback,
                 fontSize: 12,
               ),
             ),
@@ -607,7 +671,8 @@ class _DiffScreenState extends State<DiffScreen> {
       number?.toString() ?? '',
       style: const TextStyle(
         color: _muted,
-        fontFamily: 'monospace',
+        fontFamily: cellFont,
+        fontFamilyFallback: cellFontFallback,
         fontSize: 10,
       ),
     ),

@@ -4570,13 +4570,13 @@ void main() {
         .first
         .style!
         .fontSize!;
-    expect(sizeOf('Commit & Diff'), 15);
-    expect(sizeOf('first commit'), 18);
-    expect(sizeOf('commit 1'), 15);
-    expect(sizeOf('Cam Committer'), 18);
-    expect(sizeOf('2 files changed'), 15);
-    expect(sizeOf('lib/a.dart'), 15);
-    expect(sizeOf('+lib/a.dart body'), 14);
+    expect(sizeOf('Commit & Diff'), 12);
+    expect(sizeOf('first commit'), 14);
+    expect(sizeOf('commit 1'), 12);
+    expect(sizeOf('Cam Committer'), 14);
+    expect(sizeOf('2 files changed'), 12);
+    expect(sizeOf('lib/a.dart'), 12);
+    expect(sizeOf('+lib/a.dart body'), 11);
 
     // A file row still switches the diff despite the selection layer.
     await tester.tap(
@@ -4820,7 +4820,7 @@ void main() {
     final cta = find.byKey(const Key('open-full-diff'));
     final rect = tester.getRect(cta);
     final panel = tester.getRect(find.byKey(const Key('preview-panel')));
-    expect(rect.height, 40);
+    expect(rect.height, 32);
     // Near full width, and above everything but the header.
     expect(rect.width, greaterThan(panel.width - 40));
     expect(
@@ -4838,7 +4838,7 @@ void main() {
           )
           .style
           ?.fontSize,
-      16,
+      13,
     );
     expect(tester.widget<FilledButton>(cta).onPressed, isNotNull);
   });
@@ -4938,7 +4938,7 @@ void main() {
     expect(button, findsOneWidget);
     // The name with its shortcut underneath, on green.
     expect(
-      find.descendant(of: button, matching: find.text('풀 디프')),
+      find.descendant(of: button, matching: find.text('Show Diff')),
       findsOneWidget,
     );
     expect(
@@ -4951,7 +4951,9 @@ void main() {
           .top,
       greaterThan(
         tester
-            .getRect(find.descendant(of: button, matching: find.text('풀 디프')))
+            .getRect(
+              find.descendant(of: button, matching: find.text('Show Diff')),
+            )
             .top,
       ),
     );
@@ -5214,6 +5216,103 @@ void main() {
       find.descendant(of: status, matching: find.byType(Text)),
       findsNothing,
     );
+  });
+  // ------------------------------------------------------------------ F3
+  testWidgets('the diff screen walks files and commits from the keyboard', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final repository = FakeGitRepository(
+      (_, _) async => [
+        commit('newer', 'newer commit', parents: const ['older']),
+        commit('older', 'older commit', parents: const ['root']),
+      ],
+      files: (commit, _) async => [
+        for (final name in ['one', 'two', 'three'])
+          GitFileChange(
+            path: '${commit.sha}/$name.dart',
+            status: 'M',
+            additions: 1,
+            deletions: 1,
+          ),
+      ],
+      diff: (commit, _, path, _) async => [
+        DiffLine(kind: DiffLineKind.add, text: 'body of $path', newNumber: 1),
+      ],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: repository,
+          commits: [
+            commit('newer', 'newer commit', parents: const ['older']),
+            commit('older', 'older commit', parents: const ['root']),
+          ],
+          initialIndex: 0,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // It opens on the first file of the first commit.
+    expect(find.text('body of newer/one.dart'), findsOneWidget);
+    expect(
+      find.byKey(const Key('selected-file-newer/one.dart')),
+      findsOneWidget,
+    );
+
+    // Down walks the file list, loading each diff as it goes.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(find.text('body of newer/two.dart'), findsOneWidget);
+    expect(
+      find.byKey(const Key('selected-file-newer/two.dart')),
+      findsOneWidget,
+    );
+    // Autorepeat keeps walking.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(find.text('body of newer/three.dart'), findsOneWidget);
+    // And it stops at the end rather than wrapping.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(find.text('body of newer/three.dart'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+    expect(find.text('body of newer/two.dart'), findsOneWidget);
+
+    // Cmd+Down moves to the next commit, back at its first file.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-nearby-older')), findsOneWidget);
+    expect(find.text('body of older/one.dart'), findsOneWidget);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-nearby-newer')), findsOneWidget);
+
+    // Every word on the screen is code, so it all reads in D2Coding.
+    for (final label in [
+      'body of newer/one.dart',
+      'newer/one.dart',
+      'newer commit',
+    ]) {
+      final style = DefaultTextStyle.of(
+        tester.element(find.text(label).first),
+      ).style.merge(tester.widget<Text>(find.text(label).first).style);
+      expect(style.fontFamily, 'D2Coding', reason: label);
+      expect(style.fontFamilyFallback, ['Menlo'], reason: label);
+    }
   });
 }
 

@@ -31,11 +31,6 @@ const _dateGroup = Color(0xFF5AB0FF);
 /// A ref chip narrower than this is unreadable, so the extra chips hide instead.
 const _minChipWidth = 40.0;
 
-/// D2Coding is monospace *and* covers Hangul, so a Korean commit message keeps
-/// the columns aligned instead of falling back to a proportional face.
-const _cellFont = 'D2Coding';
-const _cellFontFallback = ['Menlo'];
-
 /// Long enough that arrowing past a row does not flash tooltips.
 const _tooltipDelay = Duration(milliseconds: 400);
 
@@ -756,38 +751,47 @@ class _TimelineScreenState extends State<TimelineScreen> {
     height: 56,
     padding: const EdgeInsets.symmetric(horizontal: 14),
     color: _surface,
-    child: Row(
-      children: [
-        const Icon(
-          Icons.account_tree_outlined,
-          size: 24,
-          color: Color(0xFF7AD6E8),
+    // The '미리보기' caption is the first thing to go when the window is narrow:
+    // the three placement buttons say the same thing without it.
+    child: LayoutBuilder(
+      builder: (context, constraints) =>
+          _toolbarRow(constraints.maxWidth >= 900),
+    ),
+  );
+
+  Widget _toolbarRow(bool showPreviewLabel) => Row(
+    children: [
+      const Icon(
+        Icons.account_tree_outlined,
+        size: 24,
+        color: Color(0xFF7AD6E8),
+      ),
+      IconButton(
+        key: const Key('pick-repository'),
+        tooltip: '저장소 열기',
+        visualDensity: VisualDensity.compact,
+        onPressed: () => unawaited(_pickRepository()),
+        icon: const Icon(Icons.folder_open_outlined, size: 24, color: _muted),
+      ),
+      Expanded(
+        child: Text(
+          widget.repository.root,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: _muted, fontSize: 18),
         ),
-        IconButton(
-          key: const Key('pick-repository'),
-          tooltip: '저장소 열기',
-          visualDensity: VisualDensity.compact,
-          onPressed: () => unawaited(_pickRepository()),
-          icon: const Icon(Icons.folder_open_outlined, size: 24, color: _muted),
+      ),
+      const SizedBox(width: 10),
+      Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: _panelSoft,
+          border: Border.all(color: _border),
+          borderRadius: BorderRadius.circular(6),
         ),
-        Expanded(
-          child: Text(
-            widget.repository.root,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: _muted, fontSize: 18),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Container(
-          padding: const EdgeInsets.all(3),
-          decoration: BoxDecoration(
-            color: _panelSoft,
-            border: Border.all(color: _border),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Row(
-            children: [
+        child: Row(
+          children: [
+            if (showPreviewLabel)
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 7),
                 child: Text(
@@ -795,25 +799,24 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   style: TextStyle(color: _muted, fontSize: 14),
                 ),
               ),
-              _placementButton('좌측', PreviewPlacement.left),
-              _placementButton('우측', PreviewPlacement.right),
-              _placementButton('하단', PreviewPlacement.bottom),
-            ],
-          ),
+            _placementButton('좌측', PreviewPlacement.left),
+            _placementButton('우측', PreviewPlacement.right),
+            _placementButton('하단', PreviewPlacement.bottom),
+          ],
         ),
-        const SizedBox(width: 12),
-        _shortcutHint(),
-        _toolbarFullDiffButton(),
-        const SizedBox(width: 8),
-        IconButton(
-          key: const Key('open-settings'),
-          tooltip: 'Settings',
-          visualDensity: VisualDensity.compact,
-          onPressed: widget.onOpenSettings,
-          icon: const Icon(Icons.settings_outlined, size: 22, color: _muted),
-        ),
-      ],
-    ),
+      ),
+      const SizedBox(width: 12),
+      _shortcutHint(),
+      _toolbarFullDiffButton(),
+      const SizedBox(width: 8),
+      IconButton(
+        key: const Key('open-settings'),
+        tooltip: 'Settings',
+        visualDensity: VisualDensity.compact,
+        onPressed: widget.onOpenSettings,
+        icon: const Icon(Icons.settings_outlined, size: 22, color: _muted),
+      ),
+    ],
   );
 
   /// The full-diff shortcut in the toolbar: the name with its key combination
@@ -840,7 +843,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(
-                '풀 디프',
+                'Show Diff',
                 style: TextStyle(
                   color: ink,
                   fontSize: 13,
@@ -1613,8 +1616,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   style: TextStyle(
                     color: selected ? _text : _hash,
                     fontSize: 12,
-                    fontFamily: _cellFont,
-                    fontFamilyFallback: _cellFontFallback,
+                    fontFamily: cellFont,
+                    fontFamilyFallback: cellFontFallback,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -1630,8 +1633,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   style: const TextStyle(
                     color: _text,
                     fontSize: 14,
-                    fontFamily: _cellFont,
-                    fontFamilyFallback: _cellFontFallback,
+                    fontFamily: cellFont,
+                    fontFamilyFallback: cellFontFallback,
                   ),
                 ),
               ),
@@ -1651,8 +1654,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     style: TextStyle(
                       color: selected ? _text : _muted,
                       fontSize: 12,
-                      fontFamily: _cellFont,
-                      fontFamilyFallback: _cellFontFallback,
+                      fontFamily: cellFont,
+                      fontFamilyFallback: cellFontFallback,
                     ),
                   ),
                 ),
@@ -1665,8 +1668,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                         style: TextStyle(
                           color: _muted,
                           fontSize: 12,
-                          fontFamily: _cellFont,
-                          fontFamilyFallback: _cellFontFallback,
+                          fontFamily: cellFont,
+                          fontFamilyFallback: cellFontFallback,
                         ),
                       )
                     : Row(
@@ -1688,8 +1691,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                                     ? _text
                                     : Color.lerp(_text, _main, 0.12),
                                 fontSize: 12,
-                                fontFamily: _cellFont,
-                                fontFamilyFallback: _cellFontFallback,
+                                fontFamily: cellFont,
+                                fontFamilyFallback: cellFontFallback,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
@@ -2092,7 +2095,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                       ? const Center(
                           child: Text(
                             'No commit selected',
-                            style: TextStyle(color: _muted, fontSize: 16),
+                            style: TextStyle(color: _muted, fontSize: 13),
                           ),
                         )
                       : _previewBody(
@@ -2110,7 +2113,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 
   Widget _previewHeader(GitCommit? commit) => Container(
-    height: 38,
+    height: 32,
     padding: const EdgeInsets.only(left: 12, right: 6),
     decoration: const BoxDecoration(
       border: Border(bottom: BorderSide(color: _border)),
@@ -2126,7 +2129,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: _muted,
-              fontSize: 15,
+              fontSize: 12,
               fontWeight: FontWeight.w500,
               letterSpacing: 0.66,
             ),
@@ -2136,9 +2139,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
           style: TextButton.styleFrom(
             foregroundColor: _muted,
             padding: const EdgeInsets.symmetric(horizontal: 6),
-            minimumSize: const Size(0, 28),
+            minimumSize: const Size(0, 24),
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            textStyle: const TextStyle(fontSize: 13),
+            textStyle: const TextStyle(fontSize: 10),
           ),
           onPressed: commit == null ? null : _openFullDiff,
           child: const Text('Open full diff'),
@@ -2156,7 +2159,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: _muted,
-              fontSize: 14,
+              fontSize: 11,
               fontFamily: 'monospace',
             ),
           ),
@@ -2169,7 +2172,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   Widget _fullDiffButton(GitCommit? commit) => Padding(
     padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
     child: SizedBox(
-      height: 40,
+      height: 32,
       child: FilledButton.icon(
         key: const Key('open-full-diff'),
         onPressed: commit == null ? null : _openFullDiff,
@@ -2180,10 +2183,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
           disabledForegroundColor: _muted,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
         ),
-        icon: const Icon(Icons.open_in_full, size: 18),
+        icon: const Icon(Icons.open_in_full, size: 15),
         label: const Text(
           'Open full diff',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
         ),
       ),
     ),
@@ -2211,7 +2214,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: _text,
-                fontSize: 18,
+                fontSize: 14,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -2224,7 +2227,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: _muted,
-                fontSize: 15,
+                fontSize: 12,
                 fontFamily: 'monospace',
               ),
             ),
@@ -2242,7 +2245,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               ? const Center(
                   child: Text(
                     'Select a file to load its diff.',
-                    style: TextStyle(color: _muted, fontSize: 15),
+                    style: TextStyle(color: _muted, fontSize: 12),
                   ),
                 )
               : _previewDiff(commit, selectedPath),
@@ -2306,7 +2309,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: _text,
-                  fontSize: 18,
+                  fontSize: 14,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -2316,7 +2319,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     : 'Committer · ${_socialTime(commit.committerTimestamp)}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: _muted, fontSize: 15),
+                style: const TextStyle(color: _muted, fontSize: 12),
               ),
               // The working tree has no commit, so it has no exact moment.
               if (!commit.isWorkingTree)
@@ -2325,7 +2328,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   maxLines: 1,
                   style: const TextStyle(
                     color: _muted,
-                    fontSize: 16,
+                    fontSize: 13,
                     fontFamily: 'monospace',
                   ),
                 ),
@@ -2349,7 +2352,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               '${changes?.length == 1 ? 'file' : 'files'} changed',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: _muted, fontSize: 15),
+              style: const TextStyle(color: _muted, fontSize: 12),
             ),
           ),
           const Spacer(),
@@ -2357,7 +2360,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             '+${total((file) => file.additions)}',
             style: const TextStyle(
               color: _main,
-              fontSize: 15,
+              fontSize: 12,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -2366,7 +2369,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             '−${total((file) => file.deletions)}',
             style: const TextStyle(
               color: _hash,
-              fontSize: 15,
+              fontSize: 12,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -2387,7 +2390,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ? const Center(
             child: Text(
               'Could not load files',
-              style: TextStyle(color: Color(0xFFF29AB2), fontSize: 15),
+              style: TextStyle(color: Color(0xFFF29AB2), fontSize: 12),
             ),
           )
         : changes == null
@@ -2401,7 +2404,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ? const Center(
             child: Text(
               'No changed files',
-              style: TextStyle(color: _muted, fontSize: 15),
+              style: TextStyle(color: _muted, fontSize: 12),
             ),
           )
         : Column(
@@ -2415,7 +2418,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   Widget _previewFileRow(GitCommit commit, GitFileChange file, bool selected) =>
       SizedBox(
-        height: 34,
+        height: 28,
         child: InkWell(
           onTap: () => setState(() => _previewPaths[commit.sha] = file.path),
           child: DecoratedBox(
@@ -2427,8 +2430,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
               children: [
                 Container(
                   key: Key('preview-state-${file.path}'),
-                  width: 24,
-                  height: 24,
+                  width: 20,
+                  height: 20,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: fileStateChipColor(file.status).background,
@@ -2439,7 +2442,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     maxLines: 1,
                     style: TextStyle(
                       color: fileStateChipColor(file.status).letter,
-                      fontSize: 13,
+                      fontSize: 10,
                     ),
                   ),
                 ),
@@ -2451,7 +2454,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: selected ? _text : _muted,
-                      fontSize: 15,
+                      fontSize: 12,
                       fontFamily: 'monospace',
                     ),
                   ),
@@ -2478,7 +2481,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: _text,
-              fontSize: 15,
+              fontSize: 12,
               fontFamily: 'monospace',
             ),
           ),
@@ -2495,7 +2498,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               return const Center(
                 child: Text(
                   'Could not load diff',
-                  style: TextStyle(color: Color(0xFFF29AB2), fontSize: 15),
+                  style: TextStyle(color: Color(0xFFF29AB2), fontSize: 12),
                 ),
               );
             }
@@ -2528,7 +2531,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       _ => ' ',
     };
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
       color: switch (line.kind) {
         DiffLineKind.add => _main.withValues(alpha: 0.15),
         DiffLineKind.delete => _hash.withValues(alpha: 0.15),
@@ -2540,7 +2543,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
           color: line.kind == DiffLineKind.hunk ? _muted : _text,
-          fontSize: 14,
+          fontSize: 11,
           fontFamily: 'monospace',
         ),
       ),
