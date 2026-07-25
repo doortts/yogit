@@ -569,6 +569,23 @@ class _TimelineScreenState extends State<TimelineScreen> {
     _focusNode.requestFocus();
   }
 
+  /// The branch or tag naming the focused commit's line: the topmost loaded row
+  /// on the same branch line that carries a ref, which is that line's tip. The
+  /// working tree belongs to whatever is checked out; a date heading and a line
+  /// whose tip is not loaded (or was deleted) name nothing.
+  String? get _selectedLineRef {
+    if (_entries.isEmpty) return null;
+    final entry = _entries[_selectedIndex.value];
+    if (entry.rowIndex < 0) return null;
+    if (entry.row.commit.isWorkingTree) return _refs.current;
+    for (final row in _rows) {
+      if (row.branch != entry.row.branch) continue;
+      final refs = _rowRefs(row.commit);
+      if (refs.isNotEmpty) return refs.first.name;
+    }
+    return null;
+  }
+
   /// The commit the selection sits on, or null before the first page lands.
   GitCommit? get _selectedCommit {
     if (_entries.isEmpty) return null;
@@ -1132,7 +1149,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
             ],
           ),
         ),
-        // The focused row's first ref, under the column its chip sits in.
+        // The branch the focused commit's line belongs to, under the column that
+        // line's chip sits in.
         Positioned(
           left: _sidebarWidth,
           top: 0,
@@ -1143,11 +1161,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
             child: ValueListenableBuilder<int>(
               valueListenable: _selectedIndex,
               builder: (context, _, _) {
-                final commit = _selectedCommit;
-                final refs = commit == null
-                    ? const <GitRef>[]
-                    : _rowRefs(commit);
-                if (refs.isEmpty) {
+                final name = _selectedLineRef;
+                if (name == null) {
                   return const SizedBox(key: Key('status-ref'), height: 0);
                 }
                 return Row(
@@ -1156,18 +1171,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   children: [
                     Flexible(
                       child: Text(
-                        refs.first.name,
+                        name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(color: _muted, fontSize: 11),
                       ),
                     ),
                     const SizedBox(width: 6),
-                    _CopyButton(
-                      text: refs.first.name,
-                      color: _muted,
-                      slot: 'status-copy',
-                    ),
+                    _CopyButton(text: name, color: _muted, slot: 'status-copy'),
                   ],
                 );
               },

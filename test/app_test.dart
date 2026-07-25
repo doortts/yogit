@@ -5111,23 +5111,47 @@ void main() {
         FakeGitRepository(
           (_, _) async => [
             commit(
-              'tagged',
-              'tagged commit',
+              'tip',
+              'line tip',
+              parents: const ['middle'],
               refs: const [
                 GitRef(name: long),
                 GitRef(name: 'v1.0', isTag: true),
               ],
             ),
-            commit('plain', 'plain commit', refs: const []),
+            // No chip of its own: it inherits its line's name.
+            commit('middle', 'mid-line commit', parents: const ['root']),
+            commit('root', 'root commit'),
           ],
+          workingTree: () async => workingTreeCommit('tip'),
+          refs: const RepoRefs(local: ['main'], current: 'main'),
         ),
         controller,
       ),
     );
     await tester.pumpAndSettle();
 
-    // Aligned with the BRANCH / TAG column, showing the row's first ref.
+    // The working tree leads the list and names the checked-out branch.
     final status = find.byKey(const Key('status-ref'));
+    expect(
+      find.descendant(of: status, matching: find.text('main')),
+      findsOneWidget,
+    );
+
+    // A mid-line commit with no chip of its own still names its line's tip.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-middle')), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('refs-cell-2')),
+        matching: find.byType(Text),
+      ),
+      findsNothing,
+    );
+    // Aligned with the BRANCH / TAG column, showing that line's name.
     expect(
       tester.getRect(status).left,
       tester.getRect(find.byKey(const Key('refs-header'))).left,
@@ -5147,9 +5171,45 @@ void main() {
     expect(copied, [long]);
     await tester.pump(const Duration(seconds: 1));
 
-    // A row without refs, and a heading, leave it blank.
+    // The row below is on the same line, so it keeps the same name.
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-root')), findsOneWidget);
+    expect(
+      find.descendant(of: status, matching: find.text(long)),
+      findsOneWidget,
+    );
+
+    // A date heading names nothing.
+    for (var press = 0; press < 3; press++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    }
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-tip')), findsNothing);
+    expect(
+      find.descendant(of: status, matching: find.byType(Text)),
+      findsNothing,
+    );
+
+    // And a line whose tip carries no ref at all stays blank. Keyed, so the
+    // screen remounts and reloads instead of reusing the old history.
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          key: const Key('unnamed'),
+          repository: FakeGitRepository(
+            (_, _) async => [
+              commit('a', 'unnamed line', parents: const ['b']),
+              commit('b', 'unnamed root'),
+            ],
+            refs: const RepoRefs(),
+          ),
+          controller: controller,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-a')), findsOneWidget);
     expect(
       find.descendant(of: status, matching: find.byType(Text)),
       findsNothing,
