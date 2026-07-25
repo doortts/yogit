@@ -994,7 +994,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         _legend('WIP', const _LegendDot(dashed: true)),
         const Spacer(),
         const Text(
-          '둥근 직각 · 8px radius · 2px rail',
+          'GitKraken curves · 2px rail',
           style: TextStyle(color: _muted, fontSize: 10),
         ),
       ],
@@ -2320,16 +2320,11 @@ class CommitGraphPainter extends CustomPainter {
   static const wipNodeRadius = 8.0;
   static const wipNodeDash = 2.5;
 
-  /// A transition runs along a jog line this far below the departure center, and
-  /// turns onto and off it with quarter arcs.
-  static const jogInset = 8.0;
-  static const departureRadius = 5.0;
-  static const arrivalRadius = 8.0;
-
-  /// How far a newborn line starts above its source center, so it reads as rooted
-  /// in the disc rather than resting against it. A join needs no such nudge: it
-  /// enters the dot sideways, and the dot covers the entry.
-  static const nodeAnchor = 1.0;
+  /// A transition turns on one quarter arc whose radius spans the lane gap, so
+  /// adjacent lanes meet their node tangent to the horizontal — GitKraken's
+  /// shape. Capped by the default spacing, so a far lane keeps a flat run at the
+  /// node's own level rather than a huge sweep.
+  static const maxCurveRadius = defaultLaneSpacing;
 
   final GraphRow row;
   final bool selected;
@@ -2581,20 +2576,20 @@ class CommitGraphPainter extends CustomPainter {
   /// One lane transition, spanning a row height from a node center at [startY] to
   /// the next row's center. Both rows paint the same path — the child from its own
   /// center, the next row with [startY] a row height above its center — so the
-  /// halves meet exactly. Distant lanes only lengthen the horizontal run.
+  /// halves meet exactly.
   ///
-  /// A transition bends beside the node it belongs to, and each shape has exactly
-  /// the corners it needs:
+  /// Each kind turns on a single quarter arc of [maxCurveRadius]-scale radius,
+  /// horizontal where it meets its node, so neighbouring lanes read as one sweep
+  /// into the dot rather than a small corner plus a long straight:
   ///
-  /// * [bendEarly] — a line being born. Out of its source (starting [nodeAnchor]
-  ///   above that center, so it roots inside the disc), a corner just below it,
-  ///   across, then a corner down into its new column: it leaves the node
-  ///   sideways instead of shadowing the parent's rail.
-  /// * otherwise — a line joining its parent. Straight down its own column, one
-  ///   square corner, then a flat run into the dot from the side, [nodeAnchor]
-  ///   below the parent's center so it tucks into the dot's lower half. The
-  ///   corner is deliberately unrounded and there is no trailing vertical, so
-  ///   nothing rides the parent's rail and the dying branch leaves no stub.
+  /// * [bendEarly] — a line being born leaves its source sideways, then arcs down
+  ///   into the vertical of its new column.
+  /// * otherwise — a line joining its parent runs down its own column, then arcs
+  ///   into the parent's own level and enters the dot from the side. Nothing
+  ///   rides the parent's rail, and the dying branch leaves no stub.
+  ///
+  /// A far lane keeps a flat run at the node's level for the distance the arc
+  /// cannot cover.
   Path transitionPath(
     int from,
     int to,
@@ -2606,24 +2601,21 @@ class CommitGraphPainter extends CustomPainter {
     final x1 = laneX(to);
     final endY = startY + size.height;
     final direction = x1 > x0 ? 1.0 : -1.0;
-    final half = (x1 - x0).abs() / 2;
-    if (!bendEarly) {
-      final corner = math.min(math.min(arrivalRadius, half), endY - startY);
+    final radius = math.min(
+      math.min((x1 - x0).abs(), maxCurveRadius),
+      endY - startY,
+    );
+    if (bendEarly) {
       return Path()
         ..moveTo(x0, startY)
-        ..lineTo(x0, endY - corner)
-        ..quadraticBezierTo(x0, endY, x0 + direction * corner, endY)
+        ..lineTo(x1 - direction * radius, startY)
+        ..quadraticBezierTo(x1, startY, x1, startY + radius)
         ..lineTo(x1, endY);
     }
-    final jogY = startY + jogInset;
-    final out = math.min(math.min(departureRadius, half), jogY - startY);
-    final into = math.min(math.min(arrivalRadius, half), endY - jogY);
     return Path()
-      ..moveTo(x0, startY - nodeAnchor)
-      ..lineTo(x0, jogY - out)
-      ..quadraticBezierTo(x0, jogY, x0 + direction * out, jogY)
-      ..lineTo(x1 - direction * into, jogY)
-      ..quadraticBezierTo(x1, jogY, x1, jogY + into)
+      ..moveTo(x0, startY)
+      ..lineTo(x0, endY - radius)
+      ..quadraticBezierTo(x0, endY, x0 + direction * radius, endY)
       ..lineTo(x1, endY);
   }
 
