@@ -967,20 +967,17 @@ class _TimelineScreenState extends State<TimelineScreen> {
   Widget _shortcutHint() => Row(
     key: const Key('shortcut-hint'),
     children: [
-      _kbd('Enter'),
-      const Text(' 상세', style: TextStyle(color: _muted, fontSize: 14)),
+      const Text('상세', style: TextStyle(color: _muted, fontSize: 14)),
+      const SizedBox(width: 6),
+      _KeyCap(
+        label: 'Enter',
+        onTap: () {
+          if (_commits.isEmpty) return;
+          _togglePreview();
+          _focusNode.requestFocus();
+        },
+      ),
     ],
-  );
-
-  Widget _kbd(String label) => Container(
-    margin: const EdgeInsets.symmetric(horizontal: 3),
-    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-    decoration: BoxDecoration(
-      color: _panelSoft,
-      border: Border.all(color: _border),
-      borderRadius: BorderRadius.circular(5),
-    ),
-    child: Text(label, style: const TextStyle(color: _text, fontSize: 13)),
   );
 
   // ---------------------------------------------------------------- sidebar
@@ -2653,6 +2650,46 @@ class _Wordmark extends StatelessWidget {
       fontFamily: 'DancingScript',
       fontSize: fontSize,
       fontWeight: FontWeight.w700,
+    ),
+  );
+}
+
+/// A keycap that also works as a button — the Enter chip runs the same toggle the
+/// Enter key does.
+class _KeyCap extends StatefulWidget {
+  const _KeyCap({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  State<_KeyCap> createState() => _KeyCapState();
+}
+
+class _KeyCapState extends State<_KeyCap> {
+  var _hovered = false;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: SystemMouseCursors.click,
+    onEnter: (_) => setState(() => _hovered = true),
+    onExit: (_) => setState(() => _hovered = false),
+    child: GestureDetector(
+      key: Key('keycap-${widget.label}'),
+      behavior: HitTestBehavior.opaque,
+      onTap: widget.onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+        decoration: BoxDecoration(
+          color: _hovered ? _selectedRow : _panelSoft,
+          border: Border.all(color: _hovered ? _muted : _border),
+          borderRadius: BorderRadius.circular(5),
+        ),
+        child: Text(
+          widget.label,
+          style: const TextStyle(color: _text, fontSize: 13),
+        ),
+      ),
     ),
   );
 }

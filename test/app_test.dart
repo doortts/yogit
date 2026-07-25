@@ -4108,7 +4108,7 @@ void main() {
       tester
           .widgetList<Container>(
             find.ancestor(
-              of: find.text(' 상세'),
+              of: find.text('상세'),
               matching: find.byType(Container),
             ),
           )
@@ -4127,6 +4127,11 @@ void main() {
           .any((box) => (box.decoration as BoxDecoration?)?.border != null),
       isTrue,
     );
+    // Label first, then the chip.
+    expect(
+      tester.getRect(find.text('상세')).left,
+      lessThan(tester.getRect(find.byKey(const Key('keycap-Enter'))).left),
+    );
     // Right cluster order: keycaps, caption, placement box, Show Diff, gear.
     final lefts = [
       tester.getRect(find.byKey(const Key('shortcut-hint'))).left,
@@ -4143,6 +4148,17 @@ void main() {
       tester.getRect(find.byIcon(Icons.settings_outlined)).right,
       lessThanOrEqualTo(960),
     );
+    // The Enter chip is the same toggle the key runs, by mouse.
+    await tester.tap(find.byKey(const Key('keycap-Enter')));
+    await tester.pumpAndSettle();
+    expect(find.text('Commit & Diff'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('keycap-Enter')));
+    await tester.pumpAndSettle();
+    expect(find.text('Commit & Diff'), findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('Commit & Diff'), findsOneWidget);
+
     // The placement buttons grew but still respond.
     await tester.tap(find.text('하단'));
     await tester.pumpAndSettle();
