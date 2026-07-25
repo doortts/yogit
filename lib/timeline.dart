@@ -104,6 +104,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
   final _previewPaths = <String, String>{};
 
   var _refs = const RepoRefs();
+
+  /// Which way the cursor last travelled, so the ref modal opens on the side the
+  /// cursor came from. Null after a click or a jump, which have no direction.
+  bool? _arrivedGoingDown;
   final _filterController = TextEditingController();
   var _filter = '';
 
@@ -173,13 +177,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   double _w(String column) => _widths[column]!;
 
-  /// Auto-fit: just wide enough for the deepest lane in the loaded rows. The
-  /// resizer reaches further down than this range; auto-fit never does.
+  /// Auto-fit: the snuggest width that still shows every loaded lane's node, so
+  /// the first launch shows the whole graph and no more. The resizer reaches
+  /// further down than this range; auto-fit never does.
   double get _graphColumnWidth =>
       _graphWidth ??
-      (CommitGraphPainter.laneInset +
-              (_deepestLane + 1) * CommitGraphPainter.defaultLaneSpacing)
-          .clamp(96.0, timelineColumns['graph']!.max);
+      CommitGraphPainter.contentWidth(
+        _deepestLane,
+      ).clamp(96.0, timelineColumns['graph']!.max);
 
   void _maybeLoadNextPage() {
     if (!_scrollController.hasClients || _end || _inFlight != null) return;
@@ -300,6 +305,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   void _moveSelection(int delta, {bool animate = true}) {
     if (_commits.isEmpty) return;
+    _arrivedGoingDown = delta > 0;
     _selectedIndex.value = (_selectedIndex.value + delta).clamp(
       0,
       _commits.length - 1,
@@ -340,6 +346,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// A click only moves the selection. An open preview follows it; a closed one
   /// stays closed until Enter or Space.
   void _select(int index) {
+    _arrivedGoingDown = null;
     _selectedIndex.value = index;
     _focusNode.requestFocus();
   }
@@ -367,6 +374,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
           commit.refs.any((ref) => candidates.contains(ref.name)),
     );
     if (index < 0) return;
+    _arrivedGoingDown = null;
     _selectedIndex.value = index;
     _scrollToSelection();
     _focusNode.requestFocus();
@@ -830,17 +838,33 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   ),
                 ),
                 Expanded(
-                  child: ListView.builder(
-                    key: const Key('timeline-list'),
-                    controller: _scrollController,
-                    // A little cache keeps rows from popping in mid-scroll.
-                    cacheExtent: 200,
-                    itemExtent: _rowHeight,
-                    itemCount: _commits.length + (_showFooter ? 1 : 0),
-                    itemBuilder: (context, index) {
-                      if (index == _commits.length) return _footer();
-                      return _row(index, commitWidth, graphWidth);
-                    },
+                  child: Stack(
+                    children: [
+                      ListView.builder(
+                        key: const Key('timeline-list'),
+                        controller: _scrollController,
+                        // A little cache keeps rows from popping in mid-scroll.
+                        cacheExtent: 200,
+                        itemExtent: _rowHeight,
+                        itemCount: _commits.length + (_showFooter ? 1 : 0),
+                        itemBuilder: (context, index) {
+                          if (index == _commits.length) return _footer();
+                          return _row(index, commitWidth, graphWidth);
+                        },
+                      ),
+                      Positioned.fill(
+                        child: LayoutBuilder(
+                          builder: (context, constraints) => ListenableBuilder(
+                            listenable: Listenable.merge([
+                              _selectedIndex,
+                              _scrollController,
+                            ]),
+                            builder: (context, _) =>
+                                _refsModal(constraints.maxHeight),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -1135,61 +1159,66 @@ class _TimelineScreenState extends State<TimelineScreen> {
     );
   }
 
+  /// One chip per row: the first ref, plus a `+N` badge when the row carries
+  /// more. The full list belongs to the floating modal the selected row shows.
+  /// No bottom hairline here — the rules start at the hash column.
   Widget _refsCell(
     int index,
     GitCommit commit,
     List<GitRef> refs,
     Color color,
     bool selected,
-  ) {
-    return SizedBox(
-      key: Key('refs-cell-$index'),
-      width: _w('refs'),
-      child: Stack(
-        alignment: Alignment.centerLeft,
-        children: [
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: const BoxDecoration(
-                border: Border(bottom: BorderSide(color: _border)),
-              ),
-            ),
-          ),
-          if (refs.isNotEmpty)
-            Positioned.fill(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  // Chips pack toward the graph: the last one ends on the cell
-                  // boundary, so the only connector left is the short run the
-                  // graph cell paints from its own edge to the node.
-                  final lastIndex = refs.length - 1;
-                  final available = math.max(0.0, constraints.maxWidth - 8);
-                  final width = math.min(76.0, available);
-                  final step = lastIndex == 0
-                      ? 0.0
-                      : math.max(0.0, (available - width) / lastIndex);
-                  return Stack(
-                    children: [
-                      for (var index = 0; index < refs.length; index++)
-                        Positioned(
-                          left:
-                              constraints.maxWidth -
-                              width -
-                              (lastIndex - index) * step,
-                          top: 6,
-                          width: width,
-                          height: 24,
-                          child: _refChip(commit, refs[index], color, selected),
+  ) => SizedBox(
+    key: Key('refs-cell-$index'),
+    width: _w('refs'),
+    child: refs.isEmpty
+        ? null
+        : LayoutBuilder(
+            builder: (context, constraints) {
+              // The chip pack ends on the cell boundary, so the only connector
+              // left is the short run the graph cell paints to the node.
+              final badge = refs.length > 1 ? 30.0 : 0.0;
+              final available = math.max(0.0, constraints.maxWidth - 8 - badge);
+              final width = math.min(76.0, available);
+              return Stack(
+                children: [
+                  Positioned(
+                    left: constraints.maxWidth - width - badge,
+                    top: 6,
+                    width: width,
+                    height: 24,
+                    child: _refChip(commit, refs.first, color, selected),
+                  ),
+                  if (refs.length > 1)
+                    Positioned(
+                      key: Key('ref-more-${commit.sha}'),
+                      left: constraints.maxWidth - badge + 4,
+                      top: 6,
+                      width: badge - 4,
+                      height: 24,
+                      child: Container(
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.14),
+                          border: Border.all(
+                            color: color.withValues(alpha: 0.55),
+                          ),
+                          borderRadius: BorderRadius.circular(4),
                         ),
-                    ],
-                  );
-                },
-              ),
-            ),
-        ],
-      ),
-    );
-  }
+                        child: Text(
+                          '+${refs.length - 1}',
+                          style: TextStyle(
+                            color: selected ? _text : color,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+  );
 
   Widget _refChip(GitCommit commit, GitRef ref, Color color, bool selected) =>
       Container(
@@ -1202,38 +1231,105 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ),
         child: Row(
           children: [
-            if (ref.isHead || ref.isTag)
-              Padding(
-                padding: const EdgeInsets.only(right: 3),
-                child: Text(
-                  ref.isHead ? '✓' : '◇',
-                  style: TextStyle(
-                    color: selected ? _text : color,
-                    fontSize: 10,
-                  ),
-                ),
-              ),
-            Expanded(
-              child: Text(
-                ref.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: selected ? _text : color, fontSize: 11),
-              ),
-            ),
-            // Branch chips carry their tip committer; tags belong to nobody.
-            if (!ref.isTag) ...[
-              const SizedBox(width: 4),
-              _committerAvatar(
-                commit,
-                20,
-                discColor: color,
-                key: Key('ref-avatar-${commit.sha}-${ref.name}'),
-              ),
-            ],
+            _refGlyph(ref, color, selected),
+            _refName(ref, color, selected),
           ],
         ),
       );
+
+  Widget _refGlyph(GitRef ref, Color color, bool selected) =>
+      ref.isHead || ref.isTag
+      ? Padding(
+          padding: const EdgeInsets.only(right: 3),
+          child: Text(
+            ref.isHead ? '✓' : '◇',
+            style: TextStyle(color: selected ? _text : color, fontSize: 10),
+          ),
+        )
+      : const SizedBox.shrink();
+
+  Widget _refName(GitRef ref, Color color, bool selected) => Expanded(
+    child: Text(
+      ref.name,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(color: selected ? _text : color, fontSize: 11),
+    ),
+  );
+
+  /// The floating list of every ref on the selected row. It sits above the row
+  /// when the cursor arrived heading down and below it heading up — a click has
+  /// no direction, so it takes whichever side has more room — stays inside the
+  /// viewport, and vanishes with the selection or when the row scrolls away.
+  Widget _refsModal(double viewportHeight) {
+    final index = _selectedIndex.value;
+    if (index >= _rows.length) return const SizedBox.shrink();
+    final row = _rows[index];
+    final refs = _rowRefs(row.commit);
+    final offset = _scrollController.hasClients
+        ? _scrollController.position.pixels
+        : 0.0;
+    final rowTop = index * _rowHeight - offset;
+    final rowBottom = rowTop + _rowHeight;
+    if (refs.length < 2 || rowBottom <= 0 || rowTop >= viewportHeight) {
+      return const SizedBox.shrink();
+    }
+    final color = AvatarService.branchColor(row.branch);
+    final height = refs.length * 24.0 + 8;
+    final above = _arrivedGoingDown ?? rowTop > viewportHeight - rowBottom;
+    final double top = (above ? rowTop - height - 4 : rowBottom + 4).clamp(
+      0.0,
+      math.max(0.0, viewportHeight - height),
+    );
+    return Stack(
+      children: [
+        Positioned(
+          key: const Key('refs-modal'),
+          left: 8,
+          top: top,
+          width: math.min(_w('refs') + 40, 260),
+          child: IgnorePointer(
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              decoration: BoxDecoration(
+                color: _raised,
+                border: Border.all(color: _border),
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x66000000),
+                    blurRadius: 8,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final ref in refs)
+                    Container(
+                      height: 24,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      decoration: BoxDecoration(
+                        border: Border(
+                          left: BorderSide(color: color, width: 2),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          _refGlyph(ref, color, false),
+                          _refName(ref, color, false),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
   Widget _committerAvatar(
     GitCommit commit,
@@ -1869,20 +1965,30 @@ class CommitGraphPainter extends CustomPainter {
   /// Stage 3: at or below this cell width the graph collapses to one lane.
   static const compactWidth = 56.0;
 
-  /// Stage 2 floor, and the air it keeps right of the deepest lane.
+  /// Stage 2 floor.
   static const minLaneSpacing = 12.0;
-  static const compressedInset = 12.0;
+
+  /// Half the 22px node avatar plus a hair of air: how far right of the deepest
+  /// lane's center a row still draws.
+  static const nodeExtent = 13.0;
 
   /// Below this spacing the graph node shows the small avatar stack.
   static const compressedAvatarSpacing = 22.0;
 
-  /// Stage 1 (cell fits every lane) keeps [defaultLaneSpacing]; stage 2 squeezes
-  /// the lanes together so the deepest one still lands inside the cell.
+  /// The narrowest cell that still shows every node whole. Empty space right of
+  /// it clips away before any lane moves.
+  static double contentWidth(int deepestLane) =>
+      laneInset + deepestLane * defaultLaneSpacing + nodeExtent;
+
+  /// Stage 1 (the cell still holds the rightmost node) keeps
+  /// [defaultLaneSpacing]; stage 2 squeezes the lanes so that node stays just
+  /// inside the cell.
   static double spacingFor(double width, int deepestLane) {
-    final fit = laneInset + (deepestLane + 1) * defaultLaneSpacing;
-    if (width >= fit) return defaultLaneSpacing;
-    return ((width - laneInset - compressedInset) / math.max(deepestLane, 1))
-        .clamp(minLaneSpacing, defaultLaneSpacing);
+    if (width >= contentWidth(deepestLane)) return defaultLaneSpacing;
+    return ((width - laneInset - nodeExtent) / math.max(deepestLane, 1)).clamp(
+      minLaneSpacing,
+      defaultLaneSpacing,
+    );
   }
 
   /// Rails are opaque.

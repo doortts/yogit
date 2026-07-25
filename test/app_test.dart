@@ -1203,8 +1203,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(columnWidth('graph'), 118);
-    expect(columnWidth('commit'), 1100 - (156 + 118 + 78 + 116 + 150));
+    expect(columnWidth('graph'), 101);
+    expect(columnWidth('commit'), 1100 - (156 + 101 + 78 + 116 + 150));
     expect(
       tester.getRect(find.byKey(const Key('name-header'))).right,
       viewport().right,
@@ -1236,7 +1236,7 @@ void main() {
     expect(const TimelineColumnWidths().graph, isNull);
     expect(graphWidth(), 96);
 
-    // Three lanes want 28 + 3 * 30, which clears the minimum.
+    // Three lanes want 28 + 2 * 30 + 13 of content, which clears the minimum.
     await tester.pumpWidget(
       screen(
         FakeGitRepository(
@@ -1250,7 +1250,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(graphWidth(), 118);
+    expect(graphWidth(), 101);
 
     // Dragging pins it, and the pinned width is what gets saved.
     await tester.drag(
@@ -1259,7 +1259,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     final pinned = graphWidth();
-    expect(pinned, greaterThan(118));
+    expect(pinned, greaterThan(101));
     expect(saved?.graph, pinned);
     final painter =
         tester
@@ -1319,12 +1319,17 @@ void main() {
   });
 
   test('graph lane spacing compresses in stages', () {
-    // Stage 1: the cell fits every lane, so nothing moves.
-    expect(CommitGraphPainter.spacingFor(118, 2), 30);
+    // Lanes hold their coordinates while the cell still shows the last node,
+    // which is all the width the content needs.
+    expect(CommitGraphPainter.contentWidth(2), 101);
+    expect(CommitGraphPainter.contentWidth(0), 41);
     expect(CommitGraphPainter.spacingFor(260, 2), 30);
+    expect(CommitGraphPainter.spacingFor(118, 2), 30);
+    expect(CommitGraphPainter.spacingFor(101, 2), 30);
     expect(CommitGraphPainter.spacingFor(58, 0), 30);
-    // Stage 2: proportional squeeze down to the 12px floor.
-    expect(CommitGraphPainter.spacingFor(70, 2), 15);
+    // Below that the lanes squeeze so the last node stays just inside.
+    expect(CommitGraphPainter.spacingFor(100, 2), 29.5);
+    expect(CommitGraphPainter.spacingFor(70, 2), 14.5);
     expect(CommitGraphPainter.spacingFor(40, 2), 12);
     expect(CommitGraphPainter.compactWidth, 56);
     expect(timelineColumns['graph']!.min, 40);
@@ -1362,7 +1367,7 @@ void main() {
         )
         .size;
 
-    // Stage 1: 118px fits three lanes at the full spacing.
+    // Stage 1: 118px is wider than the 101px content, so nothing moves.
     await tester.pumpWidget(screen(118));
     await tester.pumpAndSettle();
     expect(painterAt(0).compact, isFalse);
@@ -1374,12 +1379,12 @@ void main() {
     await tester.pumpWidget(screen(70));
     await tester.pumpAndSettle();
     expect(painterAt(0).compact, isFalse);
-    expect(painterAt(0).laneSpacing, 15);
+    expect(painterAt(0).laneSpacing, 14.5);
     expect(painterAt(1).laneX(0), CommitGraphPainter.laneInset);
-    expect(painterAt(1).laneX(1) - painterAt(1).laneX(0), 15);
+    expect(painterAt(1).laneX(1) - painterAt(1).laneX(0), 14.5);
     expect(
       painterAt(0).transitionPath(0, 2, 18, const Size(70, 36)).getBounds(),
-      const Rect.fromLTRB(28, 18, 58, 54),
+      const Rect.fromLTRB(28, 18, 57, 54),
     );
     expect(avatarSize(1), 18);
 
@@ -2073,55 +2078,68 @@ void main() {
     );
   });
 
-  testWidgets('renders every ref and later HEAD committer avatar', (
+  testWidgets('a multi-ref row shows one chip, a +N badge, and no avatars', (
     tester,
   ) async {
-    final refs = const [
+    const refs = [
       GitRef(name: 'v1.0', isTag: true),
       GitRef(name: 'origin/main'),
-      GitRef(name: 'feature'),
       GitRef(name: 'main', isHead: true),
     ];
     await tester.pumpWidget(
       app(
         FakeGitRepository(
-          (_, _) async => [commit('multi', 'multi ref commit', refs: refs)],
+          (_, _) async => [
+            commit('multi', 'multi ref commit', refs: refs),
+            commit('plain', 'plain commit', refs: const []),
+          ],
         ),
         controller,
       ),
     );
     await tester.pumpAndSettle();
 
-    // Scoped to the row: the sidebar lists branch names of its own.
-    for (final ref in refs) {
-      expect(
-        find.descendant(
-          of: find.byKey(const Key('refs-cell-0')),
-          matching: find.text(ref.name),
-        ),
-        findsOneWidget,
-      );
-    }
-    // Every branch chip carries the tip committer; the tag chip carries none.
-    for (final ref in refs.where((ref) => !ref.isTag)) {
-      expect(find.byKey(Key('ref-avatar-multi-${ref.name}')), findsOneWidget);
-      expect(
-        tester.getSize(find.byKey(Key('ref-avatar-multi-${ref.name}'))).width,
-        20,
-      );
-    }
-    expect(find.byKey(const Key('ref-avatar-multi-v1.0')), findsNothing);
-
-    // Chips pack to the right: the last one ends on the graph boundary, and the
-    // stagger keeps every earlier chip inside the cell.
+    // The first ref keeps its chip; the rest collapse into the badge.
     final cell = tester.getRect(find.byKey(const Key('refs-cell-0')));
-    Rect chip(GitRef ref) =>
-        tester.getRect(find.byKey(Key('ref-chip-multi-${ref.name}')));
-    expect(chip(refs.last).right, cell.right);
-    expect(chip(refs.first).left, greaterThanOrEqualTo(cell.left));
-    for (var index = 1; index < refs.length; index++) {
-      expect(chip(refs[index]).left, greaterThan(chip(refs[index - 1]).left));
-    }
+    final chip = tester.getRect(find.byKey(const Key('ref-chip-multi-v1.0')));
+    final badge = tester.getRect(find.byKey(const Key('ref-more-multi')));
+    expect(find.byKey(const Key('ref-chip-multi-origin/main')), findsNothing);
+    expect(find.byKey(const Key('ref-chip-multi-main')), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('refs-cell-0')),
+        matching: find.text('+2'),
+      ),
+      findsOneWidget,
+    );
+    expect(badge.right, cell.right);
+    expect(chip.right, lessThanOrEqualTo(badge.left));
+    expect(chip.left, greaterThanOrEqualTo(cell.left));
+    expect(badge.height, chip.height);
+
+    // Chips carry no avatars at all any more, and the cell has no hairline.
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('refs-cell-0')),
+        matching: find.byType(IdentityAvatar),
+      ),
+      findsNothing,
+    );
+    // Nothing in this cell paints the row hairline any more; the rules start at
+    // the hash column.
+    expect(
+      tester
+          .widgetList<DecoratedBox>(
+            find.descendant(
+              of: find.byKey(const Key('refs-cell-0')),
+              matching: find.byType(DecoratedBox),
+            ),
+          )
+          .map((box) => (box.decoration as BoxDecoration).border)
+          .whereType<Border>()
+          .map((border) => border.bottom.color),
+      everyElement(isNot(const Color(0xFF343946))),
+    );
     // The remaining run to the node is the graph cell's own connector.
     expect(
       tester.getRect(find.byKey(const Key('graph-cell-0'))).left,
@@ -2129,68 +2147,61 @@ void main() {
     );
   });
 
-  testWidgets('ref chips land on the tip rows even without decorations', (
+  testWidgets('the selected multi-ref row lists its refs in a floating modal', (
     tester,
   ) async {
+    const refs = [
+      GitRef(name: 'v1.0', isTag: true),
+      GitRef(name: 'origin/main'),
+      GitRef(name: 'main', isHead: true),
+    ];
     await tester.pumpWidget(
       app(
         FakeGitRepository(
-          // No decorations at all: the chips have to come from the ref tips.
           (_, _) async => [
-            commit('tip', 'branch tip', refs: const []),
-            commit('older', 'older commit', refs: const []),
-            commit('tagged', 'tagged commit', refs: const []),
+            for (var index = 0; index < 10; index++)
+              commit(
+                '$index',
+                'commit $index',
+                // Row 5 sits with room on both sides of it.
+                refs: index == 5 ? refs : const [],
+              ),
           ],
-          refs: const RepoRefs(
-            local: ['main'],
-            remote: ['origin/main'],
-            tags: ['v1.0'],
-            current: 'main',
-            tips: {'main': 'tip', 'origin/main': 'tip', 'v1.0': 'tagged'},
-          ),
         ),
         controller,
       ),
     );
     await tester.pumpAndSettle();
+    final modal = find.byKey(const Key('refs-modal'));
+    expect(modal, findsNothing);
 
-    for (final name in ['main', 'origin/main']) {
+    // Arriving from above puts the box over the row, clear of it.
+    for (var press = 0; press < 5; press++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+    }
+    expect(modal, findsOneWidget);
+    for (final ref in refs) {
       expect(
-        find.descendant(
-          of: find.byKey(const Key('refs-cell-0')),
-          matching: find.byKey(Key('ref-chip-tip-$name')),
-        ),
+        find.descendant(of: modal, matching: find.text(ref.name)),
         findsOneWidget,
       );
     }
-    expect(find.byKey(const Key('ref-chip-tagged-v1.0')), findsOneWidget);
-    expect(find.byKey(const Key('refs-cell-1')), findsOneWidget);
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('refs-cell-1')),
-        matching: find.byType(Container).at(1),
-      ),
-      findsNothing,
-    );
-    // HEAD keys off RepoRefs.current, and the tag keeps its own glyph.
-    expect(find.text('✓'), findsOneWidget);
-    expect(find.text('◇'), findsOneWidget);
+    final row = tester.getRect(find.byKey(const Key('refs-cell-5')));
+    expect(tester.getRect(modal).bottom, lessThanOrEqualTo(row.top));
 
-    // The chip carries its row's branch color, like every other accent.
-    final painter =
-        tester
-                .widget<CustomPaint>(find.byKey(const Key('graph-painter-0')))
-                .painter!
-            as CommitGraphPainter;
-    final chip =
-        tester
-                .widget<Container>(find.byKey(const Key('ref-chip-tip-main')))
-                .decoration!
-            as BoxDecoration;
-    expect(
-      (chip.border! as Border).top.color,
-      AvatarService.branchColor(painter.row.branch).withValues(alpha: 0.55),
-    );
+    // Arriving from below flips it under the row.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(modal, findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+    expect(tester.getRect(modal).top, greaterThanOrEqualTo(row.bottom));
+
+    // Leaving the row hides it again.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+    expect(modal, findsNothing);
   });
 
   testWidgets('avatar lookup is limited to rows in the short viewport', (
