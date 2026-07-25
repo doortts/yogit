@@ -35,9 +35,9 @@ const timelineColumns = <String, ColumnSpec>{
   'refs': (label: 'Branch / Tag', min: 110, max: 240),
   'graph': (label: 'Graph', min: 40, max: 260),
   'hash': (label: 'Hash', min: 64, max: 120),
-  'commit': (label: 'Commit title', min: 100, max: 620),
-  'time': (label: 'Social time', min: 112, max: 170),
-  'name': (label: 'Name', min: 88, max: 180),
+  'commit': (label: 'Commit Message', min: 100, max: 620),
+  'time': (label: 'Date', min: 112, max: 170),
+  'name': (label: 'Name', min: 100, max: 240),
 };
 
 class TimelineScreen extends StatefulWidget {
@@ -1897,6 +1897,20 @@ class CommitGraphPainter extends CustomPainter {
   double laneX(int lane) =>
       compact ? laneInset : laneInset + lane * laneSpacing;
 
+  /// The branch line a sweep belongs to, so a whole line keeps one color:
+  /// a foreign column converging on its parent stays its own line's color, a
+  /// commit's first-parent tail stays the commit's, and only a merge edge to a
+  /// further parent takes the line it lands in. Null falls back to the sha color.
+  static int? transitionBranch(GraphRow row, LaneTransition transition) {
+    if (transition.from != row.lane) {
+      return row.activeLaneBranches[transition.from];
+    }
+    if (row.parentLanes.isNotEmpty && transition.to == row.parentLanes.first) {
+      return row.branch;
+    }
+    return row.nextLaneBranches[transition.to];
+  }
+
   /// The single rail stage 3 paints, colored by this row's committer.
   ({double top, double bottom}) compactRail(Size size) => (
     top: (previous?.nextLanes.isNotEmpty ?? false) ? 0.0 : size.height / 2,
@@ -2006,21 +2020,24 @@ class CommitGraphPainter extends CustomPainter {
       // Arrival halves of the movements the row above started, then this row's
       // own departures. Every lane movement is a transition, so the two lists
       // are the whole story.
-      for (final transition in previous?.transitions ?? const []) {
-        canvas.drawPath(
-          transitionPath(
-            transition.from,
-            transition.to,
-            centerY - size.height,
-            size,
-          ),
-          _railPaint(previous?.nextLaneBranches[transition.to], transition.sha),
-        );
+      if (previous case final previous?) {
+        for (final transition in previous.transitions) {
+          canvas.drawPath(
+            transitionPath(
+              transition.from,
+              transition.to,
+              centerY - size.height,
+              size,
+            ),
+            // The arrival half repeats its departure half's color exactly.
+            _railPaint(transitionBranch(previous, transition), transition.sha),
+          );
+        }
       }
       for (final transition in row.transitions) {
         canvas.drawPath(
           transitionPath(transition.from, transition.to, centerY, size),
-          _railPaint(row.nextLaneBranches[transition.to], transition.sha),
+          _railPaint(transitionBranch(row, transition), transition.sha),
         );
       }
     }

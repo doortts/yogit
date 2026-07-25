@@ -15,7 +15,7 @@ class TimelineColumnWidths {
     this.hash = 78,
     this.commit,
     this.time = 116,
-    this.name = 100,
+    this.name = 150,
   });
 
   final double refs;
@@ -64,7 +64,7 @@ class TimelineColumnWidths {
       hash: width('hash', 78, 64, 120),
       commit: json['commit'] is num ? width('commit', 380, 100, 620) : null,
       time: width('time', 116, 112, 170),
-      name: width('name', 100, 88, 180),
+      name: width('name', 150, 100, 240),
     );
   }
 

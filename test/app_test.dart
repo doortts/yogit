@@ -287,10 +287,10 @@ void main() {
     final header = tester.widget<Text>(find.text('GRAPH'));
     expect(header.style?.fontFamily, 'monospace');
     expect(header.style?.fontSize, 12);
-    final commitHeader = tester.widget<Text>(find.text('COMMIT TITLE'));
+    final commitHeader = tester.widget<Text>(find.text('COMMIT MESSAGE'));
     expect(commitHeader.style?.fontFamily, 'monospace');
     expect(commitHeader.style?.fontSize, 12);
-    expect(find.text('SOCIAL TIME'), findsOneWidget);
+    expect(find.text('DATE'), findsOneWidget);
     expect(find.text('NAME'), findsOneWidget);
 
     await tester.drag(
@@ -798,6 +798,124 @@ void main() {
     );
   });
 
+  test('a sweep keeps the color of the line it belongs to', () {
+    const size = Size(168, 36);
+    // main = 0, alpha = 1, hotfix = 2, all with distinct palette colors.
+    Color line(int branch) => AvatarService.branchColor(branch);
+    CommitGraphPainter painter(GraphRow row, {GraphRow? previous}) =>
+        CommitGraphPainter(
+          row: row,
+          previous: previous,
+          selected: false,
+          committerColor: line(row.branch),
+        );
+
+    // A foreign column converging on its first parent: main's commit sits on
+    // lane 0 while hotfix's tail sweeps in from lane 2. The sweep is hotfix's.
+    final converging = graphRow(
+      commit: commit('M', 'main commit', parents: const ['P']),
+      lane: 0,
+      activeLanes: const [0, 2],
+      nextLanes: const [0],
+      activeLaneShas: const {0: 'M', 2: 'P'},
+      nextLaneShas: const {0: 'P'},
+      parentLanes: const [0],
+      transitions: const [(from: 2, to: 0, sha: 'P')],
+      branch: 0,
+      activeLaneBranches: const {0: 0, 2: 2},
+      nextLaneBranches: const {0: 0},
+    );
+    expect(
+      CommitGraphPainter.transitionBranch(
+        converging,
+        converging.transitions.single,
+      ),
+      2,
+    );
+    expect(
+      (Canvas canvas) => painter(converging).paint(canvas, size),
+      paints..path(color: line(2)),
+    );
+
+    // A commit's own first-parent tail moving column: alpha's line, not the
+    // destination's.
+    final tail = graphRow(
+      commit: commit('A', 'alpha commit', parents: const ['R']),
+      lane: 1,
+      activeLanes: const [0, 1],
+      nextLanes: const [0],
+      activeLaneShas: const {0: 'R', 1: 'A'},
+      nextLaneShas: const {0: 'R'},
+      parentLanes: const [0],
+      transitions: const [(from: 1, to: 0, sha: 'R')],
+      branch: 1,
+      activeLaneBranches: const {0: 0, 1: 1},
+      nextLaneBranches: const {0: 0},
+    );
+    expect(
+      CommitGraphPainter.transitionBranch(tail, tail.transitions.single),
+      1,
+    );
+    expect(
+      (Canvas canvas) => painter(tail).paint(canvas, size),
+      paints..path(color: line(1)),
+    );
+
+    // A merge edge to a further parent keeps the destination line's color.
+    final merge = graphRow(
+      commit: commit('C', 'merge', parents: const ['A', 'B']),
+      lane: 0,
+      activeLanes: const [0],
+      nextLanes: const [0, 1],
+      activeLaneShas: const {0: 'C'},
+      nextLaneShas: const {0: 'A', 1: 'B'},
+      parentLanes: const [0, 1],
+      transitions: const [(from: 0, to: 1, sha: 'B')],
+      branch: 0,
+      activeLaneBranches: const {0: 0},
+      nextLaneBranches: const {0: 0, 1: 2},
+    );
+    expect(
+      CommitGraphPainter.transitionBranch(merge, merge.transitions.single),
+      2,
+    );
+    expect(
+      (Canvas canvas) => painter(merge).paint(canvas, size),
+      paints..path(color: line(2)),
+    );
+
+    // Arrival halves repeat their departure half's color, so a sweep is one
+    // color across the row boundary.
+    for (final departure in [converging, tail, merge]) {
+      final arrival = graphRow(
+        commit: commit('P', 'parent', parents: const ['R']),
+        lane: 0,
+        activeLanes: const [0],
+        nextLanes: const [0],
+        activeLaneShas: const {0: 'P'},
+        nextLaneShas: const {0: 'R'},
+        parentLanes: const [0],
+        branch: 0,
+        activeLaneBranches: const {0: 0},
+        nextLaneBranches: const {0: 0},
+      );
+      expect(
+        (Canvas canvas) =>
+            painter(arrival, previous: departure).paint(canvas, size),
+        paints
+          ..line()
+          ..path(
+            color: line(
+              CommitGraphPainter.transitionBranch(
+                departure,
+                departure.transitions.single,
+              )!,
+            ),
+          ),
+      );
+    }
+  });
+
   test('a collapsing lane slides on a transition, not a straight rail', () {
     const size = Size(168, 36);
     const color = Color(0xFF7AD6E8);
@@ -987,13 +1105,13 @@ void main() {
     double nameRight() =>
         tester.getRect(find.byKey(const Key('name-header'))).right;
 
-    // 1400 - 150 sidebar - 288 preview - (156 + 96 + 78 + 116 + 100) fixed.
-    expect(titleWidth(), 416);
+    // 1400 - 150 sidebar - 288 preview - (156 + 96 + 78 + 116 + 150) fixed.
+    expect(titleWidth(), 366);
     expect(nameRight(), lessThanOrEqualTo(1400 - 288));
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(titleWidth(), 704);
+    expect(titleWidth(), 654);
     expect(nameRight(), lessThanOrEqualTo(1400));
 
     // Every column stays visible at the default window size with the preview
@@ -1002,18 +1120,18 @@ void main() {
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(titleWidth(), 296);
+    expect(titleWidth(), 246);
     expect(nameRight(), lessThanOrEqualTo(1280 - 288));
 
     // Dragging narrower pins the width: it is saved and stops following the
-    // viewport. The drag starts from the width on screen (296).
+    // viewport. The drag starts from the width on screen (246).
     await tester.drag(
       find.byKey(const Key('commit-resizer')),
       const Offset(-100, 0),
     );
     await tester.pumpAndSettle();
     final pinned = titleWidth();
-    expect(pinned, lessThan(296));
+    expect(pinned, lessThan(246));
     expect(saved?.commit, pinned);
 
     // A narrow window compresses even a pinned title to the 100px minimum, and
@@ -1057,7 +1175,7 @@ void main() {
     // 1538 - 150 sidebar - 288 preview.
     expect(viewport().width, 1100);
     expect(columnWidth('graph'), 96);
-    expect(columnWidth('commit'), 1100 - (156 + 96 + 78 + 116 + 100));
+    expect(columnWidth('commit'), 1100 - (156 + 96 + 78 + 116 + 150));
     expect(
       tester.getRect(find.byKey(const Key('name-header'))).right,
       viewport().right,
@@ -1079,7 +1197,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(columnWidth('graph'), 118);
-    expect(columnWidth('commit'), 1100 - (156 + 118 + 78 + 116 + 100));
+    expect(columnWidth('commit'), 1100 - (156 + 118 + 78 + 116 + 150));
     expect(
       tester.getRect(find.byKey(const Key('name-header'))).right,
       viewport().right,
@@ -1171,14 +1289,14 @@ void main() {
     // 1250 - 150 sidebar, preview closed.
     expect(timelineColumns['commit']!.min, 100);
     expect(viewport().width, 1100);
-    expect(titleWidth(), 1100 - 546);
+    expect(titleWidth(), 1100 - 596);
     expect(nameRight(), viewport().right);
 
-    // The title takes the whole 450px shrink; the other five hold their widths.
-    tester.view.physicalSize = const Size(800, 800);
+    // The title takes the whole 350px shrink; the other five hold their widths.
+    tester.view.physicalSize = const Size(900, 800);
     await tester.pumpAndSettle();
-    expect(viewport().width, 650);
-    expect(titleWidth(), 650 - 546);
+    expect(viewport().width, 750);
+    expect(titleWidth(), 750 - 596);
     expect(nameRight(), viewport().right);
 
     // Past the 100px floor the row overflows instead, so the right clips. (The
@@ -1309,7 +1427,7 @@ void main() {
       await tester.pump();
     }
     expect(saved?.time, 112);
-    expect(saved?.name, 100);
+    expect(saved?.name, 150);
   });
 
   testWidgets('sidebar lists refs, filters them, and moves the selection', (
@@ -1813,7 +1931,7 @@ void main() {
         'graph': 10,
       });
       expect(clamped.time, 170);
-      expect(clamped.name, 88);
+      expect(clamped.name, 100);
       expect(clamped.refs, 240);
       expect(clamped.commit, 620);
       expect(clamped.graph, 40);
@@ -3073,13 +3191,14 @@ GraphRow graphRow({
   Map<int, String> activeLaneShas = const {},
   Map<int, String> nextLaneShas = const {},
   List<LaneTransition> transitions = const [],
+  List<int> parentLanes = const [],
   int branch = 0,
   Map<int, int> activeLaneBranches = const {},
   Map<int, int> nextLaneBranches = const {},
 }) => GraphRow(
   commit: commit,
   lane: lane,
-  parentLanes: const [],
+  parentLanes: parentLanes,
   activeLanes: activeLanes,
   nextLanes: nextLanes,
   activeLaneShas: activeLaneShas,
