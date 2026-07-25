@@ -2320,11 +2320,10 @@ class CommitGraphPainter extends CustomPainter {
   static const wipNodeRadius = 8.0;
   static const wipNodeDash = 2.5;
 
-  /// A transition turns on one quarter arc whose radius spans the lane gap, so
-  /// adjacent lanes meet their node tangent to the horizontal — GitKraken's
-  /// shape. Capped by the default spacing, so a far lane keeps a flat run at the
-  /// node's own level rather than a huge sweep.
-  static const maxCurveRadius = defaultLaneSpacing;
+  /// Every transition turns on one quarter arc of this radius beside the node it
+  /// belongs to, so the horizontal run into or out of that node stays long and
+  /// readable.
+  static const cornerRadius = 8.0;
 
   final GraphRow row;
   final bool selected;
@@ -2578,18 +2577,16 @@ class CommitGraphPainter extends CustomPainter {
   /// center, the next row with [startY] a row height above its center — so the
   /// halves meet exactly.
   ///
-  /// Each kind turns on a single quarter arc of [maxCurveRadius]-scale radius,
-  /// horizontal where it meets its node, so neighbouring lanes read as one sweep
-  /// into the dot rather than a small corner plus a long straight:
+  /// Each kind turns on a single [cornerRadius] quarter arc, horizontal where it
+  /// meets its node, so the line reads as entering or leaving that node sideways:
   ///
-  /// * [bendEarly] — a line being born leaves its source sideways, then arcs down
-  ///   into the vertical of its new column.
-  /// * otherwise — a line joining its parent runs down its own column, then arcs
-  ///   into the parent's own level and enters the dot from the side. Nothing
+  /// * [bendEarly] — a line being born runs flat out of its source's side, then
+  ///   arcs down into the vertical of its new column.
+  /// * otherwise — a line joining its parent runs down its own column, arcs onto
+  ///   the parent's own level, and runs flat into the dot from the side. Nothing
   ///   rides the parent's rail, and the dying branch leaves no stub.
   ///
-  /// A far lane keeps a flat run at the node's level for the distance the arc
-  /// cannot cover.
+  /// The flat run carries whatever distance the corner does not.
   Path transitionPath(
     int from,
     int to,
@@ -2601,21 +2598,21 @@ class CommitGraphPainter extends CustomPainter {
     final x1 = laneX(to);
     final endY = startY + size.height;
     final direction = x1 > x0 ? 1.0 : -1.0;
-    final radius = math.min(
-      math.min((x1 - x0).abs(), maxCurveRadius),
+    final corner = math.min(
+      math.min(cornerRadius, (x1 - x0).abs() / 2),
       endY - startY,
     );
     if (bendEarly) {
       return Path()
         ..moveTo(x0, startY)
-        ..lineTo(x1 - direction * radius, startY)
-        ..quadraticBezierTo(x1, startY, x1, startY + radius)
+        ..lineTo(x1 - direction * corner, startY)
+        ..quadraticBezierTo(x1, startY, x1, startY + corner)
         ..lineTo(x1, endY);
     }
     return Path()
       ..moveTo(x0, startY)
-      ..lineTo(x0, endY - radius)
-      ..quadraticBezierTo(x0, endY, x0 + direction * radius, endY)
+      ..lineTo(x0, endY - corner)
+      ..quadraticBezierTo(x0, endY, x0 + direction * corner, endY)
       ..lineTo(x1, endY);
   }
 

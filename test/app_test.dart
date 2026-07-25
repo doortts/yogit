@@ -492,7 +492,7 @@ void main() {
     expect(scrollable.position.pixels, 360);
   });
 
-  test('lane transitions turn on one lane-wide arc, tangent at their node', () {
+  test('lane transitions turn on one 8px corner beside their node', () {
     GraphRow rowTo(int parentLane) => graphRow(
       commit: commit('1', 'first commit', parents: ['0']),
       lane: 0,
@@ -515,8 +515,8 @@ void main() {
     expect(painter.laneX(2), 88);
     expect(CommitGraphPainter.railWidth, 2.0);
     expect(CommitGraphPainter.railOpacity, 1.0);
-    // The arc spans a lane gap, so neighbours meet their node horizontally.
-    expect(CommitGraphPainter.maxCurveRadius, 30);
+    // One corner radius for both kinds; the flat run carries the rest.
+    expect(CommitGraphPainter.cornerRadius, 8);
 
     // Node center (y 18) down to the next row's center (y 54): one row height,
     // and no overshoot outside the two lanes.
@@ -534,10 +534,15 @@ void main() {
     expect(at(1).vector.dx.abs(), lessThan(0.01));
     expect(at(1).vector.dy, greaterThan(0.99));
 
-    // Adjacent lanes are one pure quarter arc: it starts on the source center,
-    // sweeps through the corner, and is already vertical a lane-gap below.
+    // A birth runs flat out of its source's side, corners, and is vertical in its
+    // new column well before the arrival row.
     expect(_touches(path, const Offset(28, 18)), isTrue);
+    expect(_touches(path, const Offset(50, 18)), isTrue);
     final samples = _samples(path);
+    expect(
+      samples.where((point) => point.dy > 26.5).map((point) => point.dx),
+      everyElement(58),
+    );
     expect(
       samples.where((point) => point.dy > 50).map((point) => point.dx),
       everyElement(58),
@@ -589,10 +594,15 @@ void main() {
     );
     expect(joinMetrics.length, lessThan(30 + 36));
     final joinSamples = _samples(join);
-    // It holds its lane until the arc, and never rides the parent's lane.
+    // It holds its lane until the corner, releases 8px along, then runs flat.
     expect(
-      joinSamples.where((point) => point.dy < 22).map((point) => point.dx),
+      joinSamples.where((point) => point.dy < 45).map((point) => point.dx),
       everyElement(28),
+    );
+    expect(_touches(join, const Offset(36, 54)), isTrue);
+    expect(
+      joinSamples.where((point) => point.dx > 37).map((point) => point.dy),
+      everyElement(54),
     );
     expect(_touches(join, const Offset(58, 50)), isFalse);
     expect(_touches(join, const Offset(58, 54)), isTrue);
