@@ -3411,10 +3411,10 @@ void main() {
     expect(label.style?.color, const Color(0xFF5AB0FF));
     expect(label.style?.fontSize, 12);
     expect(label.style?.fontWeight, FontWeight.w600);
-    // The box starts where the hash text starts.
+    // The box sits 5px left of the hash text it heads.
     expect(
       tester.getRect(find.byKey(const Key('date-box-0'))).left,
-      tester.getRect(find.text('a')).left,
+      tester.getRect(find.text('a')).left - 5,
     );
     // The date row is a row of the list, 36px like the rest.
     expect(tester.getSize(find.byKey(const Key('date-row-0'))).height, 36);
