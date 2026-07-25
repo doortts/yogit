@@ -242,12 +242,20 @@ class AvatarService {
     ].join().toUpperCase();
   }
 
+  /// The mainline's fixed color: branch 0 is the leftmost, first-born line.
+  static const mainBranchColor = Color(0xFF5CB270);
+
+  /// Branch id → color for the repository on screen, assigned once per layout.
+  /// Empty until the timeline assigns them, and [branchColor] falls back to the
+  /// editable palette for anything the map does not carry.
+  static Map<int, Color> branchAssignments = const {};
+
   /// A branch line's color. Every rail, curve, chip and dot on one line shares
-  /// it, so the graph reads by branch rather than by person. Line 0 is the
-  /// mainline — the leftmost, first-born line — and always renders white; the
-  /// palette colors the lines that branch off it.
+  /// it, so the graph reads by branch rather than by person.
   static Color branchColor(int branch) {
-    if (branch == 0) return const Color(0xFFFFFFFF);
+    final assigned = branchAssignments[branch];
+    if (assigned != null) return assigned;
+    if (branch == 0) return mainBranchColor;
     final colors = palette.isEmpty ? defaultColors : palette;
     return colors[(branch.abs() - 1) % colors.length];
   }

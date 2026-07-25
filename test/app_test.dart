@@ -174,7 +174,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(position.pixels, 0);
 
-    var index = 1;
+    // The date heading leads the list, so the first commit sits at entry 1.
+    var index = 2;
     while (position.pixels == 0 && index < 40) {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
@@ -193,7 +194,7 @@ void main() {
 
     // Upward is symmetric: the row stays visible without a scroll until it would
     // pass the top edge, and the walk ends with the list back at the top.
-    while (index > 0) {
+    while (index > 1) {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
       await tester.pumpAndSettle();
       index--;
@@ -203,7 +204,9 @@ void main() {
         greaterThanOrEqualTo((index + 1) * 36.0 - viewport),
       );
     }
-    expect(position.pixels, 0);
+    // The walk ends with the first commit flush at the top; the date heading
+    // above it stays off screen until the user scrolls there.
+    expect(position.pixels, 36);
     expect(find.byKey(const Key('selected-row-0')), findsOneWidget);
   });
 
@@ -1820,21 +1823,6 @@ void main() {
     expect(AvatarService.onColor(const Color(0xFF1D2029)), Colors.white);
   });
 
-  test('the mainline is white and the palette colors the rest', () {
-    addTearDown(() => AvatarService.palette = AvatarService.defaultColors);
-
-    // Branch 0 is the leftmost, first-born line: always white, never editable.
-    expect(AvatarService.branchColor(0), const Color(0xFFFFFFFF));
-    expect(AvatarService.branchColor(1), AvatarService.defaultColors.first);
-    expect(AvatarService.branchColor(8), AvatarService.defaultColors.last);
-    expect(AvatarService.branchColor(9), AvatarService.defaultColors.first);
-    AvatarService.palette = const [Color(0xFF010203), Color(0xFF040506)];
-    expect(AvatarService.branchColor(0), const Color(0xFFFFFFFF));
-    expect(AvatarService.branchColor(1), const Color(0xFF010203));
-    expect(AvatarService.branchColor(2), const Color(0xFF040506));
-    expect(AvatarService.branchColor(3), const Color(0xFF010203));
-  });
-
   test('the committer color follows the active palette', () {
     const ada = GitIdentity(name: 'Ada', email: 'ada@example.com');
     addTearDown(() => AvatarService.palette = AvatarService.defaultColors);
@@ -1870,14 +1858,14 @@ void main() {
     expect(find.text('Timeline colors'), findsOneWidget);
     expect(find.byKey(const Key('lane-swatch-7')), findsOneWidget);
     expect(swatch(0), const Color(0xFFFF2D95));
-    // The mainline swatch is fixed white and sits outside the editable palette.
+    // The mainline swatch is the fixed green and is not editable.
     expect(
       (tester
                   .widget<Container>(find.byKey(const Key('lane-swatch-main')))
                   .decoration!
               as BoxDecoration)
           .color,
-      const Color(0xFFFFFFFF),
+      AvatarService.mainBranchColor,
     );
     expect(find.byKey(const Key('lane-color-main')), findsNothing);
     // No row context in the preview, so those avatars stay identity-colored.
@@ -1934,10 +1922,10 @@ void main() {
                 .widget<CustomPaint>(find.byKey(const Key('graph-painter-0')))
                 .painter!
             as CommitGraphPainter;
-    // The mainline is white; the stored palette colors the lines off it.
+    // Main is the fixed green; the stored palette is only the fallback now.
     expect(painter.row.branch, 0);
-    expect(painter.committerColor, const Color(0xFFFFFFFF));
-    expect(AvatarService.branchColor(1), const Color(0xFF0B7285));
+    expect(painter.committerColor, const Color(0xFF5CB270));
+    expect(AvatarService.palette, const [Color(0xFF0B7285)]);
   });
 
   test('social time spells out the elapsed distance', () {
@@ -2025,6 +2013,11 @@ void main() {
     // Timeline row plus the opened preview title.
     expect(find.text('Uncommitted changes'), findsNWidgets(2));
     expect(find.text('working tree'), findsOneWidget);
+    // No date group above the working tree row: it belongs to no day.
+    expect(
+      tester.getRect(find.byKey(const Key('date-row-1'))).top,
+      greaterThan(tester.getRect(find.text('working tree')).top),
+    );
     expect(find.text('·······'), findsOneWidget);
     expect(find.text('—'), findsOneWidget);
     expect(skips, [0]);
@@ -2078,7 +2071,7 @@ void main() {
     );
   });
 
-  testWidgets('a multi-ref row shows one chip, a +N badge, and no avatars', (
+  testWidgets('a multi-ref row shares its cell between chips, no avatars', (
     tester,
   ) async {
     const refs = [
@@ -2099,23 +2092,18 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // The first ref keeps its chip; the rest collapse into the badge.
+    // Every ref that fits gets an equal share of the cell; no badge at all.
     final cell = tester.getRect(find.byKey(const Key('refs-cell-0')));
     final chip = tester.getRect(find.byKey(const Key('ref-chip-multi-v1.0')));
-    final badge = tester.getRect(find.byKey(const Key('ref-more-multi')));
-    expect(find.byKey(const Key('ref-chip-multi-origin/main')), findsNothing);
-    expect(find.byKey(const Key('ref-chip-multi-main')), findsNothing);
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('refs-cell-0')),
-        matching: find.text('+2'),
-      ),
-      findsOneWidget,
-    );
-    expect(badge.right, cell.right);
-    expect(chip.right, lessThanOrEqualTo(badge.left));
+    for (final ref in refs) {
+      expect(find.byKey(Key('ref-chip-multi-${ref.name}')), findsOneWidget);
+    }
+    expect(find.byKey(const Key('ref-more-multi')), findsNothing);
     expect(chip.left, greaterThanOrEqualTo(cell.left));
-    expect(badge.height, chip.height);
+    expect(
+      tester.getRect(find.byKey(const Key('ref-chip-multi-main'))).right,
+      lessThanOrEqualTo(cell.right),
+    );
 
     // Chips carry no avatars at all any more, and the cell has no hairline.
     expect(
@@ -3174,6 +3162,441 @@ void main() {
     await tester.pumpAndSettle();
     expect(controller.previewPlacement, PreviewPlacement.bottom);
   });
+  // ------------------------------------------------------------------ §17.1
+  test('date group labels read Today, Yesterday, then dates', () {
+    final now = DateTime(2026, 7, 26, 10);
+    String label(DateTime day) => dateGroupLabel(day, now);
+
+    expect(label(DateTime(2026, 7, 26)), 'Today');
+    expect(label(DateTime(2026, 7, 25)), 'Yesterday');
+    expect(label(DateTime(2026, 7, 24)), '07.24 Fri');
+    expect(label(DateTime(2026, 1, 1)), '01.01 Thu');
+    expect(label(DateTime(2025, 12, 31)), '25.12.31 Wed');
+    expect(label(DateTime(2024, 2, 29)), '24.02.29 Thu');
+  });
+
+  test('date separators head every day and the working tree leads them', () {
+    final now = DateTime(2026, 7, 26, 12);
+    int at(int day, int hour) =>
+        DateTime(2026, 7, day, hour).millisecondsSinceEpoch ~/ 1000;
+    final rows = layoutGraph([
+      workingTreeCommit('a'),
+      commit('a', 'today late', timestamp: at(26, 9)),
+      commit('a2', 'today early', parents: const ['b'], timestamp: at(26, 1)),
+      commit('b', 'yesterday', timestamp: at(25, 23)),
+    ]);
+
+    final entries = timelineEntries(rows, now);
+
+    expect(entries.map((entry) => entry.label).toList(), [
+      null,
+      'Today',
+      null,
+      null,
+      'Yesterday',
+      null,
+    ]);
+    // The working tree row belongs to no day, so it leads the list.
+    expect(entries.first.row.commit.isWorkingTree, isTrue);
+    expect(entries.first.rowIndex, 0);
+    expect(entries[2].rowIndex, 1);
+    // A separator is a pass-through row carrying the lanes of the row above it.
+    final separator = entries[4];
+    expect(separator.rowIndex, -1);
+    expect(separator.row.activeLanes, rows[2].nextLanes);
+    expect(separator.row.nextLanes, rows[2].nextLanes);
+    expect(separator.row.activeLaneShas, rows[2].nextLaneShas);
+    expect(separator.row.activeLaneBranches, rows[2].nextLaneBranches);
+    expect(separator.row.nextLaneBranches, rows[2].nextLaneBranches);
+    expect(separator.row.transitions, isEmpty);
+  });
+
+  test('a date separator carries the rails and the sweep across itself', () {
+    const size = Size(168, 36);
+    final now = DateTime(2026, 7, 26, 12);
+    int at(int day) =>
+        DateTime(2026, 7, day, 12).millisecondsSinceEpoch ~/ 1000;
+    // A merge on the older day: its second-parent sweep must finish over the
+    // separator, and the merge must not stamp a node on the separator row.
+    final rows = layoutGraph([
+      commit('M', 'merge', parents: const ['P', 'F'], timestamp: at(26)),
+      commit('P', 'parent', parents: const ['R'], timestamp: at(25)),
+      commit('F', 'feature', parents: const ['R'], timestamp: at(25)),
+      commit('R', 'root', timestamp: at(25)),
+    ]);
+    final entries = timelineEntries(rows, now);
+    final separator = entries[2];
+    expect(separator.label, 'Yesterday');
+
+    final painter = CommitGraphPainter(
+      row: separator.row,
+      previous: rows[0],
+      selected: true,
+      committerColor: const Color(0xFF5CB270),
+      passThrough: true,
+    );
+
+    // Lane 0 runs the full height and the arriving sweep completes here.
+    expect(painter.laneVerticals(size)[0], (top: 0.0, bottom: 36.0));
+    expect(
+      (Canvas canvas) => painter.paint(canvas, size),
+      paints
+        ..line(p1: const Offset(28, 0), p2: const Offset(28, 18))
+        ..line(p1: const Offset(28, 18), p2: const Offset(28, 36))
+        ..path(),
+    );
+    // No node, no selected band, no ref connector on a pass-through row.
+    expect(
+      (Canvas canvas) => painter.paint(canvas, size),
+      isNot(paints..circle()),
+    );
+    expect(
+      (Canvas canvas) => painter.paint(canvas, size),
+      isNot(paints..rect()),
+    );
+  });
+
+  testWidgets('date rows head their group, boxed at the hash column', (
+    tester,
+  ) async {
+    final now = DateTime.now();
+    int stamp(Duration ago) => now.subtract(ago).millisecondsSinceEpoch ~/ 1000;
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [
+            commit(
+              'a',
+              'today commit',
+              timestamp: stamp(const Duration(hours: 2)),
+            ),
+            commit(
+              'b',
+              'older commit',
+              timestamp: stamp(const Duration(days: 2)),
+            ),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Today'), findsOneWidget);
+    expect(find.byKey(const Key('date-row-0')), findsOneWidget);
+    expect(find.byKey(const Key('date-row-2')), findsOneWidget);
+    // Rounded, transparent, blue-bordered box with blue 12px w600 text.
+    final box =
+        tester
+                .widget<Container>(find.byKey(const Key('date-box-0')))
+                .decoration!
+            as BoxDecoration;
+    expect(box.color, isNull);
+    expect((box.border! as Border).top.color, const Color(0xFF5AB0FF));
+    expect((box.border! as Border).top.width, 1);
+    expect(box.borderRadius, BorderRadius.circular(7));
+    final label = tester.widget<Text>(find.text('Today'));
+    expect(label.style?.color, const Color(0xFF5AB0FF));
+    expect(label.style?.fontSize, 12);
+    expect(label.style?.fontWeight, FontWeight.w600);
+    // The box starts where the hash text starts.
+    expect(
+      tester.getRect(find.byKey(const Key('date-box-0'))).left,
+      tester.getRect(find.text('a')).left,
+    );
+    // The date row is a row of the list, 36px like the rest.
+    expect(tester.getSize(find.byKey(const Key('date-row-0'))).height, 36);
+
+    // Underlines are gone from commit rows too.
+    expect(
+      tester
+          .widgetList<DecoratedBox>(
+            find.descendant(
+              of: find.byKey(const Key('selected-row-a')),
+              matching: find.byType(DecoratedBox),
+            ),
+          )
+          .map((box) => (box.decoration as BoxDecoration).border)
+          .whereType<Border>()
+          .map((border) => border.bottom.color),
+      everyElement(isNot(const Color(0xFF343946))),
+    );
+  });
+
+  testWidgets('arrow keys and clicks step over date separators', (
+    tester,
+  ) async {
+    final now = DateTime.now();
+    int stamp(Duration ago) => now.subtract(ago).millisecondsSinceEpoch ~/ 1000;
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [
+            commit(
+              'a',
+              'today commit',
+              timestamp: stamp(const Duration(hours: 2)),
+            ),
+            commit(
+              'b',
+              'older commit',
+              timestamp: stamp(const Duration(days: 2)),
+            ),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Selection starts on the first commit, not on the separator above it.
+    expect(find.byKey(const Key('selected-row-a')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-b')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-a')), findsOneWidget);
+
+    // A separator is not selectable.
+    await tester.tap(find.byKey(const Key('date-row-2')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-a')), findsOneWidget);
+  });
+
+  // ------------------------------------------------------------------ §17.2
+  test('branch colors take fixed roles, then a non-colliding pool', () {
+    GraphRow born(int id, Map<int, int> active) => graphRow(
+      commit: commit('$id', 'line $id'),
+      lane: 0,
+      activeLanes: active.keys.toList(),
+      nextLanes: active.keys.toList(),
+      branch: id,
+      activeLaneBranches: active,
+      nextLaneBranches: active,
+    );
+    // main, then a second line, then three lines each born while the earlier
+    // ones are still running, then one more with the pool exhausted.
+    final rows = [
+      born(0, const {0: 0}),
+      born(1, const {0: 0, 1: 1}),
+      born(2, const {0: 0, 1: 1, 2: 2}),
+      born(3, const {0: 0, 2: 2, 3: 3}),
+      born(4, const {0: 0, 2: 2, 3: 3, 4: 4}),
+      born(5, const {2: 2, 3: 3, 4: 4, 5: 5}),
+    ];
+
+    final colors = assignBranchColors(rows, 7);
+
+    expect(colors[0], const Color(0xFF5CB270));
+    expect(colors[1], anyOf(const Color(0xFF00E5FF), const Color(0xFFFF3131)));
+    // Pool order, skipping colors already on screen at birth.
+    expect(colors[2], const Color(0xFF3B82F6));
+    expect(colors[3], const Color(0xFFFFF01F));
+    expect(colors[4], const Color(0xFFB026FF));
+    // Pool exhausted: a seeded pick from the rest of the palette.
+    expect(colors[5], isNot(const Color(0xFF3B82F6)));
+    expect(colors[5], isNot(const Color(0xFFFFF01F)));
+    expect(colors[5], isNot(const Color(0xFFB026FF)));
+    expect(colors[5], isNot(const Color(0xFF5CB270)));
+    expect(colors[5], isNotNull);
+
+    // Deterministic per seed, and stable as rows are appended.
+    expect(assignBranchColors(rows, 7), colors);
+    expect(assignBranchColors(rows, 8)[0], colors[0]);
+    for (var length = 1; length <= rows.length; length++) {
+      final prefix = assignBranchColors(rows.sublist(0, length), 7);
+      for (final entry in prefix.entries) {
+        expect(entry.value, colors[entry.key], reason: 'id ${entry.key}');
+      }
+    }
+    // Both second-line colors are reachable across seeds.
+    expect(
+      {for (var seed = 0; seed < 8; seed++) assignBranchColors(rows, seed)[1]},
+      {const Color(0xFF00E5FF), const Color(0xFFFF3131)},
+    );
+  });
+
+  test('assigned branch colors win over the fallback palette', () {
+    addTearDown(() {
+      AvatarService.branchAssignments = const {};
+      AvatarService.palette = AvatarService.defaultColors;
+    });
+
+    AvatarService.branchAssignments = const {0: Color(0xFF010203)};
+    expect(AvatarService.branchColor(0), const Color(0xFF010203));
+    // An id the map does not carry keeps the palette fallback; main stays green.
+    AvatarService.branchAssignments = const {};
+    expect(AvatarService.branchColor(0), const Color(0xFF5CB270));
+    expect(AvatarService.branchColor(1), AvatarService.defaultColors.first);
+  });
+
+  testWidgets('the timeline colors the graph with its assigned lines', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [
+            commit('merge', 'merge commit', parents: const ['main', 'feature']),
+            commit('main', 'main commit', parents: const ['base']),
+            commit('feature', 'feature commit', parents: const ['base']),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final painter =
+        tester
+                .widget<CustomPaint>(find.byKey(const Key('graph-painter-0')))
+                .painter!
+            as CommitGraphPainter;
+    expect(painter.row.branch, 0);
+    expect(painter.committerColor, const Color(0xFF5CB270));
+    expect(AvatarService.branchAssignments[0], const Color(0xFF5CB270));
+    expect(
+      AvatarService.branchAssignments[1],
+      anyOf(const Color(0xFF00E5FF), const Color(0xFFFF3131)),
+    );
+  });
+
+  // ------------------------------------------------------------------ §17.3
+  testWidgets('ref chips split the cell width and drop what will not fit', (
+    tester,
+  ) async {
+    const many = [
+      GitRef(name: 'main', isHead: true),
+      GitRef(name: 'v1.0', isTag: true),
+      GitRef(name: 'origin/main'),
+      GitRef(name: 'feature/one'),
+      GitRef(name: 'feature/two'),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [
+              commit('three', 'three refs', refs: many.take(3).toList()),
+              commit('five', 'five refs', refs: many),
+            ],
+          ),
+          controller: controller,
+          // 150px of chips: floor(150 / 40) = 3 chips at 50px each.
+          columnWidths: const TimelineColumnWidths(refs: 150),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    Rect chip(String sha, String name) =>
+        tester.getRect(find.byKey(Key('ref-chip-$sha-$name')));
+    for (final ref in many.take(3)) {
+      expect(chip('three', ref.name).width, greaterThanOrEqualTo(40));
+    }
+    // Equal shares, in order, inside the cell.
+    expect(chip('three', 'main').left, lessThan(chip('three', 'v1.0').left));
+    expect(
+      chip('three', 'v1.0').left,
+      lessThan(chip('three', 'origin/main').left),
+    );
+    expect(
+      chip('three', 'main').width,
+      closeTo(chip('three', 'origin/main').width, 0.5),
+    );
+
+    // Five refs in the same cell: three chips, the rest silently dropped, and
+    // no badge anywhere.
+    for (final ref in many.take(3)) {
+      expect(find.byKey(Key('ref-chip-five-${ref.name}')), findsOneWidget);
+    }
+    for (final ref in many.skip(3)) {
+      expect(find.byKey(Key('ref-chip-five-${ref.name}')), findsNothing);
+    }
+    expect(find.byKey(const Key('ref-more-five')), findsNothing);
+    expect(find.textContaining('+'), findsNothing);
+
+    // The modal still lists every ref, each behind a square 2px accent bar.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    final modal = find.byKey(const Key('refs-modal'));
+    for (final ref in many) {
+      expect(
+        find.descendant(of: modal, matching: find.text(ref.name)),
+        findsOneWidget,
+      );
+    }
+    final accent = find.byKey(const Key('modal-accent-main'));
+    expect(tester.getSize(accent).width, 2);
+    expect(tester.getSize(accent).height, 20);
+    expect(tester.widget<Container>(accent).decoration, isNull);
+  });
+
+  // ------------------------------------------------------------------ §17.4
+  testWidgets('the graph column ratchets to the lanes it has shown', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1000, 600);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    // A straight run on lane 0, then an octopus far below the fold opening
+    // lanes 1..3.
+    final repository = FakeGitRepository(
+      (_, _) async => [
+        for (var index = 0; index < 20; index++)
+          commit('$index', 'commit $index', parents: ['${index + 1}']),
+        commit('20', 'octopus', parents: const ['a', 'b', 'c', 'd']),
+        commit('a', 'a'),
+        commit('b', 'b'),
+        commit('c', 'c'),
+        commit('d', 'd'),
+      ],
+    );
+    Widget screen(GitRepository repository, Key key) => MaterialApp(
+      home: TimelineScreen(
+        key: key,
+        repository: repository,
+        controller: controller,
+      ),
+    );
+    await tester.pumpWidget(screen(repository, const Key('first')));
+    await tester.pumpAndSettle();
+    double graphWidth() =>
+        tester.getSize(find.byKey(const Key('graph-header'))).width;
+
+    // Only lane 0 is on screen, so the column stays at its floor.
+    expect(graphWidth(), 96);
+
+    // Scrolling the octopus into view widens it once: 28 + 3 * 30 + 13.
+    final scrollable = tester.state<ScrollableState>(
+      find.descendant(
+        of: find.byKey(const Key('timeline-list')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    expect(graphWidth(), 131);
+
+    // Scrolling back never shrinks it inside a session.
+    scrollable.position.jumpTo(0);
+    await tester.pumpAndSettle();
+    expect(graphWidth(), 131);
+
+    // A different repository starts over.
+    await tester.pumpWidget(
+      screen(
+        FakeGitRepository((_, _) async => [commit('1', 'first commit')]),
+        const Key('second'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(graphWidth(), 96);
+  });
 }
 
 Widget app(GitRepository repository, WindowFrameController controller) =>
@@ -3299,6 +3722,7 @@ GitCommit commit(
   String subject, {
   List<String> parents = const [],
   List<GitRef>? refs,
+  int timestamp = 1700000120,
   GitIdentity committer = const GitIdentity(
     name: 'Cam Committer',
     email: 'cam@example.com',
@@ -3310,7 +3734,7 @@ GitCommit commit(
   author: GitIdentity(name: 'Ada Author', email: 'ada@example.com'),
   authorTimestamp: 1700000000,
   committer: committer,
-  committerTimestamp: 1700000120,
+  committerTimestamp: timestamp,
   refs:
       refs ??
       (sha == '3' ? const [GitRef(name: 'main', isHead: true)] : const []),
