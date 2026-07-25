@@ -3526,7 +3526,9 @@ void main() {
     );
   });
 
-  testWidgets('date headings select like any other row', (tester) async {
+  testWidgets('only the first date heading takes the selection', (
+    tester,
+  ) async {
     final now = DateTime.now();
     int stamp(Duration ago) => now.subtract(ago).millisecondsSinceEpoch ~/ 1000;
     await tester.pumpWidget(
@@ -3550,46 +3552,52 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Selection starts on the first commit, and the walk stops on the heading
-    // between the two days on its way down.
+    // Entries: heading 0, commit a, heading 2, commit b. Only heading 0 selects.
     expect(find.byKey(const Key('selected-row-a')), findsOneWidget);
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-a')), findsNothing);
-    expect(find.byKey(const Key('selected-row-b')), findsNothing);
-    // The heading carries the full-width band while it holds the selection.
     final band = tester.widget<ColoredBox>(
       find
           .ancestor(
-            of: find.byKey(const Key('date-row-2')),
+            of: find.byKey(const Key('date-row-0')),
             matching: find.byType(ColoredBox),
           )
           .first,
     );
     expect(band.color, const Color(0xFF1F4D8F));
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('selected-row-b')), findsOneWidget);
 
-    // A heading has no commit, so the preview falls back to its empty state.
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-    await tester.pumpAndSettle();
+    // It has no commit, so the preview falls back to its empty state.
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     expect(find.text('No commit selected'), findsOneWidget);
     expect(find.byKey(const Key('refs-modal')), findsNothing);
-    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsNothing);
 
-    // Clicking a commit selects it, and clicking a heading selects that.
-    await tester.tap(find.text('older commit'));
+    // Down from it lands on the commit, not on the next heading.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-a')), findsOneWidget);
+
+    // The later heading is skipped in both directions.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-b')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-a')), findsOneWidget);
+
+    // And clicking it changes nothing.
+    await tester.tap(find.byKey(const Key('date-row-2')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-a')), findsOneWidget);
+
+    // Clicking the first heading still selects it.
     await tester.tap(find.text('Today'));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('selected-row-b')), findsNothing);
     expect(find.byKey(const Key('selected-row-a')), findsNothing);
+    expect(find.byKey(const Key('selected-row-b')), findsNothing);
   });
 
   // ------------------------------------------------------------------ §17.2
@@ -5117,9 +5125,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(opened, ['a', 'a']);
 
-    // A date heading has no commit: the button dims and the shortcut does
-    // nothing.
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    // The first date heading has no commit: the button dims and the shortcut
+    // does nothing.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-a')), findsNothing);
     expect(background(), const Color(0xFF252936));
@@ -5877,7 +5885,7 @@ void main() {
       Color(0xFFBAFFC9),
       Color(0xFFBAE1FF),
     ]);
-    // The cloud badge rides the top-right corner, inside the same IgnorePointer.
+    // The cloud badge floats beside the Y, inside the same IgnorePointer.
     final cloud = find.byKey(const Key('wordmark-cloud'));
     expect(
       find.descendant(of: find.byKey(const Key('wordmark')), matching: cloud),
@@ -5890,8 +5898,10 @@ void main() {
         matching: find.byType(Text),
       ),
     );
-    expect(badge.top, lessThan(glyphs.top));
-    expect(badge.right, greaterThanOrEqualTo(glyphs.right));
+    // Beside the Y, inside the text's own box, high above its middle.
+    expect(badge.left, greaterThan(glyphs.left));
+    expect(badge.right, lessThan(glyphs.right));
+    expect(badge.top, lessThan(glyphs.center.dy));
     // Sized off the font, so the 20px variant stays proportional.
     expect(
       tester.widget<CustomPaint>(cloud).size.width,

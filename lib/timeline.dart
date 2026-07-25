@@ -467,6 +467,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
           _rows,
           widget.repository.root.hashCode,
         );
+        // A heading never holds the selection across a load — including the
+        // very first one, so the app opens on a commit.
         if (_entries[_selectedIndex.value].rowIndex < 0) {
           _selectedIndex.value = _entries.indexWhere(
             (entry) => entry.rowIndex >= 0,
@@ -536,15 +538,31 @@ class _TimelineScreenState extends State<TimelineScreen> {
     return KeyEventResult.ignored;
   }
 
-  /// Steps one entry, heading rows included: they select like any other row and
-  /// simply have no commit to preview.
+  /// The topmost heading is the only one the selection may land on; the rest are
+  /// skip-only, so walking the list never stops on them.
+  bool _selectable(int index) =>
+      _entries[index].rowIndex >= 0 ||
+      index == _entries.indexWhere((entry) => entry.rowIndex < 0);
+
+  /// Steps one entry, walking on past skip-only headings. Running off the end
+  /// comes back the other way, so the walk always lands somewhere selectable.
   void _moveSelection(int delta, {bool animate = true}) {
     if (_entries.isEmpty) return;
     _arrivedGoingDown = delta > 0;
-    _selectedIndex.value = (_selectedIndex.value + delta).clamp(
-      0,
-      _entries.length - 1,
-    );
+    final step = delta < 0 ? -1 : 1;
+    var next = (_selectedIndex.value + delta).clamp(0, _entries.length - 1);
+    for (final direction in [step, -step]) {
+      var probe = next;
+      while (probe >= 0 && probe < _entries.length && !_selectable(probe)) {
+        probe += direction;
+      }
+      if (probe >= 0 && probe < _entries.length) {
+        next = probe;
+        break;
+      }
+    }
+    if (!_selectable(next)) return;
+    _selectedIndex.value = next;
     _scrollToSelection(animate: animate);
   }
 
@@ -579,8 +597,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 
   /// A click only moves the selection. An open preview follows it; a closed one
-  /// stays closed until Enter or Space.
+  /// stays closed until Enter or Space. A skip-only heading takes no click.
   void _select(int index) {
+    if (!_selectable(index)) return;
     _arrivedGoingDown = null;
     _selectedIndex.value = index;
     _focusNode.requestFocus();
@@ -843,10 +862,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// it. Landing near the bar's centre is a happy side effect, not a promise.
   Widget _pathAndWordmark() => LayoutBuilder(
     builder: (context, constraints) {
-      // fontSize * 5.5 over-states 'Yogit' plus its badge overhang in
-      // DancingScript, so this errs toward leaving the path room.
+      // fontSize * 5 over-states 'Yogit' in DancingScript, so this errs toward
+      // leaving the path room.
       final size = [26.0, 20.0].firstWhere(
-        (size) => constraints.maxWidth - (size * 5.5 + 24) >= _minDragWidth,
+        (size) => constraints.maxWidth - (size * 5 + 24) >= _minDragWidth,
         orElse: () => 0.0,
       );
       // The whole leftover is the window's drag handle — the name is short now,
@@ -2635,36 +2654,39 @@ class _Wordmark extends StatelessWidget {
     ('t', Color(0xFFBAE1FF)),
   ];
 
-  /// How far the badge reaches past the last glyph. Reserved as padding so the
-  /// widget's own box covers it and the toolbar's fit rules keep working.
-  double get _overhang => fontSize * 0.38;
+  TextStyle get _style => TextStyle(
+    fontFamily: 'DancingScript',
+    fontSize: fontSize,
+    fontWeight: FontWeight.w700,
+  );
+
+  /// Where the 'Y' ends, so the badge can float in the space the lowercase
+  /// letters leave above them.
+  double get _afterY => (TextPainter(
+    text: TextSpan(text: letters.first.$1, style: _style),
+    textDirection: TextDirection.ltr,
+  )..layout()).width;
 
   @override
   Widget build(BuildContext context) => Stack(
     clipBehavior: Clip.none,
     children: [
-      Padding(
-        padding: EdgeInsets.only(right: _overhang),
-        child: Text.rich(
-          TextSpan(
-            children: [
-              for (final (glyph, color) in letters)
-                TextSpan(
-                  text: glyph,
-                  style: TextStyle(color: color),
-                ),
-            ],
-          ),
-          style: TextStyle(
-            fontFamily: 'DancingScript',
-            fontSize: fontSize,
-            fontWeight: FontWeight.w700,
-          ),
+      Text.rich(
+        TextSpan(
+          children: [
+            for (final (glyph, color) in letters)
+              TextSpan(
+                text: glyph,
+                style: TextStyle(color: color),
+              ),
+          ],
         ),
+        style: _style,
       ),
       Positioned(
-        right: 0,
-        top: -fontSize * 0.12,
+        left: _afterY + fontSize * 0.03,
+        // Above the x-height, below the Y's cap: the lowercase tops stay clear.
+        top: fontSize * 0.06,
         child: CustomPaint(
           key: const Key('wordmark-cloud'),
           size: Size(fontSize * 0.92, fontSize * 0.54),
