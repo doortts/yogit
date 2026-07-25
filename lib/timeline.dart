@@ -2326,8 +2326,9 @@ class CommitGraphPainter extends CustomPainter {
   static const departureRadius = 5.0;
   static const arrivalRadius = 8.0;
 
-  /// How far a transition reaches past the node center it belongs to, so the
-  /// line reads as rooted in the disc rather than resting against it.
+  /// How far a newborn line starts above its source center, so it reads as rooted
+  /// in the disc rather than resting against it. A join needs no such nudge: it
+  /// enters the dot sideways, and the dot covers the entry.
   static const nodeAnchor = 1.0;
 
   final GraphRow row;
@@ -2577,23 +2578,22 @@ class CommitGraphPainter extends CustomPainter {
     );
   }
 
-  /// One lane transition: out of the node, a rounded right angle onto the jog
-  /// line, across, then a rounded right angle down into the arrival lane. It
-  /// spans a whole row height from a node center at [startY] to the next row's
-  /// center, and both rows paint the same path — the child from its own center,
-  /// the next row with [startY] a row height above its center — so the halves
-  /// meet exactly. Distant lanes only lengthen the horizontal run.
+  /// One lane transition, spanning a row height from a node center at [startY] to
+  /// the next row's center. Both rows paint the same path — the child from its own
+  /// center, the next row with [startY] a row height above its center — so the
+  /// halves meet exactly. Distant lanes only lengthen the horizontal run.
   ///
-  /// A transition bends beside the node it belongs to. [bendEarly] is a newborn
-  /// line leaving its source, so it turns just below the departure node; anything
-  /// else is an existing line staying vertical in its own column until it slides
-  /// into its parent at the arrival node's level — which is what keeps a dying
-  /// branch from leaving a stub under its last node.
+  /// A transition bends beside the node it belongs to, and each shape has exactly
+  /// the corners it needs:
   ///
-  /// Each kind overshoots the node it belongs to by [nodeAnchor], so the line
-  /// roots inside the disc or dot instead of stopping ambiguously against it: a
-  /// birth starts that far above its source center, a join ends that far below
-  /// its parent's. The jog stays put either way.
+  /// * [bendEarly] — a line being born. Out of its source (starting [nodeAnchor]
+  ///   above that center, so it roots inside the disc), a corner just below it,
+  ///   across, then a corner down into its new column: it leaves the node
+  ///   sideways instead of shadowing the parent's rail.
+  /// * otherwise — a line joining its parent. Straight down its own column, then
+  ///   a single corner onto the parent's center line and a flat run into the dot
+  ///   from the side. No trailing vertical, so nothing rides the parent's rail
+  ///   and no stub is left under the dying branch's last node.
   Path transitionPath(
     int from,
     int to,
@@ -2604,18 +2604,26 @@ class CommitGraphPainter extends CustomPainter {
     final x0 = laneX(from);
     final x1 = laneX(to);
     final endY = startY + size.height;
-    final jogY = bendEarly ? startY + jogInset : endY - jogInset;
     final direction = x1 > x0 ? 1.0 : -1.0;
     final half = (x1 - x0).abs() / 2;
+    if (!bendEarly) {
+      final corner = math.min(math.min(arrivalRadius, half), endY - startY);
+      return Path()
+        ..moveTo(x0, startY)
+        ..lineTo(x0, endY - corner)
+        ..quadraticBezierTo(x0, endY, x0 + direction * corner, endY)
+        ..lineTo(x1, endY);
+    }
+    final jogY = startY + jogInset;
     final out = math.min(math.min(departureRadius, half), jogY - startY);
     final into = math.min(math.min(arrivalRadius, half), endY - jogY);
     return Path()
-      ..moveTo(x0, bendEarly ? startY - nodeAnchor : startY)
+      ..moveTo(x0, startY - nodeAnchor)
       ..lineTo(x0, jogY - out)
       ..quadraticBezierTo(x0, jogY, x0 + direction * out, jogY)
       ..lineTo(x1 - direction * into, jogY)
       ..quadraticBezierTo(x1, jogY, x1, jogY + into)
-      ..lineTo(x1, bendEarly ? endY : endY + nodeAnchor);
+      ..lineTo(x1, endY);
   }
 
   /// A rail paints in its branch line's color. Before [GraphRow] carries branch

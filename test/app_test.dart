@@ -578,24 +578,24 @@ void main() {
       const Rect.fromLTRB(28, -19, 58, 18),
     );
 
-    // The other kind bends beside the arrival node instead, 8px above it.
+    // The other kind takes a single corner and runs flat into its parent, so it
+    // enters the dot from the side with no trailing vertical.
     final late = painter.transitionPath(0, 1, 18, size);
-    // A join runs 1px past its parent's center instead.
-    expect(late.getBounds(), const Rect.fromLTRB(28, 18, 58, 55));
-    final lateMetrics = late.computeMetrics().single;
-    final lateJog =
-        [
-          for (var step = 0; step <= 400; step++)
-            lateMetrics
-                .getTangentForOffset(lateMetrics.length * step / 400)!
-                .position,
-        ].where(
-          (point) =>
-              (point.dy - (54 - CommitGraphPainter.jogInset)).abs() < 0.01,
-        );
-    expect(lateJog, hasLength(greaterThan(1)));
-    expect(lateJog.first.dx, closeTo(33, 0.6));
-    expect(lateJog.last.dx, closeTo(50, 0.6));
+    expect(late.getBounds(), const Rect.fromLTRB(28, 18, 58, 54));
+    final lateSamples = _samples(late);
+    final lateRun = lateSamples
+        .where((point) => (point.dy - 54).abs() < 0.01)
+        .toList();
+    expect(lateRun, hasLength(greaterThan(1)));
+    expect(lateRun.first.dx, closeTo(36, 0.6));
+    expect(lateRun.last.dx, 58);
+    // The corner is the only one, and it sits on the line's own lane.
+    expect(
+      lateSamples.where((point) => point.dy < 45).map((point) => point.dx),
+      everyElement(28),
+    );
+    // Nothing runs down the parent's lane above the dot.
+    expect(_touches(late, const Offset(58, 50)), isFalse);
 
     // A distant lane only lengthens the horizontal run on the same jog line.
     final distant = painterTo(
@@ -666,17 +666,18 @@ void main() {
       _touches(path, Offset((painter.laneX(0) + painter.laneX(1)) / 2, 18 + 8)),
       isFalse,
     );
-    // It turns at the parent's level and lands on the parent node.
-    final jog = _samples(
+    // One corner onto the parent's center line, then a flat run into the dot from
+    // the side — no second corner, no trailing vertical.
+    final run = _samples(
       path,
-    ).where((point) => (point.dy - 46).abs() < 0.01).toList();
-    expect(jog, hasLength(greaterThan(1)));
-    expect(jog.first.dx, closeTo(53, 0.6));
-    expect(jog.last.dx, closeTo(36, 0.6));
-    // And it anchors 1px inside the parent's dot rather than resting on it.
-    expect(_touches(path, Offset(painter.laneX(0), 54)), isTrue);
-    expect(_touches(path, Offset(painter.laneX(0), 55)), isTrue);
-    expect(path.getBounds().bottom, 55);
+    ).where((point) => (point.dy - 54).abs() < 0.01).toList();
+    expect(run, hasLength(greaterThan(1)));
+    expect(run.first.dx, closeTo(50, 0.6));
+    expect(run.last.dx, painter.laneX(0));
+    expect(path.getBounds().bottom, 54);
+    expect(_touches(path, Offset(painter.laneX(0) + 2, 54)), isTrue);
+    // Nothing descends the parent's own lane into the dot.
+    expect(_touches(path, Offset(painter.laneX(0), 50)), isFalse);
 
     // The arrival half shows that turn inside the parent's own row.
     final arrival = painter.transitionPath(
@@ -686,17 +687,15 @@ void main() {
       size,
       bendEarly: CommitGraphPainter.isMergeEdge(converging, transition),
     );
-    final arrivalJog = _samples(
+    final arrivalRun = _samples(
       arrival,
-    ).where((point) => (point.dy - 10).abs() < 0.01).toList();
-    expect(arrivalJog, hasLength(greaterThan(1)));
-    expect(
-      arrivalJog.map((point) => point.dy),
-      everyElement(closeTo(10, 0.01)),
-    );
-    expect(arrivalJog.first.dx, greaterThan(arrivalJog.last.dx));
-    expect(_touches(arrival, Offset(painter.laneX(0), 18)), isTrue);
-    expect(_touches(arrival, Offset(painter.laneX(0), 19)), isTrue);
+    ).where((point) => (point.dy - 18).abs() < 0.01).toList();
+    expect(arrivalRun, hasLength(greaterThan(1)));
+    expect(arrivalRun.first.dx, greaterThan(arrivalRun.last.dx));
+    expect(arrivalRun.last.dx, painter.laneX(0));
+    // Side entry into the dot, with the parent's lane left clear above it.
+    expect(_touches(arrival, Offset(painter.laneX(0) + 2, 18)), isTrue);
+    expect(_touches(arrival, Offset(painter.laneX(0), 14)), isFalse);
   });
 
   test('a transition lane gets no straight rail overdrawing its curve', () {
@@ -1059,7 +1058,7 @@ void main() {
     // The slide takes the same rounded path as a branch or merge edge.
     expect(
       painter.transitionPath(2, 1, 18, size).getBounds(),
-      const Rect.fromLTRB(58, 18, 88, 55),
+      const Rect.fromLTRB(58, 18, 88, 54),
     );
     // Lane 2 runs down to the center and leaves on that curve.
     expect(painter.laneVerticals(size)[2], (top: 0.0, bottom: 18.0));
@@ -1491,7 +1490,7 @@ void main() {
     expect(painterAt(1).laneX(1) - painterAt(1).laneX(0), 14.5);
     expect(
       painterAt(0).transitionPath(0, 2, 18, const Size(70, 36)).getBounds(),
-      const Rect.fromLTRB(28, 18, 57, 55),
+      const Rect.fromLTRB(28, 18, 57, 54),
     );
     // Nodes keep their full size at every width; the overhang just clips.
     expect(avatarSize(1), 22);
