@@ -400,6 +400,7 @@ class CommitAvatarStack extends StatelessWidget {
     this.avatarService,
     this.showRemoteAvatars = true,
     this.size = 22,
+    this.stacked = true,
     this.discColor,
     super.key,
   });
@@ -409,12 +410,17 @@ class CommitAvatarStack extends StatelessWidget {
   final bool showRemoteAvatars;
   final double size;
 
+  /// Whether a separate committer may sit behind the author. A graph node in a
+  /// squeezed lane says no, so the pair never reaches the next lane's rail.
+  final bool stacked;
+
   /// Passed straight through to both discs: a row's avatars wear its branch.
   final Color? discColor;
 
   bool get _hasSeparateCommitter =>
-      commit.author.name != commit.committer.name ||
-      commit.author.email != commit.committer.email;
+      stacked &&
+      (commit.author.name != commit.committer.name ||
+          commit.author.email != commit.committer.email);
 
   @override
   Widget build(BuildContext context) {

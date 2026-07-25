@@ -10,6 +10,7 @@ import 'window_frame.dart';
 
 class TimelineColumnWidths {
   const TimelineColumnWidths({
+    this.sidebar = 150,
     this.refs = 156,
     this.graph,
     this.hash = 78,
@@ -18,6 +19,7 @@ class TimelineColumnWidths {
     this.name = 150,
   });
 
+  final double sidebar;
   final double refs;
 
   /// Null until the user drags the graph column: the timeline then fits it to
@@ -34,6 +36,7 @@ class TimelineColumnWidths {
   /// [graph] and [commit] only widen: pass a value to pin the column, and use
   /// `TimelineColumnWidths(...)` directly to clear it back to auto.
   TimelineColumnWidths copyWith({
+    double? sidebar,
     double? refs,
     double? graph,
     double? hash,
@@ -41,6 +44,7 @@ class TimelineColumnWidths {
     double? time,
     double? name,
   }) => TimelineColumnWidths(
+    sidebar: sidebar ?? this.sidebar,
     refs: refs ?? this.refs,
     graph: graph ?? this.graph,
     hash: hash ?? this.hash,
@@ -59,6 +63,7 @@ class TimelineColumnWidths {
           max,
         );
     return TimelineColumnWidths(
+      sidebar: width('sidebar', 150, 120, 320),
       refs: width('refs', 156, 110, 240),
       graph: json['graph'] is num ? width('graph', 142, 40, 260) : null,
       hash: width('hash', 78, 64, 120),
@@ -69,6 +74,7 @@ class TimelineColumnWidths {
   }
 
   Map<String, double> toJson() => {
+    'sidebar': sidebar,
     'refs': refs,
     'graph': ?graph,
     'hash': hash,
@@ -80,6 +86,7 @@ class TimelineColumnWidths {
   @override
   bool operator ==(Object other) =>
       other is TimelineColumnWidths &&
+      sidebar == other.sidebar &&
       refs == other.refs &&
       graph == other.graph &&
       hash == other.hash &&
@@ -88,7 +95,8 @@ class TimelineColumnWidths {
       name == other.name;
 
   @override
-  int get hashCode => Object.hash(refs, graph, hash, commit, time, name);
+  int get hashCode =>
+      Object.hash(sidebar, refs, graph, hash, commit, time, name);
 }
 
 /// `#RRGGBB` (or bare `RRGGBB`) to a color, or null when malformed.

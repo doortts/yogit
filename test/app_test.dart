@@ -3597,6 +3597,327 @@ void main() {
     await tester.pumpAndSettle();
     expect(graphWidth(), 96);
   });
+  // ------------------------------------------------------------------ §18.1
+  test('a date heading carries a non-main lane through, not just lane 0', () {
+    const size = Size(168, 36);
+    final now = DateTime(2026, 7, 26, 12);
+    int at(int day) =>
+        DateTime(2026, 7, day, 12).millisecondsSinceEpoch ~/ 1000;
+    // A lane-1 chain straddling a day change, with lane 0 running beside it.
+    final rows = layoutGraph([
+      commit('M', 'merge', parents: const ['P', 'F1'], timestamp: at(26)),
+      commit('F1', 'feature today', parents: const ['F2'], timestamp: at(26)),
+      commit(
+        'F2',
+        'feature yesterday',
+        parents: const ['P'],
+        timestamp: at(25),
+      ),
+      commit('P', 'parent', timestamp: at(25)),
+    ]);
+    final entries = timelineEntries(rows, now);
+    final heading = entries.firstWhere((entry) => entry.label == 'Yesterday');
+    final above = entries[entries.indexOf(heading) - 1];
+    expect(above.row.commit.sha, 'F1');
+    expect(above.row.lane, 1);
+
+    final painter = CommitGraphPainter(
+      row: heading.row,
+      previous: above.row,
+      selected: false,
+      committerColor: AvatarService.branchColor(0),
+      passThrough: true,
+    );
+
+    // Both lanes hand their rail straight through the heading row.
+    expect(painter.laneVerticals(size)[0], (top: 0.0, bottom: 36.0));
+    expect(painter.laneVerticals(size)[1], (top: 0.0, bottom: 36.0));
+    expect(
+      (Canvas canvas) => painter.paint(canvas, size),
+      paints
+        ..line(p1: const Offset(28, 0), p2: const Offset(28, 18))
+        ..line(p1: const Offset(28, 18), p2: const Offset(28, 36))
+        ..line(p1: const Offset(58, 0), p2: const Offset(58, 18))
+        ..line(p1: const Offset(58, 18), p2: const Offset(58, 36)),
+    );
+
+    // The commit below the heading resumes lane 1 from the top of its row.
+    final below = entries[entries.indexOf(heading) + 1];
+    expect(below.row.commit.sha, 'F2');
+    final resumed = CommitGraphPainter(
+      row: below.row,
+      previous: heading.row,
+      selected: false,
+      committerColor: AvatarService.branchColor(0),
+    );
+    expect(resumed.continuesFromAbove(1), isTrue);
+    expect(resumed.laneVerticals(size)[1]?.top, 0.0);
+  });
+
+  testWidgets('the date heading row paints its rails at full row size', (
+    tester,
+  ) async {
+    final now = DateTime.now();
+    int stamp(Duration ago) => now.subtract(ago).millisecondsSinceEpoch ~/ 1000;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [
+              commit(
+                'M',
+                'merge',
+                parents: const ['P', 'F'],
+                timestamp: stamp(const Duration(hours: 1)),
+              ),
+              commit(
+                'F',
+                'feature today',
+                parents: const ['P'],
+                timestamp: stamp(const Duration(hours: 2)),
+              ),
+              commit('P', 'parent', timestamp: stamp(const Duration(days: 2))),
+            ],
+          ),
+          controller: controller,
+          columnWidths: const TimelineColumnWidths(graph: 120),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // The heading's graph cell is a full row, so its rails actually paint.
+    final painter = find.byKey(const Key('date-painter-3'));
+    expect(painter, findsOneWidget);
+    expect(tester.getSize(painter), const Size(120, 36));
+    expect(
+      tester.getRect(painter).left,
+      tester.getRect(find.byKey(const Key('graph-cell-0'))).left,
+    );
+  });
+
+  // ------------------------------------------------------------------ §18.2
+  testWidgets('nodes sit above every rail and inside their own lane', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [
+              commit('o', 'octopus', parents: const ['a', 'b', 'c', 'd', 'e']),
+              commit('a', 'a', parents: const ['z']),
+              commit('b', 'b', parents: const ['z']),
+              commit('c', 'c', parents: const ['z']),
+              commit('d', 'd', parents: const ['z']),
+              commit('e', 'e', parents: const ['z']),
+              commit('z', 'root'),
+            ],
+          ),
+          controller: controller,
+          // Five lanes squeezed into a cell far below their content width.
+          columnWidths: const TimelineColumnWidths(graph: 110),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    CommitGraphPainter painterAt(int index) =>
+        tester
+                .widget<CustomPaint>(find.byKey(Key('graph-painter-$index')))
+                .painter!
+            as CommitGraphPainter;
+    expect(painterAt(0).laneSpacing, lessThan(30));
+
+    for (var index = 1; index <= 5; index++) {
+      final painter = painterAt(index);
+      final cell = tester.getRect(find.byKey(Key('graph-cell-$index')));
+      final stack = find.descendant(
+        of: find.byKey(Key('graph-cell-$index')),
+        matching: find.byType(CommitAvatarStack),
+      );
+      final avatar = tester.widget<CommitAvatarStack>(stack);
+      final rect = tester.getRect(stack);
+
+      // The node sits on its lane's effective x, centred on it.
+      expect(
+        rect.left - cell.left,
+        closeTo(painter.laneX(painter.row.lane) - avatar.size / 2, 0.01),
+      );
+      // And it stops short of the next lane's rail.
+      expect(
+        rect.right - cell.left,
+        lessThanOrEqualTo(
+          painter.laneX(painter.row.lane) +
+              painter.laneSpacing -
+              CommitGraphPainter.railWidth,
+        ),
+      );
+
+      // Rails paint below the node: the painter comes first in the row's stack.
+      final children = tester
+          .widget<Stack>(
+            find
+                .descendant(
+                  of: find.byKey(Key('graph-cell-$index')),
+                  matching: find.byType(Stack),
+                )
+                .first,
+          )
+          .children;
+      expect(children.length, 2);
+      expect(
+        find
+            .descendant(
+              of: find.byWidget(children.first),
+              matching: find.byType(CustomPaint),
+            )
+            .evaluate(),
+        isNotEmpty,
+      );
+      expect(
+        find
+            .descendant(
+              of: find.byWidget(children.last),
+              matching: find.byType(CommitAvatarStack),
+            )
+            .evaluate(),
+        isNotEmpty,
+      );
+    }
+  });
+  // ------------------------------------------------------------------ §18.3
+  testWidgets('the toolbar reads half again bigger', (tester) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          root: '/Users/ada/project',
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.widget<Text>(find.text('/Users/ada/project')).style?.fontSize,
+      18,
+    );
+    expect(
+      tester.widget<Icon>(find.byIcon(Icons.account_tree_outlined)).size,
+      24,
+    );
+    expect(
+      tester.widget<Icon>(find.byIcon(Icons.folder_open_outlined)).size,
+      24,
+    );
+    expect(tester.getSize(find.byKey(const Key('toolbar'))).height, 56);
+  });
+
+  // ------------------------------------------------------------------ §18.4
+  testWidgets('the sidebar resizes, persists, and clamps', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    TimelineColumnWidths? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+            refs: const RepoRefs(local: ['main'], current: 'main'),
+          ),
+          controller: controller,
+          onColumnWidthsChanged: (value) => saved = value,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    double sidebarWidth() =>
+        tester.getSize(find.byKey(const Key('sidebar'))).width;
+    double titleWidth() =>
+        tester.getSize(find.byKey(const Key('commit-header'))).width;
+    double nameRight() =>
+        tester.getRect(find.byKey(const Key('name-header'))).right;
+
+    expect(const TimelineColumnWidths().sidebar, 150);
+    expect(sidebarWidth(), 150);
+    final title = titleWidth();
+
+    // Dragging the right edge widens it, and the timeline gives up exactly that
+    // much so no dead strip opens.
+    await tester.drag(
+      find.byKey(const Key('sidebar-resizer')),
+      const Offset(70, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(sidebarWidth(), 220);
+    expect(saved?.sidebar, 220);
+    expect(titleWidth(), title - 70);
+    expect(nameRight(), 1400);
+
+    // It clamps at both ends of the design range.
+    await tester.drag(
+      find.byKey(const Key('sidebar-resizer')),
+      const Offset(400, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(sidebarWidth(), 320);
+    await tester.drag(
+      find.byKey(const Key('sidebar-resizer')),
+      const Offset(-400, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(sidebarWidth(), 120);
+    expect(saved?.sidebar, 120);
+
+    // Round-trips like every other width, clamped on the way in.
+    expect(
+      TimelineColumnWidths.fromJson(
+        const TimelineColumnWidths(sidebar: 240).toJson(),
+      ).sidebar,
+      240,
+    );
+    expect(
+      TimelineColumnWidths.fromJson(<String, dynamic>{'sidebar': 40}).sidebar,
+      120,
+    );
+    expect(
+      TimelineColumnWidths.fromJson(<String, dynamic>{'sidebar': 900}).sidebar,
+      320,
+    );
+  });
+
+  testWidgets('the sidebar reads a size up', (tester) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(
+            local: ['main'],
+            tags: ['v1.0'],
+            current: 'main',
+          ),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<Text>(find.text('main')).style?.fontSize, 13);
+    expect(tester.widget<Text>(find.text('LOCAL')).style?.fontSize, 11);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('ref-filter')))
+          .style
+          ?.fontSize,
+      13,
+    );
+  });
 }
 
 Widget app(GitRepository repository, WindowFrameController controller) =>

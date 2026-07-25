@@ -208,7 +208,7 @@ class TimelineScreen extends StatefulWidget {
 class _TimelineScreenState extends State<TimelineScreen> {
   static const _pageSize = 500;
   static const _rowHeight = 36.0;
-  static const _sidebarWidth = 150.0;
+  static const _sidebarRange = (min: 120.0, max: 320.0);
   static const _sidePreviewWidth = 288.0;
   static const _bottomPreviewHeight = 280.0;
 
@@ -246,6 +246,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   late final Map<String, double> _widths = _widthMap(widget.columnWidths);
   late double? _commitWidth = widget.columnWidths.commit;
   late double? _graphWidth = widget.columnWidths.graph;
+  late double _sidebarWidth = widget.columnWidths.sidebar;
 
   /// Deepest lane the viewport has shown so far. It only grows, so the column
   /// never shrinks under the user mid-session; a new repository remounts.
@@ -282,6 +283,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       _widths.addAll(_widthMap(widget.columnWidths));
       _commitWidth = widget.columnWidths.commit;
       _graphWidth = widget.columnWidths.graph;
+      _sidebarWidth = widget.columnWidths.sidebar;
     }
   }
 
@@ -691,14 +693,15 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 
   Widget _toolbar() => Container(
-    height: 47,
+    key: const Key('toolbar'),
+    height: 56,
     padding: const EdgeInsets.symmetric(horizontal: 14),
     color: _surface,
     child: Row(
       children: [
         const Icon(
           Icons.account_tree_outlined,
-          size: 15,
+          size: 24,
           color: Color(0xFF7AD6E8),
         ),
         IconButton(
@@ -706,14 +709,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
           tooltip: '저장소 열기',
           visualDensity: VisualDensity.compact,
           onPressed: () => unawaited(_pickRepository()),
-          icon: const Icon(Icons.folder_open_outlined, size: 16, color: _muted),
+          icon: const Icon(Icons.folder_open_outlined, size: 24, color: _muted),
         ),
         Expanded(
           child: Text(
             widget.repository.root,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: _muted, fontSize: 11),
+            style: const TextStyle(color: _muted, fontSize: 18),
           ),
         ),
         const SizedBox(width: 10),
@@ -811,8 +814,40 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   // ---------------------------------------------------------------- sidebar
 
-  Widget _sidebar() => Container(
+  /// The sidebar, with a drag handle on its right edge. The timeline sits in the
+  /// leftover width, so its own flex math follows along for free.
+  Widget _sidebar() => SizedBox(
+    key: const Key('sidebar'),
     width: _sidebarWidth,
+    child: Stack(
+      children: [
+        Positioned.fill(child: _sidebarBody()),
+        Positioned(
+          right: 0,
+          top: 0,
+          bottom: 0,
+          width: 8,
+          child: MouseRegion(
+            cursor: SystemMouseCursors.resizeColumn,
+            child: GestureDetector(
+              key: const Key('sidebar-resizer'),
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragUpdate: (details) => setState(
+                () => _sidebarWidth = (_sidebarWidth + details.delta.dx).clamp(
+                  _sidebarRange.min,
+                  _sidebarRange.max,
+                ),
+              ),
+              onHorizontalDragEnd: (_) => _saveColumnWidths(),
+              onHorizontalDragCancel: _saveColumnWidths,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _sidebarBody() => Container(
     decoration: const BoxDecoration(
       color: _panelSoft,
       border: Border(right: BorderSide(color: _border)),
@@ -825,11 +860,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
             key: const Key('ref-filter'),
             controller: _filterController,
             onChanged: (value) => setState(() => _filter = value),
-            style: const TextStyle(color: _text, fontSize: 11),
+            style: const TextStyle(color: _text, fontSize: 13),
             decoration: InputDecoration(
               isDense: true,
               hintText: '브랜치와 태그 찾기',
-              hintStyle: const TextStyle(color: _muted, fontSize: 11),
+              hintStyle: const TextStyle(color: _muted, fontSize: 13),
               filled: true,
               fillColor: _raised,
               contentPadding: const EdgeInsets.symmetric(
@@ -883,7 +918,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         heading,
         style: const TextStyle(
           color: _muted,
-          fontSize: 10,
+          fontSize: 11,
           fontWeight: FontWeight.w500,
           letterSpacing: 0.8,
         ),
@@ -940,7 +975,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: current ? _text : _muted,
-                    fontSize: 11,
+                    fontSize: 13,
                   ),
                 ),
               ),
@@ -1150,6 +1185,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   void _saveColumnWidths() => widget.onColumnWidthsChanged?.call(
     TimelineColumnWidths(
+      sidebar: _sidebarWidth,
       refs: _w('refs'),
       graph: _graphWidth,
       hash: _w('hash'),
@@ -1194,16 +1230,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
     key: Key('date-row-$index'),
     children: [
       SizedBox(width: _w('refs')),
-      SizedBox(
-        width: graphWidth,
-        child: ClipRect(
-          child: RepaintBoundary(
-            child: CustomPaint(
-              key: Key('date-painter-$index'),
-              painter: _painterFor(entry, index, graphWidth, false, false),
-            ),
-          ),
-        ),
+      _graphCell(
+        Key('date-painter-$index'),
+        _painterFor(entry, index, graphWidth, false, false),
+        graphWidth,
       ),
       Padding(
         // The hash column's 2px rule shifts its text, so the box follows it.
@@ -1226,6 +1256,37 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ),
       ),
     ],
+  );
+
+  /// The graph cell both row kinds share: rails and sweeps below, the node's
+  /// avatar above. A childless CustomPaint has no size of its own, so the cell
+  /// pins the row height — without it a date heading paints nothing at all.
+  Widget _graphCell(
+    Key painterKey,
+    CommitGraphPainter painter,
+    double graphWidth, {
+    Key? cellKey,
+    Widget? node,
+  }) => SizedBox(
+    key: cellKey,
+    width: graphWidth,
+    height: _rowHeight,
+    child: Stack(
+      clipBehavior: Clip.hardEdge,
+      children: [
+        // Transition curves sweep a full row, so the cell clips the halves that
+        // belong to the neighbouring rows.
+        Positioned.fill(
+          child: ClipRect(
+            child: RepaintBoundary(
+              child: CustomPaint(key: painterKey, painter: painter),
+            ),
+          ),
+        ),
+        // Last, so a node always covers the rails behind it.
+        ?node,
+      ],
+    ),
   );
 
   /// One painter for both row kinds: a heading passes through, drawing the rails
@@ -1275,6 +1336,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
         painter.laneSpacing < CommitGraphPainter.compressedAvatarSpacing
         ? 18.0
         : 22.0;
+    // The author/committer stack reaches 45% further right than one disc, so it
+    // only shows while that stays clear of the next lane's rail.
+    final stacked =
+        avatarSize * 0.95 <= painter.laneSpacing - CommitGraphPainter.railWidth;
     return MouseRegion(
       onEnter: (_) => _hoverIndex.value = index,
       onExit: (_) {
@@ -1293,26 +1358,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
           child: Row(
             children: [
               _refsCell(entry.rowIndex, commit, refs, branchColor, selected),
-              SizedBox(
-                key: Key('graph-cell-${entry.rowIndex}'),
-                width: graphWidth,
-                child: Stack(
-                  clipBehavior: Clip.hardEdge,
-                  children: [
-                    // Transition curves sweep a full row, so the cell clips the
-                    // halves that belong to the neighbouring rows.
-                    Positioned.fill(
-                      child: ClipRect(
-                        child: RepaintBoundary(
-                          child: CustomPaint(
-                            key: Key('graph-painter-${entry.rowIndex}'),
-                            painter: painter,
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (!commit.isWorkingTree && !merge)
-                      Positioned(
+              _graphCell(
+                Key('graph-painter-${entry.rowIndex}'),
+                painter,
+                graphWidth,
+                cellKey: Key('graph-cell-${entry.rowIndex}'),
+                node: commit.isWorkingTree || merge
+                    ? null
+                    : Positioned(
                         left: painter.laneX(row.lane) - avatarSize / 2,
                         top: (_rowHeight - avatarSize) / 2,
                         child: CommitAvatarStack(
@@ -1320,11 +1373,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
                           avatarService: widget.avatarService,
                           showRemoteAvatars: widget.showRemoteAvatars,
                           size: avatarSize,
+                          stacked: stacked,
                           discColor: branchColor,
                         ),
                       ),
-                  ],
-                ),
               ),
               _cell(
                 _w('hash'),
