@@ -2326,6 +2326,10 @@ class CommitGraphPainter extends CustomPainter {
   static const departureRadius = 5.0;
   static const arrivalRadius = 8.0;
 
+  /// How far a transition reaches past the node center it belongs to, so the
+  /// line reads as rooted in the disc rather than resting against it.
+  static const nodeAnchor = 1.0;
+
   final GraphRow row;
   final bool selected;
 
@@ -2585,6 +2589,11 @@ class CommitGraphPainter extends CustomPainter {
   /// else is an existing line staying vertical in its own column until it slides
   /// into its parent at the arrival node's level — which is what keeps a dying
   /// branch from leaving a stub under its last node.
+  ///
+  /// Each kind overshoots the node it belongs to by [nodeAnchor], so the line
+  /// roots inside the disc or dot instead of stopping ambiguously against it: a
+  /// birth starts that far above its source center, a join ends that far below
+  /// its parent's. The jog stays put either way.
   Path transitionPath(
     int from,
     int to,
@@ -2601,12 +2610,12 @@ class CommitGraphPainter extends CustomPainter {
     final out = math.min(math.min(departureRadius, half), jogY - startY);
     final into = math.min(math.min(arrivalRadius, half), endY - jogY);
     return Path()
-      ..moveTo(x0, startY)
+      ..moveTo(x0, bendEarly ? startY - nodeAnchor : startY)
       ..lineTo(x0, jogY - out)
       ..quadraticBezierTo(x0, jogY, x0 + direction * out, jogY)
       ..lineTo(x1 - direction * into, jogY)
       ..quadraticBezierTo(x1, jogY, x1, jogY + into)
-      ..lineTo(x1, endY);
+      ..lineTo(x1, bendEarly ? endY : endY + nodeAnchor);
   }
 
   /// A rail paints in its branch line's color. Before [GraphRow] carries branch

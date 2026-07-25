@@ -523,7 +523,9 @@ void main() {
     // and no overshoot outside the two lanes.
     expect(painter.row.transitions, [(from: 0, to: 1, sha: '0')]);
     final path = painter.transitionPath(0, 1, 18, size, bendEarly: true);
-    expect(path.getBounds(), const Rect.fromLTRB(28, 18, 58, 54));
+    // A birth roots 1px inside its source disc, so the bounds start at 17.
+    expect(CommitGraphPainter.nodeAnchor, 1);
+    expect(path.getBounds(), const Rect.fromLTRB(28, 17, 58, 54));
 
     final metrics = path.computeMetrics().single;
     ui.Tangent at(double fraction) =>
@@ -573,12 +575,13 @@ void main() {
       painter
           .transitionPath(0, 1, 18 - size.height, size, bendEarly: true)
           .getBounds(),
-      const Rect.fromLTRB(28, -18, 58, 18),
+      const Rect.fromLTRB(28, -19, 58, 18),
     );
 
     // The other kind bends beside the arrival node instead, 8px above it.
     final late = painter.transitionPath(0, 1, 18, size);
-    expect(late.getBounds(), const Rect.fromLTRB(28, 18, 58, 54));
+    // A join runs 1px past its parent's center instead.
+    expect(late.getBounds(), const Rect.fromLTRB(28, 18, 58, 55));
     final lateMetrics = late.computeMetrics().single;
     final lateJog =
         [
@@ -598,7 +601,7 @@ void main() {
     final distant = painterTo(
       2,
     ).transitionPath(0, 2, 18, size, bendEarly: true);
-    expect(distant.getBounds(), const Rect.fromLTRB(28, 18, 88, 54));
+    expect(distant.getBounds(), const Rect.fromLTRB(28, 17, 88, 54));
     final distantMetrics = distant.computeMetrics().single;
     final distantJog = <Offset>[];
     for (var step = 0; step <= 400; step++) {
@@ -613,7 +616,7 @@ void main() {
     // Leftward transitions mirror, keeping the same radii.
     expect(
       painter.transitionPath(2, 0, 18, size, bendEarly: true).getBounds(),
-      const Rect.fromLTRB(28, 18, 88, 54),
+      const Rect.fromLTRB(28, 17, 88, 54),
     );
   });
 
@@ -670,7 +673,10 @@ void main() {
     expect(jog, hasLength(greaterThan(1)));
     expect(jog.first.dx, closeTo(53, 0.6));
     expect(jog.last.dx, closeTo(36, 0.6));
+    // And it anchors 1px inside the parent's dot rather than resting on it.
     expect(_touches(path, Offset(painter.laneX(0), 54)), isTrue);
+    expect(_touches(path, Offset(painter.laneX(0), 55)), isTrue);
+    expect(path.getBounds().bottom, 55);
 
     // The arrival half shows that turn inside the parent's own row.
     final arrival = painter.transitionPath(
@@ -690,6 +696,7 @@ void main() {
     );
     expect(arrivalJog.first.dx, greaterThan(arrivalJog.last.dx));
     expect(_touches(arrival, Offset(painter.laneX(0), 18)), isTrue);
+    expect(_touches(arrival, Offset(painter.laneX(0), 19)), isTrue);
   });
 
   test('a transition lane gets no straight rail overdrawing its curve', () {
@@ -1052,7 +1059,7 @@ void main() {
     // The slide takes the same rounded path as a branch or merge edge.
     expect(
       painter.transitionPath(2, 1, 18, size).getBounds(),
-      const Rect.fromLTRB(58, 18, 88, 54),
+      const Rect.fromLTRB(58, 18, 88, 55),
     );
     // Lane 2 runs down to the center and leaves on that curve.
     expect(painter.laneVerticals(size)[2], (top: 0.0, bottom: 18.0));
@@ -1484,7 +1491,7 @@ void main() {
     expect(painterAt(1).laneX(1) - painterAt(1).laneX(0), 14.5);
     expect(
       painterAt(0).transitionPath(0, 2, 18, const Size(70, 36)).getBounds(),
-      const Rect.fromLTRB(28, 18, 57, 54),
+      const Rect.fromLTRB(28, 18, 57, 55),
     );
     // Nodes keep their full size at every width; the overhang just clips.
     expect(avatarSize(1), 22);
@@ -4105,7 +4112,9 @@ void main() {
     // The departure leaves the node center and bends into its own column inside
     // this row, instead of running down the parent rail into the next one.
     expect(_touches(departure(), const Offset(28, 18)), isTrue);
-    expect(departure().getBounds(), Rect.fromLTRB(28, 18, merge.laneX(1), 54));
+    // Rooted 1px inside the disc, so the birth starts above the node center.
+    expect(_touches(departure(), const Offset(28, 17)), isTrue);
+    expect(departure().getBounds(), Rect.fromLTRB(28, 17, merge.laneX(1), 54));
     final jog = _samples(departure());
     // Everything past the bend sits in the new column, still inside this row.
     expect(
