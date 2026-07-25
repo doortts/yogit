@@ -243,14 +243,29 @@ class AvatarService {
     ].join().toUpperCase();
   }
 
+  /// A branch line's color. Every rail, curve, chip and dot on one line shares
+  /// it, so the graph reads by branch rather than by person.
+  static Color branchColor(int branch) {
+    final colors = palette.isEmpty ? defaultColors : palette;
+    return colors[branch.abs() % colors.length];
+  }
+
+  /// Person color, for avatars only: the graph is colored by branch.
   static Color color(GitIdentity identity) {
     var hash = 0;
     for (final codeUnit in identity.email.codeUnits) {
       hash = (hash * 31 + codeUnit) & 0x7fffffff;
     }
-    final colors = palette.isEmpty ? defaultColors : palette;
-    return colors[hash % colors.length];
+    return branchColor(hash);
   }
+
+  /// Ink that stays readable on a filled [background] disc. The crossover sits
+  /// where white and near-black swap contrast, not at mid grey, so the brighter
+  /// palette colors get dark letters.
+  static Color onColor(Color background) =>
+      background.computeLuminance() > 0.179
+      ? const Color(0xFF15171E)
+      : const Color(0xFFFFFFFF);
 }
 
 class _PermitPool {
@@ -330,7 +345,8 @@ class IdentityAvatar extends StatelessWidget {
       alignment: Alignment.center,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: color.withValues(alpha: 0.26),
+        // A filled identity-colored disc: a photo covers it, initials sit on it.
+        color: color,
         border: Border.all(color: ringColor ?? color, width: ringWidth),
       ),
       clipBehavior: Clip.antiAlias,
@@ -358,11 +374,11 @@ class IdentityAvatar extends StatelessWidget {
         : avatar;
   }
 
-  Widget _initials(Color color) => Text(
+  Widget _initials(Color background) => Text(
     AvatarService.initials(identity),
     maxLines: 1,
     style: TextStyle(
-      color: color,
+      color: AvatarService.onColor(background),
       fontSize: size * 0.42,
       fontWeight: FontWeight.w700,
       height: 1,

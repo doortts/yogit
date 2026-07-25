@@ -46,7 +46,7 @@ void main() {
       find.byKey(const Key('timeline-list')),
     );
     expect(list.itemExtent, 36);
-    expect(list.cacheExtent, 0);
+    expect(list.cacheExtent, 200);
 
     // The preview starts hidden and only a key opens it.
     expect(find.text('Commit & Diff'), findsNothing);
@@ -74,6 +74,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Commit & Diff'), findsOneWidget);
 
+    // Enter toggles: a second press closes what the first opened.
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('Commit & Diff'), findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('Commit & Diff'), findsOneWidget);
+
     await tester.tap(find.text('하단'));
     await tester.pumpAndSettle();
     expect(controller.previewPlacement, PreviewPlacement.bottom);
@@ -88,7 +96,7 @@ void main() {
     expect(find.byKey(const Key('selected-row-3')), findsOneWidget);
     expect(find.text('Commit & Diff'), findsNothing);
 
-    // Space opens it just like Enter, on the clicked row.
+    // Space opens it just like Enter, on the clicked row, and closes it again.
     await tester.sendKeyEvent(LogicalKeyboardKey.space);
     await tester.pumpAndSettle();
     expect(find.text('Commit & Diff'), findsOneWidget);
@@ -99,6 +107,43 @@ void main() {
       ),
       findsOneWidget,
     );
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    expect(find.text('Commit & Diff'), findsNothing);
+  });
+
+  testWidgets('selection moves rebuild only the rows that changed', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async =>
+              List.generate(8, (index) => commit('$index', 'commit $index')),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // A row that does not rebuild keeps the very same widget instances.
+    Text subject(int index) => tester.widget<Text>(find.text('commit $index'));
+    final before = {
+      for (var index = 0; index < 8; index++) index: subject(index),
+    };
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+
+    expect(identical(subject(0), before[0]), isFalse);
+    expect(identical(subject(1), before[1]), isFalse);
+    for (var index = 2; index < 8; index++) {
+      expect(
+        identical(subject(index), before[index]),
+        isTrue,
+        reason: '$index',
+      );
+    }
   });
 
   testWidgets('holding an arrow key keeps moving the selection', (
@@ -629,6 +674,69 @@ void main() {
     expect(underWip.laneVerticals(size)[0], (top: 0.0, bottom: 18.0));
   });
 
+  test('rails and curves take their branch line color', () {
+    const size = Size(168, 36);
+    const other = GitIdentity(name: 'Other', email: 'other@example.com');
+    // Two branch ids whose colors are not this person's, so a per-committer
+    // fallback anywhere would show up as a mismatch.
+    final person = AvatarService.color(other);
+    final ids = [
+      for (var id = 0; id < AvatarService.defaultColors.length; id++)
+        if (AvatarService.branchColor(id) != person) id,
+    ];
+    final (main, feature) = (ids.first, ids[1]);
+    final merge = graphRow(
+      commit: commit('C', 'merge', parents: const ['A', 'B']),
+      lane: 0,
+      activeLanes: const [0],
+      nextLanes: const [0, 1],
+      activeLaneShas: const {0: 'C'},
+      nextLaneShas: const {0: 'A', 1: 'B'},
+      transitions: [(from: 0, to: 1, sha: 'B')],
+      branch: main,
+      activeLaneBranches: {0: main},
+      nextLaneBranches: {0: main, 1: feature},
+    );
+    final painter = CommitGraphPainter(
+      row: merge,
+      selected: false,
+      committerColor: AvatarService.branchColor(merge.branch),
+      committersBySha: const {'A': other, 'B': other},
+    );
+
+    // The rail, the merge curve and the merge dot all paint palette colors
+    // picked by branch id, never a person's color.
+    expect(
+      (Canvas canvas) => painter.paint(canvas, size),
+      paints
+        ..line(color: AvatarService.branchColor(main))
+        ..path(color: AvatarService.branchColor(feature))
+        ..circle(color: AvatarService.branchColor(main)),
+    );
+
+    // A lane without a branch id keeps the old per-committer color.
+    final legacy = CommitGraphPainter(
+      row: graphRow(
+        commit: commit('C', 'merge', parents: const ['A', 'B']),
+        lane: 0,
+        activeLanes: const [0],
+        nextLanes: const [0, 1],
+        activeLaneShas: const {0: 'C'},
+        nextLaneShas: const {0: 'A', 1: 'B'},
+        transitions: const [(from: 0, to: 1, sha: 'B')],
+      ),
+      selected: false,
+      committerColor: person,
+      committersBySha: const {'A': other, 'B': other},
+    );
+    expect(
+      (Canvas canvas) => legacy.paint(canvas, size),
+      paints
+        ..line(color: AvatarService.color(other))
+        ..path(color: AvatarService.color(other)),
+    );
+  });
+
   test('a collapsing lane slides on a transition, not a straight rail', () {
     const size = Size(168, 36);
     const color = Color(0xFF7AD6E8);
@@ -691,31 +799,53 @@ void main() {
     expect(below.laneVerticals(size)[0], (top: 0.0, bottom: 36.0));
   });
 
-  test('the working tree ring takes the HEAD committer lane color', () {
+  test('the working tree ring takes its branch line color', () {
     const head = GitIdentity(name: 'Cam Committer', email: 'cam@example.com');
-    final rows = layoutGraph([
-      workingTreeCommit('head'),
-      commit('head', 'head commit', committer: head),
-    ]);
+    final wip = graphRow(
+      commit: workingTreeCommit('head'),
+      lane: 0,
+      activeLanes: const [0],
+      nextLanes: const [0],
+      activeLaneShas: const {0: ''},
+      nextLaneShas: const {0: 'head'},
+      branch: 3,
+      activeLaneBranches: const {0: 3},
+      nextLaneBranches: const {0: 3},
+    );
     final painter = CommitGraphPainter(
-      row: rows[0],
+      row: wip,
       selected: true,
-      committerColor: AvatarService.color(head),
+      committerColor: AvatarService.branchColor(3),
       committersBySha: {'': head, 'head': head},
     );
 
-    expect(painter.workingTreeRingColor, AvatarService.color(head));
+    expect(painter.workingTreeRingColor, AvatarService.branchColor(3));
     expect(painter.workingTreeRingColor, isNot(const Color(0xFF15171E)));
     // The fill hides the rail behind the node, so it follows the row color.
     expect(painter.nodeFillColor, const Color(0xFF1F4D8F));
     expect(
       CommitGraphPainter(
-        row: rows[0],
+        row: wip,
         selected: false,
-        committerColor: AvatarService.color(head),
-        committersBySha: {'': head, 'head': head},
+        committerColor: AvatarService.branchColor(3),
       ).nodeFillColor,
       const Color(0xFF15171E),
+    );
+    // Without branch ids it degrades to the old committer color.
+    expect(
+      CommitGraphPainter(
+        row: graphRow(
+          commit: workingTreeCommit('head'),
+          lane: 0,
+          activeLanes: const [0],
+          nextLanes: const [0],
+          nextLaneShas: const {0: 'head'},
+        ),
+        selected: false,
+        committerColor: AvatarService.color(head),
+        committersBySha: {'head': head},
+      ).workingTreeRingColor,
+      AvatarService.color(head),
     );
   });
 
@@ -758,9 +888,11 @@ void main() {
     );
     expect(stack.size, 18);
     expect(stack.ringWidth, 2.0);
+    // The node ring follows the branch line, not the committer.
+    expect(stack.ringColor, AvatarService.branchColor(painterAt(1).row.branch));
     expect(
-      stack.ringColor,
-      AvatarService.color(painterAt(1).row.commit.committer),
+      painterAt(0).committerColor,
+      AvatarService.branchColor(painterAt(0).row.branch),
     );
   });
 
@@ -1415,6 +1547,37 @@ void main() {
     );
   });
 
+  testWidgets('the initials avatar is a filled disc with contrasting ink', (
+    tester,
+  ) async {
+    const ada = GitIdentity(name: 'Ada Lovelace', email: 'ada@example.com');
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Center(
+          child: IdentityAvatar(
+            identity: ada,
+            ringColor: Color(0xFF3FB950),
+            ringWidth: 2,
+          ),
+        ),
+      ),
+    );
+
+    final fill =
+        tester.widget<Container>(find.byType(Container)).decoration!
+            as BoxDecoration;
+    // Opaque identity color, no transparent center, and the graph ring survives.
+    expect(fill.color, AvatarService.color(ada));
+    expect(fill.color!.a, 1.0);
+    expect((fill.border! as Border).top.color, const Color(0xFF3FB950));
+    expect(
+      tester.widget<Text>(find.text('AL')).style?.color,
+      AvatarService.onColor(AvatarService.color(ada)),
+    );
+    expect(AvatarService.onColor(const Color(0xFFD29922)), isNot(Colors.white));
+    expect(AvatarService.onColor(const Color(0xFF1D2029)), Colors.white);
+  });
+
   test('the committer color follows the active palette', () {
     const ada = GitIdentity(name: 'Ada', email: 'ada@example.com');
     addTearDown(() => AvatarService.palette = AvatarService.defaultColors);
@@ -1687,6 +1850,70 @@ void main() {
     expect(
       tester.getRect(find.byKey(const Key('graph-cell-0'))).left,
       cell.right,
+    );
+  });
+
+  testWidgets('ref chips land on the tip rows even without decorations', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          // No decorations at all: the chips have to come from the ref tips.
+          (_, _) async => [
+            commit('tip', 'branch tip', refs: const []),
+            commit('older', 'older commit', refs: const []),
+            commit('tagged', 'tagged commit', refs: const []),
+          ],
+          refs: const RepoRefs(
+            local: ['main'],
+            remote: ['origin/main'],
+            tags: ['v1.0'],
+            current: 'main',
+            tips: {'main': 'tip', 'origin/main': 'tip', 'v1.0': 'tagged'},
+          ),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    for (final name in ['main', 'origin/main']) {
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('refs-cell-0')),
+          matching: find.byKey(Key('ref-chip-tip-$name')),
+        ),
+        findsOneWidget,
+      );
+    }
+    expect(find.byKey(const Key('ref-chip-tagged-v1.0')), findsOneWidget);
+    expect(find.byKey(const Key('refs-cell-1')), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('refs-cell-1')),
+        matching: find.byType(Container).at(1),
+      ),
+      findsNothing,
+    );
+    // HEAD keys off RepoRefs.current, and the tag keeps its own glyph.
+    expect(find.text('✓'), findsOneWidget);
+    expect(find.text('◇'), findsOneWidget);
+
+    // The chip carries its row's branch color, like every other accent.
+    final painter =
+        tester
+                .widget<CustomPaint>(find.byKey(const Key('graph-painter-0')))
+                .painter!
+            as CommitGraphPainter;
+    final chip =
+        tester
+                .widget<Container>(find.byKey(const Key('ref-chip-tip-main')))
+                .decoration!
+            as BoxDecoration;
+    expect(
+      (chip.border! as Border).top.color,
+      AvatarService.branchColor(painter.row.branch).withValues(alpha: 0.55),
     );
   });
 
@@ -2750,6 +2977,9 @@ GraphRow graphRow({
   Map<int, String> activeLaneShas = const {},
   Map<int, String> nextLaneShas = const {},
   List<LaneTransition> transitions = const [],
+  int branch = 0,
+  Map<int, int> activeLaneBranches = const {},
+  Map<int, int> nextLaneBranches = const {},
 }) => GraphRow(
   commit: commit,
   lane: lane,
@@ -2759,6 +2989,9 @@ GraphRow graphRow({
   activeLaneShas: activeLaneShas,
   nextLaneShas: nextLaneShas,
   transitions: transitions,
+  branch: branch,
+  activeLaneBranches: activeLaneBranches,
+  nextLaneBranches: nextLaneBranches,
 );
 
 GitCommit workingTreeCommit(String head) => GitCommit(

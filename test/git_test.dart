@@ -164,6 +164,60 @@ void main() {
     _expectStableColumns(rows);
   });
 
+  test('a first-parent chain shares one branch line id', () {
+    final rows = layoutGraph([
+      _commit('M', ['A', 'S']),
+      _commit('A', ['R']),
+      _commit('S', ['R']),
+      _commit('R', const []),
+    ]);
+
+    // Main is born at row 0 and still line 0 at the root, across the merge; the
+    // side branch is its own line.
+    expect([for (final row in rows) row.branch], [0, 0, 1, 0]);
+    expect(rows[1].nextLaneBranches, {0: 0, 1: 1});
+    _expectStableColumns(rows);
+  });
+
+  test('a reused column carries a new branch line id', () {
+    final rows = layoutGraph([
+      _commit('A', ['C']),
+      _commit('B', ['C']),
+      _commit('C', ['D']),
+      _commit('E', ['D']),
+      _commit('D', const []),
+    ]);
+
+    // B's line 1 ends at C. E reuses B's column but is a different branch, so it
+    // is line 2 — column index alone would have colored them the same.
+    expect([for (final row in rows) row.branch], [0, 1, 0, 2, 0]);
+    expect(rows[1].activeLaneBranches, {0: 0, 1: 1});
+    expect(rows[3].activeLaneBranches, {0: 0, 1: 2});
+    expect(rows[3].nextLaneBranches, {0: 0, 1: 2});
+    _expectStableColumns(rows);
+  });
+
+  test('branch line ids do not renumber when a page is appended', () {
+    final commits = [
+      _commit('M', ['A', 'P']),
+      _commit('S', ['Q']),
+      _commit('A', ['Q']),
+      _commit('Q', const []),
+      _commit('D', ['P']),
+      _commit('P', const []),
+    ];
+
+    final page = layoutGraph(commits.take(4).toList());
+    final full = layoutGraph(commits);
+
+    expect([for (final row in page) row.branch], [0, 1, 0, 0]);
+    expect(
+      [for (final row in page) row.branch],
+      [for (final row in full.take(page.length)) row.branch],
+    );
+    expect([for (final row in full) row.branch], [0, 1, 0, 0, 2, 3]);
+  });
+
   test('lays out a real repository by the straight-branch rules', () async {
     final root = await Directory.systemTemp.createTemp('yogit_graph_');
     addTearDown(() => root.delete(recursive: true));
@@ -214,6 +268,10 @@ void main() {
     );
     // Never a third column: column 1 is freed and reused, not abandoned.
     expect([for (final row in rows) row.maxLane], everyElement(lessThan(2)));
+    // Main is one line the whole way; `two` and `one` share column 1 but are
+    // separate lines, so they never share a color.
+    expect([for (final row in rows) row.branch], [0, 0, 1, 0, 0, 0, 2, 0]);
+    expect(rows[5].nextLaneBranches, {0: 0, 1: 2});
     _expectStableColumns(rows);
   });
 
@@ -236,7 +294,7 @@ void main() {
     expect(rows[1].nextLaneShas[1], 'B');
   });
 
-  test('paints untouched rails from the occupying commit identity', () async {
+  test('paints untouched rails in the occupying branch line color', () async {
     final branch = _commit('B', [
       'R',
     ], committer: const GitIdentity(name: 'Bee', email: 'bee@example.com'));
@@ -262,17 +320,22 @@ void main() {
       y: 30,
     );
 
+    // The rail passing this row belongs to B's line, not to the row's own line
+    // and not to B's committer — the graph colors by branch.
+    expect(row.branch, 0);
+    expect(row.activeLaneBranches[1], 1);
     expect(
       pixel,
       _quantize(
         Color.alphaBlend(
-          AvatarService.color(
-            branch.committer,
+          AvatarService.branchColor(
+            row.activeLaneBranches[1]!,
           ).withValues(alpha: CommitGraphPainter.railOpacity),
           _canvasBackground,
         ),
       ),
     );
+    expect(pixel, isNot(_quantize(AvatarService.color(branch.committer))));
   });
 
   test('selected band spans the full row to the graph boundary', () {
@@ -560,11 +623,11 @@ void main() {
           return ProcessResult(
             1,
             0,
-            'refs/heads/main\n'
-                'refs/heads/feature/x\n'
-                'refs/remotes/origin/HEAD\n'
-                'refs/remotes/origin/main\n'
-                'refs/tags/v0.1.0\n',
+            'refs/heads/main aaa1\n'
+                'refs/heads/feature/x aaa2\n'
+                'refs/remotes/origin/HEAD aaa1\n'
+                'refs/remotes/origin/main aaa3\n'
+                'refs/tags/v0.1.0 aaa4\n',
             '',
           );
         }
@@ -578,18 +641,29 @@ void main() {
     expect(refs.remote, ['origin/main']);
     expect(refs.tags, ['v0.1.0']);
     expect(refs.current, 'main');
+    // origin/HEAD is an alias, so it contributes neither a name nor a tip.
+    expect(refs.tips, {
+      'main': 'aaa1',
+      'feature/x': 'aaa2',
+      'origin/main': 'aaa3',
+      'v0.1.0': 'aaa4',
+    });
     expect(calls, [
       [
         'for-each-ref',
-        '--format=%(refname)',
+        '--format=%(refname) %(objectname)',
         'refs/heads',
         'refs/remotes',
         'refs/tags',
       ],
       ['branch', '--show-current'],
     ]);
+    // Arguments stay single tokens — only the format string carries a space, and
+    // it reaches git as one argument rather than through a shell.
     expect(
-      calls.expand((arguments) => arguments),
+      calls
+          .expand((arguments) => arguments)
+          .where((argument) => !argument.startsWith('--format=')),
       everyElement(isNot(contains(' '))),
     );
   });
@@ -601,7 +675,7 @@ void main() {
           ProcessResult(
             1,
             0,
-            arguments.first == 'branch' ? '\n' : 'refs/heads/main\n',
+            arguments.first == 'branch' ? '\n' : 'refs/heads/main aaa1\n',
             '',
           ),
     );
@@ -610,6 +684,7 @@ void main() {
 
     expect(refs.local, ['main']);
     expect(refs.current, isNull);
+    expect(refs.tips, {'main': 'aaa1'});
   });
 
   test('a clean working tree produces no uncommitted row', () async {
@@ -642,6 +717,18 @@ void _expectStableColumns(List<GraphRow> rows) {
       hasLength(row.transitions.length),
       reason: 'duplicate transition on ${row.commit.sha}',
     );
+    // A branch id for exactly the occupied columns, and the node's own id.
+    expect(
+      row.activeLaneBranches.keys.toSet(),
+      row.activeLaneShas.keys.toSet(),
+      reason: 'entering branch ids on ${row.commit.sha}',
+    );
+    expect(
+      row.nextLaneBranches.keys.toSet(),
+      row.nextLaneShas.keys.toSet(),
+      reason: 'leaving branch ids on ${row.commit.sha}',
+    );
+    expect(row.activeLaneBranches[row.lane], row.branch);
     for (final move in row.transitions) {
       expect(move.from, isNot(move.to), reason: '$move');
       expect(row.nextLaneShas[move.to], move.sha, reason: '$move');

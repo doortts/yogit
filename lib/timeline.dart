@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -89,8 +90,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
   late final WindowFrameController _previewController;
   late final bool _ownsPreviewController;
 
-  var _selectedIndex = 0;
-  var _hoverIndex = -1;
+  /// Selection and hover live in notifiers so moving the cursor rebuilds the two
+  /// rows that changed instead of every row on screen.
+  final _selectedIndex = ValueNotifier(0);
+  final _hoverIndex = ValueNotifier(-1);
   var _loading = false;
   var _end = false;
   var _hasWorkingTree = false;
@@ -100,7 +103,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   final _previewDiffs = <({String sha, String path}), Future<List<DiffLine>>>{};
   final _previewPaths = <String, String>{};
 
-  late final Future<RepoRefs> _refsFuture = widget.repository.loadRefs();
+  var _refs = const RepoRefs();
   final _filterController = TextEditingController();
   var _filter = '';
 
@@ -117,10 +120,20 @@ class _TimelineScreenState extends State<TimelineScreen> {
     super.initState();
     _ownsPreviewController = widget.controller == null;
     _previewController = widget.controller ?? WindowFrameController();
-    _previewController.addListener(_previewChanged);
     _scrollController.addListener(_maybeLoadNextPage);
+    // Refs load beside the first page, and neither blocks the first paint. The
+    // detail pane stays hidden until Enter or Space asks for it.
     _loadNextPage();
-    // The detail pane stays hidden until Enter or Space asks for it.
+    unawaited(_loadRefs());
+  }
+
+  Future<void> _loadRefs() async {
+    try {
+      final refs = await widget.repository.loadRefs();
+      if (mounted) setState(() => _refs = refs);
+    } catch (_) {
+      // The sidebar just stays empty; the timeline does not depend on refs.
+    }
   }
 
   @override
@@ -135,8 +148,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   @override
   void dispose() {
-    _previewController.removeListener(_previewChanged);
     if (_ownsPreviewController) _previewController.dispose();
+    _selectedIndex.dispose();
+    _hoverIndex.dispose();
     _scrollController
       ..removeListener(_maybeLoadNextPage)
       ..dispose();
@@ -167,10 +181,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
               (_deepestLane + 1) * CommitGraphPainter.defaultLaneSpacing)
           .clamp(96.0, timelineColumns['graph']!.max);
 
-  void _previewChanged() {
-    if (mounted) setState(() {});
-  }
-
   void _maybeLoadNextPage() {
     if (!_scrollController.hasClients || _end || _inFlight != null) return;
     if (_scrollController.position.maxScrollExtent -
@@ -199,13 +209,19 @@ class _TimelineScreenState extends State<TimelineScreen> {
       _loadError = null;
     });
     try {
-      final working = _commits.isEmpty
-          ? await widget.repository.loadWorkingTree()
-          : null;
-      final page = await widget.repository.loadHistory(
-        skip: _historyCount,
-        limit: _pageSize,
-      );
+      // The first page fetches the working tree and the log together.
+      final (working, page) = _commits.isEmpty
+          ? await (
+              widget.repository.loadWorkingTree(),
+              widget.repository.loadHistory(limit: _pageSize),
+            ).wait
+          : (
+              null,
+              await widget.repository.loadHistory(
+                skip: _historyCount,
+                limit: _pageSize,
+              ),
+            );
       if (!mounted) return;
       final keepEndVisible =
           _commits.isNotEmpty &&
@@ -256,12 +272,15 @@ class _TimelineScreenState extends State<TimelineScreen> {
   KeyEventResult _onKeyEvent(FocusNode _, KeyEvent event) {
     // Holding an arrow keeps moving; everything else acts once per press.
     if (event is KeyDownEvent || event is KeyRepeatEvent) {
+      // Autorepeat jumps instead of animating: queued animations would lag
+      // behind a held key and never catch up.
+      final animate = event is KeyDownEvent;
       if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-        _moveSelection(1);
+        _moveSelection(1, animate: animate);
         return KeyEventResult.handled;
       }
       if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-        _moveSelection(-1);
+        _moveSelection(-1, animate: animate);
         return KeyEventResult.handled;
       }
     }
@@ -269,7 +288,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     if ((event.logicalKey == LogicalKeyboardKey.enter ||
             event.logicalKey == LogicalKeyboardKey.space) &&
         _commits.isNotEmpty) {
-      _openPreview();
+      _togglePreview();
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.escape) {
@@ -279,20 +298,25 @@ class _TimelineScreenState extends State<TimelineScreen> {
     return KeyEventResult.ignored;
   }
 
-  void _moveSelection(int delta) {
+  void _moveSelection(int delta, {bool animate = true}) {
     if (_commits.isEmpty) return;
-    setState(() {
-      _selectedIndex = (_selectedIndex + delta).clamp(0, _commits.length - 1);
-    });
-    _scrollToSelection();
+    _selectedIndex.value = (_selectedIndex.value + delta).clamp(
+      0,
+      _commits.length - 1,
+    );
+    _scrollToSelection(animate: animate);
   }
 
-  void _scrollToSelection() {
+  void _scrollToSelection({bool animate = true}) {
     if (!_scrollController.hasClients) return;
-    final target = (_selectedIndex * _rowHeight).clamp(
+    final target = (_selectedIndex.value * _rowHeight).clamp(
       _scrollController.position.minScrollExtent,
       _scrollController.position.maxScrollExtent,
     );
+    if (!animate) {
+      _scrollController.jumpTo(target);
+      return;
+    }
     _scrollController.animateTo(
       target,
       duration: const Duration(milliseconds: 100),
@@ -303,17 +327,18 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// A click only moves the selection. An open preview follows it; a closed one
   /// stays closed until Enter or Space.
   void _select(int index) {
-    setState(() => _selectedIndex = index);
+    _selectedIndex.value = index;
     _focusNode.requestFocus();
   }
 
-  void _openPreview() {
-    final placement =
-        _previewController.previewPlacement == PreviewPlacement.closed
-        ? widget.preferredPreviewPlacement
-        : _previewController.previewPlacement;
-    unawaited(_previewController.setPreview(placement));
-  }
+  /// Enter and Space toggle the panel; Esc always closes.
+  void _togglePreview() => unawaited(
+    _previewController.setPreview(
+      _previewController.previewPlacement == PreviewPlacement.closed
+          ? widget.preferredPreviewPlacement
+          : PreviewPlacement.closed,
+    ),
+  );
 
   /// Sidebar click: jump to the newest commit decorated with [name]. Remote
   /// entries also match the branch name without their remote prefix.
@@ -322,11 +347,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
       name,
       if (remote && name.contains('/')) name.substring(name.indexOf('/') + 1),
     };
+    final tip = _refs.tips[name];
     final index = _commits.indexWhere(
-      (commit) => commit.refs.any((ref) => candidates.contains(ref.name)),
+      (commit) =>
+          commit.sha == tip ||
+          commit.refs.any((ref) => candidates.contains(ref.name)),
     );
     if (index < 0) return;
-    setState(() => _selectedIndex = index);
+    _selectedIndex.value = index;
     _scrollToSelection();
     _focusNode.requestFocus();
   }
@@ -356,46 +384,51 @@ class _TimelineScreenState extends State<TimelineScreen> {
     ),
   );
 
-  Widget _workspace() => LayoutBuilder(
-    builder: (context, constraints) {
-      final placement = _previewController.previewPlacement;
-      final timeline = Expanded(
-        key: const Key('timeline-viewport'),
-        child: KeyedSubtree(key: _timelineKey, child: _timeline()),
-      );
-      if (placement == PreviewPlacement.bottom) {
-        final extent = math.min(_bottomPreviewHeight, constraints.maxHeight);
-        return Column(
-          key: const Key('preview-layout-bottom'),
-          children: [
-            timeline,
-            _animatedPreview(
-              axis: Axis.vertical,
-              extent: extent,
-              width: constraints.maxWidth,
-              height: extent,
-            ),
-          ],
-        );
-      }
-      final onLeft = placement == PreviewPlacement.left;
-      final beside = onLeft || placement == PreviewPlacement.right;
-      final extent = beside
-          ? math.min(_sidePreviewWidth, constraints.maxWidth)
-          : 0.0;
-      final preview = _animatedPreview(
-        axis: Axis.horizontal,
-        extent: extent,
-        width: extent,
-        height: constraints.maxHeight,
-        visible: beside,
-      );
-      return Row(
-        key: Key(onLeft ? 'preview-layout-left' : 'preview-layout-right'),
-        children: onLeft ? [preview, timeline] : [timeline, preview],
-      );
-    },
+  /// Opening or closing the panel re-lays out this subtree only, never the whole
+  /// screen.
+  Widget _workspace() => ListenableBuilder(
+    listenable: _previewController,
+    builder: (context, _) => LayoutBuilder(builder: _workspaceLayout),
   );
+
+  Widget _workspaceLayout(BuildContext context, BoxConstraints constraints) {
+    final placement = _previewController.previewPlacement;
+    final timeline = Expanded(
+      key: const Key('timeline-viewport'),
+      child: KeyedSubtree(key: _timelineKey, child: _timeline()),
+    );
+    if (placement == PreviewPlacement.bottom) {
+      final extent = math.min(_bottomPreviewHeight, constraints.maxHeight);
+      return Column(
+        key: const Key('preview-layout-bottom'),
+        children: [
+          timeline,
+          _animatedPreview(
+            axis: Axis.vertical,
+            extent: extent,
+            width: constraints.maxWidth,
+            height: extent,
+          ),
+        ],
+      );
+    }
+    final onLeft = placement == PreviewPlacement.left;
+    final beside = onLeft || placement == PreviewPlacement.right;
+    final extent = beside
+        ? math.min(_sidePreviewWidth, constraints.maxWidth)
+        : 0.0;
+    final preview = _animatedPreview(
+      axis: Axis.horizontal,
+      extent: extent,
+      width: extent,
+      height: constraints.maxHeight,
+      visible: beside,
+    );
+    return Row(
+      key: Key(onLeft ? 'preview-layout-left' : 'preview-layout-right'),
+      children: onLeft ? [preview, timeline] : [timeline, preview],
+    );
+  }
 
   Widget _animatedPreview({
     required Axis axis,
@@ -608,38 +641,27 @@ class _TimelineScreenState extends State<TimelineScreen> {
           ),
         ),
         Expanded(
-          child: FutureBuilder<RepoRefs>(
-            future: _refsFuture,
-            builder: (context, snapshot) {
-              final refs = snapshot.data ?? const RepoRefs();
-              return ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                children: [
-                  // The checked-out branch leads the local list.
-                  ..._sidebarSection(
-                    'LOCAL',
-                    [
-                      if (refs.local.contains(refs.current)) refs.current!,
-                      ...refs.local.where((name) => name != refs.current),
-                    ],
-                    refs.current,
-                    null,
-                  ),
-                  ..._sidebarSection(
-                    'REMOTE',
-                    refs.remote,
-                    null,
-                    Icons.cloud_outlined,
-                  ),
-                  ..._sidebarSection(
-                    'TAGS',
-                    refs.tags,
-                    null,
-                    Icons.sell_outlined,
-                  ),
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            children: [
+              // The checked-out branch leads the local list.
+              ..._sidebarSection(
+                'LOCAL',
+                [
+                  if (_refs.local.contains(_refs.current)) _refs.current!,
+                  ..._refs.local.where((name) => name != _refs.current),
                 ],
-              );
-            },
+                _refs.current,
+                null,
+              ),
+              ..._sidebarSection(
+                'REMOTE',
+                _refs.remote,
+                null,
+                Icons.cloud_outlined,
+              ),
+              ..._sidebarSection('TAGS', _refs.tags, null, Icons.sell_outlined),
+            ],
           ),
         ),
       ],
@@ -669,14 +691,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
         _sidebarItem(name, icon: icon, current: name == current),
   ];
 
-  /// The committer color of the branch tip, so the sidebar dot matches the rail
-  /// the branch sits on. Falls back to muted while that commit is unloaded.
+  /// The dot takes the color of the branch line the ref tip sits on. Muted while
+  /// that commit is still unloaded.
   Color _refTipColor(String name) {
-    for (final commit in _commits) {
-      if (commit.refs.any((ref) => ref.name == name)) {
-        return AvatarService.color(
-          _committersBySha[commit.sha] ?? commit.committer,
-        );
+    final tip = _refs.tips[name];
+    for (final row in _rows) {
+      if (row.commit.sha == tip ||
+          row.commit.refs.any((ref) => ref.name == name)) {
+        return AvatarService.branchColor(row.branch);
       }
     }
     return _muted;
@@ -798,7 +820,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   child: ListView.builder(
                     key: const Key('timeline-list'),
                     controller: _scrollController,
-                    cacheExtent: 0,
+                    // A little cache keeps rows from popping in mid-scroll.
+                    cacheExtent: 200,
                     itemExtent: _rowHeight,
                     itemCount: _commits.length + (_showFooter ? 1 : 0),
                     itemBuilder: (context, index) {
@@ -914,13 +937,47 @@ class _TimelineScreenState extends State<TimelineScreen> {
     ),
   );
 
-  Widget _row(int index, double commitWidth, double graphWidth) {
+  /// The chips a row shows: the `for-each-ref` tips landing on this commit,
+  /// unioned with the log decorations so remotes and detached HEAD still show.
+  List<GitRef> _rowRefs(GitCommit commit) {
+    final refs = [...commit.refs];
+    if (commit.sha.isEmpty || _refs.tips.isEmpty) return refs;
+    final seen = {for (final ref in refs) ref.name};
+    for (final entry in _refs.tips.entries) {
+      if (entry.value != commit.sha || !seen.add(entry.key)) continue;
+      refs.add(
+        GitRef(
+          name: entry.key,
+          isHead: entry.key == _refs.current,
+          isTag: _refs.tags.contains(entry.key),
+        ),
+      );
+    }
+    return refs;
+  }
+
+  /// Only the rows whose selected or hovered state flipped rebuild.
+  Widget _row(int index, double commitWidth, double graphWidth) =>
+      _RowStateScope(
+        index: index,
+        selectedIndex: _selectedIndex,
+        hoverIndex: _hoverIndex,
+        builder: (selected, hovered) =>
+            _rowContent(index, commitWidth, graphWidth, selected, hovered),
+      );
+
+  Widget _rowContent(
+    int index,
+    double commitWidth,
+    double graphWidth,
+    bool selected,
+    bool hovered,
+  ) {
     final row = _rows[index];
     final commit = row.commit;
-    final selected = index == _selectedIndex;
-    final committerColor = AvatarService.color(
-      _committersBySha[commit.sha] ?? commit.committer,
-    );
+    // One branch line, one color: rails, chips, node ring and hash border.
+    final branchColor = AvatarService.branchColor(row.branch);
+    final refs = _rowRefs(commit);
     final merge = commit.parents.length >= 2 && !commit.isWorkingTree;
     // Shrink stages: full spacing while the cell fits every lane, compressed
     // spacing below that, one collapsed lane at the narrowest.
@@ -928,20 +985,21 @@ class _TimelineScreenState extends State<TimelineScreen> {
       row: row,
       previous: index > 0 ? _rows[index - 1] : null,
       selected: selected,
-      committerColor: committerColor,
+      committerColor: branchColor,
       committersBySha: _committersBySha,
       laneSpacing: CommitGraphPainter.spacingFor(graphWidth, _deepestLane),
       compact: graphWidth <= CommitGraphPainter.compactWidth,
+      refConnector: refs.isNotEmpty,
     );
     final avatarSize =
         painter.laneSpacing < CommitGraphPainter.compressedAvatarSpacing
         ? 14.0
         : 18.0;
     return MouseRegion(
-      onEnter: (_) => setState(() => _hoverIndex = index),
-      onExit: (_) => setState(() {
-        if (_hoverIndex == index) _hoverIndex = -1;
-      }),
+      onEnter: (_) => _hoverIndex.value = index,
+      onExit: (_) {
+        if (_hoverIndex.value == index) _hoverIndex.value = -1;
+      },
       child: GestureDetector(
         key: selected ? Key('selected-row-${commit.sha}') : null,
         behavior: HitTestBehavior.opaque,
@@ -949,12 +1007,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
         child: ColoredBox(
           color: selected
               ? _selectedRow
-              : index == _hoverIndex
+              : hovered
               ? _accent.withValues(alpha: 0.48)
               : _background,
           child: Row(
             children: [
-              _refsCell(index, commit, committerColor, selected),
+              _refsCell(index, commit, refs, branchColor, selected),
               SizedBox(
                 key: Key('graph-cell-$index'),
                 width: graphWidth,
@@ -982,7 +1040,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                           avatarService: widget.avatarService,
                           showRemoteAvatars: widget.showRemoteAvatars,
                           size: avatarSize,
-                          ringColor: committerColor,
+                          ringColor: branchColor,
                           ringWidth: CommitGraphPainter.railWidth,
                         ),
                       ),
@@ -1000,7 +1058,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-                leftBorder: committerColor,
+                leftBorder: branchColor,
               ),
               _cell(
                 commitWidth,
@@ -1064,7 +1122,13 @@ class _TimelineScreenState extends State<TimelineScreen> {
     );
   }
 
-  Widget _refsCell(int index, GitCommit commit, Color color, bool selected) {
+  Widget _refsCell(
+    int index,
+    GitCommit commit,
+    List<GitRef> refs,
+    Color color,
+    bool selected,
+  ) {
     return SizedBox(
       key: Key('refs-cell-$index'),
       width: _w('refs'),
@@ -1078,14 +1142,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
               ),
             ),
           ),
-          if (commit.refs.isNotEmpty)
+          if (refs.isNotEmpty)
             Positioned.fill(
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   // Chips pack toward the graph: the last one ends on the cell
                   // boundary, so the only connector left is the short run the
                   // graph cell paints from its own edge to the node.
-                  final lastIndex = commit.refs.length - 1;
+                  final lastIndex = refs.length - 1;
                   final available = math.max(0.0, constraints.maxWidth - 8);
                   final width = math.min(76.0, available);
                   final step = lastIndex == 0
@@ -1093,7 +1157,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                       : math.max(0.0, (available - width) / lastIndex);
                   return Stack(
                     children: [
-                      for (var index = 0; index < commit.refs.length; index++)
+                      for (var index = 0; index < refs.length; index++)
                         Positioned(
                           left:
                               constraints.maxWidth -
@@ -1102,12 +1166,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                           top: 6,
                           width: width,
                           height: 24,
-                          child: _refChip(
-                            commit,
-                            commit.refs[index],
-                            color,
-                            selected,
-                          ),
+                          child: _refChip(commit, refs[index], color, selected),
                         ),
                     ],
                   );
@@ -1231,8 +1290,13 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   // ----------------------------------------------------------------- preview
 
-  Widget _preview() {
-    final commit = _commits.isEmpty ? null : _commits[_selectedIndex];
+  Widget _preview() => ValueListenableBuilder<int>(
+    valueListenable: _selectedIndex,
+    builder: (context, selectedIndex, _) =>
+        _previewFor(_commits.isEmpty ? null : _commits[selectedIndex]),
+  );
+
+  Widget _previewFor(GitCommit? commit) {
     final placement = _previewController.previewPlacement;
     return Container(
       decoration: BoxDecoration(
@@ -1669,7 +1733,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 
   void _openFullDiff() {
-    final commit = _commits[_selectedIndex];
+    final commit = _commits[_selectedIndex.value];
     if (widget.onOpenFullDiff case final callback?) {
       callback(commit);
       return;
@@ -1679,11 +1743,73 @@ class _TimelineScreenState extends State<TimelineScreen> {
         builder: (context) => DiffScreen(
           repository: widget.repository,
           commits: List.unmodifiable(_commits),
-          initialIndex: _selectedIndex,
+          initialIndex: _selectedIndex.value,
         ),
       ),
     );
   }
+}
+
+/// Rebuilds one row only when *its* selected or hovered state flips. Every row
+/// listens, but a notification that does not change this row's pair is dropped
+/// before it can rebuild the subtree.
+class _RowStateScope extends StatefulWidget {
+  const _RowStateScope({
+    required this.index,
+    required this.selectedIndex,
+    required this.hoverIndex,
+    required this.builder,
+  });
+
+  final int index;
+  final ValueListenable<int> selectedIndex;
+  final ValueListenable<int> hoverIndex;
+  final Widget Function(bool selected, bool hovered) builder;
+
+  @override
+  State<_RowStateScope> createState() => _RowStateScopeState();
+}
+
+class _RowStateScopeState extends State<_RowStateScope> {
+  late bool _selected = widget.selectedIndex.value == widget.index;
+  late bool _hovered = widget.hoverIndex.value == widget.index;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.selectedIndex.addListener(_sync);
+    widget.hoverIndex.addListener(_sync);
+  }
+
+  @override
+  void didUpdateWidget(covariant _RowStateScope oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The list recycles elements across indexes, so re-read without a rebuild.
+    if (oldWidget.index != widget.index) {
+      _selected = widget.selectedIndex.value == widget.index;
+      _hovered = widget.hoverIndex.value == widget.index;
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.selectedIndex.removeListener(_sync);
+    widget.hoverIndex.removeListener(_sync);
+    super.dispose();
+  }
+
+  void _sync() {
+    final selected = widget.selectedIndex.value == widget.index;
+    final hovered = widget.hoverIndex.value == widget.index;
+    if (selected == _selected && hovered == _hovered) return;
+    setState(() {
+      _selected = selected;
+      _hovered = hovered;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(_selected, _hovered);
 }
 
 /// Draws one row of the commit graph: pass-through rails, the rounded lane
@@ -1697,6 +1823,7 @@ class CommitGraphPainter extends CustomPainter {
     this.committersBySha = const {},
     this.laneSpacing = defaultLaneSpacing,
     this.compact = false,
+    this.refConnector = false,
   });
 
   static const laneInset = 28.0;
@@ -1737,6 +1864,9 @@ class CommitGraphPainter extends CustomPainter {
 
   final GraphRow row;
   final bool selected;
+
+  /// The color of the branch line this row's node sits on: `row.branch` through
+  /// the settings palette. Named for history — nothing here is per-committer.
   final Color committerColor;
 
   /// The row above. A lane transition sweeps a full row height, so its arrival
@@ -1748,6 +1878,10 @@ class CommitGraphPainter extends CustomPainter {
   /// Stage 3: every lane collapses onto [laneInset] and only the row's own rail
   /// and node survive.
   final bool compact;
+
+  /// Whether this row shows ref chips, which the cell to the left resolves from
+  /// both `for-each-ref` tips and the log decorations.
+  final bool refConnector;
 
   double laneX(int lane) =>
       compact ? laneInset : laneInset + lane * laneSpacing;
@@ -1840,14 +1974,20 @@ class CommitGraphPainter extends CustomPainter {
           canvas.drawLine(
             Offset(x, entry.value.top),
             Offset(x, centerY),
-            _railPaint(row.activeLaneShas[entry.key]),
+            _railPaint(
+              row.activeLaneBranches[entry.key],
+              row.activeLaneShas[entry.key],
+            ),
           );
         }
         if (entry.value.bottom > centerY) {
           canvas.drawLine(
             Offset(x, centerY),
             Offset(x, entry.value.bottom),
-            _railPaint(row.nextLaneShas[entry.key]),
+            _railPaint(
+              row.nextLaneBranches[entry.key],
+              row.nextLaneShas[entry.key],
+            ),
           );
         }
       }
@@ -1863,18 +2003,18 @@ class CommitGraphPainter extends CustomPainter {
             centerY - size.height,
             size,
           ),
-          _railPaint(transition.sha),
+          _railPaint(previous?.nextLaneBranches[transition.to], transition.sha),
         );
       }
       for (final transition in row.transitions) {
         canvas.drawPath(
           transitionPath(transition.from, transition.to, centerY, size),
-          _railPaint(transition.sha),
+          _railPaint(row.nextLaneBranches[transition.to], transition.sha),
         );
       }
     }
     final nodeX = laneX(row.lane);
-    if (row.commit.refs.isNotEmpty) {
+    if (refConnector) {
       canvas.drawLine(
         Offset.zero.translate(0, centerY),
         Offset(nodeX, centerY),
@@ -1897,14 +2037,19 @@ class CommitGraphPainter extends CustomPainter {
     }
   }
 
-  /// The working tree ring takes the lane color of the commit it sits on, which
-  /// for the working tree row is `HEAD` — its own sha is empty and carries no
-  /// committer.
-  Color get workingTreeRingColor => AvatarService.color(
-    committersBySha[row.nextLaneShas[row.lane] ??
-            row.activeLaneShas[row.lane]] ??
-        row.commit.committer,
-  );
+  /// The working tree ring takes the color of the branch line it sits on, which
+  /// for the working tree row is the line `HEAD` is on.
+  Color get workingTreeRingColor {
+    final branch =
+        row.nextLaneBranches[row.lane] ?? row.activeLaneBranches[row.lane];
+    return branch == null
+        ? AvatarService.color(
+            committersBySha[row.nextLaneShas[row.lane] ??
+                    row.activeLaneShas[row.lane]] ??
+                row.commit.committer,
+          )
+        : AvatarService.branchColor(branch);
+  }
 
   /// The node fill hides the rail behind it, so it has to match the row it sits
   /// on rather than the global background — a selected row is blue.
@@ -1951,8 +2096,13 @@ class CommitGraphPainter extends CustomPainter {
       ..lineTo(x1, endY);
   }
 
-  Paint _railPaint(String? sha) => Paint()
-    ..color = AvatarService.color(committersBySha[sha] ?? row.commit.committer)
+  /// A rail paints in its branch line's color. Before [GraphRow] carries branch
+  /// ids for a lane it falls back to the committer color, so the graph degrades
+  /// to the old look instead of to one flat color.
+  Paint _railPaint(int? branch, String? sha) => Paint()
+    ..color = branch == null
+        ? AvatarService.color(committersBySha[sha] ?? row.commit.committer)
+        : AvatarService.branchColor(branch)
     ..style = PaintingStyle.stroke
     ..strokeWidth = railWidth
     ..strokeCap = StrokeCap.round
@@ -1966,7 +2116,8 @@ class CommitGraphPainter extends CustomPainter {
       oldDelegate.committerColor != committerColor ||
       oldDelegate.committersBySha != committersBySha ||
       oldDelegate.laneSpacing != laneSpacing ||
-      oldDelegate.compact != compact;
+      oldDelegate.compact != compact ||
+      oldDelegate.refConnector != refConnector;
 }
 
 void drawDashedRing(

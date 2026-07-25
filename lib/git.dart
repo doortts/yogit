@@ -174,6 +174,9 @@ class GraphRow {
     this.activeLaneShas = const {},
     this.nextLaneShas = const {},
     this.transitions = const [],
+    this.branch = 0,
+    this.activeLaneBranches = const {},
+    this.nextLaneBranches = const {},
   });
 
   final GitCommit commit;
@@ -184,6 +187,15 @@ class GraphRow {
   final Map<int, String> activeLaneShas;
   final Map<int, String> nextLaneShas;
   final List<LaneTransition> transitions;
+
+  /// Stable id of the branch line this row's node sits on. Branch lines are
+  /// numbered in birth order top-down, so ids survive page appends. The
+  /// palette color of a rail is `palette[branch % palette.length]`.
+  final int branch;
+
+  /// Lane → branch-line id for the columns entering/leaving this row.
+  final Map<int, int> activeLaneBranches;
+  final Map<int, int> nextLaneBranches;
 
   /// The rightmost column this row touches. Columns are never slid left, so a
   /// row can leave interior columns free and this is not `nextLanes.length - 1`.
@@ -196,22 +208,29 @@ class GraphRow {
 /// commit the column is waiting for, or null while the column is free, and [row]
 /// is where that state began: the row of the commit whose line the column
 /// carries, or the last row the column was busy before it went free. One int is
-/// all the forbidden-column test in [layoutGraph] needs.
-typedef _Column = ({String? sha, int row});
+/// all the forbidden-column test in [layoutGraph] needs. [line] is the id of the
+/// branch line filling the column, i.e. of this one continuous occupancy.
+typedef _Column = ({String? sha, int row, int line});
 
 class _RowBuffer {
   _RowBuffer({
     required this.commit,
     required this.lane,
+    required this.branch,
     required this.entering,
     required this.leaving,
+    required this.enteringBranches,
+    required this.leavingBranches,
     required this.parentLanes,
   });
 
   final GitCommit commit;
   final int lane;
+  final int branch;
   final Map<int, String> entering;
   final Map<int, String> leaving;
+  final Map<int, int> enteringBranches;
+  final Map<int, int> leavingBranches;
   final List<int> parentLanes;
   final transitions = <LaneTransition>[];
 }
@@ -234,10 +253,16 @@ class _RowBuffer {
 /// convergences, which belong to the row above the commit they sweep into
 /// because the painter splits a transition across two rows, that is why rows are
 /// buffered here and materialized at the end.
+///
+/// Every continuous occupancy of a column is one branch line and gets an id in
+/// birth order, so a first-parent chain keeps one id for its whole life and
+/// colors uniformly. Ids only ever come from placements already made, so
+/// appending a page never renumbers the rows above it.
 List<GraphRow> layoutGraph(List<GitCommit> commits) {
   final columns = <_Column>[];
   final mergeChildRows = <String, List<int>>{};
   final rows = <_RowBuffer>[];
+  var lines = 0;
 
   for (var index = 0; index < commits.length; index++) {
     final commit = commits[index];
@@ -264,14 +289,18 @@ List<GraphRow> layoutGraph(List<GitCommit> commits) {
     }
     if (lane < 0) {
       lane = columns.length;
-      columns.add((sha: null, row: -1));
+      columns.add((sha: null, row: -1, line: -1));
     }
+    // Taking over a column continues its line; a fresh or reused one is a birth.
+    final branch = columns[lane].sha == commit.sha
+        ? columns[lane].line
+        : lines++;
 
     // Every other line waiting for this commit converges into its column. The
     // sweep is drawn from the row above, so the column is busy up to there.
     for (var column = 0; column < columns.length; column++) {
       if (column == lane || columns[column].sha != commit.sha) continue;
-      columns[column] = (sha: null, row: index - 1);
+      columns[column] = (sha: null, row: index - 1, line: -1);
       rows[index - 1].transitions.add((
         from: column,
         to: lane,
@@ -284,18 +313,29 @@ List<GraphRow> layoutGraph(List<GitCommit> commits) {
         column: ?columns[column].sha,
       lane: commit.sha,
     };
+    final enteringBranches = {
+      for (var column = 0; column < columns.length; column++)
+        if (columns[column].sha != null) column: columns[column].line,
+      lane: branch,
+    };
     // The column now carries this commit's own line, starting at its node.
     columns[lane] = commit.parents.isEmpty
-        ? (sha: null, row: index)
-        : (sha: commit.parents.first, row: index);
+        ? (sha: null, row: index, line: -1)
+        : (sha: commit.parents.first, row: index, line: branch);
     rows.add(
       _RowBuffer(
         commit: commit,
         lane: lane,
+        branch: branch,
         entering: entering,
         leaving: {
           for (var column = 0; column < columns.length; column++)
             column: ?columns[column].sha,
+        },
+        enteringBranches: enteringBranches,
+        leavingBranches: {
+          for (var column = 0; column < columns.length; column++)
+            if (columns[column].sha != null) column: columns[column].line,
         },
         parentLanes: [if (commit.parents.isNotEmpty) lane],
       ),
@@ -305,7 +345,11 @@ List<GraphRow> layoutGraph(List<GitCommit> commits) {
     for (final child in mergeChildren) {
       for (var row = child; row < index; row++) {
         rows[row].leaving[lane] = commit.sha;
-        if (row > child) rows[row].entering[lane] = commit.sha;
+        rows[row].leavingBranches[lane] = branch;
+        if (row > child) {
+          rows[row].entering[lane] = commit.sha;
+          rows[row].enteringBranches[lane] = branch;
+        }
       }
       rows[child].parentLanes.add(lane);
       if (rows[child].lane != lane) {
@@ -332,6 +376,9 @@ List<GraphRow> layoutGraph(List<GitCommit> commits) {
         nextLanes: row.leaving.keys.toList()..sort(),
         activeLaneShas: row.entering,
         nextLaneShas: row.leaving,
+        branch: row.branch,
+        activeLaneBranches: row.enteringBranches,
+        nextLaneBranches: row.leavingBranches,
         transitions: row.transitions,
       ),
   ];
@@ -498,12 +545,16 @@ class RepoRefs {
     this.remote = const [],
     this.tags = const [],
     this.current,
+    this.tips = const {},
   });
 
   final List<String> local;
   final List<String> remote;
   final List<String> tags;
   final String? current;
+
+  /// Short ref name → tip commit sha, for every entry in the three lists.
+  final Map<String, String> tips;
 }
 
 class GitRepository {
@@ -603,11 +654,12 @@ class GitRepository {
   }
 
   /// Sidebar data: local branches, remote branches, and tags, plus the
-  /// currently checked-out branch (null when detached).
+  /// currently checked-out branch (null when detached) and each ref's tip sha,
+  /// which is what decides the row a branch or tag chip belongs on.
   Future<RepoRefs> loadRefs() async {
-    final names = (await _run([
+    final lines = (await _run([
       'for-each-ref',
-      '--format=%(refname)',
+      '--format=%(refname) %(objectname)',
       'refs/heads',
       'refs/remotes',
       'refs/tags',
@@ -615,14 +667,23 @@ class GitRepository {
     final local = <String>[];
     final remote = <String>[];
     final tags = <String>[];
-    for (final name in names) {
-      if (name.startsWith('refs/heads/')) {
-        local.add(name.substring('refs/heads/'.length));
-      } else if (name.startsWith('refs/remotes/')) {
-        final short = name.substring('refs/remotes/'.length);
-        if (!short.endsWith('/HEAD')) remote.add(short);
-      } else if (name.startsWith('refs/tags/')) {
-        tags.add(name.substring('refs/tags/'.length));
+    final tips = <String, String>{};
+    final buckets = {
+      'refs/heads/': local,
+      'refs/remotes/': remote,
+      'refs/tags/': tags,
+    };
+    for (final line in lines) {
+      // A ref name cannot contain a space, so the split is exactly two fields.
+      final [name, sha] = line.split(' ');
+      for (final bucket in buckets.entries) {
+        if (!name.startsWith(bucket.key)) continue;
+        final short = name.substring(bucket.key.length);
+        // `origin/HEAD` is an alias for another branch, not a branch of its own.
+        if (bucket.value == remote && short.endsWith('/HEAD')) break;
+        bucket.value.add(short);
+        tips[short] = sha;
+        break;
       }
     }
     final current = (await _run(['branch', '--show-current'])).trim();
@@ -631,6 +692,7 @@ class GitRepository {
       remote: remote,
       tags: tags,
       current: current.isEmpty ? null : current,
+      tips: tips,
     );
   }
 
