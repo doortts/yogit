@@ -3486,11 +3486,12 @@ void main() {
     expect(label.style?.color, const Color(0xFF5AB0FF));
     expect(label.style?.fontSize, 12);
     expect(label.style?.fontWeight, FontWeight.w600);
-    // The box sits 5px left of the hash text it heads.
-    expect(
-      tester.getRect(find.byKey(const Key('date-box-0'))).left,
-      tester.getRect(find.text('a')).left - 5,
-    );
+    // The box sits 5px left of the hash text it heads, and 6px below centre.
+    final box0 = tester.getRect(find.byKey(const Key('date-box-0')));
+    final row0 = tester.getRect(find.byKey(const Key('date-row-0')));
+    expect(box0.left, tester.getRect(find.text('a')).left - 5);
+    expect(box0.top - row0.top, closeTo((36 - box0.height) / 2 + 6, 0.01));
+    expect(row0.height, 36);
     // The date row is a row of the list, 36px like the rest.
     expect(tester.getSize(find.byKey(const Key('date-row-0'))).height, 36);
 
@@ -3852,6 +3853,27 @@ void main() {
         ..line(p1: const Offset(58, 0), p2: const Offset(58, 18))
         ..line(p1: const Offset(58, 18), p2: const Offset(58, 36)),
     );
+
+    // The label's offset cannot shorten the rails: both lanes are painted from
+    // the heading row's very top edge to its very bottom edge.
+    for (final lane in [0, 1]) {
+      expect(
+        (Canvas canvas) => painter.paint(canvas, size),
+        paints
+          ..something(
+            (symbol, arguments) =>
+                symbol == #drawLine &&
+                (arguments[0] as Offset) == Offset(painter.laneX(lane), 0),
+          )
+          ..something(
+            (symbol, arguments) =>
+                symbol == #drawLine &&
+                (arguments[1] as Offset) ==
+                    Offset(painter.laneX(lane), size.height),
+          ),
+        reason: 'lane $lane',
+      );
+    }
 
     // The commit below the heading resumes lane 1 from the top of its row.
     final below = entries[entries.indexOf(heading) + 1];

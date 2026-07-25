@@ -1328,10 +1328,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
         graphWidth,
       ),
       Padding(
-        // The hash column's 2px rule shifts its text, so the box follows it.
-        // 5px left of the hash text, so the box reads as heading the row rather
-        // than sitting in the hash column.
-        padding: const EdgeInsets.only(left: 6, right: 9),
+        // 5px left of the hash text (whose 2px rule shifts it), so the box reads
+        // as heading the row rather than sitting in the hash column, and pushed
+        // down so it hangs under the group above instead of centring.
+        // 12px of top padding sits the centred box 6px lower.
+        padding: const EdgeInsets.only(left: 6, right: 9, top: 12),
         child: Container(
           key: Key('date-box-$index'),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
