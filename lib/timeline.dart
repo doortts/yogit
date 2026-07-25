@@ -2590,10 +2590,11 @@ class CommitGraphPainter extends CustomPainter {
   ///   above that center, so it roots inside the disc), a corner just below it,
   ///   across, then a corner down into its new column: it leaves the node
   ///   sideways instead of shadowing the parent's rail.
-  /// * otherwise — a line joining its parent. Straight down its own column, then
-  ///   a single corner onto the parent's center line and a flat run into the dot
-  ///   from the side. No trailing vertical, so nothing rides the parent's rail
-  ///   and no stub is left under the dying branch's last node.
+  /// * otherwise — a line joining its parent. Straight down its own column, one
+  ///   square corner, then a flat run into the dot from the side, [nodeAnchor]
+  ///   below the parent's center so it tucks into the dot's lower half. The
+  ///   corner is deliberately unrounded and there is no trailing vertical, so
+  ///   nothing rides the parent's rail and the dying branch leaves no stub.
   Path transitionPath(
     int from,
     int to,
@@ -2607,12 +2608,11 @@ class CommitGraphPainter extends CustomPainter {
     final direction = x1 > x0 ? 1.0 : -1.0;
     final half = (x1 - x0).abs() / 2;
     if (!bendEarly) {
-      final corner = math.min(math.min(arrivalRadius, half), endY - startY);
+      final joinY = endY + nodeAnchor;
       return Path()
         ..moveTo(x0, startY)
-        ..lineTo(x0, endY - corner)
-        ..quadraticBezierTo(x0, endY, x0 + direction * corner, endY)
-        ..lineTo(x1, endY);
+        ..lineTo(x0, joinY)
+        ..lineTo(x1, joinY);
     }
     final jogY = startY + jogInset;
     final out = math.min(math.min(departureRadius, half), jogY - startY);
@@ -2636,7 +2636,9 @@ class CommitGraphPainter extends CustomPainter {
     ..style = PaintingStyle.stroke
     ..strokeWidth = railWidth
     ..strokeCap = StrokeCap.round
-    ..strokeJoin = StrokeJoin.round;
+    // Mitered, so a join's square corner renders as a crisp right angle. Curves
+    // are unaffected.
+    ..strokeJoin = StrokeJoin.miter;
 
   @override
   bool shouldRepaint(covariant CommitGraphPainter oldDelegate) =>
