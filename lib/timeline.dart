@@ -265,6 +265,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
   late double? _commitWidth = widget.columnWidths.commit;
   late double? _graphWidth = widget.columnWidths.graph;
   late double _sidebarWidth = widget.columnWidths.sidebar;
+
+  /// Test hook: the preview text the user last selected, so a test can prove that
+  /// dragging over the panel really selects.
+  @visibleForTesting
+  String? debugPreviewSelection;
+
+  /// Where the Date column starts, so the status bar can line its stamp up with
+  /// it. Written while the timeline lays out, read by the status bar built right
+  /// after it in the same frame.
+  var _dateColumnLeft = 0.0;
   late double _previewWidth = widget.previewWidth;
   late double _previewHeight = widget.previewHeight;
 
@@ -1023,20 +1033,46 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   Widget _statusBar() => Container(
     height: 29,
-    padding: const EdgeInsets.symmetric(horizontal: 12),
     decoration: const BoxDecoration(
       color: _panelSoft,
       border: Border(top: BorderSide(color: _border)),
     ),
-    child: Row(
+    child: Stack(
       children: [
-        _legend('commit', const _LegendDot()),
-        _legend('merge', const _LegendDot(filled: true)),
-        _legend('WIP', const _LegendDot(dashed: true)),
-        const Spacer(),
-        const Text(
-          'GitKraken curves · 2px rail',
-          style: TextStyle(color: _muted, fontSize: 10),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: [
+              _legend('commit', const _LegendDot()),
+              _legend('merge', const _LegendDot(filled: true)),
+              _legend('WIP', const _LegendDot(dashed: true)),
+            ],
+          ),
+        ),
+        // The focused commit's exact moment, under the column it belongs to.
+        Positioned(
+          left: _dateColumnLeft,
+          top: 0,
+          bottom: 0,
+          child: Align(
+            child: ValueListenableBuilder<int>(
+              valueListenable: _selectedIndex,
+              builder: (context, _, _) {
+                final commit = _selectedCommit;
+                return Text(
+                  key: const Key('status-timestamp'),
+                  commit == null || commit.isWorkingTree
+                      ? ''
+                      : exactCommitTime(commit.committerTimestamp),
+                  style: const TextStyle(
+                    color: _muted,
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                  ),
+                );
+              },
+            ),
+          ),
         ),
       ],
     ),
@@ -1072,6 +1108,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
         'graph' => graphWidth,
         _ => _w(column),
       };
+      _dateColumnLeft =
+          _sidebarWidth + _w('refs') + graphWidth + _w('hash') + commitWidth;
       return ColoredBox(
         color: _background,
         child: SingleChildScrollView(
@@ -1891,10 +1929,13 @@ class _TimelineScreenState extends State<TimelineScreen> {
       child: Stack(
         children: [
           SelectionArea(
+            onSelectionChanged: (selection) =>
+                debugPreviewSelection = selection?.plainText,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _previewHeader(commit),
+                _fullDiffButton(commit),
                 Expanded(
                   child: commit == null
                       ? const Center(
@@ -1973,6 +2014,30 @@ class _TimelineScreenState extends State<TimelineScreen> {
     ),
   );
 
+  /// The panel's one call to action, right under its header.
+  Widget _fullDiffButton(GitCommit? commit) => Padding(
+    padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+    child: SizedBox(
+      height: 40,
+      child: FilledButton.icon(
+        key: const Key('open-full-diff'),
+        onPressed: commit == null ? null : _openFullDiff,
+        style: FilledButton.styleFrom(
+          backgroundColor: _selectedRow,
+          foregroundColor: Colors.white,
+          disabledBackgroundColor: _raised,
+          disabledForegroundColor: _muted,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        ),
+        icon: const Icon(Icons.open_in_full, size: 18),
+        label: const Text(
+          'Open full diff',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        ),
+      ),
+    ),
+  );
+
   Widget _previewBody(GitCommit commit, bool bottom) {
     final files = _previewFiles.putIfAbsent(
       commit.sha,
@@ -2031,28 +2096,23 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 )
               : _previewDiff(commit, selectedPath),
         );
-        return Padding(
+        // One scroll view for the whole body: nothing inside competes for the
+        // drag, which is what lets a mouse drag select text across it.
+        return SingleChildScrollView(
+          key: const Key('preview-scroll'),
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           child: bottom
               ? Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(
-                      width: 240,
-                      child: SingleChildScrollView(child: info),
-                    ),
+                    SizedBox(width: 240, child: info),
                     const SizedBox(width: 16),
                     Expanded(child: diff),
                   ],
                 )
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Flexible so a short window scrolls the summary instead of
-                    // overflowing it.
-                    Flexible(child: SingleChildScrollView(child: info)),
-                    Expanded(child: diff),
-                  ],
+                  children: [info, diff],
                 ),
         );
       },
@@ -2169,9 +2229,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
     List<GitFileChange>? changes,
     bool failed,
     String? selectedPath,
-  ) => SizedBox(
+  ) => Container(
     key: const Key('preview-files'),
-    height: 124,
+    alignment: Alignment.topLeft,
     child: failed
         ? const Center(
             child: Text(
@@ -2193,62 +2253,63 @@ class _TimelineScreenState extends State<TimelineScreen> {
               style: TextStyle(color: _muted, fontSize: 15),
             ),
           )
-        : ListView.builder(
-            itemExtent: 34,
-            itemCount: changes.length,
-            itemBuilder: (context, index) {
-              final file = changes[index];
-              final selected = file.path == selectedPath;
-              return InkWell(
-                onTap: () =>
-                    setState(() => _previewPaths[commit.sha] = file.path),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: selected ? _accent : null,
-                    border: const Border(
-                      top: BorderSide(color: Color(0x66343946)),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        key: Key('preview-state-${file.path}'),
-                        width: 24,
-                        height: 24,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: fileStateChipColor(file.status).background,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          file.status,
-                          maxLines: 1,
-                          style: TextStyle(
-                            color: fileStateChipColor(file.status).letter,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 7),
-                      Expanded(
-                        child: Text(
-                          file.path,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: selected ? _text : _muted,
-                            fontSize: 15,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final file in changes)
+                _previewFileRow(commit, file, file.path == selectedPath),
+            ],
           ),
   );
+
+  Widget _previewFileRow(GitCommit commit, GitFileChange file, bool selected) =>
+      SizedBox(
+        height: 34,
+        child: InkWell(
+          onTap: () => setState(() => _previewPaths[commit.sha] = file.path),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: selected ? _accent : null,
+              border: const Border(top: BorderSide(color: Color(0x66343946))),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  key: Key('preview-state-${file.path}'),
+                  width: 24,
+                  height: 24,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: fileStateChipColor(file.status).background,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    file.status,
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: fileStateChipColor(file.status).letter,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    file.path,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: selected ? _text : _muted,
+                      fontSize: 15,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
 
   Widget _previewDiff(GitCommit commit, String path) {
     final future = _previewDiffs.putIfAbsent((
@@ -2271,74 +2332,67 @@ class _TimelineScreenState extends State<TimelineScreen> {
             ),
           ),
         ),
-        Expanded(
-          child: FutureBuilder<List<DiffLine>>(
-            future: future,
-            builder: (context, snapshot) {
-              // The file name is already the head line, so the raw `diff --git`
-              // and `index` preamble is noise here. The full DiffScreen keeps it.
-              final lines = snapshot.data
-                  ?.where((line) => line.kind != DiffLineKind.header)
-                  .toList(growable: false);
-              if (snapshot.hasError) {
-                return const Center(
-                  child: Text(
-                    'Could not load diff',
-                    style: TextStyle(color: Color(0xFFF29AB2), fontSize: 15),
-                  ),
-                );
-              }
-              if (lines == null) {
-                return const Center(
-                  child: SizedBox.square(
-                    dimension: 14,
-                    child: CircularProgressIndicator(strokeWidth: 1.5),
-                  ),
-                );
-              }
-              return ListView.builder(
-                itemExtent: 24,
-                itemCount: lines.length,
-                itemBuilder: (context, index) {
-                  final line = lines[index];
-                  final prefix = switch (line.kind) {
-                    DiffLineKind.add => '+',
-                    DiffLineKind.delete => '-',
-                    // The hunk header reads as its own line, like the mockup.
-                    DiffLineKind.hunk => '',
-                    _ => ' ',
-                  };
-                  return Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 5,
-                      vertical: 2,
-                    ),
-                    color: switch (line.kind) {
-                      DiffLineKind.add => _main.withValues(alpha: 0.15),
-                      DiffLineKind.delete => _hash.withValues(alpha: 0.15),
-                      _ => null,
-                    },
-                    child: Text(
-                      '$prefix${line.text}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color:
-                            line.kind == DiffLineKind.hunk ||
-                                line.kind == DiffLineKind.header
-                            ? _muted
-                            : _text,
-                        fontSize: 14,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  );
-                },
+        FutureBuilder<List<DiffLine>>(
+          future: future,
+          builder: (context, snapshot) {
+            // The file name is already the head line, so the raw `diff --git`
+            // and `index` preamble is noise here. The full DiffScreen keeps it.
+            final lines = snapshot.data
+                ?.where((line) => line.kind != DiffLineKind.header)
+                .toList(growable: false);
+            if (snapshot.hasError) {
+              return const Center(
+                child: Text(
+                  'Could not load diff',
+                  style: TextStyle(color: Color(0xFFF29AB2), fontSize: 15),
+                ),
               );
-            },
-          ),
+            }
+            if (lines == null) {
+              return const Center(
+                child: SizedBox.square(
+                  dimension: 14,
+                  child: CircularProgressIndicator(strokeWidth: 1.5),
+                ),
+              );
+            }
+            // The panel shows one file, so its lines flow with the rest of the
+            // body instead of scrolling on their own.
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [for (final line in lines) _previewDiffLine(line)],
+            );
+          },
         ),
       ],
+    );
+  }
+
+  Widget _previewDiffLine(DiffLine line) {
+    final prefix = switch (line.kind) {
+      DiffLineKind.add => '+',
+      DiffLineKind.delete => '-',
+      // The hunk header reads as its own line, like the mockup.
+      DiffLineKind.hunk => '',
+      _ => ' ',
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+      color: switch (line.kind) {
+        DiffLineKind.add => _main.withValues(alpha: 0.15),
+        DiffLineKind.delete => _hash.withValues(alpha: 0.15),
+        _ => null,
+      },
+      child: Text(
+        '$prefix${line.text}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: line.kind == DiffLineKind.hunk ? _muted : _text,
+          fontSize: 14,
+          fontFamily: 'monospace',
+        ),
+      ),
     );
   }
 
@@ -2939,20 +2993,20 @@ String _socialTime(int timestamp) => socialTimeLabel(
   DateTime.now(),
 );
 
-/// Long-form relative time, as the mockup spells it out. Days come from the
-/// calendar, not from elapsed hours, so a commit late on Friday reads "2 days
-/// ago" on Sunday instead of contradicting its own "07.24 Fri" heading.
+/// Long-form relative time, as the mockup spells it out. The first two days read
+/// in hours — precise, and never contradicting the heading a row sits under —
+/// and past that the buckets count calendar days, the same basis
+/// [dateGroupLabel] uses.
 String socialTimeLabel(DateTime time, DateTime now) {
   String ago(int value, String unit) =>
       '$value $unit${value == 1 ? '' : 's'} ago';
-  final days = calendarDaysBetween(time, now);
-  if (days == 0) {
-    final elapsed = now.difference(time);
+  final elapsed = now.difference(time);
+  if (elapsed.inHours < 48) {
     if (elapsed.inMinutes < 1) return 'just now';
     if (elapsed.inHours < 1) return ago(elapsed.inMinutes, 'minute');
     return ago(elapsed.inHours, 'hour');
   }
-  if (days == 1) return 'yesterday';
+  final days = calendarDaysBetween(time, now);
   if (days < 30) return ago(days, 'day');
   if (days < 365) return ago(days ~/ 30, 'month');
   return ago(days ~/ 365, 'year');

@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -2051,16 +2053,18 @@ void main() {
     expect(label(DateTime(2026, 7, 26, 9)), '1 hour ago');
     expect(label(DateTime(2026, 7, 26, 0, 1)), '9 hours ago');
 
-    // The user's repro: 34 hours back is two calendar days, not yesterday.
-    expect(label(DateTime(2026, 7, 24, 23, 19)), '2 days ago');
-    // And 1.5 hours back across midnight is yesterday, not '1 hour ago'.
+    // The first two days read in hours, however the calendar falls.
+    expect(label(DateTime(2026, 7, 24, 23, 19)), '34 hours ago');
+    expect(label(DateTime(2026, 7, 25, 2)), '32 hours ago');
+    expect(label(DateTime(2026, 7, 24, 11)), '47 hours ago');
     expect(
       socialTimeLabel(DateTime(2026, 7, 25, 23), DateTime(2026, 7, 26, 0, 30)),
-      'yesterday',
+      '1 hour ago',
     );
-    expect(label(DateTime(2026, 7, 25, 9)), 'yesterday');
-    expect(label(DateTime(2026, 7, 25, 23, 59)), 'yesterday');
-
+    // Past 48 hours the calendar buckets take over, and 'yesterday' is retired.
+    expect(label(DateTime(2026, 7, 24, 10)), '2 days ago');
+    expect(label(DateTime(2026, 7, 24, 9)), '2 days ago');
+    expect(label(DateTime(2026, 7, 23, 9)), '3 days ago');
     expect(label(DateTime(2026, 6, 27)), '29 days ago');
     expect(label(DateTime(2026, 6, 26)), '1 month ago');
     expect(label(DateTime(2025, 7, 27)), '12 months ago');
@@ -2108,14 +2112,19 @@ void main() {
       final heading = dateGroupLabel(time, now);
       // A row saying 'yesterday' belongs under Yesterday, 'N days ago' under a
       // dated heading, and today's hours under Today.
-      final expected = switch (social) {
-        'yesterday' => 'Yesterday',
-        final value when value.endsWith('days ago') => isNot(
-          anyOf('Today', 'Yesterday'),
-        ),
-        _ => 'Today',
-      };
-      expect(heading, expected, reason: '$social / $heading');
+      // Under two days the row reads in hours and may sit under any heading;
+      // past that its day bucket must match a dated heading.
+      if (now.difference(time).inHours < 48) {
+        expect(social, endsWith('ago'), reason: '$social / $heading');
+        expect(social, isNot(contains('days')), reason: '$social / $heading');
+      } else {
+        expect(social, endsWith('days ago'), reason: '$social / $heading');
+        expect(
+          heading,
+          isNot(anyOf('Today', 'Yesterday')),
+          reason: '$social / $heading',
+        );
+      }
       expect(find.text(social), findsWidgets, reason: social);
       expect(find.text(heading), findsWidgets, reason: heading);
     }
@@ -2567,7 +2576,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Open full diff'));
+    await tester.tap(find.byKey(const Key('open-full-diff')));
     await tester.pumpAndSettle();
 
     expect(tester.getSize(find.byKey(const Key('nearby-column'))).width, 210);
@@ -4687,6 +4696,197 @@ void main() {
     expect(top('main'), lessThan(top('zeta')));
     expect(top('zeta'), lessThan(top('alpha')));
     expect(top('alpha'), lessThan(top('gone')));
+  });
+  // ------------------------------------------------------------------ C1/C2
+  testWidgets('a mouse drag selects preview text, and the body scrolls as one', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 700);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          files: (_, _) async => [
+            for (var index = 0; index < 6; index++)
+              GitFileChange(
+                path: 'lib/file$index.dart',
+                status: 'M',
+                additions: 1,
+                deletions: 1,
+              ),
+          ],
+          diff: (_, _, _, _) async => [
+            for (var index = 0; index < 40; index++)
+              DiffLine(
+                kind: DiffLineKind.add,
+                text: 'line $index',
+                newNumber: index + 1,
+              ),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    // One scroll view holds the whole body: no separate file or diff scrollers.
+    final preview = find.byKey(const Key('preview-panel'));
+    expect(
+      find.descendant(of: preview, matching: find.byType(Scrollable)),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('preview-scroll')), findsOneWidget);
+
+    // Dragging with a mouse across the title selects it.
+    final title = find.descendant(
+      of: preview,
+      matching: find.text('first commit'),
+    );
+    final paragraph = tester.renderObject<RenderParagraph>(
+      find.descendant(of: title, matching: find.byType(RichText)),
+    );
+    Offset glyph(int offset) => paragraph.localToGlobal(
+      paragraph.getOffsetForCaret(TextPosition(offset: offset), Rect.zero) +
+          const Offset(0, 8),
+    );
+    // Drag from the title all the way down into a diff line: with one scroll view
+    // the selection spans the whole body, which is what users actually want.
+    final line = find.descendant(of: preview, matching: find.text('+line 3'));
+    final gesture = await tester.startGesture(
+      glyph(0),
+      kind: PointerDeviceKind.mouse,
+    );
+    addTearDown(gesture.removePointer);
+    await tester.pump();
+    await gesture.moveTo(glyph(5));
+    await tester.pump();
+    await gesture.moveTo(tester.getCenter(line));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    final screen = tester.state<State<TimelineScreen>>(
+      find.byType(TimelineScreen),
+    );
+    final selection = (screen as dynamic).debugPreviewSelection as String?;
+    expect(selection, isNotNull);
+    expect(selection, startsWith('first commit'));
+    expect(selection, contains('lib/file0.dart'));
+    expect(selection, contains('line 3'));
+
+    // The diff sits below the file list in that one scroll view, and scrolling
+    // the body moves both together.
+    final before = tester.getRect(title).top;
+    await tester.drag(
+      find.byKey(const Key('preview-scroll')),
+      const Offset(0, -80),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getRect(title).top, lessThan(before));
+  });
+
+  // ------------------------------------------------------------------ C3
+  testWidgets('the full diff CTA sits under the header, wide and bright', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository((_, _) async => [commit('1', 'first commit')]),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    final cta = find.byKey(const Key('open-full-diff'));
+    final rect = tester.getRect(cta);
+    final panel = tester.getRect(find.byKey(const Key('preview-panel')));
+    expect(rect.height, 40);
+    // Near full width, and above everything but the header.
+    expect(rect.width, greaterThan(panel.width - 40));
+    expect(
+      rect.top,
+      lessThan(tester.getRect(find.text('first commit').last).top),
+    );
+    expect(
+      find.descendant(of: cta, matching: find.byIcon(Icons.open_in_full)),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<Text>(
+            find.descendant(of: cta, matching: find.text('Open full diff')),
+          )
+          .style
+          ?.fontSize,
+      16,
+    );
+    expect(tester.widget<FilledButton>(cta).onPressed, isNotNull);
+  });
+
+  // ------------------------------------------------------------------ C5/C6
+  testWidgets('the status bar stamps the focused commit under DATE', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final stamp =
+        DateTime.now()
+            .subtract(const Duration(hours: 5))
+            .millisecondsSinceEpoch ~/
+        1000;
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit', timestamp: stamp)],
+          workingTree: () async => workingTreeCommit('1'),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    Text status() =>
+        tester.widget<Text>(find.byKey(const Key('status-timestamp')));
+    double statusLeft() =>
+        tester.getRect(find.byKey(const Key('status-timestamp'))).left;
+    double dateHeaderLeft() =>
+        tester.getRect(find.byKey(const Key('time-header'))).left;
+
+    // The working tree leads the list, so nothing to stamp yet.
+    expect(status().data, '');
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    // A date heading has no commit either.
+    expect(status().data, '');
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(status().data, exactCommitTime(stamp));
+    expect(statusLeft(), dateHeaderLeft());
+
+    // It follows the columns when they are resized.
+    await tester.drag(
+      find.byKey(const Key('hash-resizer')),
+      const Offset(30, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(statusLeft(), dateHeaderLeft());
+
+    // The old right-hand rail label is gone.
+    expect(find.textContaining('2px rail'), findsNothing);
+    expect(find.text('commit'), findsOneWidget);
   });
 }
 
