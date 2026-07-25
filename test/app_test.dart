@@ -2839,13 +2839,13 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('/Users/ada/first'), findsOneWidget);
+    expect(find.text('first'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('pick-repository')));
     await tester.pumpAndSettle();
 
     expect(opened, ['/Users/ada/next']);
-    expect(find.text('/Users/ada/next'), findsOneWidget);
+    expect(find.text('next'), findsOneWidget);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     // Timeline row plus the preview title, and the old history is gone.
@@ -2857,7 +2857,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Git 저장소가 아닙니다: /Users/ada/plain'), findsOneWidget);
     expect(opened, ['/Users/ada/next']);
-    expect(find.text('/Users/ada/next'), findsOneWidget);
+    expect(find.text('next'), findsOneWidget);
     expect(find.text('next repo commit'), findsNWidgets(2));
 
     // Let the notice expire so its timer does not outlive the test.
@@ -4027,14 +4027,33 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    // Only the last segment shows; the full path lives in the tooltip.
+    expect(tester.widget<Text>(find.text('project')).style?.fontSize, 18);
+    expect(find.text('/Users/ada/project'), findsNothing);
     expect(
-      tester.widget<Text>(find.text('/Users/ada/project')).style?.fontSize,
-      18,
+      tester
+          .widget<Tooltip>(
+            find.ancestor(
+              of: find.text('project'),
+              matching: find.byType(Tooltip),
+            ),
+          )
+          .message,
+      '/Users/ada/project',
     );
-    expect(
-      tester.widget<Icon>(find.byIcon(Icons.account_tree_outlined)).size,
-      24,
+    expect(find.byIcon(Icons.account_tree_outlined), findsNothing);
+    // A root with no last segment keeps the whole string.
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          root: '/',
+        ),
+        controller,
+      ),
     );
+    await tester.pumpAndSettle();
+    expect(find.text('/'), findsOneWidget);
     expect(
       tester.widget<Icon>(find.byIcon(Icons.folder_open_outlined)).size,
       24,
@@ -4081,13 +4100,15 @@ void main() {
     );
     expect(sizeOf('하단'), 14);
     expect(sizeOf('Enter'), 13);
-    expect(sizeOf(' 이동 · '), 14);
+    expect(find.text('↑'), findsNothing);
+    expect(find.text('↓'), findsNothing);
+    expect(find.text(' 이동 · '), findsNothing);
     // The keycap group carries no box of its own — only the chips do.
     expect(
       tester
           .widgetList<Container>(
             find.ancestor(
-              of: find.text(' 이동 · '),
+              of: find.text(' 상세'),
               matching: find.byType(Container),
             ),
           )
@@ -4108,7 +4129,7 @@ void main() {
     );
     // Right cluster order: keycaps, caption, placement box, Show Diff, gear.
     final lefts = [
-      tester.getRect(find.text(' 이동 · ')).left,
+      tester.getRect(find.byKey(const Key('shortcut-hint'))).left,
       tester.getRect(find.text('미리보기')).left,
       box.left,
       tester.getRect(find.byKey(const Key('toolbar-full-diff'))).left,
@@ -5856,7 +5877,9 @@ void main() {
     // right cluster starts after it.
     final slot = tester.getRect(find.byKey(const Key('wordmark')));
     expect(
-      tester.getRect(find.text(root)).right,
+      tester
+          .getRect(find.text('yogit-480bbcc5-8064-43d5-976e-5e5ec891eba5'))
+          .right,
       lessThanOrEqualTo(slot.left - 8),
     );
     expect(
@@ -5876,7 +5899,9 @@ void main() {
     final path = tester.getRect(find.byKey(const Key('toolbar-drag')));
     expect(path.width, greaterThanOrEqualTo(200));
     expect(
-      tester.getRect(find.text(root)).right,
+      tester
+          .getRect(find.text('yogit-480bbcc5-8064-43d5-976e-5e5ec891eba5'))
+          .right,
       lessThanOrEqualTo(narrow.left - 8),
     );
     expect(

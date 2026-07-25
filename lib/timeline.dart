@@ -234,6 +234,15 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// The window drag stretch the path keeps for itself before the wordmark is
   /// allowed any room.
   static const _minDragWidth = 200.0;
+
+  /// The repository's last path segment; the full path lives in its tooltip. A
+  /// root with no segment ('/') keeps the whole string.
+  String get _repositoryName {
+    final root = widget.repository.root;
+    final segments = root.split('/').where((part) => part.isNotEmpty);
+    return segments.isEmpty ? root : segments.last;
+  }
+
   static const _previewWidthRange = (min: 240.0, max: 560.0);
   static const _previewHeightRange = (min: 200.0, max: 480.0);
 
@@ -816,11 +825,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
   Widget _toolbarLeft() => Row(
     children: [
       _windowButtons(),
-      const Icon(
-        Icons.account_tree_outlined,
-        size: 24,
-        color: Color(0xFF7AD6E8),
-      ),
       IconButton(
         key: const Key('pick-repository'),
         tooltip: '저장소 열기',
@@ -845,33 +849,39 @@ class _TimelineScreenState extends State<TimelineScreen> {
         (size) => constraints.maxWidth - (size * 5 + 24) >= _minDragWidth,
         orElse: () => 0.0,
       );
-      return Row(
-        children: [
-          // The path stretch doubles as the window's drag handle: it is the one
-          // wide area with no control in it, so no button fights it for a
-          // gesture.
-          Expanded(
-            child: GestureDetector(
-              key: const Key('toolbar-drag'),
-              behavior: HitTestBehavior.opaque,
-              onPanStart: (_) => unawaited(_previewController.startDrag()),
-              onDoubleTap: () => unawaited(_previewController.toggleZoom()),
-              child: Text(
-                widget.repository.root,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: _muted, fontSize: 18),
+      // The whole leftover is the window's drag handle — the name is short now,
+      // so the empty space beside it has to count. Nothing here takes a tap: the
+      // wordmark ignores pointers and the tooltip only wants hover.
+      return GestureDetector(
+        key: const Key('toolbar-drag'),
+        behavior: HitTestBehavior.opaque,
+        onPanStart: (_) => unawaited(_previewController.startDrag()),
+        onDoubleTap: () => unawaited(_previewController.toggleZoom()),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 5,
+              child: Tooltip(
+                message: widget.repository.root,
+                child: Text(
+                  _repositoryName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: _muted, fontSize: 18),
+                ),
               ),
             ),
-          ),
-          if (size > 0) ...[
-            const SizedBox(width: 12),
-            IgnorePointer(
-              child: _Wordmark(key: const Key('wordmark'), fontSize: size),
-            ),
-            const SizedBox(width: 12),
+            if (size > 0) ...[
+              // Equal shares either side: the wordmark centres in what the name
+              // leaves, not on the bar.
+              const Spacer(flex: 2),
+              IgnorePointer(
+                child: _Wordmark(key: const Key('wordmark'), fontSize: size),
+              ),
+              const Spacer(flex: 2),
+            ],
           ],
-        ],
+        ),
       );
     },
   );
@@ -957,9 +967,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
   Widget _shortcutHint() => Row(
     key: const Key('shortcut-hint'),
     children: [
-      _kbd('↑'),
-      _kbd('↓'),
-      const Text(' 이동 · ', style: TextStyle(color: _muted, fontSize: 14)),
       _kbd('Enter'),
       const Text(' 상세', style: TextStyle(color: _muted, fontSize: 14)),
     ],
