@@ -578,25 +578,24 @@ void main() {
       const Rect.fromLTRB(28, -19, 58, 18),
     );
 
-    // The other kind is a square corner and a flat run 1px under the parent's
-    // center, so it tucks into the dot's lower half from the side.
+    // The other kind rounds one corner on its own lane, then runs flat along the
+    // parent's own center line, entering the dot from the side.
     final late = painter.transitionPath(0, 1, 18, size);
-    expect(late.getBounds(), const Rect.fromLTRB(28, 18, 58, 55));
+    expect(late.getBounds(), const Rect.fromLTRB(28, 18, 58, 54));
     final lateSamples = _samples(late);
     final lateRun = lateSamples
-        .where((point) => (point.dy - 55).abs() < 0.01)
+        .where((point) => (point.dy - 54).abs() < 0.01)
         .toList();
     expect(lateRun, hasLength(greaterThan(1)));
-    expect(lateRun.first.dx, closeTo(28, 0.05));
+    // The run starts where the 8px arc lets go of the lane.
+    expect(lateRun.first.dx, closeTo(36, 0.6));
     expect(lateRun.last.dx, 58);
-    // Two straight lines, no arc: the length is the vertical plus the run, and
-    // nothing bulges where the old rounding used to cut the corner.
-    expect(late.computeMetrics().single.length, closeTo(37 + 30, 0.01));
-    expect(_touches(late, const Offset(31, 51)), isFalse);
+    // The corner is a quarter arc, so the path bulges through its inside.
+    expect(_touches(late, const Offset(30, 52)), isTrue);
     // Everything above the corner stays on the line's own lane, and nothing runs
     // down the parent's lane above the dot.
     expect(
-      lateSamples.where((point) => point.dy < 54).map((point) => point.dx),
+      lateSamples.where((point) => point.dy < 46).map((point) => point.dx),
       everyElement(28),
     );
     expect(_touches(late, const Offset(58, 50)), isFalse);
@@ -670,19 +669,23 @@ void main() {
       _touches(path, Offset((painter.laneX(0) + painter.laneX(1)) / 2, 18 + 8)),
       isFalse,
     );
-    // One square corner, then a flat run 1px under the parent's center into the
-    // dot from the side — no rounding, no second corner, no trailing vertical.
+    // One rounded corner on its own lane, then a flat run along the parent's own
+    // center into the dot from the side — no second corner, no trailing vertical.
     final run = _samples(
       path,
-    ).where((point) => (point.dy - 55).abs() < 0.01).toList();
+    ).where((point) => (point.dy - 54).abs() < 0.01).toList();
     expect(run, hasLength(greaterThan(1)));
-    expect(run.first.dx, closeTo(painter.laneX(1), 0.05));
+    expect(run.first.dx, closeTo(painter.laneX(1) - 8, 0.6));
     expect(run.last.dx, painter.laneX(0));
-    expect(path.getBounds().bottom, 55);
-    expect(_touches(path, Offset(painter.laneX(1), 55)), isTrue);
-    expect(_touches(path, Offset(painter.laneX(0) + 2, 55)), isTrue);
-    // Straight lines only: no arc cutting the corner.
-    expect(_touches(path, Offset(painter.laneX(1) - 3, 52)), isFalse);
+    expect(path.getBounds().bottom, 54);
+    expect(_touches(path, Offset(painter.laneX(0) + 2, 54)), isTrue);
+    // Its single corner is rounded, so the path runs through the arc's inside.
+    expect(_touches(path, Offset(painter.laneX(1) - 2, 52)), isTrue);
+    // Above the corner it is still purely vertical on its own lane.
+    expect(
+      _samples(path).where((point) => point.dy < 46).map((point) => point.dx),
+      everyElement(painter.laneX(1)),
+    );
     // Nothing descends the parent's own lane into the dot.
     expect(_touches(path, Offset(painter.laneX(0), 50)), isFalse);
 
@@ -696,12 +699,12 @@ void main() {
     );
     final arrivalRun = _samples(
       arrival,
-    ).where((point) => (point.dy - 19).abs() < 0.01).toList();
+    ).where((point) => (point.dy - 18).abs() < 0.01).toList();
     expect(arrivalRun, hasLength(greaterThan(1)));
     expect(arrivalRun.first.dx, greaterThan(arrivalRun.last.dx));
     expect(arrivalRun.last.dx, painter.laneX(0));
-    // Side entry into the dot's lower half, parent's lane clear above it.
-    expect(_touches(arrival, Offset(painter.laneX(0) + 2, 19)), isTrue);
+    // Side entry into the dot, parent's lane clear above it.
+    expect(_touches(arrival, Offset(painter.laneX(0) + 2, 18)), isTrue);
     expect(_touches(arrival, Offset(painter.laneX(0), 14)), isFalse);
   });
 
@@ -1065,7 +1068,7 @@ void main() {
     // The slide takes the same rounded path as a branch or merge edge.
     expect(
       painter.transitionPath(2, 1, 18, size).getBounds(),
-      const Rect.fromLTRB(58, 18, 88, 55),
+      const Rect.fromLTRB(58, 18, 88, 54),
     );
     // Lane 2 runs down to the center and leaves on that curve.
     expect(painter.laneVerticals(size)[2], (top: 0.0, bottom: 18.0));
@@ -1497,7 +1500,7 @@ void main() {
     expect(painterAt(1).laneX(1) - painterAt(1).laneX(0), 14.5);
     expect(
       painterAt(0).transitionPath(0, 2, 18, const Size(70, 36)).getBounds(),
-      const Rect.fromLTRB(28, 18, 57, 55),
+      const Rect.fromLTRB(28, 18, 57, 54),
     );
     // Nodes keep their full size at every width; the overhang just clips.
     expect(avatarSize(1), 22);

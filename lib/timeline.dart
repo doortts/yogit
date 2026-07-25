@@ -2608,11 +2608,12 @@ class CommitGraphPainter extends CustomPainter {
     final direction = x1 > x0 ? 1.0 : -1.0;
     final half = (x1 - x0).abs() / 2;
     if (!bendEarly) {
-      final joinY = endY + nodeAnchor;
+      final corner = math.min(math.min(arrivalRadius, half), endY - startY);
       return Path()
         ..moveTo(x0, startY)
-        ..lineTo(x0, joinY)
-        ..lineTo(x1, joinY);
+        ..lineTo(x0, endY - corner)
+        ..quadraticBezierTo(x0, endY, x0 + direction * corner, endY)
+        ..lineTo(x1, endY);
     }
     final jogY = startY + jogInset;
     final out = math.min(math.min(departureRadius, half), jogY - startY);
