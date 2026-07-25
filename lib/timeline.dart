@@ -31,6 +31,11 @@ const _dateGroup = Color(0xFF5AB0FF);
 /// A ref chip narrower than this is unreadable, so the extra chips hide instead.
 const _minChipWidth = 40.0;
 
+/// D2Coding is monospace *and* covers Hangul, so a Korean commit message keeps
+/// the columns aligned instead of falling back to a proportional face.
+const _cellFont = 'D2Coding';
+const _cellFontFallback = ['Menlo'];
+
 /// Long enough that arrowing past a row does not flash tooltips.
 const _tooltipDelay = Duration(milliseconds: 400);
 
@@ -491,6 +496,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
       }
     }
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event.logicalKey == LogicalKeyboardKey.keyD &&
+        HardwareKeyboard.instance.isMetaPressed) {
+      if (_selectedCommit != null) _openFullDiff();
+      return KeyEventResult.handled;
+    }
     if ((event.logicalKey == LogicalKeyboardKey.enter ||
             event.logicalKey == LogicalKeyboardKey.space) &&
         _commits.isNotEmpty) {
@@ -771,6 +781,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ),
         const SizedBox(width: 12),
         _shortcutHint(),
+        _toolbarFullDiffButton(),
+        const SizedBox(width: 8),
         IconButton(
           key: const Key('open-settings'),
           tooltip: 'Settings',
@@ -780,6 +792,53 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ),
       ],
     ),
+  );
+
+  /// The full-diff shortcut in the toolbar: the name with its key combination
+  /// under it, dimmed while the selection is a date heading with no commit.
+  Widget _toolbarFullDiffButton() => ValueListenableBuilder<int>(
+    valueListenable: _selectedIndex,
+    builder: (context, _, _) {
+      final enabled = _selectedCommit != null;
+      const green = Color(0xFF2EA043);
+      final ink = enabled ? AvatarService.onColor(green) : _muted;
+      return GestureDetector(
+        key: const Key('toolbar-full-diff'),
+        behavior: HitTestBehavior.opaque,
+        onTap: enabled ? _openFullDiff : null,
+        child: Container(
+          height: 40,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: enabled ? green : _raised,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                '풀 디프',
+                style: TextStyle(
+                  color: ink,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  height: 1.1,
+                ),
+              ),
+              Text(
+                '⌘D',
+                style: TextStyle(
+                  color: ink.withValues(alpha: 0.75),
+                  fontSize: 10,
+                  height: 1.2,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
   );
 
   Widget _placementButton(String label, PreviewPlacement placement) {
@@ -1477,7 +1536,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   style: TextStyle(
                     color: selected ? _text : _hash,
                     fontSize: 12,
-                    fontFamily: 'monospace',
+                    fontFamily: _cellFont,
+                    fontFamilyFallback: _cellFontFallback,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -1490,7 +1550,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   commit.subject,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: _text, fontSize: 14),
+                  style: const TextStyle(
+                    color: _text,
+                    fontSize: 14,
+                    fontFamily: _cellFont,
+                    fontFamilyFallback: _cellFontFallback,
+                  ),
                 ),
               ),
               _cell(
@@ -1509,6 +1574,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     style: TextStyle(
                       color: selected ? _text : _muted,
                       fontSize: 12,
+                      fontFamily: _cellFont,
+                      fontFamilyFallback: _cellFontFallback,
                     ),
                   ),
                 ),
@@ -1518,7 +1585,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 commit.isWorkingTree
                     ? const Text(
                         '—',
-                        style: TextStyle(color: _muted, fontSize: 12),
+                        style: TextStyle(
+                          color: _muted,
+                          fontSize: 12,
+                          fontFamily: _cellFont,
+                          fontFamilyFallback: _cellFontFallback,
+                        ),
                       )
                     : Row(
                         children: [
@@ -1539,6 +1611,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                                     ? _text
                                     : Color.lerp(_text, _main, 0.12),
                                 fontSize: 12,
+                                fontFamily: _cellFont,
+                                fontFamilyFallback: _cellFontFallback,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),

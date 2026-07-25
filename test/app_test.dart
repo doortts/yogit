@@ -4888,6 +4888,136 @@ void main() {
     expect(find.textContaining('2px rail'), findsNothing);
     expect(find.text('commit'), findsOneWidget);
   });
+  // ------------------------------------------------------------------ D1
+  testWidgets('the toolbar full-diff button and Cmd+D open the same screen', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final opened = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [
+              commit('a', 'today commit'),
+              commit(
+                'b',
+                'older commit',
+                timestamp:
+                    DateTime.now()
+                        .subtract(const Duration(days: 3))
+                        .millisecondsSinceEpoch ~/
+                    1000,
+              ),
+            ],
+          ),
+          controller: controller,
+          onOpenFullDiff: (commit) => opened.add(commit.sha),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final button = find.byKey(const Key('toolbar-full-diff'));
+    expect(button, findsOneWidget);
+    // The name with its shortcut underneath, on green.
+    expect(
+      find.descendant(of: button, matching: find.text('풀 디프')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: button, matching: find.text('⌘D')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .getRect(find.descendant(of: button, matching: find.text('⌘D')))
+          .top,
+      greaterThan(
+        tester
+            .getRect(find.descendant(of: button, matching: find.text('풀 디프')))
+            .top,
+      ),
+    );
+    Color background() =>
+        (tester
+                    .widget<Container>(
+                      find.descendant(
+                        of: button,
+                        matching: find.byType(Container),
+                      ),
+                    )
+                    .decoration!
+                as BoxDecoration)
+            .color!;
+    expect(background(), const Color(0xFF2EA043));
+    // Right of the preview control and left of the gear.
+    expect(
+      tester.getRect(button).left,
+      greaterThan(tester.getRect(find.text('하단')).left),
+    );
+    expect(
+      tester.getRect(button).right,
+      lessThan(tester.getRect(find.byIcon(Icons.settings_outlined)).left),
+    );
+
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(opened, ['a']);
+
+    // Cmd+D does the same for the selected commit.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(opened, ['a', 'a']);
+
+    // A date heading has no commit: the button dims and the shortcut does
+    // nothing.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-a')), findsNothing);
+    expect(background(), const Color(0xFF252936));
+    expect(tester.widget<GestureDetector>(button).onTap, isNull);
+    await tester.tap(button);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(opened, ['a', 'a']);
+  });
+
+  // ------------------------------------------------------------------ D2
+  testWidgets('the four data columns use the Korean-capable mono face', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [
+            commit(
+              '1',
+              '한글 커밋 메시지도 정렬됩니다',
+              timestamp: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+            ),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    for (final label in ['1', '한글 커밋 메시지도 정렬됩니다', 'just now', 'Ada Author']) {
+      final style = tester.widget<Text>(find.text(label).first).style!;
+      expect(style.fontFamily, 'D2Coding', reason: label);
+      expect(style.fontFamilyFallback, ['Menlo'], reason: label);
+    }
+  });
 }
 
 /// Points along [path], for probing where a rail actually runs.
