@@ -32,9 +32,9 @@ typedef ColumnSpec = ({String label, double min, double max});
 /// The six resizable timeline columns, in display order.
 const timelineColumns = <String, ColumnSpec>{
   'refs': (label: 'Branch / Tag', min: 110, max: 240),
-  'graph': (label: 'Graph', min: 96, max: 260),
+  'graph': (label: 'Graph', min: 40, max: 260),
   'hash': (label: 'Hash', min: 64, max: 120),
-  'commit': (label: 'Commit title', min: 140, max: 620),
+  'commit': (label: 'Commit title', min: 100, max: 620),
   'time': (label: 'Social time', min: 112, max: 170),
   'name': (label: 'Name', min: 88, max: 180),
 };
@@ -120,15 +120,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     _previewController.addListener(_previewChanged);
     _scrollController.addListener(_maybeLoadNextPage);
     _loadNextPage();
-    // The detail pane is part of the resting layout, so it opens on launch.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted &&
-          _previewController.previewPlacement == PreviewPlacement.closed) {
-        unawaited(
-          _previewController.setPreview(widget.preferredPreviewPlacement),
-        );
-      }
-    });
+    // The detail pane stays hidden until Enter or Space asks for it.
   }
 
   @override
@@ -167,13 +159,13 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   double _w(String column) => _widths[column]!;
 
-  /// Auto-fit: just wide enough for the deepest lane in the loaded rows, clamped
-  /// to the design range. Lane coordinates never move with it — the cell clips.
+  /// Auto-fit: just wide enough for the deepest lane in the loaded rows. The
+  /// resizer reaches further down than this range; auto-fit never does.
   double get _graphColumnWidth =>
       _graphWidth ??
       (CommitGraphPainter.laneInset +
               (_deepestLane + 1) * CommitGraphPainter.defaultLaneSpacing)
-          .clamp(timelineColumns['graph']!.min, timelineColumns['graph']!.max);
+          .clamp(96.0, timelineColumns['graph']!.max);
 
   void _previewChanged() {
     if (mounted) setState(() {});
@@ -262,16 +254,21 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 
   KeyEventResult _onKeyEvent(FocusNode _, KeyEvent event) {
+    // Holding an arrow keeps moving; everything else acts once per press.
+    if (event is KeyDownEvent || event is KeyRepeatEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        _moveSelection(1);
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        _moveSelection(-1);
+        return KeyEventResult.handled;
+      }
+    }
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
-    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-      _moveSelection(1);
-      return KeyEventResult.handled;
-    }
-    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-      _moveSelection(-1);
-      return KeyEventResult.handled;
-    }
-    if (event.logicalKey == LogicalKeyboardKey.enter && _commits.isNotEmpty) {
+    if ((event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.space) &&
+        _commits.isNotEmpty) {
       _openPreview();
       return KeyEventResult.handled;
     }
@@ -303,9 +300,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
     );
   }
 
-  void _selectAndOpen(int index) {
+  /// A click only moves the selection. An open preview follows it; a closed one
+  /// stays closed until Enter or Space.
+  void _select(int index) {
     setState(() => _selectedIndex = index);
-    _openPreview();
     _focusNode.requestFocus();
   }
 
@@ -764,14 +762,15 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   Widget _timeline() => LayoutBuilder(
     builder: (context, constraints) {
-      // The title column takes whatever the other five leave, so the six always
-      // fill the viewport — a dragged width is only a floor that widens it past
-      // the fill, never a pin that leaves a dead strip on the right.
+      // The title column gives first: it fills whatever the other five leave,
+      // and a narrowing window compresses it — down to 100px, dragged or not —
+      // before any other column clips.
       final graphWidth = _graphColumnWidth;
       final fixed = _widths.values.reduce((a, b) => a + b) + graphWidth;
+      final available = constraints.maxWidth - fixed;
       final commitWidth = math.max(
-        _commitWidth ?? timelineColumns['commit']!.min,
-        constraints.maxWidth - fixed,
+        timelineColumns['commit']!.min,
+        math.min(_commitWidth ?? available, available),
       );
       double width(String column) => switch (column) {
         'commit' => commitWidth,
@@ -923,6 +922,21 @@ class _TimelineScreenState extends State<TimelineScreen> {
       _committersBySha[commit.sha] ?? commit.committer,
     );
     final merge = commit.parents.length >= 2 && !commit.isWorkingTree;
+    // Shrink stages: full spacing while the cell fits every lane, compressed
+    // spacing below that, one collapsed lane at the narrowest.
+    final painter = CommitGraphPainter(
+      row: row,
+      previous: index > 0 ? _rows[index - 1] : null,
+      selected: selected,
+      committerColor: committerColor,
+      committersBySha: _committersBySha,
+      laneSpacing: CommitGraphPainter.spacingFor(graphWidth, _deepestLane),
+      compact: graphWidth <= CommitGraphPainter.compactWidth,
+    );
+    final avatarSize =
+        painter.laneSpacing < CommitGraphPainter.compressedAvatarSpacing
+        ? 14.0
+        : 18.0;
     return MouseRegion(
       onEnter: (_) => setState(() => _hoverIndex = index),
       onExit: (_) => setState(() {
@@ -931,7 +945,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       child: GestureDetector(
         key: selected ? Key('selected-row-${commit.sha}') : null,
         behavior: HitTestBehavior.opaque,
-        onTap: () => _selectAndOpen(index),
+        onTap: () => _select(index),
         child: ColoredBox(
           color: selected
               ? _selectedRow
@@ -954,28 +968,20 @@ class _TimelineScreenState extends State<TimelineScreen> {
                         child: RepaintBoundary(
                           child: CustomPaint(
                             key: Key('graph-painter-$index'),
-                            painter: CommitGraphPainter(
-                              row: row,
-                              previous: index > 0 ? _rows[index - 1] : null,
-                              selected: selected,
-                              committerColor: committerColor,
-                              committersBySha: _committersBySha,
-                            ),
+                            painter: painter,
                           ),
                         ),
                       ),
                     ),
                     if (!commit.isWorkingTree && !merge)
                       Positioned(
-                        left:
-                            CommitGraphPainter.laneInset +
-                            row.lane * CommitGraphPainter.defaultLaneSpacing -
-                            9,
-                        top: 9,
+                        left: painter.laneX(row.lane) - avatarSize / 2,
+                        top: (_rowHeight - avatarSize) / 2,
                         child: CommitAvatarStack(
                           commit: commit,
                           avatarService: widget.avatarService,
                           showRemoteAvatars: widget.showRemoteAvatars,
+                          size: avatarSize,
                           ringColor: committerColor,
                           ringWidth: CommitGraphPainter.railWidth,
                         ),
@@ -1690,11 +1696,31 @@ class CommitGraphPainter extends CustomPainter {
     this.previous,
     this.committersBySha = const {},
     this.laneSpacing = defaultLaneSpacing,
+    this.compact = false,
   });
 
   static const laneInset = 28.0;
   static const defaultLaneSpacing = 30.0;
   static const railWidth = 2.0;
+
+  /// Stage 3: at or below this cell width the graph collapses to one lane.
+  static const compactWidth = 56.0;
+
+  /// Stage 2 floor, and the air it keeps right of the deepest lane.
+  static const minLaneSpacing = 12.0;
+  static const compressedInset = 12.0;
+
+  /// Below this spacing the graph node shows the small avatar stack.
+  static const compressedAvatarSpacing = 22.0;
+
+  /// Stage 1 (cell fits every lane) keeps [defaultLaneSpacing]; stage 2 squeezes
+  /// the lanes together so the deepest one still lands inside the cell.
+  static double spacingFor(double width, int deepestLane) {
+    final fit = laneInset + (deepestLane + 1) * defaultLaneSpacing;
+    if (width >= fit) return defaultLaneSpacing;
+    return ((width - laneInset - compressedInset) / math.max(deepestLane, 1))
+        .clamp(minLaneSpacing, defaultLaneSpacing);
+  }
 
   /// Rails are opaque.
   static const railOpacity = 1.0;
@@ -1719,7 +1745,18 @@ class CommitGraphPainter extends CustomPainter {
   final Map<String, GitIdentity> committersBySha;
   final double laneSpacing;
 
-  double laneX(int lane) => laneInset + lane * laneSpacing;
+  /// Stage 3: every lane collapses onto [laneInset] and only the row's own rail
+  /// and node survive.
+  final bool compact;
+
+  double laneX(int lane) =>
+      compact ? laneInset : laneInset + lane * laneSpacing;
+
+  /// The single rail stage 3 paints, colored by this row's committer.
+  ({double top, double bottom}) compactRail(Size size) => (
+    top: (previous?.nextLanes.isNotEmpty ?? false) ? 0.0 : size.height / 2,
+    bottom: row.nextLanes.isEmpty ? size.height / 2 : size.height,
+  );
 
   /// The straight vertical rails [row] hands down past its node center, keyed by
   /// lane. A rail that moves — a branch, a merge, or a git-style collapse slide —
@@ -1783,45 +1820,58 @@ class CommitGraphPainter extends CustomPainter {
       );
     }
 
-    // Halves are painted apart: above the node a lane carries the rail it waits
-    // for, below it the rail it hands down.
-    for (final entry in laneVerticals(size).entries) {
-      final x = laneX(entry.key);
-      if (entry.value.top < centerY) {
-        canvas.drawLine(
-          Offset(x, entry.value.top),
-          Offset(x, centerY),
-          _railPaint(row.activeLaneShas[entry.key]),
-        );
+    if (compact) {
+      // Stage 3: one rail in this row's committer color, no lanes, no curves.
+      final rail = compactRail(size);
+      canvas.drawLine(
+        Offset(laneInset, rail.top),
+        Offset(laneInset, rail.bottom),
+        Paint()
+          ..color = committerColor
+          ..strokeWidth = railWidth
+          ..strokeCap = StrokeCap.round,
+      );
+    } else {
+      // Halves are painted apart: above the node a lane carries the rail it
+      // waits for, below it the rail it hands down.
+      for (final entry in laneVerticals(size).entries) {
+        final x = laneX(entry.key);
+        if (entry.value.top < centerY) {
+          canvas.drawLine(
+            Offset(x, entry.value.top),
+            Offset(x, centerY),
+            _railPaint(row.activeLaneShas[entry.key]),
+          );
+        }
+        if (entry.value.bottom > centerY) {
+          canvas.drawLine(
+            Offset(x, centerY),
+            Offset(x, entry.value.bottom),
+            _railPaint(row.nextLaneShas[entry.key]),
+          );
+        }
       }
-      if (entry.value.bottom > centerY) {
-        canvas.drawLine(
-          Offset(x, centerY),
-          Offset(x, entry.value.bottom),
-          _railPaint(row.nextLaneShas[entry.key]),
-        );
-      }
-    }
 
-    // Arrival halves of the movements the row above started, then this row's own
-    // departures. Every lane movement is a transition, so the two lists are the
-    // whole story.
-    for (final transition in previous?.transitions ?? const []) {
-      canvas.drawPath(
-        transitionPath(
-          transition.from,
-          transition.to,
-          centerY - size.height,
-          size,
-        ),
-        _railPaint(transition.sha),
-      );
-    }
-    for (final transition in row.transitions) {
-      canvas.drawPath(
-        transitionPath(transition.from, transition.to, centerY, size),
-        _railPaint(transition.sha),
-      );
+      // Arrival halves of the movements the row above started, then this row's
+      // own departures. Every lane movement is a transition, so the two lists
+      // are the whole story.
+      for (final transition in previous?.transitions ?? const []) {
+        canvas.drawPath(
+          transitionPath(
+            transition.from,
+            transition.to,
+            centerY - size.height,
+            size,
+          ),
+          _railPaint(transition.sha),
+        );
+      }
+      for (final transition in row.transitions) {
+        canvas.drawPath(
+          transitionPath(transition.from, transition.to, centerY, size),
+          _railPaint(transition.sha),
+        );
+      }
     }
     final nodeX = laneX(row.lane);
     if (row.commit.refs.isNotEmpty) {
@@ -1834,14 +1884,16 @@ class CommitGraphPainter extends CustomPainter {
           ..strokeCap = StrokeCap.round,
       );
     }
+    _drawNode(canvas, Offset(nodeX, centerY));
+  }
+
+  /// The node glyph: a dashed ring for the working tree, a filled dot for a
+  /// merge, and nothing for a plain commit — its avatar stack sits on top.
+  void _drawNode(Canvas canvas, Offset center) {
     if (row.commit.isWorkingTree) {
-      _drawWorkingTreeNode(canvas, Offset(nodeX, centerY));
+      _drawWorkingTreeNode(canvas, center);
     } else if (showsMergeDot) {
-      canvas.drawCircle(
-        Offset(nodeX, centerY),
-        nodeRadius,
-        Paint()..color = committerColor,
-      );
+      canvas.drawCircle(center, nodeRadius, Paint()..color = committerColor);
     }
   }
 
@@ -1913,7 +1965,8 @@ class CommitGraphPainter extends CustomPainter {
       oldDelegate.selected != selected ||
       oldDelegate.committerColor != committerColor ||
       oldDelegate.committersBySha != committersBySha ||
-      oldDelegate.laneSpacing != laneSpacing;
+      oldDelegate.laneSpacing != laneSpacing ||
+      oldDelegate.compact != compact;
 }
 
 void drawDashedRing(

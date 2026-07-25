@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'avatars.dart';
@@ -59,9 +60,9 @@ class TimelineColumnWidths {
         );
     return TimelineColumnWidths(
       refs: width('refs', 156, 110, 240),
-      graph: json['graph'] is num ? width('graph', 142, 96, 260) : null,
+      graph: json['graph'] is num ? width('graph', 142, 40, 260) : null,
       hash: width('hash', 78, 64, 120),
-      commit: json['commit'] is num ? width('commit', 380, 140, 620) : null,
+      commit: json['commit'] is num ? width('commit', 380, 100, 620) : null,
       time: width('time', 116, 112, 170),
       name: width('name', 100, 88, 180),
     );
@@ -90,29 +91,72 @@ class TimelineColumnWidths {
   int get hashCode => Object.hash(refs, graph, hash, commit, time, name);
 }
 
+/// `#RRGGBB` (or bare `RRGGBB`) to a color, or null when malformed.
+Color? parseHexColor(String value) {
+  final match = RegExp(r'^#?([0-9a-fA-F]{6})$').firstMatch(value.trim());
+  return match == null
+      ? null
+      : Color(0xFF000000 | int.parse(match.group(1)!, radix: 16));
+}
+
+String formatHexColor(String value) =>
+    '#${value.trim().replaceFirst('#', '').toUpperCase()}';
+
 class AppSettings {
   const AppSettings({
     this.showAvatars = true,
     this.previewPlacement = PreviewPlacement.right,
     this.columnWidths = const TimelineColumnWidths(),
+    this.laneColors = defaultLaneColors,
   });
+
+  /// The GitHub dark label palette, as stored.
+  static const defaultLaneColors = [
+    '#F85149',
+    '#DB6D28',
+    '#D29922',
+    '#3FB950',
+    '#39C5CF',
+    '#58A6FF',
+    '#BC8CFF',
+    '#F778BA',
+  ];
 
   final bool showAvatars;
   final PreviewPlacement previewPlacement;
   final TimelineColumnWidths columnWidths;
+  final List<String> laneColors;
+
+  /// The palette to hand [AvatarService]; a damaged entry drops the whole list
+  /// back to the default rather than painting one rail wrong.
+  List<Color> get laneColorValues {
+    final colors = [for (final value in laneColors) parseHexColor(value)];
+    return colors.isEmpty || colors.contains(null)
+        ? AvatarService.defaultColors
+        : colors.cast<Color>();
+  }
 
   AppSettings copyWith({
     bool? showAvatars,
     PreviewPlacement? previewPlacement,
     TimelineColumnWidths? columnWidths,
+    List<String>? laneColors,
   }) => AppSettings(
     showAvatars: showAvatars ?? this.showAvatars,
     previewPlacement: previewPlacement ?? this.previewPlacement,
     columnWidths: columnWidths ?? this.columnWidths,
+    laneColors: laneColors ?? this.laneColors,
   );
 
   factory AppSettings.fromJson(Object? value) {
     if (value is! Map<String, dynamic>) return const AppSettings();
+    final stored = value['laneColors'];
+    final laneColors = stored is List
+        ? [for (final entry in stored) '$entry']
+        : const <String>[];
+    final valid =
+        laneColors.isNotEmpty &&
+        laneColors.every((entry) => parseHexColor(entry) != null);
     return AppSettings(
       showAvatars: value['showAvatars'] is bool
           ? value['showAvatars'] as bool
@@ -123,6 +167,9 @@ class AppSettings {
         _ => PreviewPlacement.right,
       },
       columnWidths: TimelineColumnWidths.fromJson(value['columnWidths']),
+      laneColors: valid
+          ? [for (final entry in laneColors) formatHexColor(entry)]
+          : defaultLaneColors,
     );
   }
 
@@ -130,6 +177,7 @@ class AppSettings {
     'showAvatars': showAvatars,
     'previewPlacement': previewPlacement.name,
     'columnWidths': columnWidths.toJson(),
+    'laneColors': laneColors,
   };
 
   @override
@@ -137,10 +185,16 @@ class AppSettings {
       other is AppSettings &&
       showAvatars == other.showAvatars &&
       previewPlacement == other.previewPlacement &&
-      columnWidths == other.columnWidths;
+      columnWidths == other.columnWidths &&
+      listEquals(laneColors, other.laneColors);
 
   @override
-  int get hashCode => Object.hash(showAvatars, previewPlacement, columnWidths);
+  int get hashCode => Object.hash(
+    showAvatars,
+    previewPlacement,
+    columnWidths,
+    Object.hashAll(laneColors),
+  );
 }
 
 class SettingsStore {
@@ -189,10 +243,36 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late AppSettings _settings = widget.settings;
+  late final _laneFields = [
+    for (final hex in _settings.laneColors) TextEditingController(text: hex),
+  ];
+
+  @override
+  void dispose() {
+    for (final field in _laneFields) {
+      field.dispose();
+    }
+    super.dispose();
+  }
 
   void _change(AppSettings value) {
     setState(() => _settings = value);
     widget.onChanged(value);
+  }
+
+  /// Live validation: a half-typed hex leaves the timeline on the last good one.
+  void _changeLaneColor(int index, String value) {
+    if (parseHexColor(value) == null) return;
+    final colors = [..._settings.laneColors];
+    colors[index] = formatHexColor(value);
+    _change(_settings.copyWith(laneColors: colors));
+  }
+
+  void _resetLaneColors() {
+    _change(_settings.copyWith(laneColors: AppSettings.defaultLaneColors));
+    for (var index = 0; index < _laneFields.length; index++) {
+      _laneFields[index].text = AppSettings.defaultLaneColors[index];
+    }
   }
 
   @override
@@ -316,6 +396,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               _change(_settings.copyWith(showAvatars: value)),
                         ),
                         const SizedBox(height: 24),
+                        _laneColors(),
+                        const SizedBox(height: 24),
                         const Text(
                           'Avatar fallback preview',
                           style: TextStyle(
@@ -353,6 +435,73 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ],
     ),
+  );
+
+  /// The lane palette: one swatch and hex field per color, plus the way back.
+  Widget _laneColors() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Row(
+        children: [
+          const Text(
+            'Timeline colors',
+            style: TextStyle(
+              color: Color(0xFFE8EAF2),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const Spacer(),
+          TextButton(
+            key: const Key('reset-lane-colors'),
+            onPressed: _resetLaneColors,
+            child: const Text('Reset to GitHub dark'),
+          ),
+        ],
+      ),
+      const SizedBox(height: 6),
+      for (var index = 0; index < _laneFields.length; index++)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            children: [
+              Container(
+                key: Key('lane-swatch-$index'),
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  color:
+                      parseHexColor(_settings.laneColors[index]) ??
+                      const Color(0xFF343946),
+                  borderRadius: BorderRadius.circular(5),
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 120,
+                child: TextField(
+                  key: Key('lane-color-$index'),
+                  controller: _laneFields[index],
+                  onChanged: (value) => _changeLaneColor(index, value),
+                  style: const TextStyle(
+                    color: Color(0xFFE8EAF2),
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                  ),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 7,
+                    ),
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+    ],
   );
 
   Widget _connection() {

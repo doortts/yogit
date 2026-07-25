@@ -94,13 +94,21 @@ class AvatarService {
     this.runner = runProcess,
   });
 
-  static const colors = [
-    Color(0xFF7AD6E8),
-    Color(0xFF8AD6A1),
-    Color(0xFFF29AB2),
-    Color(0xFFE7C879),
-    Color(0xFFB6A0EA),
+  /// GitHub dark (Primer) label colors: red, orange, yellow, green, cyan, blue,
+  /// purple, pink.
+  static const defaultColors = [
+    Color(0xFFF85149),
+    Color(0xFFDB6D28),
+    Color(0xFFD29922),
+    Color(0xFF3FB950),
+    Color(0xFF39C5CF),
+    Color(0xFF58A6FF),
+    Color(0xFFBC8CFF),
+    Color(0xFFF778BA),
   ];
+
+  /// The palette every rail, ring, chip and dot reads. Settings replace it.
+  static List<Color> palette = defaultColors;
 
   final RemoteRepository remote;
   final String ghExecutable;
@@ -240,6 +248,7 @@ class AvatarService {
     for (final codeUnit in identity.email.codeUnits) {
       hash = (hash * 31 + codeUnit) & 0x7fffffff;
     }
+    final colors = palette.isEmpty ? defaultColors : palette;
     return colors[hash % colors.length];
   }
 }

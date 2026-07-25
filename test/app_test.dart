@@ -48,11 +48,11 @@ void main() {
     expect(list.itemExtent, 36);
     expect(list.cacheExtent, 0);
 
-    // The preview opens with the app, so the subject shows in both panes.
-    expect(find.text('Commit & Diff'), findsOneWidget);
+    // The preview starts hidden and only a key opens it.
+    expect(find.text('Commit & Diff'), findsNothing);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pump();
-    expect(find.text('second commit'), findsNWidgets(2));
+    expect(find.text('second commit'), findsOneWidget);
     final selected = find.byKey(const Key('selected-row-2'));
     expect(selected, findsOneWidget);
     final selectedBox =
@@ -82,10 +82,63 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Commit & Diff'), findsNothing);
 
+    // A click selects; it no longer opens the panel.
     await tester.tap(find.text('third commit'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-3')), findsOneWidget);
+    expect(find.text('Commit & Diff'), findsNothing);
+
+    // Space opens it just like Enter, on the clicked row.
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
     expect(find.text('Commit & Diff'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('preview-panel')),
+        matching: find.text('third commit'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('holding an arrow key keeps moving the selection', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async =>
+              List.generate(6, (index) => commit('$index', 'commit $index')),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
+
+    // Autorepeat while the key stays held.
+    for (var repeat = 2; repeat <= 4; repeat++) {
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump();
+      expect(find.byKey(Key('selected-row-$repeat')), findsOneWidget);
+    }
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+    expect(find.byKey(const Key('selected-row-2')), findsOneWidget);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowUp);
+
+    // Enter and Space ignore repeats, so a held key opens the panel once.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('Commit & Diff'), findsOneWidget);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
   });
 
   testWidgets('graph viewport resize does not scale lane coordinates', (
@@ -733,6 +786,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
 
     // Default is unset, so the title column takes whatever is left over.
     expect(const TimelineColumnWidths().commit, isNull);
@@ -759,22 +814,25 @@ void main() {
     expect(titleWidth(), 296);
     expect(nameRight(), lessThanOrEqualTo(1280 - 288));
 
-    // Dragging pins it: the stored width is saved and stops following the
+    // Dragging narrower pins the width: it is saved and stops following the
     // viewport. The drag starts from the width on screen (296).
     await tester.drag(
       find.byKey(const Key('commit-resizer')),
-      const Offset(60, 0),
+      const Offset(-100, 0),
     );
     await tester.pumpAndSettle();
     final pinned = titleWidth();
-    expect(pinned, greaterThan(296));
+    expect(pinned, lessThan(296));
     expect(saved?.commit, pinned);
-    // A wider window still fills the slack: the drag is a floor, not a cap, so
-    // no dead strip ever opens on the right.
+
+    // A narrow window compresses even a pinned title to the 100px minimum, and
+    // widening restores it up to the pinned width — never past it.
+    tester.view.physicalSize = const Size(800, 760);
+    await tester.pumpAndSettle();
+    expect(titleWidth(), 100);
     tester.view.physicalSize = const Size(1400, 760);
     await tester.pumpAndSettle();
-    expect(titleWidth(), 416);
-    expect(nameRight(), 1400 - 288);
+    expect(titleWidth(), pinned);
   });
 
   testWidgets('the six columns fill the timeline viewport with no dead strip', (
@@ -786,17 +844,18 @@ void main() {
       tester.view.resetDevicePixelRatio();
       tester.view.resetPhysicalSize();
     });
-    final page = Completer<List<GitCommit>>();
-    await tester.pumpWidget(
-      MaterialApp(
-        home: TimelineScreen(
-          repository: FakeGitRepository((_, _) => page.future),
-          controller: controller,
-          // A width dragged narrower than the viewport must not strand slack.
-          columnWidths: const TimelineColumnWidths(commit: 330),
-        ),
+    Widget screen(GitRepository repository) => MaterialApp(
+      home: TimelineScreen(
+        key: ValueKey(repository),
+        repository: repository,
+        controller: controller,
       ),
     );
+    await tester.pumpWidget(
+      screen(FakeGitRepository((_, _) async => [commit('1', 'first commit')])),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
     Rect viewport() =>
@@ -815,12 +874,18 @@ void main() {
 
     // A deeper graph widens its own column, and the title gives back exactly
     // that much — the right edge stays flush.
-    page.complete([
-      commit('M', 'octopus', parents: const ['a', 'b', 'c']),
-      commit('a', 'a'),
-      commit('b', 'b'),
-      commit('c', 'c'),
-    ]);
+    await tester.pumpWidget(
+      screen(
+        FakeGitRepository(
+          (_, _) async => [
+            commit('M', 'octopus', parents: const ['a', 'b', 'c']),
+            commit('a', 'a'),
+            commit('b', 'b'),
+            commit('c', 'c'),
+          ],
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(columnWidth('graph'), 118);
     expect(columnWidth('commit'), 1100 - (156 + 118 + 78 + 116 + 100));
@@ -886,6 +951,138 @@ void main() {
                 .painter!
             as CommitGraphPainter;
     expect(painter.laneX(1) - painter.laneX(0), 30);
+  });
+
+  testWidgets('the title column absorbs the window shrink down to 100px', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1250, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository((_, _) async => [commit('1', 'first commit')]),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    Rect viewport() =>
+        tester.getRect(find.byKey(const Key('timeline-viewport')));
+    double titleWidth() =>
+        tester.getSize(find.byKey(const Key('commit-header'))).width;
+    double nameRight() =>
+        tester.getRect(find.byKey(const Key('name-header'))).right;
+
+    // 1250 - 150 sidebar, preview closed.
+    expect(timelineColumns['commit']!.min, 100);
+    expect(viewport().width, 1100);
+    expect(titleWidth(), 1100 - 546);
+    expect(nameRight(), viewport().right);
+
+    // The title takes the whole 450px shrink; the other five hold their widths.
+    tester.view.physicalSize = const Size(800, 800);
+    await tester.pumpAndSettle();
+    expect(viewport().width, 650);
+    expect(titleWidth(), 650 - 546);
+    expect(nameRight(), viewport().right);
+
+    // Past the 100px floor the row overflows instead, so the right clips. (The
+    // native window stops at 960 wide, so the toolbar never gets narrower.)
+    tester.view.physicalSize = const Size(790, 800);
+    await tester.pumpAndSettle();
+    expect(titleWidth(), 100);
+    expect(nameRight(), greaterThan(viewport().right));
+
+    final title = tester.widget<Text>(find.text('first commit'));
+    expect(title.maxLines, 1);
+    expect(title.overflow, TextOverflow.ellipsis);
+  });
+
+  test('graph lane spacing compresses in stages', () {
+    // Stage 1: the cell fits every lane, so nothing moves.
+    expect(CommitGraphPainter.spacingFor(118, 2), 30);
+    expect(CommitGraphPainter.spacingFor(260, 2), 30);
+    expect(CommitGraphPainter.spacingFor(58, 0), 30);
+    // Stage 2: proportional squeeze down to the 12px floor.
+    expect(CommitGraphPainter.spacingFor(70, 2), 15);
+    expect(CommitGraphPainter.spacingFor(40, 2), 12);
+    expect(CommitGraphPainter.compactWidth, 56);
+    expect(timelineColumns['graph']!.min, 40);
+  });
+
+  testWidgets('a narrow graph column compresses lanes, then collapses them', (
+    tester,
+  ) async {
+    Widget screen(double graph) => MaterialApp(
+      home: TimelineScreen(
+        key: ValueKey(graph),
+        repository: FakeGitRepository(
+          (_, _) async => [
+            commit('M', 'octopus', parents: const ['a', 'b', 'c']),
+            commit('a', 'a'),
+            commit('b', 'b'),
+            commit('c', 'c'),
+          ],
+        ),
+        controller: controller,
+        columnWidths: TimelineColumnWidths(graph: graph),
+      ),
+    );
+    CommitGraphPainter painterAt(int index) =>
+        tester
+                .widget<CustomPaint>(find.byKey(Key('graph-painter-$index')))
+                .painter!
+            as CommitGraphPainter;
+    double avatarSize(int index) => tester
+        .widget<CommitAvatarStack>(
+          find.descendant(
+            of: find.byKey(Key('graph-cell-$index')),
+            matching: find.byType(CommitAvatarStack),
+          ),
+        )
+        .size;
+
+    // Stage 1: 118px fits three lanes at the full spacing.
+    await tester.pumpWidget(screen(118));
+    await tester.pumpAndSettle();
+    expect(painterAt(0).compact, isFalse);
+    expect(painterAt(0).laneSpacing, 30);
+    expect(painterAt(1).laneX(1) - painterAt(1).laneX(0), 30);
+    expect(avatarSize(1), 18);
+
+    // Stage 2: the lanes squeeze together and the node avatar shrinks with them.
+    await tester.pumpWidget(screen(70));
+    await tester.pumpAndSettle();
+    expect(painterAt(0).compact, isFalse);
+    expect(painterAt(0).laneSpacing, 15);
+    expect(painterAt(1).laneX(0), CommitGraphPainter.laneInset);
+    expect(painterAt(1).laneX(1) - painterAt(1).laneX(0), 15);
+    expect(
+      painterAt(0).transitionPath(0, 2, 18, const Size(70, 36)).getBounds(),
+      const Rect.fromLTRB(28, 18, 58, 54),
+    );
+    expect(avatarSize(1), 14);
+
+    // Stage 3: every lane collapses onto the inset and the curves are dropped.
+    await tester.pumpWidget(screen(56));
+    await tester.pumpAndSettle();
+    final compact = painterAt(0);
+    expect(compact.compact, isTrue);
+    expect(compact.laneX(2), CommitGraphPainter.laneInset);
+    expect(compact.laneX(2), compact.laneX(0));
+    expect(compact.row.transitions, isNotEmpty);
+    // The octopus row hands rails down, so its single rail runs to the edge.
+    expect(compact.compactRail(const Size(56, 36)), (top: 18.0, bottom: 36.0));
+    // The last row ends the history, so its rail stops at the node.
+    expect(painterAt(3).compactRail(const Size(56, 36)), (
+      top: 0.0,
+      bottom: 18.0,
+    ));
+    expect(avatarSize(1), 14);
   });
 
   testWidgets('column resizers move by 8px on arrow keys and clamp', (
@@ -1116,6 +1313,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
 
     // 'N file changed' is singular for one file.
     expect(find.text('1 file changed'), findsOneWidget);
@@ -1176,6 +1375,129 @@ void main() {
       find.descendant(of: preview, matching: find.text('first commit')),
       findsNothing,
     );
+  });
+
+  test('lane colors round-trip, and a damaged palette falls back', () {
+    expect(AvatarService.defaultColors, hasLength(8));
+    expect(AvatarService.defaultColors.first, const Color(0xFFF85149));
+    expect(AvatarService.defaultColors.last, const Color(0xFFF778BA));
+    expect(AppSettings.defaultLaneColors.first, '#F85149');
+    expect(parseHexColor('#39C5CF'), const Color(0xFF39C5CF));
+    expect(parseHexColor('39c5cf'), const Color(0xFF39C5CF));
+    expect(parseHexColor('#39C5C'), isNull);
+    expect(parseHexColor('teal'), isNull);
+
+    const custom = AppSettings(laneColors: ['#112233', '#445566']);
+    final decoded = AppSettings.fromJson(custom.toJson());
+    expect(decoded, custom);
+    expect(decoded.laneColorValues, const [
+      Color(0xFF112233),
+      Color(0xFF445566),
+    ]);
+
+    // One bad entry drops the whole palette back to GitHub dark.
+    for (final stored in [
+      <String>['#112233', 'oops'],
+      <String>[],
+      'red',
+    ]) {
+      expect(
+        AppSettings.fromJson(<String, dynamic>{
+          'laneColors': stored,
+        }).laneColors,
+        AppSettings.defaultLaneColors,
+        reason: '$stored',
+      );
+    }
+    expect(
+      const AppSettings(laneColors: ['bad']).laneColorValues,
+      AvatarService.defaultColors,
+    );
+  });
+
+  test('the committer color follows the active palette', () {
+    const ada = GitIdentity(name: 'Ada', email: 'ada@example.com');
+    addTearDown(() => AvatarService.palette = AvatarService.defaultColors);
+
+    expect(AvatarService.defaultColors, contains(AvatarService.color(ada)));
+    AvatarService.palette = const [Color(0xFF010203)];
+    expect(AvatarService.color(ada), const Color(0xFF010203));
+    // An empty palette is never painted with.
+    AvatarService.palette = const [];
+    expect(AvatarService.defaultColors, contains(AvatarService.color(ada)));
+  });
+
+  testWidgets('the timeline colors editor applies hex edits and resets', (
+    tester,
+  ) async {
+    final saved = <AppSettings>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          settings: const AppSettings(),
+          onChanged: saved.add,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    Color swatch(int index) =>
+        (tester
+                    .widget<Container>(find.byKey(Key('lane-swatch-$index')))
+                    .decoration!
+                as BoxDecoration)
+            .color!;
+
+    expect(find.text('Timeline colors'), findsOneWidget);
+    expect(find.byKey(const Key('lane-swatch-7')), findsOneWidget);
+    expect(swatch(0), const Color(0xFFF85149));
+
+    await tester.enterText(find.byKey(const Key('lane-color-0')), '#123456');
+    await tester.pumpAndSettle();
+    expect(saved.last.laneColors.first, '#123456');
+    expect(swatch(0), const Color(0xFF123456));
+
+    // A half-typed hex leaves the last good color in place.
+    await tester.enterText(find.byKey(const Key('lane-color-0')), '#12');
+    await tester.pumpAndSettle();
+    expect(saved.last.laneColors.first, '#123456');
+
+    await tester.ensureVisible(find.byKey(const Key('reset-lane-colors')));
+    await tester.tap(find.byKey(const Key('reset-lane-colors')));
+    await tester.pumpAndSettle();
+    expect(saved.last.laneColors, AppSettings.defaultLaneColors);
+    expect(swatch(0), const Color(0xFFF85149));
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('lane-color-0')))
+          .controller
+          ?.text,
+      '#F85149',
+    );
+  });
+
+  testWidgets('a stored palette reaches the timeline rails', (tester) async {
+    addTearDown(() => AvatarService.palette = AvatarService.defaultColors);
+    final store = MemorySettingsStore()
+      ..current = const AppSettings(laneColors: ['#0B7285']);
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+        ),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(AvatarService.palette, const [Color(0xFF0B7285)]);
+    final painter =
+        tester
+                .widget<CustomPaint>(find.byKey(const Key('graph-painter-0')))
+                .painter!
+            as CommitGraphPainter;
+    expect(painter.committerColor, const Color(0xFF0B7285));
   });
 
   test('social time spells out the elapsed distance', () {
@@ -1239,7 +1561,7 @@ void main() {
       expect(clamped.name, 88);
       expect(clamped.refs, 240);
       expect(clamped.commit, 620);
-      expect(clamped.graph, 96);
+      expect(clamped.graph, 40);
     },
   );
 
@@ -1257,8 +1579,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
 
-    // Timeline row plus the open preview title.
+    // Timeline row plus the opened preview title.
     expect(find.text('Uncommitted changes'), findsNWidgets(2));
     expect(find.text('working tree'), findsOneWidget);
     expect(find.text('·······'), findsOneWidget);
@@ -1494,7 +1818,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(calls, 2);
-    // Timeline row plus the open preview title.
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    // Timeline row plus the opened preview title.
     expect(find.text('recovered commit'), findsNWidgets(2));
     expect(find.text('End of history'), findsOneWidget);
   });
@@ -1823,7 +2149,9 @@ void main() {
 
     expect(opened, ['/Users/ada/next']);
     expect(find.text('/Users/ada/next'), findsOneWidget);
-    // Timeline row plus the reopened preview title, and the old history is gone.
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    // Timeline row plus the preview title, and the old history is gone.
     expect(find.text('next repo commit'), findsNWidgets(2));
     expect(find.text('first commit'), findsNothing);
 

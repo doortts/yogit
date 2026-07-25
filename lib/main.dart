@@ -173,6 +173,7 @@ class _YogitAppState extends State<YogitApp> {
     final settings = await _store.load();
     if (mounted) {
       setState(() {
+        AvatarService.palette = settings.laneColorValues;
         _settings = settings;
         _settingsLoaded = true;
       });
@@ -211,6 +212,7 @@ class _YogitAppState extends State<YogitApp> {
 
   void _changeSettings(AppSettings settings) {
     setState(() {
+      AvatarService.palette = settings.laneColorValues;
       _settings = settings;
       _settingsLoaded = true;
     });
