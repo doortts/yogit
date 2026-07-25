@@ -107,6 +107,9 @@ Color? parseHexColor(String value) {
       : Color(0xFF000000 | int.parse(match.group(1)!, radix: 16));
 }
 
+double _clamped(Object? value, double fallback, double min, double max) =>
+    (value is num ? value.toDouble() : fallback).clamp(min, max);
+
 String formatHexColor(String value) =>
     '#${value.trim().replaceFirst('#', '').toUpperCase()}';
 
@@ -116,6 +119,8 @@ class AppSettings {
     this.previewPlacement = PreviewPlacement.right,
     this.columnWidths = const TimelineColumnWidths(),
     this.laneColors = defaultLaneColors,
+    this.previewWidth = 288,
+    this.previewHeight = 280,
   });
 
   /// The neon palette, as stored.
@@ -149,6 +154,10 @@ class AppSettings {
   final TimelineColumnWidths columnWidths;
   final List<String> laneColors;
 
+  /// The detail panel's size, per placement axis.
+  final double previewWidth;
+  final double previewHeight;
+
   /// The palette to hand [AvatarService]; a damaged entry drops the whole list
   /// back to the default rather than painting one rail wrong.
   List<Color> get laneColorValues {
@@ -163,11 +172,15 @@ class AppSettings {
     PreviewPlacement? previewPlacement,
     TimelineColumnWidths? columnWidths,
     List<String>? laneColors,
+    double? previewWidth,
+    double? previewHeight,
   }) => AppSettings(
     showAvatars: showAvatars ?? this.showAvatars,
     previewPlacement: previewPlacement ?? this.previewPlacement,
     columnWidths: columnWidths ?? this.columnWidths,
     laneColors: laneColors ?? this.laneColors,
+    previewWidth: previewWidth ?? this.previewWidth,
+    previewHeight: previewHeight ?? this.previewHeight,
   );
 
   factory AppSettings.fromJson(Object? value) {
@@ -192,6 +205,8 @@ class AppSettings {
       },
       columnWidths: TimelineColumnWidths.fromJson(value['columnWidths']),
       laneColors: valid ? laneColors : defaultLaneColors,
+      previewWidth: _clamped(value['previewWidth'], 288, 240, 560),
+      previewHeight: _clamped(value['previewHeight'], 280, 200, 480),
     );
   }
 
@@ -200,6 +215,8 @@ class AppSettings {
     'previewPlacement': previewPlacement.name,
     'columnWidths': columnWidths.toJson(),
     'laneColors': laneColors,
+    'previewWidth': previewWidth,
+    'previewHeight': previewHeight,
   };
 
   @override
@@ -208,7 +225,9 @@ class AppSettings {
       showAvatars == other.showAvatars &&
       previewPlacement == other.previewPlacement &&
       columnWidths == other.columnWidths &&
-      listEquals(laneColors, other.laneColors);
+      listEquals(laneColors, other.laneColors) &&
+      previewWidth == other.previewWidth &&
+      previewHeight == other.previewHeight;
 
   @override
   int get hashCode => Object.hash(
@@ -216,6 +235,8 @@ class AppSettings {
     previewPlacement,
     columnWidths,
     Object.hashAll(laneColors),
+    previewWidth,
+    previewHeight,
   );
 }
 

@@ -4283,6 +4283,305 @@ void main() {
       findsNothing,
     );
   });
+  // ------------------------------------------------------------------ A1
+  testWidgets('the hash rule is an inset 3px strip', (tester) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          workingTree: () async => workingTreeCommit('1'),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    for (final index in [0, 1]) {
+      final rule = find.byKey(Key('hash-rule-$index'));
+      expect(rule, findsOneWidget, reason: 'row $index');
+      final rect = tester.getRect(rule);
+      expect(rect.width, 3);
+      expect(rect.height, 34);
+      // 1px shy of the row at both ends.
+      final row = tester.getRect(find.byKey(Key('graph-cell-$index')));
+      expect(rect.top - row.top, 1);
+      expect(row.bottom - rect.bottom, 1);
+      expect(
+        (tester.widget<ColoredBox>(
+          find.descendant(of: rule, matching: find.byType(ColoredBox)),
+        )).color,
+        AvatarService.branchColor(0),
+      );
+    }
+    // A date heading has no rule of its own.
+    expect(find.byKey(const Key('hash-rule--1')), findsNothing);
+  });
+
+  // ------------------------------------------------------------------ A2
+  testWidgets('each modal ref copies its full name', (tester) async {
+    const long = 'feature/copy-me-in-full';
+    final copied = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copied.add(
+              (call.arguments as Map<Object?, Object?>)['text']! as String,
+            );
+          }
+          return null;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null),
+    );
+
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [
+            commit('first', 'first commit'),
+            commit(
+              'many',
+              'many refs',
+              refs: const [
+                GitRef(name: 'main', isHead: true),
+                GitRef(name: long),
+              ],
+            ),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+
+    // The modal takes the tap itself, so the row underneath keeps its selection.
+    await tester.tap(find.byKey(Key('copy-ref-$long')));
+    await tester.pumpAndSettle();
+    expect(copied, [long]);
+    expect(find.byKey(const Key('selected-row-many')), findsOneWidget);
+    // It answers with a check, then goes back to the copy glyph.
+    expect(
+      tester
+          .widget<Icon>(
+            find.descendant(
+              of: find.byKey(Key('copy-ref-$long')),
+              matching: find.byType(Icon),
+            ),
+          )
+          .icon,
+      Icons.check,
+    );
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<Icon>(
+            find.descendant(
+              of: find.byKey(Key('copy-ref-$long')),
+              matching: find.byType(Icon),
+            ),
+          )
+          .icon,
+      Icons.copy_outlined,
+    );
+  });
+
+  // ------------------------------------------------------------------ A3/A5
+  testWidgets('the preview is selectable, clickable, and reads bigger', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          files: (_, _) async => const [
+            GitFileChange(
+              path: 'lib/a.dart',
+              status: 'M',
+              additions: 1,
+              deletions: 1,
+            ),
+            GitFileChange(
+              path: 'lib/b.dart',
+              status: 'A',
+              additions: 2,
+              deletions: 0,
+            ),
+          ],
+          diff: (_, _, path, _) async => [
+            DiffLine(kind: DiffLineKind.add, text: '$path body', newNumber: 1),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    final preview = find.byKey(const Key('preview-panel'));
+    // Every preview text sits under one SelectionArea.
+    expect(
+      find.ancestor(
+        of: find.descendant(of: preview, matching: find.text('first commit')),
+        matching: find.byType(SelectionArea),
+      ),
+      findsOneWidget,
+    );
+    double sizeOf(String label) => tester
+        .widgetList<Text>(
+          find.descendant(of: preview, matching: find.text(label)),
+        )
+        .first
+        .style!
+        .fontSize!;
+    expect(sizeOf('Commit & Diff'), 15);
+    expect(sizeOf('first commit'), 18);
+    expect(sizeOf('commit 1'), 15);
+    expect(sizeOf('Cam Committer'), 18);
+    expect(sizeOf('2 files changed'), 15);
+    expect(sizeOf('lib/a.dart'), 15);
+    expect(sizeOf('+lib/a.dart body'), 14);
+
+    // A file row still switches the diff despite the selection layer.
+    await tester.tap(
+      find.descendant(of: preview, matching: find.text('lib/b.dart')),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(of: preview, matching: find.text('+lib/b.dart body')),
+      findsOneWidget,
+    );
+  });
+
+  // ------------------------------------------------------------------ A4
+  testWidgets('the preview panel resizes, persists, and clamps', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1600, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    ({double width, double height})? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+          ),
+          controller: controller,
+          onPreviewSizeChanged: (size) => saved = size,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    double previewWidth() =>
+        tester.getSize(find.byKey(const Key('preview-panel'))).width;
+    double titleWidth() =>
+        tester.getSize(find.byKey(const Key('commit-header'))).width;
+    expect(previewWidth(), 288);
+    final title = titleWidth();
+
+    // Dragging the inner edge left widens the panel; the timeline gives back
+    // exactly that much.
+    await tester.drag(
+      find.byKey(const Key('preview-resizer')),
+      const Offset(-60, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(previewWidth(), 348);
+    expect(saved?.width, 348);
+    expect(titleWidth(), title - 60);
+
+    // Clamps at both ends of the design range.
+    await tester.drag(
+      find.byKey(const Key('preview-resizer')),
+      const Offset(-400, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(previewWidth(), 560);
+    await tester.drag(
+      find.byKey(const Key('preview-resizer')),
+      const Offset(600, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(previewWidth(), 240);
+    expect(saved?.width, 240);
+
+    // Round-trips with the rest of the settings, clamped on the way in.
+    expect(const AppSettings().previewWidth, 288);
+    expect(const AppSettings().previewHeight, 280);
+    expect(
+      AppSettings.fromJson(
+        const AppSettings(previewWidth: 400, previewHeight: 300).toJson(),
+      ).previewWidth,
+      400,
+    );
+    expect(
+      AppSettings.fromJson(<String, dynamic>{
+        'previewWidth': 40,
+        'previewHeight': 4000,
+      }).previewWidth,
+      240,
+    );
+    expect(
+      AppSettings.fromJson(<String, dynamic>{
+        'previewWidth': 40,
+        'previewHeight': 4000,
+      }).previewHeight,
+      480,
+    );
+  });
+
+  // ------------------------------------------------------------------ A6
+  testWidgets('local branches follow their tips down the timeline', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [
+            commit('newest', 'newest commit'),
+            commit('middle', 'middle commit'),
+            commit('oldest', 'oldest commit'),
+          ],
+          refs: const RepoRefs(
+            local: ['main', 'zeta', 'alpha', 'gone'],
+            current: 'main',
+            tips: {
+              'main': 'middle',
+              'zeta': 'newest',
+              'alpha': 'oldest',
+              'gone': 'unloaded',
+            },
+          ),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    double top(String name) =>
+        tester.getRect(find.byKey(Key('sidebar-ref-$name'))).top;
+    // Checked-out first, then by tip position, then the unloaded tip.
+    expect(top('main'), lessThan(top('zeta')));
+    expect(top('zeta'), lessThan(top('alpha')));
+    expect(top('alpha'), lessThan(top('gone')));
+  });
 }
 
 /// Points along [path], for probing where a rail actually runs.

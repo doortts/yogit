@@ -185,8 +185,11 @@ class TimelineScreen extends StatefulWidget {
     this.showRemoteAvatars = true,
     this.preferredPreviewPlacement = PreviewPlacement.right,
     this.columnWidths = const TimelineColumnWidths(),
+    this.previewWidth = 288,
+    this.previewHeight = 280,
     this.onPreviewPlacementChanged,
     this.onColumnWidthsChanged,
+    this.onPreviewSizeChanged,
     super.key,
   });
 
@@ -201,8 +204,11 @@ class TimelineScreen extends StatefulWidget {
   final bool showRemoteAvatars;
   final PreviewPlacement preferredPreviewPlacement;
   final TimelineColumnWidths columnWidths;
+  final double previewWidth;
+  final double previewHeight;
   final ValueChanged<PreviewPlacement>? onPreviewPlacementChanged;
   final ValueChanged<TimelineColumnWidths>? onColumnWidthsChanged;
+  final ValueChanged<({double width, double height})>? onPreviewSizeChanged;
 
   @override
   State<TimelineScreen> createState() => _TimelineScreenState();
@@ -212,8 +218,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
   static const _pageSize = 500;
   static const _rowHeight = 36.0;
   static const _sidebarRange = (min: 120.0, max: 320.0);
-  static const _sidePreviewWidth = 288.0;
-  static const _bottomPreviewHeight = 280.0;
+  static const _previewWidthRange = (min: 240.0, max: 560.0);
+  static const _previewHeightRange = (min: 200.0, max: 480.0);
 
   final _focusNode = FocusNode();
   final _timelineKey = GlobalKey();
@@ -250,6 +256,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
   late double? _commitWidth = widget.columnWidths.commit;
   late double? _graphWidth = widget.columnWidths.graph;
   late double _sidebarWidth = widget.columnWidths.sidebar;
+  late double _previewWidth = widget.previewWidth;
+  late double _previewHeight = widget.previewHeight;
 
   /// Deepest lane the viewport has shown so far. It only grows, so the column
   /// never shrinks under the user mid-session; a new repository remounts.
@@ -287,6 +295,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
       _commitWidth = widget.columnWidths.commit;
       _graphWidth = widget.columnWidths.graph;
       _sidebarWidth = widget.columnWidths.sidebar;
+    }
+    if (widget.previewWidth != oldWidget.previewWidth ||
+        widget.previewHeight != oldWidget.previewHeight) {
+      _previewWidth = widget.previewWidth;
+      _previewHeight = widget.previewHeight;
     }
   }
 
@@ -600,7 +613,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       child: KeyedSubtree(key: _timelineKey, child: _timeline()),
     );
     if (placement == PreviewPlacement.bottom) {
-      final extent = math.min(_bottomPreviewHeight, constraints.maxHeight);
+      final extent = math.min(_previewHeight, constraints.maxHeight);
       return Column(
         key: const Key('preview-layout-bottom'),
         children: [
@@ -616,9 +629,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     }
     final onLeft = placement == PreviewPlacement.left;
     final beside = onLeft || placement == PreviewPlacement.right;
-    final extent = beside
-        ? math.min(_sidePreviewWidth, constraints.maxWidth)
-        : 0.0;
+    final extent = beside ? math.min(_previewWidth, constraints.maxWidth) : 0.0;
     final preview = _animatedPreview(
       axis: Axis.horizontal,
       extent: extent,
@@ -880,15 +891,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 8),
             children: [
               // The checked-out branch leads the local list.
-              ..._sidebarSection(
-                'LOCAL',
-                [
-                  if (_refs.local.contains(_refs.current)) _refs.current!,
-                  ..._refs.local.where((name) => name != _refs.current),
-                ],
-                _refs.current,
-                null,
-              ),
+              ..._sidebarSection('LOCAL', _localBranches, _refs.current, null),
               ..._sidebarSection(
                 'REMOTE',
                 _refs.remote,
@@ -902,6 +905,32 @@ class _TimelineScreenState extends State<TimelineScreen> {
       ],
     ),
   );
+
+  /// Checked-out branch first, then by how far up the timeline each tip sits, so
+  /// the freshest work leads. A tip outside the loaded rows trails alphabetically.
+  List<String> get _localBranches {
+    final rest = [..._refs.local.where((name) => name != _refs.current)];
+    final rows = <String, int>{};
+    for (final name in rest) {
+      final tip = _refs.tips[name];
+      final row = _entries.indexWhere(
+        (entry) =>
+            entry.rowIndex >= 0 &&
+            (entry.row.commit.sha == tip ||
+                entry.row.commit.refs.any((ref) => ref.name == name)),
+      );
+      if (row >= 0) rows[name] = row;
+    }
+    rest.sort((a, b) {
+      final left = rows[a];
+      final right = rows[b];
+      if (left != null && right != null) return left.compareTo(right);
+      if (left != null) return -1;
+      if (right != null) return 1;
+      return a.compareTo(b);
+    });
+    return [if (_refs.local.contains(_refs.current)) _refs.current!, ...rest];
+  }
 
   Iterable<Widget> _sidebarSection(
     String heading,
@@ -1406,6 +1435,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   ),
                 ),
                 leftBorder: branchColor,
+                ruleKey: Key('hash-rule-${entry.rowIndex}'),
               ),
               _cell(
                 commitWidth,
@@ -1582,8 +1612,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
       final glyph = ref.isHead || ref.isTag ? 16.0 : 0.0;
       longest = math.max(longest, painter.width + glyph);
     }
-    // accent bar, its gap, the trailing gap and the box padding.
-    return math.min(longest + 2 + 7 + 8 + 16, _timelineViewportWidth - 16);
+    // accent bar, its gap, the copy button with its gaps, and the box padding.
+    return math.min(
+      longest + 2 + 7 + 6 + 16 + 4 + 16,
+      _timelineViewportWidth - 16,
+    );
   }
 
   /// The floating list of every ref on the selected row. It sits above the row
@@ -1620,45 +1653,46 @@ class _TimelineScreenState extends State<TimelineScreen> {
           left: 8,
           top: top,
           width: width,
-          child: IgnorePointer(
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              decoration: BoxDecoration(
-                color: _raised,
-                border: Border.all(color: _border),
-                borderRadius: BorderRadius.circular(8),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x66000000),
-                    blurRadius: 8,
-                    offset: Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (final ref in refs)
-                    SizedBox(
-                      height: 24,
-                      child: Row(
-                        children: [
-                          // A straight 2px bar, no rounding.
-                          Container(
-                            key: Key('modal-accent-${ref.name}'),
-                            width: 2,
-                            height: 20,
-                            color: color,
-                          ),
-                          const SizedBox(width: 7),
-                          _refGlyph(ref, color, false),
-                          _refName(ref, color, false, ellipsis: false),
-                          const SizedBox(width: 8),
-                        ],
-                      ),
+          // Only the box takes pointers; the rest of the overlay stays through.
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            decoration: BoxDecoration(
+              color: _raised,
+              border: Border.all(color: _border),
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x66000000),
+                  blurRadius: 8,
+                  offset: Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final ref in refs)
+                  SizedBox(
+                    height: 24,
+                    child: Row(
+                      children: [
+                        // A straight 2px bar, no rounding.
+                        Container(
+                          key: Key('modal-accent-${ref.name}'),
+                          width: 2,
+                          height: 20,
+                          color: color,
+                        ),
+                        const SizedBox(width: 7),
+                        _refGlyph(ref, color, false),
+                        _refName(ref, color, false, ellipsis: false),
+                        const SizedBox(width: 6),
+                        _CopyButton(text: ref.name, color: color),
+                        const SizedBox(width: 4),
+                      ],
                     ),
-                ],
-              ),
+                  ),
+              ],
             ),
           ),
         ),
@@ -1700,18 +1734,33 @@ class _TimelineScreenState extends State<TimelineScreen> {
       ? child
       : Tooltip(message: message, waitDuration: _tooltipDelay, child: child);
 
-  /// No hairlines anywhere: the hash column's 2px line color is the only rule.
-  Widget _cell(double width, Widget child, {Color? leftBorder}) => Container(
-    width: width,
-    padding: const EdgeInsets.symmetric(horizontal: 9),
-    alignment: Alignment.centerLeft,
-    decoration: leftBorder == null
-        ? null
-        : BoxDecoration(
-            border: Border(left: BorderSide(color: leftBorder, width: 2)),
+  /// No hairlines anywhere: the hash column's rule is the only line, a 3px strip
+  /// stopping 1px short top and bottom so stacked rows read apart.
+  Widget _cell(double width, Widget child, {Color? leftBorder, Key? ruleKey}) {
+    final cell = Container(
+      width: width,
+      padding: EdgeInsets.only(left: leftBorder == null ? 9 : 11, right: 9),
+      alignment: Alignment.centerLeft,
+      child: child,
+    );
+    if (leftBorder == null) return cell;
+    return SizedBox(
+      width: width,
+      child: Stack(
+        children: [
+          cell,
+          Positioned(
+            key: ruleKey,
+            left: 0,
+            top: 1,
+            bottom: 1,
+            width: 3,
+            child: ColoredBox(color: leftBorder),
           ),
-    child: child,
-  );
+        ],
+      ),
+    );
+  }
 
   // Left aligned: the footer sits inside the horizontally scrollable body, so
   // centering it across every column would push it out of view.
@@ -1761,6 +1810,57 @@ class _TimelineScreenState extends State<TimelineScreen> {
     builder: (context, _, _) => _previewFor(_selectedCommit),
   );
 
+  /// Drags the panel's inner edge. The stored size is what the open/close tween
+  /// targets, so resizing and animating stay in step.
+  Widget _previewResizer(PreviewPlacement placement) {
+    final vertical = placement == PreviewPlacement.bottom;
+    final handle = MouseRegion(
+      cursor: vertical
+          ? SystemMouseCursors.resizeRow
+          : SystemMouseCursors.resizeColumn,
+      child: GestureDetector(
+        key: const Key('preview-resizer'),
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragUpdate: vertical
+            ? null
+            : (details) => setState(() {
+                final delta = placement == PreviewPlacement.right
+                    ? -details.delta.dx
+                    : details.delta.dx;
+                _previewWidth = (_previewWidth + delta).clamp(
+                  _previewWidthRange.min,
+                  _previewWidthRange.max,
+                );
+              }),
+        onHorizontalDragEnd: vertical ? null : (_) => _savePreviewSize(),
+        onVerticalDragUpdate: vertical
+            ? (details) => setState(() {
+                _previewHeight = (_previewHeight - details.delta.dy).clamp(
+                  _previewHeightRange.min,
+                  _previewHeightRange.max,
+                );
+              })
+            : null,
+        onVerticalDragEnd: vertical ? (_) => _savePreviewSize() : null,
+      ),
+    );
+    return vertical
+        ? Positioned(left: 0, right: 0, top: 0, height: 8, child: handle)
+        : Positioned(
+            left: placement == PreviewPlacement.right ? 0 : null,
+            right: placement == PreviewPlacement.left ? 0 : null,
+            top: 0,
+            bottom: 0,
+            width: 8,
+            child: handle,
+          );
+  }
+
+  void _savePreviewSize() => widget.onPreviewSizeChanged?.call((
+    width: _previewWidth,
+    height: _previewHeight,
+  ));
+
   Widget _previewFor(GitCommit? commit) {
     final placement = _previewController.previewPlacement;
     return Container(
@@ -1778,69 +1878,86 @@ class _TimelineScreenState extends State<TimelineScreen> {
               : BorderSide.none,
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      // Everything in here is text worth copying; taps still reach the buttons.
+      child: Stack(
         children: [
-          _previewHeader(commit),
-          Expanded(
-            child: commit == null
-                ? const Center(
-                    child: Text(
-                      'No commit selected',
-                      style: TextStyle(color: _muted, fontSize: 11),
-                    ),
-                  )
-                : _previewBody(commit, placement == PreviewPlacement.bottom),
+          SelectionArea(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _previewHeader(commit),
+                Expanded(
+                  child: commit == null
+                      ? const Center(
+                          child: Text(
+                            'No commit selected',
+                            style: TextStyle(color: _muted, fontSize: 16),
+                          ),
+                        )
+                      : _previewBody(
+                          commit,
+                          placement == PreviewPlacement.bottom,
+                        ),
+                ),
+              ],
+            ),
           ),
+          _previewResizer(placement),
         ],
       ),
     );
   }
 
   Widget _previewHeader(GitCommit? commit) => Container(
-    height: 29,
+    height: 38,
     padding: const EdgeInsets.only(left: 12, right: 6),
     decoration: const BoxDecoration(
       border: Border(bottom: BorderSide(color: _border)),
     ),
     child: Row(
       children: [
-        const Flexible(
+        // Expanded, not Flexible plus a Spacer: the label is what yields when the
+        // panel is dragged narrow.
+        const Expanded(
           child: Text(
             'Commit & Diff',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: _muted,
-              fontSize: 11,
+              fontSize: 15,
               fontWeight: FontWeight.w500,
               letterSpacing: 0.66,
             ),
           ),
         ),
-        const Spacer(),
         TextButton(
           style: TextButton.styleFrom(
             foregroundColor: _muted,
             padding: const EdgeInsets.symmetric(horizontal: 6),
-            minimumSize: const Size(0, 22),
+            minimumSize: const Size(0, 28),
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            textStyle: const TextStyle(fontSize: 10),
+            textStyle: const TextStyle(fontSize: 13),
           ),
           onPressed: commit == null ? null : _openFullDiff,
           child: const Text('Open full diff'),
         ),
         const SizedBox(width: 6),
-        Text(
-          commit == null
-              ? '—'
-              : commit.isWorkingTree
-              ? 'WIP'
-              : commit.shortSha,
-          style: const TextStyle(
-            color: _muted,
-            fontSize: 10,
-            fontFamily: 'monospace',
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 64),
+          child: Text(
+            commit == null
+                ? '—'
+                : commit.isWorkingTree
+                ? 'WIP'
+                : commit.shortSha,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: _muted,
+              fontSize: 14,
+              fontFamily: 'monospace',
+            ),
           ),
         ),
       ],
@@ -1869,11 +1986,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: _text,
-                fontSize: 12,
+                fontSize: 18,
                 fontWeight: FontWeight.w500,
               ),
             ),
-            const SizedBox(height: 7),
+            const SizedBox(height: 9),
             Text(
               commit.isWorkingTree
                   ? 'Working tree changes'
@@ -1882,7 +1999,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: _muted,
-                fontSize: 10,
+                fontSize: 15,
                 fontFamily: 'monospace',
               ),
             ),
@@ -1900,7 +2017,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               ? const Center(
                   child: Text(
                     'Select a file to load its diff.',
-                    style: TextStyle(color: _muted, fontSize: 10),
+                    style: TextStyle(color: _muted, fontSize: 15),
                   ),
                 )
               : _previewDiff(commit, selectedPath),
@@ -1969,7 +2086,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: _text,
-                  fontSize: 12,
+                  fontSize: 18,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -1979,7 +2096,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     : 'Committer · ${_socialTime(commit.committerTimestamp)}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: _muted, fontSize: 10),
+                style: const TextStyle(color: _muted, fontSize: 15),
               ),
               // The working tree has no commit, so it has no exact moment.
               if (!commit.isWorkingTree)
@@ -1988,7 +2105,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   maxLines: 1,
                   style: const TextStyle(
                     color: _muted,
-                    fontSize: 11,
+                    fontSize: 16,
                     fontFamily: 'monospace',
                   ),
                 ),
@@ -2006,17 +2123,21 @@ class _TimelineScreenState extends State<TimelineScreen> {
       padding: const EdgeInsets.only(bottom: 9),
       child: Row(
         children: [
-          Text(
-            '${changes?.length ?? 0} '
-            '${changes?.length == 1 ? 'file' : 'files'} changed',
-            style: const TextStyle(color: _muted, fontSize: 10),
+          Flexible(
+            child: Text(
+              '${changes?.length ?? 0} '
+              '${changes?.length == 1 ? 'file' : 'files'} changed',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: _muted, fontSize: 15),
+            ),
           ),
           const Spacer(),
           Text(
             '+${total((file) => file.additions)}',
             style: const TextStyle(
               color: _main,
-              fontSize: 10,
+              fontSize: 15,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -2025,7 +2146,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             '−${total((file) => file.deletions)}',
             style: const TextStyle(
               color: _hash,
-              fontSize: 10,
+              fontSize: 15,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -2041,12 +2162,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
     String? selectedPath,
   ) => SizedBox(
     key: const Key('preview-files'),
-    height: 92,
+    height: 124,
     child: failed
         ? const Center(
             child: Text(
               'Could not load files',
-              style: TextStyle(color: Color(0xFFF29AB2), fontSize: 10),
+              style: TextStyle(color: Color(0xFFF29AB2), fontSize: 15),
             ),
           )
         : changes == null
@@ -2060,11 +2181,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ? const Center(
             child: Text(
               'No changed files',
-              style: TextStyle(color: _muted, fontSize: 10),
+              style: TextStyle(color: _muted, fontSize: 15),
             ),
           )
         : ListView.builder(
-            itemExtent: 29,
+            itemExtent: 34,
             itemCount: changes.length,
             itemBuilder: (context, index) {
               final file = changes[index];
@@ -2083,8 +2204,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     children: [
                       Container(
                         key: Key('preview-state-${file.path}'),
-                        width: 18,
-                        height: 18,
+                        width: 24,
+                        height: 24,
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
                           color: fileStateChipColor(file.status).background,
@@ -2095,7 +2216,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                           maxLines: 1,
                           style: TextStyle(
                             color: fileStateChipColor(file.status).letter,
-                            fontSize: 9,
+                            fontSize: 13,
                           ),
                         ),
                       ),
@@ -2107,7 +2228,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: selected ? _text : _muted,
-                            fontSize: 10,
+                            fontSize: 15,
                             fontFamily: 'monospace',
                           ),
                         ),
@@ -2136,7 +2257,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: _text,
-              fontSize: 10,
+              fontSize: 15,
               fontFamily: 'monospace',
             ),
           ),
@@ -2154,7 +2275,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 return const Center(
                   child: Text(
                     'Could not load diff',
-                    style: TextStyle(color: Color(0xFFF29AB2), fontSize: 10),
+                    style: TextStyle(color: Color(0xFFF29AB2), fontSize: 15),
                   ),
                 );
               }
@@ -2167,7 +2288,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 );
               }
               return ListView.builder(
-                itemExtent: 18,
+                itemExtent: 24,
                 itemCount: lines.length,
                 itemBuilder: (context, index) {
                   final line = lines[index];
@@ -2198,7 +2319,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                                 line.kind == DiffLineKind.header
                             ? _muted
                             : _text,
-                        fontSize: 9,
+                        fontSize: 14,
                         fontFamily: 'monospace',
                       ),
                     ),
@@ -2228,6 +2349,60 @@ class _TimelineScreenState extends State<TimelineScreen> {
       ),
     );
   }
+}
+
+/// Copies a ref name and answers with a check for a moment, so the click has
+/// feedback without a snackbar.
+class _CopyButton extends StatefulWidget {
+  const _CopyButton({required this.text, required this.color});
+
+  final String text;
+  final Color color;
+
+  @override
+  State<_CopyButton> createState() => _CopyButtonState();
+}
+
+class _CopyButtonState extends State<_CopyButton> {
+  Timer? _reset;
+  var _copied = false;
+  var _hovered = false;
+
+  @override
+  void dispose() {
+    _reset?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.text));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    _reset?.cancel();
+    _reset = Timer(const Duration(seconds: 1), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    onEnter: (_) => setState(() => _hovered = true),
+    onExit: (_) => setState(() => _hovered = false),
+    child: GestureDetector(
+      key: Key('copy-ref-${widget.text}'),
+      behavior: HitTestBehavior.opaque,
+      onTap: () => unawaited(_copy()),
+      child: Icon(
+        _copied ? Icons.check : Icons.copy_outlined,
+        size: 16,
+        color: _copied
+            ? widget.color
+            : _hovered
+            ? _text
+            : _muted,
+      ),
+    ),
+  );
 }
 
 /// Rebuilds one row only when *its* selected or hovered state flips. Every row
