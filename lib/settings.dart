@@ -110,8 +110,22 @@ class AppSettings {
     this.laneColors = defaultLaneColors,
   });
 
-  /// The GitHub dark label palette, as stored.
+  /// The neon palette, as stored.
   static const defaultLaneColors = [
+    '#FF2D95',
+    '#00E5FF',
+    '#39FF14',
+    '#FFF01F',
+    '#FF6E27',
+    '#B026FF',
+    '#04D9FF',
+    '#FF3131',
+  ];
+
+  /// The palette that used to be the default. A settings file still carrying it
+  /// unchanged never chose it, so it migrates to [defaultLaneColors]; an edited
+  /// palette is kept as it is.
+  static const _replacedLaneColors = [
     '#F85149',
     '#DB6D28',
     '#D29922',
@@ -150,13 +164,15 @@ class AppSettings {
 
   factory AppSettings.fromJson(Object? value) {
     if (value is! Map<String, dynamic>) return const AppSettings();
-    final stored = value['laneColors'];
-    final laneColors = stored is List
-        ? [for (final entry in stored) '$entry']
-        : const <String>[];
+    final entries = value['laneColors'];
+    final laneColors = [
+      if (entries is List)
+        for (final entry in entries) formatHexColor('$entry'),
+    ];
     final valid =
         laneColors.isNotEmpty &&
-        laneColors.every((entry) => parseHexColor(entry) != null);
+        laneColors.every((entry) => parseHexColor(entry) != null) &&
+        !listEquals(laneColors, _replacedLaneColors);
     return AppSettings(
       showAvatars: value['showAvatars'] is bool
           ? value['showAvatars'] as bool
@@ -167,9 +183,7 @@ class AppSettings {
         _ => PreviewPlacement.right,
       },
       columnWidths: TimelineColumnWidths.fromJson(value['columnWidths']),
-      laneColors: valid
-          ? [for (final entry in laneColors) formatHexColor(entry)]
-          : defaultLaneColors,
+      laneColors: valid ? laneColors : defaultLaneColors,
     );
   }
 

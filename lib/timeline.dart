@@ -307,18 +307,31 @@ class _TimelineScreenState extends State<TimelineScreen> {
     _scrollToSelection(animate: animate);
   }
 
+  /// The selection walks the visible rows without moving the list; only when it
+  /// would step past an edge does the list scroll, and then just far enough to
+  /// hold the row flush against that edge.
   void _scrollToSelection({bool animate = true}) {
     if (!_scrollController.hasClients) return;
-    final target = (_selectedIndex.value * _rowHeight).clamp(
-      _scrollController.position.minScrollExtent,
-      _scrollController.position.maxScrollExtent,
+    final position = _scrollController.position;
+    final rowTop = _selectedIndex.value * _rowHeight;
+    final rowBottom = rowTop + _rowHeight;
+    final double? target =
+        rowBottom > position.pixels + position.viewportDimension
+        ? rowBottom - position.viewportDimension
+        : rowTop < position.pixels
+        ? rowTop
+        : null;
+    if (target == null) return;
+    final clamped = target.clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
     );
     if (!animate) {
-      _scrollController.jumpTo(target);
+      _scrollController.jumpTo(clamped);
       return;
     }
     _scrollController.animateTo(
-      target,
+      clamped,
       duration: const Duration(milliseconds: 100),
       curve: Curves.easeOut,
     );
@@ -863,7 +876,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: _muted,
-                fontSize: 11,
+                fontSize: 12,
                 fontFamily: 'monospace',
                 fontWeight: FontWeight.w500,
                 letterSpacing: 0.66,
@@ -993,8 +1006,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
     );
     final avatarSize =
         painter.laneSpacing < CommitGraphPainter.compressedAvatarSpacing
-        ? 14.0
-        : 18.0;
+        ? 18.0
+        : 22.0;
     return MouseRegion(
       onEnter: (_) => _hoverIndex.value = index,
       onExit: (_) {
@@ -1040,8 +1053,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
                           avatarService: widget.avatarService,
                           showRemoteAvatars: widget.showRemoteAvatars,
                           size: avatarSize,
-                          ringColor: branchColor,
-                          ringWidth: CommitGraphPainter.railWidth,
                         ),
                       ),
                   ],
@@ -1053,7 +1064,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   commit.isWorkingTree ? '·······' : commit.shortSha,
                   style: TextStyle(
                     color: selected ? _text : _hash,
-                    fontSize: 11,
+                    fontSize: 12,
                     fontFamily: 'monospace',
                     fontWeight: FontWeight.w500,
                   ),
@@ -1066,7 +1077,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   commit.subject,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: _text, fontSize: 13),
+                  style: const TextStyle(color: _text, fontSize: 14),
                 ),
               ),
               _cell(
@@ -1079,7 +1090,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: selected ? _text : _muted,
-                    fontSize: 11,
+                    fontSize: 12,
                   ),
                 ),
               ),
@@ -1088,7 +1099,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 commit.isWorkingTree
                     ? const Text(
                         '—',
-                        style: TextStyle(color: _muted, fontSize: 11),
+                        style: TextStyle(color: _muted, fontSize: 12),
                       )
                     : Row(
                         children: [
@@ -1107,7 +1118,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                                 color: selected
                                     ? _text
                                     : Color.lerp(_text, _main, 0.12),
-                                fontSize: 11,
+                                fontSize: 12,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
@@ -1196,7 +1207,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   ref.isHead ? '✓' : '◇',
                   style: TextStyle(
                     color: selected ? _text : color,
-                    fontSize: 9,
+                    fontSize: 10,
                   ),
                 ),
               ),
@@ -1205,7 +1216,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 ref.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: selected ? _text : color, fontSize: 10),
+                style: TextStyle(color: selected ? _text : color, fontSize: 11),
               ),
             ),
             // Branch chips carry their tip committer; tags belong to nobody.
@@ -1213,7 +1224,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               const SizedBox(width: 4),
               _committerAvatar(
                 commit,
-                16,
+                20,
                 key: Key('ref-avatar-${commit.sha}-${ref.name}'),
               ),
             ],
@@ -1481,14 +1492,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
       children: [
         commit.isWorkingTree
             ? Container(
-                width: 38,
-                height: 38,
+                width: 42,
+                height: 42,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   border: Border.all(color: _border),
                 ),
               )
-            : _committerAvatar(commit, 38),
+            : _committerAvatar(commit, 42),
         const SizedBox(width: 10),
         Expanded(
           child: Column(

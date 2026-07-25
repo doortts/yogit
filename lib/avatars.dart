@@ -94,17 +94,16 @@ class AvatarService {
     this.runner = runProcess,
   });
 
-  /// GitHub dark (Primer) label colors: red, orange, yellow, green, cyan, blue,
-  /// purple, pink.
+  /// Neon: pink, cyan, green, yellow, orange, purple, blue, red.
   static const defaultColors = [
-    Color(0xFFF85149),
-    Color(0xFFDB6D28),
-    Color(0xFFD29922),
-    Color(0xFF3FB950),
-    Color(0xFF39C5CF),
-    Color(0xFF58A6FF),
-    Color(0xFFBC8CFF),
-    Color(0xFFF778BA),
+    Color(0xFFFF2D95),
+    Color(0xFF00E5FF),
+    Color(0xFF39FF14),
+    Color(0xFFFFF01F),
+    Color(0xFFFF6E27),
+    Color(0xFFB026FF),
+    Color(0xFF04D9FF),
+    Color(0xFFFF3131),
   ];
 
   /// The palette every rail, ring, chip and dot reads. Settings replace it.
@@ -320,20 +319,13 @@ class IdentityAvatar extends StatelessWidget {
   const IdentityAvatar({
     required this.identity,
     this.remoteAvatar,
-    this.size = 18,
-    this.ringColor,
-    this.ringWidth = 1,
+    this.size = 22,
     super.key,
   });
 
   final GitIdentity identity;
   final RemoteAvatar? remoteAvatar;
   final double size;
-
-  /// Graph nodes ring the avatar in the lane color; other uses keep the
-  /// identity color.
-  final Color? ringColor;
-  final double ringWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -345,9 +337,9 @@ class IdentityAvatar extends StatelessWidget {
       alignment: Alignment.center,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        // A filled identity-colored disc: a photo covers it, initials sit on it.
+        // A filled identity-colored disc, no outline: a photo covers it,
+        // initials sit on it.
         color: color,
-        border: Border.all(color: ringColor ?? color, width: ringWidth),
       ),
       clipBehavior: Clip.antiAlias,
       child: avatar == null
@@ -391,9 +383,7 @@ class CommitAvatarStack extends StatelessWidget {
     required this.commit,
     this.avatarService,
     this.showRemoteAvatars = true,
-    this.size = 18,
-    this.ringColor,
-    this.ringWidth = 1,
+    this.size = 22,
     super.key,
   });
 
@@ -401,8 +391,6 @@ class CommitAvatarStack extends StatelessWidget {
   final AvatarService? avatarService;
   final bool showRemoteAvatars;
   final double size;
-  final Color? ringColor;
-  final double ringWidth;
 
   bool get _hasSeparateCommitter =>
       commit.author.name != commit.committer.name ||
@@ -434,8 +422,6 @@ class CommitAvatarStack extends StatelessWidget {
                 identity: commit.committer,
                 remoteAvatar: avatars?.committer,
                 size: size,
-                ringColor: ringColor,
-                ringWidth: ringWidth,
               ),
             ),
           Positioned(
@@ -445,8 +431,6 @@ class CommitAvatarStack extends StatelessWidget {
               identity: commit.author,
               remoteAvatar: avatars?.author,
               size: size,
-              ringColor: ringColor,
-              ringWidth: ringWidth,
             ),
           ),
         ],

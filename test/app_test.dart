@@ -146,6 +146,67 @@ void main() {
     }
   });
 
+  testWidgets('keyboard selection scrolls only at the viewport edges', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async =>
+              List.generate(60, (index) => commit('$index', 'commit $index')),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    final position = tester
+        .state<ScrollableState>(
+          find.descendant(
+            of: find.byKey(const Key('timeline-list')),
+            matching: find.byType(Scrollable),
+          ),
+        )
+        .position;
+    final viewport = position.viewportDimension;
+
+    // Moving inside the viewport leaves the list where it is.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(position.pixels, 0);
+
+    var index = 1;
+    while (position.pixels == 0 && index < 40) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      index++;
+    }
+
+    // Nothing moved until the selected row's bottom passed the viewport bottom,
+    // and then only far enough to hold the row flush against that edge.
+    expect(index * 36.0, greaterThan(viewport - 36));
+    expect(position.pixels, (index + 1) * 36 - viewport);
+    final anchored = position.pixels;
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    index++;
+    expect(position.pixels, anchored + 36);
+
+    // Upward is symmetric: the row stays visible without a scroll until it would
+    // pass the top edge, and the walk ends with the list back at the top.
+    while (index > 0) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pumpAndSettle();
+      index--;
+      expect(position.pixels, lessThanOrEqualTo(index * 36.0));
+      expect(
+        position.pixels,
+        greaterThanOrEqualTo((index + 1) * 36.0 - viewport),
+      );
+    }
+    expect(position.pixels, 0);
+    expect(find.byKey(const Key('selected-row-0')), findsOneWidget);
+  });
+
   testWidgets('holding an arrow key keeps moving the selection', (
     tester,
   ) async {
@@ -225,10 +286,10 @@ void main() {
     }
     final header = tester.widget<Text>(find.text('GRAPH'));
     expect(header.style?.fontFamily, 'monospace');
-    expect(header.style?.fontSize, 11);
+    expect(header.style?.fontSize, 12);
     final commitHeader = tester.widget<Text>(find.text('COMMIT TITLE'));
     expect(commitHeader.style?.fontFamily, 'monospace');
-    expect(commitHeader.style?.fontSize, 11);
+    expect(commitHeader.style?.fontSize, 12);
     expect(find.text('SOCIAL TIME'), findsOneWidget);
     expect(find.text('NAME'), findsOneWidget);
 
@@ -886,10 +947,8 @@ void main() {
         matching: find.byType(CommitAvatarStack),
       ),
     );
-    expect(stack.size, 18);
-    expect(stack.ringWidth, 2.0);
-    // The node ring follows the branch line, not the committer.
-    expect(stack.ringColor, AvatarService.branchColor(painterAt(1).row.branch));
+    expect(stack.size, 22);
+    // The merge dot and every other accent still follow the branch line.
     expect(
       painterAt(0).committerColor,
       AvatarService.branchColor(painterAt(0).row.branch),
@@ -1184,7 +1243,7 @@ void main() {
     expect(painterAt(0).compact, isFalse);
     expect(painterAt(0).laneSpacing, 30);
     expect(painterAt(1).laneX(1) - painterAt(1).laneX(0), 30);
-    expect(avatarSize(1), 18);
+    expect(avatarSize(1), 22);
 
     // Stage 2: the lanes squeeze together and the node avatar shrinks with them.
     await tester.pumpWidget(screen(70));
@@ -1197,7 +1256,7 @@ void main() {
       painterAt(0).transitionPath(0, 2, 18, const Size(70, 36)).getBounds(),
       const Rect.fromLTRB(28, 18, 58, 54),
     );
-    expect(avatarSize(1), 14);
+    expect(avatarSize(1), 18);
 
     // Stage 3: every lane collapses onto the inset and the curves are dropped.
     await tester.pumpWidget(screen(56));
@@ -1214,7 +1273,7 @@ void main() {
       top: 0.0,
       bottom: 18.0,
     ));
-    expect(avatarSize(1), 14);
+    expect(avatarSize(1), 18);
   });
 
   testWidgets('column resizers move by 8px on arrow keys and clamp', (
@@ -1496,6 +1555,15 @@ void main() {
       find.descendant(of: preview, matching: find.text('first commit')),
       findsOneWidget,
     );
+    // The person block grew with every other avatar.
+    expect(
+      tester
+          .widgetList<IdentityAvatar>(
+            find.descendant(of: preview, matching: find.byType(IdentityAvatar)),
+          )
+          .map((avatar) => avatar.size),
+      contains(42.0),
+    );
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
@@ -1511,9 +1579,9 @@ void main() {
 
   test('lane colors round-trip, and a damaged palette falls back', () {
     expect(AvatarService.defaultColors, hasLength(8));
-    expect(AvatarService.defaultColors.first, const Color(0xFFF85149));
-    expect(AvatarService.defaultColors.last, const Color(0xFFF778BA));
-    expect(AppSettings.defaultLaneColors.first, '#F85149');
+    expect(AvatarService.defaultColors.first, const Color(0xFFFF2D95));
+    expect(AvatarService.defaultColors.last, const Color(0xFFFF3131));
+    expect(AppSettings.defaultLaneColors.first, '#FF2D95');
     expect(parseHexColor('#39C5CF'), const Color(0xFF39C5CF));
     expect(parseHexColor('39c5cf'), const Color(0xFF39C5CF));
     expect(parseHexColor('#39C5C'), isNull);
@@ -1545,6 +1613,35 @@ void main() {
       const AppSettings(laneColors: ['bad']).laneColorValues,
       AvatarService.defaultColors,
     );
+
+    // A settings file still carrying the previous default never chose it, so it
+    // migrates to the new one — case does not matter.
+    expect(
+      AppSettings.fromJson(<String, dynamic>{
+        'laneColors': [
+          '#f85149',
+          '#db6d28',
+          '#d29922',
+          '#3fb950',
+          '#39c5cf',
+          '#58a6ff',
+          '#bc8cff',
+          '#f778ba',
+        ],
+      }).laneColors,
+      AppSettings.defaultLaneColors,
+    );
+    // An edited palette is preserved, even when it reuses an old color.
+    expect(
+      AppSettings.fromJson(<String, dynamic>{
+        'laneColors': ['#F85149', '#00FF00'],
+      }).laneColors,
+      ['#F85149', '#00FF00'],
+    );
+    expect(
+      AppSettings.fromJson(<String, dynamic>{}).laneColors,
+      AppSettings.defaultLaneColors,
+    );
   });
 
   testWidgets('the initials avatar is a filled disc with contrasting ink', (
@@ -1553,23 +1650,18 @@ void main() {
     const ada = GitIdentity(name: 'Ada Lovelace', email: 'ada@example.com');
     await tester.pumpWidget(
       const MaterialApp(
-        home: Center(
-          child: IdentityAvatar(
-            identity: ada,
-            ringColor: Color(0xFF3FB950),
-            ringWidth: 2,
-          ),
-        ),
+        home: Center(child: IdentityAvatar(identity: ada)),
       ),
     );
 
     final fill =
         tester.widget<Container>(find.byType(Container)).decoration!
             as BoxDecoration;
-    // Opaque identity color, no transparent center, and the graph ring survives.
+    // Opaque identity color, no transparent center, and no outline at all.
     expect(fill.color, AvatarService.color(ada));
     expect(fill.color!.a, 1.0);
-    expect((fill.border! as Border).top.color, const Color(0xFF3FB950));
+    expect(fill.border, isNull);
+    expect(tester.widget<IdentityAvatar>(find.byType(IdentityAvatar)).size, 22);
     expect(
       tester.widget<Text>(find.text('AL')).style?.color,
       AvatarService.onColor(AvatarService.color(ada)),
@@ -1612,7 +1704,7 @@ void main() {
 
     expect(find.text('Timeline colors'), findsOneWidget);
     expect(find.byKey(const Key('lane-swatch-7')), findsOneWidget);
-    expect(swatch(0), const Color(0xFFF85149));
+    expect(swatch(0), const Color(0xFFFF2D95));
 
     await tester.enterText(find.byKey(const Key('lane-color-0')), '#123456');
     await tester.pumpAndSettle();
@@ -1628,13 +1720,13 @@ void main() {
     await tester.tap(find.byKey(const Key('reset-lane-colors')));
     await tester.pumpAndSettle();
     expect(saved.last.laneColors, AppSettings.defaultLaneColors);
-    expect(swatch(0), const Color(0xFFF85149));
+    expect(swatch(0), const Color(0xFFFF2D95));
     expect(
       tester
           .widget<TextField>(find.byKey(const Key('lane-color-0')))
           .controller
           ?.text,
-      '#F85149',
+      '#FF2D95',
     );
   });
 
@@ -1833,6 +1925,10 @@ void main() {
     // Every branch chip carries the tip committer; the tag chip carries none.
     for (final ref in refs.where((ref) => !ref.isTag)) {
       expect(find.byKey(Key('ref-avatar-multi-${ref.name}')), findsOneWidget);
+      expect(
+        tester.getSize(find.byKey(Key('ref-avatar-multi-${ref.name}'))).width,
+        20,
+      );
     }
     expect(find.byKey(const Key('ref-avatar-multi-v1.0')), findsNothing);
 
