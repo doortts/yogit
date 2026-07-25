@@ -652,6 +652,12 @@ void main() {
             '',
           );
         }
+        if (arguments.first == 'reflog') {
+          // Newest entry first, so the branch was created on the last line.
+          return arguments.last.endsWith('/main')
+              ? ProcessResult(1, 0, '1700000200\n1700000100\n', '')
+              : ProcessResult(1, 0, '', '');
+        }
         return ProcessResult(1, 0, 'main\n', '');
       },
     );
@@ -669,6 +675,8 @@ void main() {
       'origin/main': 'aaa3',
       'v0.1.0': 'aaa4',
     });
+    // Only local branches have a birth time, and an empty reflog just has none.
+    expect(refs.birthTimes, {'main': 1700000100});
     expect(calls, [
       [
         'for-each-ref',
@@ -677,6 +685,8 @@ void main() {
         'refs/remotes',
         'refs/tags',
       ],
+      ['reflog', 'show', '--format=%ct', 'refs/heads/main'],
+      ['reflog', 'show', '--format=%ct', 'refs/heads/feature/x'],
       ['branch', '--show-current'],
     ]);
     // Arguments stay single tokens — only the format string carries a space, and
@@ -693,12 +703,12 @@ void main() {
     final repository = GitRepository(
       '/tmp/repository',
       runner: (executable, arguments, {workingDirectory}) async =>
-          ProcessResult(
-            1,
-            0,
-            arguments.first == 'branch' ? '\n' : 'refs/heads/main aaa1\n',
-            '',
-          ),
+          switch (arguments.first) {
+            'branch' => ProcessResult(1, 0, '\n', ''),
+            // A branch whose reflog is gone: the failure stays local to that branch.
+            'reflog' => ProcessResult(1, 128, '', 'fatal: no reflog for main'),
+            _ => ProcessResult(1, 0, 'refs/heads/main aaa1\n', ''),
+          },
     );
 
     final refs = await repository.loadRefs();
@@ -706,6 +716,7 @@ void main() {
     expect(refs.local, ['main']);
     expect(refs.current, isNull);
     expect(refs.tips, {'main': 'aaa1'});
+    expect(refs.birthTimes, isEmpty);
   });
 
   test('a clean working tree produces no uncommitted row', () async {

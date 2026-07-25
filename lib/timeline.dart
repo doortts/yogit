@@ -207,6 +207,9 @@ class TimelineScreen extends StatefulWidget {
     super.key,
   });
 
+  /// Every row is this tall — commits and date headings alike.
+  static const rowHeight = 34.0;
+
   final GitRepository repository;
   final WindowFrameController? controller;
   final ValueChanged<GitCommit>? onOpenFullDiff;
@@ -230,7 +233,7 @@ class TimelineScreen extends StatefulWidget {
 
 class _TimelineScreenState extends State<TimelineScreen> {
   static const _pageSize = 500;
-  static const _rowHeight = 36.0;
+
   static const _sidebarRange = (min: 120.0, max: 320.0);
   static const _previewWidthRange = (min: 240.0, max: 560.0);
   static const _previewHeightRange = (min: 200.0, max: 480.0);
@@ -368,13 +371,15 @@ class _TimelineScreenState extends State<TimelineScreen> {
   void _updateRatchet() {
     if (!mounted || _entries.isEmpty || !_scrollController.hasClients) return;
     final position = _scrollController.position;
-    final first = (position.pixels / _rowHeight).floor().clamp(
+    final first = (position.pixels / TimelineScreen.rowHeight).floor().clamp(
       0,
       _entries.length - 1,
     );
-    final last = ((position.pixels + position.viewportDimension) / _rowHeight)
-        .ceil()
-        .clamp(0, _entries.length - 1);
+    final last =
+        ((position.pixels + position.viewportDimension) /
+                TimelineScreen.rowHeight)
+            .ceil()
+            .clamp(0, _entries.length - 1);
     var deepest = _ratchetLane;
     for (var index = first; index <= last; index++) {
       final row = _entries[index].row;
@@ -390,7 +395,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     if (!_scrollController.hasClients || _end || _inFlight != null) return;
     if (_scrollController.position.maxScrollExtent -
             _scrollController.position.pixels <=
-        _rowHeight * 12) {
+        TimelineScreen.rowHeight * 12) {
       _loadNextPage();
     }
   }
@@ -434,7 +439,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
           _scrollController.hasClients &&
           _scrollController.position.maxScrollExtent -
                   _scrollController.position.pixels <=
-              _rowHeight;
+              TimelineScreen.rowHeight;
       setState(() {
         if (working != null) {
           _commits.add(working);
@@ -532,8 +537,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
   void _scrollToSelection({bool animate = true}) {
     if (!_scrollController.hasClients) return;
     final position = _scrollController.position;
-    final rowTop = _selectedIndex.value * _rowHeight;
-    final rowBottom = rowTop + _rowHeight;
+    final rowTop = _selectedIndex.value * TimelineScreen.rowHeight;
+    final rowBottom = rowTop + TimelineScreen.rowHeight;
     final double? target =
         rowBottom > position.pixels + position.viewportDimension
         ? rowBottom - position.viewportDimension
@@ -1046,47 +1051,66 @@ class _TimelineScreenState extends State<TimelineScreen> {
     return _muted;
   }
 
-  Widget _sidebarItem(String name, {IconData? icon, required bool current}) =>
-      GestureDetector(
-        key: Key('sidebar-ref-$name'),
-        behavior: HitTestBehavior.opaque,
-        onTap: () => _selectRef(name, remote: icon == Icons.cloud_outlined),
-        child: Container(
-          height: 28,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          decoration: BoxDecoration(
-            color: current ? _accent : null,
-            borderRadius: BorderRadius.circular(5),
-          ),
-          child: Row(
-            children: [
-              if (icon != null)
-                Icon(icon, size: 12, color: _muted)
-              else
-                Container(
-                  width: 7,
-                  height: 7,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: _refTipColor(name), width: 2),
-                  ),
-                ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: current ? _text : _muted,
-                    fontSize: 13,
-                  ),
+  Widget _sidebarItem(String name, {IconData? icon, required bool current}) {
+    final birth = _refs.birthTimes[name];
+    return GestureDetector(
+      key: Key('sidebar-ref-$name'),
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _selectRef(name, remote: icon == Icons.cloud_outlined),
+      child: Container(
+        height: birth == null ? 28 : 40,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: current ? _accent : null,
+          borderRadius: BorderRadius.circular(5),
+        ),
+        child: Row(
+          children: [
+            if (icon != null)
+              Icon(icon, size: 12, color: _muted)
+            else
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: _refTipColor(name), width: 2),
                 ),
               ),
-            ],
-          ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: current ? _text : _muted,
+                      fontSize: 13,
+                    ),
+                  ),
+                  // When the branch was cut, in the Date column's own words.
+                  if (birth != null)
+                    Text(
+                      socialTimeLabel(
+                        DateTime.fromMillisecondsSinceEpoch(birth * 1000),
+                        DateTime.now(),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: _muted, fontSize: 11),
+                    ),
+                ],
+              ),
+            ),
+          ],
         ),
-      );
+      ),
+    );
+  }
 
   // -------------------------------------------------------------- status bar
 
@@ -1106,6 +1130,48 @@ class _TimelineScreenState extends State<TimelineScreen> {
               _legend('merge', const _LegendDot(filled: true)),
               _legend('WIP', const _LegendDot(dashed: true)),
             ],
+          ),
+        ),
+        // The focused row's first ref, under the column its chip sits in.
+        Positioned(
+          left: _sidebarWidth,
+          top: 0,
+          bottom: 0,
+          width: math.max(0, _dateColumnLeft - _sidebarWidth - 12),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: ValueListenableBuilder<int>(
+              valueListenable: _selectedIndex,
+              builder: (context, _, _) {
+                final commit = _selectedCommit;
+                final refs = commit == null
+                    ? const <GitRef>[]
+                    : _rowRefs(commit);
+                if (refs.isEmpty) {
+                  return const SizedBox(key: Key('status-ref'), height: 0);
+                }
+                return Row(
+                  key: const Key('status-ref'),
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        refs.first.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: _muted, fontSize: 11),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    _CopyButton(
+                      text: refs.first.name,
+                      color: _muted,
+                      slot: 'status-copy',
+                    ),
+                  ],
+                );
+              },
+            ),
           ),
         ),
         // The focused commit's exact moment, under the column it belongs to.
@@ -1194,7 +1260,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                         controller: _scrollController,
                         // A little cache keeps rows from popping in mid-scroll.
                         cacheExtent: 200,
-                        itemExtent: _rowHeight,
+                        itemExtent: TimelineScreen.rowHeight,
                         itemCount: _entries.length + (_showFooter ? 1 : 0),
                         itemBuilder: (context, index) {
                           if (index == _entries.length) return _footer();
@@ -1423,7 +1489,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }) => SizedBox(
     key: cellKey,
     width: graphWidth,
-    height: _rowHeight,
+    height: TimelineScreen.rowHeight,
     child: Stack(
       clipBehavior: Clip.hardEdge,
       children: [
@@ -1518,7 +1584,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     ? null
                     : Positioned(
                         left: painter.laneX(row.lane) - avatarSize / 2,
-                        top: (_rowHeight - avatarSize) / 2,
+                        top: (TimelineScreen.rowHeight - avatarSize) / 2,
                         child: CommitAvatarStack(
                           commit: commit,
                           avatarService: widget.avatarService,
@@ -1754,8 +1820,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
     final offset = _scrollController.hasClients
         ? _scrollController.position.pixels
         : 0.0;
-    final rowTop = index * _rowHeight - offset;
-    final rowBottom = rowTop + _rowHeight;
+    final rowTop = index * TimelineScreen.rowHeight - offset;
+    final rowBottom = rowTop + TimelineScreen.rowHeight;
     if (refs.length < 2 || rowBottom <= 0 || rowTop >= viewportHeight) {
       return const SizedBox.shrink();
     }
@@ -1855,7 +1921,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       ? child
       : Tooltip(message: message, waitDuration: _tooltipDelay, child: child);
 
-  /// No hairlines anywhere: the hash column's rule is the only line, a 3px strip
+  /// No hairlines anywhere: the hash column's rule is the only line, a 2px strip
   /// stopping 1px short top and bottom so stacked rows read apart.
   Widget _cell(double width, Widget child, {Color? leftBorder, Key? ruleKey}) {
     final cell = Container(
@@ -1875,7 +1941,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             left: 0,
             top: 1,
             bottom: 1,
-            width: 3,
+            width: 2,
             child: ColoredBox(color: leftBorder),
           ),
         ],
@@ -2491,10 +2557,18 @@ class _TimelineScreenState extends State<TimelineScreen> {
 /// Copies a ref name and answers with a check for a moment, so the click has
 /// feedback without a snackbar.
 class _CopyButton extends StatefulWidget {
-  const _CopyButton({required this.text, required this.color});
+  const _CopyButton({
+    required this.text,
+    required this.color,
+    this.slot = 'copy-ref',
+  });
 
   final String text;
   final Color color;
+
+  /// Names this button apart from the other copier for the same ref: the modal's
+  /// item and the status bar can both be on screen at once.
+  final String slot;
 
   @override
   State<_CopyButton> createState() => _CopyButtonState();
@@ -2526,7 +2600,7 @@ class _CopyButtonState extends State<_CopyButton> {
     onEnter: (_) => setState(() => _hovered = true),
     onExit: (_) => setState(() => _hovered = false),
     child: GestureDetector(
-      key: Key('copy-ref-${widget.text}'),
+      key: Key('${widget.slot}-${widget.text}'),
       behavior: HitTestBehavior.opaque,
       onTap: () => unawaited(_copy()),
       child: Icon(

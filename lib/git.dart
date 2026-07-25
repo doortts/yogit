@@ -558,12 +558,17 @@ class RepoRefs {
     this.tags = const [],
     this.current,
     this.tips = const {},
+    this.birthTimes = const {},
   });
 
   final List<String> local;
   final List<String> remote;
   final List<String> tags;
   final String? current;
+
+  /// Local branch name → creation unix time, read from the branch's oldest
+  /// reflog entry. Absent when the reflog no longer records the birth.
+  final Map<String, int> birthTimes;
 
   /// Short ref name → tip commit sha, for every entry in the three lists.
   final Map<String, String> tips;
@@ -698,6 +703,7 @@ class GitRepository {
         break;
       }
     }
+    final births = await Future.wait(local.map(_birthTime));
     final current = (await _run(['branch', '--show-current'])).trim();
     return RepoRefs(
       local: local,
@@ -705,7 +711,29 @@ class GitRepository {
       tags: tags,
       current: current.isEmpty ? null : current,
       tips: tips,
+      birthTimes: {
+        for (var index = 0; index < local.length; index++)
+          local[index]: ?births[index],
+      },
     );
+  }
+
+  /// When a branch was created: the timestamp of its oldest reflog entry, which
+  /// `git reflog show` prints last. Null when the reflog cannot tell us — pruned,
+  /// never enabled, or the ref is gone — which is not an error worth failing the
+  /// whole sidebar over.
+  Future<int?> _birthTime(String branch) async {
+    try {
+      final entries = (await _run([
+        'reflog',
+        'show',
+        '--format=%ct',
+        'refs/heads/$branch',
+      ])).trim().split('\n');
+      return int.tryParse(entries.last.trim());
+    } on ProcessException {
+      return null;
+    }
   }
 
   Future<String?> loadOriginUrl() async {

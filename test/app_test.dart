@@ -47,7 +47,8 @@ void main() {
     final list = tester.widget<ListView>(
       find.byKey(const Key('timeline-list')),
     );
-    expect(list.itemExtent, 36);
+    expect(TimelineScreen.rowHeight, 34);
+    expect(list.itemExtent, 34);
     expect(list.cacheExtent, 200);
 
     // The preview starts hidden and only a key opens it.
@@ -186,13 +187,13 @@ void main() {
 
     // Nothing moved until the selected row's bottom passed the viewport bottom,
     // and then only far enough to hold the row flush against that edge.
-    expect(index * 36.0, greaterThan(viewport - 36));
-    expect(position.pixels, (index + 1) * 36 - viewport);
+    expect(index * TimelineScreen.rowHeight, greaterThan(viewport - 34));
+    expect(position.pixels, (index + 1) * TimelineScreen.rowHeight - viewport);
     final anchored = position.pixels;
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
     index++;
-    expect(position.pixels, anchored + 36);
+    expect(position.pixels, anchored + TimelineScreen.rowHeight);
 
     // Upward is symmetric: the row stays visible without a scroll until it would
     // pass the top edge, and the walk ends with the list back at the top.
@@ -200,15 +201,18 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
       await tester.pumpAndSettle();
       index--;
-      expect(position.pixels, lessThanOrEqualTo(index * 36.0));
       expect(
         position.pixels,
-        greaterThanOrEqualTo((index + 1) * 36.0 - viewport),
+        lessThanOrEqualTo(index * TimelineScreen.rowHeight),
+      );
+      expect(
+        position.pixels,
+        greaterThanOrEqualTo((index + 1) * TimelineScreen.rowHeight - viewport),
       );
     }
     // The walk ends with the first commit flush at the top; the date heading
     // above it stays off screen until the user scrolls there.
-    expect(position.pixels, 36);
+    expect(position.pixels, TimelineScreen.rowHeight);
     expect(find.byKey(const Key('selected-row-0')), findsOneWidget);
   });
 
@@ -2479,11 +2483,15 @@ void main() {
       ),
     );
 
-    scrollable.position.jumpTo(scrollable.position.maxScrollExtent - 13 * 36);
+    scrollable.position.jumpTo(
+      scrollable.position.maxScrollExtent - 13 * TimelineScreen.rowHeight,
+    );
     await tester.pump();
     expect(calls, 1);
 
-    scrollable.position.jumpTo(scrollable.position.maxScrollExtent - 12 * 36);
+    scrollable.position.jumpTo(
+      scrollable.position.maxScrollExtent - 12 * TimelineScreen.rowHeight,
+    );
     await tester.pump();
     expect(calls, 2);
 
@@ -3491,8 +3499,11 @@ void main() {
       tester.getRect(find.byKey(const Key('date-box-0'))).left,
       tester.getRect(find.text('a')).left - 5,
     );
-    // The date row is a row of the list, 36px like the rest.
-    expect(tester.getSize(find.byKey(const Key('date-row-0'))).height, 36);
+    // The date row is a row of the list, as tall as the rest.
+    expect(
+      tester.getSize(find.byKey(const Key('date-row-0'))).height,
+      TimelineScreen.rowHeight,
+    );
 
     // Underlines are gone from commit rows too.
     expect(
@@ -3901,7 +3912,7 @@ void main() {
     // The heading's graph cell is a full row, so its rails actually paint.
     final painter = find.byKey(const Key('date-painter-3'));
     expect(painter, findsOneWidget);
-    expect(tester.getSize(painter), const Size(120, 36));
+    expect(tester.getSize(painter), const Size(120, TimelineScreen.rowHeight));
     expect(
       tester.getRect(painter).left,
       tester.getRect(find.byKey(const Key('graph-cell-0'))).left,
@@ -4399,7 +4410,7 @@ void main() {
     );
   });
   // ------------------------------------------------------------------ A1
-  testWidgets('the hash rule is an inset 3px strip', (tester) async {
+  testWidgets('the hash rule is an inset 2px strip', (tester) async {
     await tester.pumpWidget(
       app(
         FakeGitRepository(
@@ -4415,8 +4426,8 @@ void main() {
       final rule = find.byKey(Key('hash-rule-$index'));
       expect(rule, findsOneWidget, reason: 'row $index');
       final rect = tester.getRect(rule);
-      expect(rect.width, 3);
-      expect(rect.height, 34);
+      expect(rect.width, 2);
+      expect(rect.height, TimelineScreen.rowHeight - 2);
       // 1px shy of the row at both ends.
       final row = tester.getRect(find.byKey(Key('graph-cell-$index')));
       expect(rect.top - row.top, 1);
@@ -5017,6 +5028,132 @@ void main() {
       expect(style.fontFamily, 'D2Coding', reason: label);
       expect(style.fontFamilyFallback, ['Menlo'], reason: label);
     }
+  });
+  // ------------------------------------------------------------------ E2
+  testWidgets('local branches show when they were cut, when the reflog knows', (
+    tester,
+  ) async {
+    final born = DateTime.now().subtract(const Duration(days: 5));
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: RepoRefs(
+            local: const ['main', 'feature/dated', 'feature/unknown'],
+            current: 'main',
+            birthTimes: {'feature/dated': born.millisecondsSinceEpoch ~/ 1000},
+          ),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // The dated branch grows a second line in the Date column's own words.
+    final dated = find.byKey(const Key('sidebar-ref-feature/dated'));
+    expect(tester.getSize(dated).height, 40);
+    final label = socialTimeLabel(born, DateTime.now());
+    expect(label, '5 days ago');
+    expect(
+      find.descendant(of: dated, matching: find.text(label)),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<Text>(find.descendant(of: dated, matching: find.text(label)))
+          .style
+          ?.fontSize,
+      11,
+    );
+
+    // No reflog entry, no second line.
+    final unknown = find.byKey(const Key('sidebar-ref-feature/unknown'));
+    expect(tester.getSize(unknown).height, 28);
+    expect(
+      find.descendant(of: unknown, matching: find.byType(Text)),
+      findsOneWidget,
+    );
+    // The checked-out branch keeps its highlight around whatever it holds.
+    expect(
+      tester.getSize(find.byKey(const Key('sidebar-ref-main'))).height,
+      28,
+    );
+  });
+
+  // ------------------------------------------------------------------ E3
+  testWidgets('the status bar names and copies the focused row ref', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final copied = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copied.add(
+              (call.arguments as Map<Object?, Object?>)['text']! as String,
+            );
+          }
+          return null;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null),
+    );
+
+    const long = 'release/2026-07-a-very-long-branch-name-indeed';
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [
+            commit(
+              'tagged',
+              'tagged commit',
+              refs: const [
+                GitRef(name: long),
+                GitRef(name: 'v1.0', isTag: true),
+              ],
+            ),
+            commit('plain', 'plain commit', refs: const []),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Aligned with the BRANCH / TAG column, showing the row's first ref.
+    final status = find.byKey(const Key('status-ref'));
+    expect(
+      tester.getRect(status).left,
+      tester.getRect(find.byKey(const Key('refs-header'))).left,
+    );
+    expect(
+      find.descendant(of: status, matching: find.text(long)),
+      findsOneWidget,
+    );
+    // Truncated before the DATE stamp it shares the bar with.
+    expect(
+      tester.getRect(status).right,
+      lessThan(tester.getRect(find.byKey(const Key('status-timestamp'))).left),
+    );
+
+    await tester.tap(find.byKey(const Key('status-copy-$long')));
+    await tester.pumpAndSettle();
+    expect(copied, [long]);
+    await tester.pump(const Duration(seconds: 1));
+
+    // A row without refs, and a heading, leave it blank.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(of: status, matching: find.byType(Text)),
+      findsNothing,
+    );
   });
 }
 
