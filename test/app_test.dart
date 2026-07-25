@@ -522,7 +522,7 @@ void main() {
     // Node center (y 18) down to the next row's center (y 54): one row height,
     // and no overshoot outside the two lanes.
     expect(painter.row.transitions, [(from: 0, to: 1, sha: '0')]);
-    final path = painter.transitionPath(0, 1, 18, size);
+    final path = painter.transitionPath(0, 1, 18, size, bendEarly: true);
     expect(path.getBounds(), const Rect.fromLTRB(28, 18, 58, 54));
 
     final metrics = path.computeMetrics().single;
@@ -535,19 +535,19 @@ void main() {
     expect(at(1).vector.dx.abs(), lessThan(0.01));
     expect(at(1).vector.dy, greaterThan(0.99));
 
-    // A flat jog line 8px above the arrival center carries the sideways move:
-    // 5px arc out, a full 8px arc in that lands exactly on the arrival center,
-    // so the straight run spans x 33 to 50.
-    const jogY = 54.0 - CommitGraphPainter.jogInset;
-    expect(jogY + CommitGraphPainter.arrivalRadius, 54);
+    // A flat jog line 8px below the departure center carries the sideways move,
+    // so a newborn line leaves its node instead of shadowing the parent rail:
+    // 5px arc out, an 8px arc in, and a straight run from x 33 to 50.
+    const jogY = 18.0 + CommitGraphPainter.jogInset;
+    expect(jogY + CommitGraphPainter.arrivalRadius, 34);
     final jog = <Offset>[];
     for (var step = 0; step <= 400; step++) {
       final point = at(step / 400).position;
       if ((point.dy - jogY).abs() < 0.01) jog.add(point);
     }
     expect(jog, hasLength(greaterThan(1)));
-    expect(jog.first.dx, closeTo(33, 0.5));
-    expect(jog.last.dx, closeTo(50, 0.5));
+    expect(jog.first.dx, closeTo(33, 0.6));
+    expect(jog.last.dx, closeTo(50, 0.6));
     expect(jog.map((point) => point.dy), everyElement(closeTo(jogY, 0.01)));
 
     // A first parent that keeps the lane records no transition at all: it is a
@@ -570,12 +570,34 @@ void main() {
     // The arrival row paints the same path one row height higher, so the two
     // halves meet exactly on the shared row boundary.
     expect(
-      painter.transitionPath(0, 1, 18 - size.height, size).getBounds(),
+      painter
+          .transitionPath(0, 1, 18 - size.height, size, bendEarly: true)
+          .getBounds(),
       const Rect.fromLTRB(28, -18, 58, 18),
     );
 
+    // The other kind bends beside the arrival node instead, 8px above it.
+    final late = painter.transitionPath(0, 1, 18, size);
+    expect(late.getBounds(), const Rect.fromLTRB(28, 18, 58, 54));
+    final lateMetrics = late.computeMetrics().single;
+    final lateJog =
+        [
+          for (var step = 0; step <= 400; step++)
+            lateMetrics
+                .getTangentForOffset(lateMetrics.length * step / 400)!
+                .position,
+        ].where(
+          (point) =>
+              (point.dy - (54 - CommitGraphPainter.jogInset)).abs() < 0.01,
+        );
+    expect(lateJog, hasLength(greaterThan(1)));
+    expect(lateJog.first.dx, closeTo(33, 0.6));
+    expect(lateJog.last.dx, closeTo(50, 0.6));
+
     // A distant lane only lengthens the horizontal run on the same jog line.
-    final distant = painterTo(2).transitionPath(0, 2, 18, size);
+    final distant = painterTo(
+      2,
+    ).transitionPath(0, 2, 18, size, bendEarly: true);
     expect(distant.getBounds(), const Rect.fromLTRB(28, 18, 88, 54));
     final distantMetrics = distant.computeMetrics().single;
     final distantJog = <Offset>[];
@@ -590,9 +612,84 @@ void main() {
 
     // Leftward transitions mirror, keeping the same radii.
     expect(
-      painter.transitionPath(2, 0, 18, size).getBounds(),
+      painter.transitionPath(2, 0, 18, size, bendEarly: true).getBounds(),
       const Rect.fromLTRB(28, 18, 88, 54),
     );
+  });
+
+  test('a converging line holds its column, then slides in at its parent', () {
+    const size = Size(168, 36);
+    // Lane 1's line hands off to its first parent on lane 0: the row above the
+    // parent records the convergence, and the dying branch's last node sits on
+    // lane 1 right above it.
+    final converging = graphRow(
+      commit: commit('X', 'main commit', parents: const ['P']),
+      lane: 0,
+      activeLanes: const [0, 1],
+      nextLanes: const [0],
+      activeLaneShas: const {0: 'X', 1: 'P'},
+      nextLaneShas: const {0: 'P'},
+      parentLanes: const [0],
+      transitions: const [(from: 1, to: 0, sha: 'P')],
+      branch: 0,
+      activeLaneBranches: const {0: 0, 1: 1},
+      nextLaneBranches: const {0: 0},
+    );
+    final transition = converging.transitions.single;
+    // Same discriminator as the color rule: this is not a birth.
+    expect(CommitGraphPainter.isMergeEdge(converging, transition), isFalse);
+    expect(CommitGraphPainter.transitionBranch(converging, transition), 1);
+
+    final painter = CommitGraphPainter(
+      row: converging,
+      selected: false,
+      committerColor: AvatarService.branchColor(0),
+    );
+    final path = painter.transitionPath(
+      transition.from,
+      transition.to,
+      18,
+      size,
+      bendEarly: CommitGraphPainter.isMergeEdge(converging, transition),
+    );
+
+    // Through its own row the line stays in its column — no early horizontal.
+    expect(
+      _samples(path).where((point) => point.dy <= 36).map((point) => point.dx),
+      everyElement(closeTo(painter.laneX(1), 0.01)),
+    );
+    // So no stub is left 8px under the dying branch's last node.
+    expect(
+      _touches(path, Offset((painter.laneX(0) + painter.laneX(1)) / 2, 18 + 8)),
+      isFalse,
+    );
+    // It turns at the parent's level and lands on the parent node.
+    final jog = _samples(
+      path,
+    ).where((point) => (point.dy - 46).abs() < 0.01).toList();
+    expect(jog, hasLength(greaterThan(1)));
+    expect(jog.first.dx, closeTo(53, 0.6));
+    expect(jog.last.dx, closeTo(36, 0.6));
+    expect(_touches(path, Offset(painter.laneX(0), 54)), isTrue);
+
+    // The arrival half shows that turn inside the parent's own row.
+    final arrival = painter.transitionPath(
+      transition.from,
+      transition.to,
+      18 - size.height,
+      size,
+      bendEarly: CommitGraphPainter.isMergeEdge(converging, transition),
+    );
+    final arrivalJog = _samples(
+      arrival,
+    ).where((point) => (point.dy - 10).abs() < 0.01).toList();
+    expect(arrivalJog, hasLength(greaterThan(1)));
+    expect(
+      arrivalJog.map((point) => point.dy),
+      everyElement(closeTo(10, 0.01)),
+    );
+    expect(arrivalJog.first.dx, greaterThan(arrivalJog.last.dx));
+    expect(_touches(arrival, Offset(painter.laneX(0), 18)), isTrue);
   });
 
   test('a transition lane gets no straight rail overdrawing its curve', () {
@@ -1389,7 +1486,8 @@ void main() {
       painterAt(0).transitionPath(0, 2, 18, const Size(70, 36)).getBounds(),
       const Rect.fromLTRB(28, 18, 57, 54),
     );
-    expect(avatarSize(1), 18);
+    // Nodes keep their full size at every width; the overhang just clips.
+    expect(avatarSize(1), 22);
 
     // Stage 3: every lane collapses onto the inset and the curves are dropped.
     await tester.pumpWidget(screen(56));
@@ -1406,7 +1504,7 @@ void main() {
       top: 0.0,
       bottom: 18.0,
     ));
-    expect(avatarSize(1), 18);
+    expect(avatarSize(1), 22);
   });
 
   testWidgets('column resizers move by 8px on arrow keys and clamp', (
@@ -3323,9 +3421,7 @@ void main() {
     );
   });
 
-  testWidgets('arrow keys and clicks step over date separators', (
-    tester,
-  ) async {
+  testWidgets('date headings select like any other row', (tester) async {
     final now = DateTime.now();
     int stamp(Duration ago) => now.subtract(ago).millisecondsSinceEpoch ~/ 1000;
     await tester.pumpWidget(
@@ -3349,19 +3445,46 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Selection starts on the first commit, not on the separator above it.
+    // Selection starts on the first commit, and the walk stops on the heading
+    // between the two days on its way down.
     expect(find.byKey(const Key('selected-row-a')), findsOneWidget);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-a')), findsNothing);
+    expect(find.byKey(const Key('selected-row-b')), findsNothing);
+    // The heading carries the full-width band while it holds the selection.
+    final band = tester.widget<ColoredBox>(
+      find
+          .ancestor(
+            of: find.byKey(const Key('date-row-2')),
+            matching: find.byType(ColoredBox),
+          )
+          .first,
+    );
+    expect(band.color, const Color(0xFF1F4D8F));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-b')), findsOneWidget);
+
+    // A heading has no commit, so the preview falls back to its empty state.
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('selected-row-a')), findsOneWidget);
-
-    // A separator is not selectable.
-    await tester.tap(find.byKey(const Key('date-row-2')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('selected-row-a')), findsOneWidget);
+    expect(find.text('No commit selected'), findsOneWidget);
+    expect(find.byKey(const Key('refs-modal')), findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    expect(find.text('Commit & Diff'), findsNothing);
+
+    // Clicking a commit selects it, and clicking a heading selects that.
+    await tester.tap(find.text('older commit'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-b')), findsOneWidget);
+    await tester.tap(find.text('Today'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-b')), findsNothing);
+    expect(find.byKey(const Key('selected-row-a')), findsNothing);
   });
 
   // ------------------------------------------------------------------ §17.2
@@ -3918,7 +4041,166 @@ void main() {
       13,
     );
   });
+  // ------------------------------------------------------------------ §18.2b
+  testWidgets('a newborn branch line leaves the source node center', (
+    tester,
+  ) async {
+    final now = DateTime.now();
+    int stamp(Duration ago) => now.subtract(ago).millisecondsSinceEpoch ~/ 1000;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            // A merge whose second parent opens a new column, with the day
+            // change landing right under it.
+            (_, _) async => [
+              commit(
+                'M',
+                'merge',
+                parents: const ['P', 'F'],
+                timestamp: stamp(const Duration(hours: 1)),
+              ),
+              commit(
+                'P',
+                'parent',
+                parents: const ['R'],
+                timestamp: stamp(const Duration(days: 2)),
+              ),
+              commit(
+                'F',
+                'feature',
+                parents: const ['R'],
+                timestamp: stamp(const Duration(days: 2)),
+              ),
+              commit('R', 'root', timestamp: stamp(const Duration(days: 3))),
+            ],
+          ),
+          controller: controller,
+          columnWidths: const TimelineColumnWidths(graph: 120),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    CommitGraphPainter painterAt(Key key) =>
+        tester.widget<CustomPaint>(find.byKey(key)).painter!
+            as CommitGraphPainter;
+    const size = Size(120, 36);
+    final merge = painterAt(const Key('graph-painter-0'));
+    final edge = merge.row.transitions.single;
+    expect(edge.from, merge.row.lane);
+    expect(edge.to, 1);
+
+    // A birth: the same discriminator the color rule uses puts its bend beside
+    // the departure node.
+    expect(CommitGraphPainter.isMergeEdge(merge.row, edge), isTrue);
+    Path departure() => merge.transitionPath(
+      edge.from,
+      edge.to,
+      18,
+      size,
+      bendEarly: CommitGraphPainter.isMergeEdge(merge.row, edge),
+    );
+
+    // The departure leaves the node center and bends into its own column inside
+    // this row, instead of running down the parent rail into the next one.
+    expect(_touches(departure(), const Offset(28, 18)), isTrue);
+    expect(departure().getBounds(), Rect.fromLTRB(28, 18, merge.laneX(1), 54));
+    final jog = _samples(departure());
+    // Everything past the bend sits in the new column, still inside this row.
+    expect(
+      jog.where((point) => point.dy > 34.5).map((point) => point.dx),
+      everyElement(closeTo(merge.laneX(1), 0.01)),
+    );
+    expect(
+      jog
+          .where((point) => point.dx > 29)
+          .map((point) => point.dy)
+          .reduce((a, b) => a < b ? a : b),
+      lessThan(36),
+    );
+
+    // The date heading right below completes the sweep into the new column.
+    final heading = painterAt(const Key('date-painter-2'));
+    expect(heading.passThrough, isTrue);
+    final arrival = heading.transitionPath(
+      edge.from,
+      edge.to,
+      18 - 36,
+      size,
+      // Classified against the row that started it, so the halves match.
+      bendEarly: CommitGraphPainter.isMergeEdge(merge.row, edge),
+    );
+    expect(_touches(arrival, Offset(heading.laneX(1), 18)), isTrue);
+    // By the time the sweep reaches the heading it is already a straight rail.
+    expect(
+      _samples(
+        arrival,
+      ).where((point) => point.dy >= 0).map((point) => point.dx),
+      everyElement(closeTo(heading.laneX(1), 0.01)),
+    );
+  });
+  // ------------------------------------------------------------------ §18.4b
+  testWidgets('the ref modal shows long names in full', (tester) async {
+    const long = 'feature/very-long-branch-name-for-testing-full-width';
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [
+              commit('first', 'first commit'),
+              commit(
+                'many',
+                'many refs',
+                refs: const [
+                  GitRef(name: 'main', isHead: true),
+                  GitRef(name: long),
+                ],
+              ),
+            ],
+          ),
+          controller: controller,
+          columnWidths: const TimelineColumnWidths(refs: 120),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+
+    final modal = find.byKey(const Key('refs-modal'));
+    expect(modal, findsOneWidget);
+    // The full name renders, and nothing inside the modal ellipsizes.
+    final name = find.descendant(of: modal, matching: find.text(long));
+    expect(name, findsOneWidget);
+    expect(tester.widget<Text>(name).overflow, TextOverflow.visible);
+    expect(tester.getSize(name).width, greaterThan(120));
+    // The box grew past the refs column to fit it, and stays in the viewport.
+    final width = tester.getSize(modal).width;
+    expect(width, greaterThan(120));
+    expect(
+      width,
+      lessThanOrEqualTo(
+        tester.getSize(find.byKey(const Key('timeline-viewport'))).width,
+      ),
+    );
+  });
 }
+
+/// Points along [path], for probing where a rail actually runs.
+List<Offset> _samples(Path path) => path
+    .computeMetrics()
+    .expand(
+      (metric) => [
+        for (var step = 0; step <= 400; step++)
+          metric.getTangentForOffset(metric.length * step / 400)!.position,
+      ],
+    )
+    .toList();
+
+/// Whether [path] passes within a hair of [point].
+bool _touches(Path path, Offset point) =>
+    _samples(path).any((sample) => (sample - point).distance < 0.5);
 
 Widget app(GitRepository repository, WindowFrameController controller) =>
     MaterialApp(

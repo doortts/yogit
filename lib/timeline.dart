@@ -469,20 +469,15 @@ class _TimelineScreenState extends State<TimelineScreen> {
     return KeyEventResult.ignored;
   }
 
-  /// Steps to the next commit entry, stepping over any date heading between.
+  /// Steps one entry, heading rows included: they select like any other row and
+  /// simply have no commit to preview.
   void _moveSelection(int delta, {bool animate = true}) {
     if (_entries.isEmpty) return;
     _arrivedGoingDown = delta > 0;
-    for (
-      var step = _selectedIndex.value + delta;
-      step >= 0 && step < _entries.length;
-      step += delta
-    ) {
-      if (_entries[step].rowIndex >= 0) {
-        _selectedIndex.value = step;
-        break;
-      }
-    }
+    _selectedIndex.value = (_selectedIndex.value + delta).clamp(
+      0,
+      _entries.length - 1,
+    );
     _scrollToSelection(animate: animate);
   }
 
@@ -519,7 +514,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// A click only moves the selection. An open preview follows it; a closed one
   /// stays closed until Enter or Space.
   void _select(int index) {
-    if (_entries[index].rowIndex < 0) return;
     _arrivedGoingDown = null;
     _selectedIndex.value = index;
     _focusNode.requestFocus();
@@ -1226,7 +1220,26 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   /// The date heading: no node, no hairline, just the rails running through and
   /// a boxed label where the hash column starts.
-  Widget _dateRow(int index, TimelineEntry entry, double graphWidth) => Row(
+  Widget _dateRow(int index, TimelineEntry entry, double graphWidth) =>
+      _RowStateScope(
+        index: index,
+        selectedIndex: _selectedIndex,
+        hoverIndex: _hoverIndex,
+        builder: (selected, hovered) => GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _select(index),
+          child: ColoredBox(
+            color: selected ? _selectedRow : _background,
+            child: _dateRowContent(index, entry, graphWidth),
+          ),
+        ),
+      );
+
+  Widget _dateRowContent(
+    int index,
+    TimelineEntry entry,
+    double graphWidth,
+  ) => Row(
     key: Key('date-row-$index'),
     children: [
       SizedBox(width: _w('refs')),
@@ -1332,10 +1345,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
       selected,
       refs.isNotEmpty,
     );
-    final avatarSize =
-        painter.laneSpacing < CommitGraphPainter.compressedAvatarSpacing
-        ? 18.0
-        : 22.0;
+    // Nodes keep their size at every width; only the overhang clips.
+    const avatarSize = 22.0;
     // The author/committer stack reaches 45% further right than one disc, so it
     // only shows while that stays clear of the next lane's rail.
     final stacked =
@@ -1522,14 +1533,47 @@ class _TimelineScreenState extends State<TimelineScreen> {
         )
       : const SizedBox.shrink();
 
-  Widget _refName(GitRef ref, Color color, bool selected) => Expanded(
-    child: Text(
+  static TextStyle _refNameStyle(Color color) =>
+      TextStyle(color: color, fontSize: 11);
+
+  /// Chips ellipsize inside their share of the cell; the modal, which sizes to
+  /// its longest name, shows every name whole.
+  Widget _refName(
+    GitRef ref,
+    Color color,
+    bool selected, {
+    bool ellipsis = true,
+  }) {
+    final text = Text(
       ref.name,
       maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: TextStyle(color: selected ? _text : color, fontSize: 11),
-    ),
-  );
+      softWrap: false,
+      overflow: ellipsis ? TextOverflow.ellipsis : TextOverflow.visible,
+      style: _refNameStyle(selected ? _text : color),
+    );
+    return ellipsis ? Expanded(child: text) : text;
+  }
+
+  /// The width the timeline viewport has, for clamping the ref modal.
+  double get _timelineViewportWidth {
+    final box = _timelineKey.currentContext?.findRenderObject();
+    return box is RenderBox && box.hasSize ? box.size.width : 320;
+  }
+
+  /// Wide enough for the longest ref in full, capped by the timeline viewport.
+  double _refsModalWidth(List<GitRef> refs) {
+    var longest = 0.0;
+    for (final ref in refs) {
+      final painter = TextPainter(
+        text: TextSpan(text: ref.name, style: _refNameStyle(_text)),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      final glyph = ref.isHead || ref.isTag ? 16.0 : 0.0;
+      longest = math.max(longest, painter.width + glyph);
+    }
+    // accent bar, its gap, the trailing gap and the box padding.
+    return math.min(longest + 2 + 7 + 8 + 16, _timelineViewportWidth - 16);
+  }
 
   /// The floating list of every ref on the selected row. It sits above the row
   /// when the cursor arrived heading down and below it heading up — a click has
@@ -1552,6 +1596,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     }
     final color = AvatarService.branchColor(row.branch);
     final height = refs.length * 24.0 + 8;
+    final width = _refsModalWidth(refs);
     final above = _arrivedGoingDown ?? rowTop > viewportHeight - rowBottom;
     final double top = (above ? rowTop - height - 4 : rowBottom + 4).clamp(
       0.0,
@@ -1563,7 +1608,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
           key: const Key('refs-modal'),
           left: 8,
           top: top,
-          width: math.min(_w('refs') + 40, 260),
+          width: width,
           child: IgnorePointer(
             child: Container(
               padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1596,7 +1641,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                           ),
                           const SizedBox(width: 7),
                           _refGlyph(ref, color, false),
-                          _refName(ref, color, false),
+                          _refName(ref, color, false, ellipsis: false),
                           const SizedBox(width: 8),
                         ],
                       ),
@@ -2275,7 +2320,7 @@ class CommitGraphPainter extends CustomPainter {
   static const wipNodeRadius = 8.0;
   static const wipNodeDash = 2.5;
 
-  /// A transition runs along a jog line this far above the arrival center, and
+  /// A transition runs along a jog line this far below the departure center, and
   /// turns onto and off it with quarter arcs.
   static const jogInset = 8.0;
   static const departureRadius = 5.0;
@@ -2309,6 +2354,14 @@ class CommitGraphPainter extends CustomPainter {
   double laneX(int lane) =>
       compact ? laneInset : laneInset + lane * laneSpacing;
 
+  /// A line being born out of this row's node: the second-or-later parent edge of
+  /// a merge. Everything else is an existing line moving — a foreign column
+  /// converging on its parent, or this row's own first-parent tail. Color and
+  /// geometry both hang off this one question.
+  static bool isMergeEdge(GraphRow row, LaneTransition transition) =>
+      transition.from == row.lane &&
+      !(row.parentLanes.isNotEmpty && transition.to == row.parentLanes.first);
+
   /// The branch line a sweep belongs to, so a whole line keeps one color:
   /// a foreign column converging on its parent stays its own line's color, a
   /// commit's first-parent tail stays the commit's, and only a merge edge to a
@@ -2317,10 +2370,9 @@ class CommitGraphPainter extends CustomPainter {
     if (transition.from != row.lane) {
       return row.activeLaneBranches[transition.from];
     }
-    if (row.parentLanes.isNotEmpty && transition.to == row.parentLanes.first) {
-      return row.branch;
-    }
-    return row.nextLaneBranches[transition.to];
+    return isMergeEdge(row, transition)
+        ? row.nextLaneBranches[transition.to]
+        : row.branch;
   }
 
   /// The single rail stage 3 paints, colored by this row's committer.
@@ -2440,15 +2492,23 @@ class CommitGraphPainter extends CustomPainter {
               transition.to,
               centerY - size.height,
               size,
+              // Classified against the row that started it, so the arrival half
+              // repeats its departure half's shape and color exactly.
+              bendEarly: isMergeEdge(previous, transition),
             ),
-            // The arrival half repeats its departure half's color exactly.
             _railPaint(transitionBranch(previous, transition), transition.sha),
           );
         }
       }
       for (final transition in row.transitions) {
         canvas.drawPath(
-          transitionPath(transition.from, transition.to, centerY, size),
+          transitionPath(
+            transition.from,
+            transition.to,
+            centerY,
+            size,
+            bendEarly: isMergeEdge(row, transition),
+          ),
           _railPaint(transitionBranch(row, transition), transition.sha),
         );
       }
@@ -2513,17 +2573,29 @@ class CommitGraphPainter extends CustomPainter {
     );
   }
 
-  /// One lane transition: straight down, a rounded right angle onto the jog
+  /// One lane transition: out of the node, a rounded right angle onto the jog
   /// line, across, then a rounded right angle down into the arrival lane. It
   /// spans a whole row height from a node center at [startY] to the next row's
   /// center, and both rows paint the same path — the child from its own center,
   /// the next row with [startY] a row height above its center — so the halves
   /// meet exactly. Distant lanes only lengthen the horizontal run.
-  Path transitionPath(int from, int to, double startY, Size size) {
+  ///
+  /// A transition bends beside the node it belongs to. [bendEarly] is a newborn
+  /// line leaving its source, so it turns just below the departure node; anything
+  /// else is an existing line staying vertical in its own column until it slides
+  /// into its parent at the arrival node's level — which is what keeps a dying
+  /// branch from leaving a stub under its last node.
+  Path transitionPath(
+    int from,
+    int to,
+    double startY,
+    Size size, {
+    bool bendEarly = false,
+  }) {
     final x0 = laneX(from);
     final x1 = laneX(to);
     final endY = startY + size.height;
-    final jogY = endY - jogInset;
+    final jogY = bendEarly ? startY + jogInset : endY - jogInset;
     final direction = x1 > x0 ? 1.0 : -1.0;
     final half = (x1 - x0).abs() / 2;
     final out = math.min(math.min(departureRadius, half), jogY - startY);
