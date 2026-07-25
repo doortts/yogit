@@ -1053,6 +1053,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                           avatarService: widget.avatarService,
                           showRemoteAvatars: widget.showRemoteAvatars,
                           size: avatarSize,
+                          discColor: branchColor,
                         ),
                       ),
                   ],
@@ -1107,6 +1108,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                             commit: commit,
                             avatarService: widget.avatarService,
                             showRemoteAvatars: widget.showRemoteAvatars,
+                            discColor: branchColor,
                           ),
                           const SizedBox(width: 7),
                           Expanded(
@@ -1225,6 +1227,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               _committerAvatar(
                 commit,
                 20,
+                discColor: color,
                 key: Key('ref-avatar-${commit.sha}-${ref.name}'),
               ),
             ],
@@ -1232,20 +1235,30 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ),
       );
 
-  Widget _committerAvatar(GitCommit commit, double size, {Key? key}) {
+  Widget _committerAvatar(
+    GitCommit commit,
+    double size, {
+    Color? discColor,
+    Key? key,
+  }) {
     final service = widget.showRemoteAvatars ? widget.avatarService : null;
     return SizedBox(
       key: key,
       width: size,
       height: size,
       child: service == null
-          ? IdentityAvatar(identity: commit.committer, size: size)
+          ? IdentityAvatar(
+              identity: commit.committer,
+              size: size,
+              discColor: discColor,
+            )
           : FutureBuilder<CommitAvatars>(
               future: service.resolve(commit.sha),
               builder: (context, snapshot) => IdentityAvatar(
                 identity: commit.committer,
                 remoteAvatar: snapshot.data?.committer,
                 size: size,
+                discColor: discColor,
               ),
             ),
     );
@@ -1300,6 +1313,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
   );
 
   // ----------------------------------------------------------------- preview
+
+  /// The branch line a commit's row sits on, for the accents outside the list.
+  int _branchOf(GitCommit commit) => _rows
+      .firstWhere(
+        (row) => row.commit.sha == commit.sha,
+        orElse: () => _rows.first,
+      )
+      .branch;
 
   Widget _preview() => ValueListenableBuilder<int>(
     valueListenable: _selectedIndex,
@@ -1499,7 +1520,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   border: Border.all(color: _border),
                 ),
               )
-            : _committerAvatar(commit, 42),
+            : _committerAvatar(
+                commit,
+                42,
+                discColor: AvatarService.branchColor(_branchOf(commit)),
+              ),
         const SizedBox(width: 10),
         Expanded(
           child: Column(

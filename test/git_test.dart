@@ -155,12 +155,33 @@ void main() {
 
     // Both A's and B's lines wait for R; nothing dedupes them before R's row.
     expect(rows[2].nextLaneShas, {0: 'R', 1: 'R'});
-    expect(rows[2].parentLanes, [1]);
+    // B waits for R in its own column 1, but R lands in column 0, so B's first
+    // parent entry is 0 — the tail is B's own line converging, not a merge edge.
+    expect(rows[2].parentLanes, [0]);
     // The convergence sits on the row above R, which is where the painter
     // starts the sweep that lands on R.
     expect(rows[3].lane, 0);
     expect(rows[2].transitions, [(from: 1, to: 0, sha: 'R')]);
     expect(rows[3].transitions, isEmpty);
+    _expectStableColumns(rows);
+  });
+
+  test('a converging first parent reports the column it lands in', () {
+    // The shape of fixture2's 8122009: a branch tip whose first parent joins the
+    // line to its left. Reporting its own lane here made the painter read the
+    // tail as a merge edge and color it after the destination line.
+    final rows = layoutGraph([
+      _commit('main', ['base']),
+      _commit('alpha', ['base']),
+      _commit('base', const []),
+    ]);
+
+    expect(rows[1].lane, 1);
+    expect(rows[2].lane, 0);
+    expect(rows[1].parentLanes, [0]);
+    expect(rows[1].transitions, [(from: 1, to: 0, sha: 'base')]);
+    // The first parent of the row that keeps its column still reads as its own.
+    expect(rows[0].parentLanes, [0]);
     _expectStableColumns(rows);
   });
 
@@ -729,6 +750,20 @@ void _expectStableColumns(List<GraphRow> rows) {
       reason: 'leaving branch ids on ${row.commit.sha}',
     );
     expect(row.activeLaneBranches[row.lane], row.branch);
+    // Each parent entry names the column that parent's own row sits in, not the
+    // child's column — the tail of a converging first parent included.
+    expect(row.parentLanes, hasLength(row.commit.parents.length));
+    for (var at = 0; at < row.commit.parents.length; at++) {
+      final parent = rows.where(
+        (other) => other.commit.sha == row.commit.parents[at],
+      );
+      if (parent.isEmpty) continue;
+      expect(
+        row.parentLanes[at],
+        parent.first.lane,
+        reason: 'parent $at of ${row.commit.sha}',
+      );
+    }
     for (final move in row.transitions) {
       expect(move.from, isNot(move.to), reason: '$move');
       expect(row.nextLaneShas[move.to], move.sha, reason: '$move');

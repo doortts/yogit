@@ -1066,7 +1066,14 @@ void main() {
       ),
     );
     expect(stack.size, 22);
-    // The merge dot and every other accent still follow the branch line.
+    expect(stack.discColor, AvatarService.branchColor(painterAt(1).row.branch));
+    // Every stack in a row — graph cell and name cell — wears its branch line.
+    expect(
+      tester
+          .widgetList<CommitAvatarStack>(find.byType(CommitAvatarStack))
+          .map((stack) => stack.discColor),
+      everyElement(isNotNull),
+    );
     expect(
       painterAt(0).committerColor,
       AvatarService.branchColor(painterAt(0).row.branch),
@@ -1780,12 +1787,47 @@ void main() {
     expect(fill.color!.a, 1.0);
     expect(fill.border, isNull);
     expect(tester.widget<IdentityAvatar>(find.byType(IdentityAvatar)).size, 22);
+
+    // In a row the disc wears the branch line instead, ink following suit.
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Center(
+          child: IdentityAvatar(
+            identity: ada,
+            discColor: AvatarService.branchColor(2),
+          ),
+        ),
+      ),
+    );
+    final branchFill =
+        tester.widget<Container>(find.byType(Container)).decoration!
+            as BoxDecoration;
+    expect(branchFill.color, AvatarService.branchColor(2));
+    expect(
+      tester.widget<Text>(find.text('AL')).style?.color,
+      AvatarService.onColor(AvatarService.branchColor(2)),
+    );
     expect(
       tester.widget<Text>(find.text('AL')).style?.color,
       AvatarService.onColor(AvatarService.color(ada)),
     );
     expect(AvatarService.onColor(const Color(0xFFD29922)), isNot(Colors.white));
     expect(AvatarService.onColor(const Color(0xFF1D2029)), Colors.white);
+  });
+
+  test('the mainline is white and the palette colors the rest', () {
+    addTearDown(() => AvatarService.palette = AvatarService.defaultColors);
+
+    // Branch 0 is the leftmost, first-born line: always white, never editable.
+    expect(AvatarService.branchColor(0), const Color(0xFFFFFFFF));
+    expect(AvatarService.branchColor(1), AvatarService.defaultColors.first);
+    expect(AvatarService.branchColor(8), AvatarService.defaultColors.last);
+    expect(AvatarService.branchColor(9), AvatarService.defaultColors.first);
+    AvatarService.palette = const [Color(0xFF010203), Color(0xFF040506)];
+    expect(AvatarService.branchColor(0), const Color(0xFFFFFFFF));
+    expect(AvatarService.branchColor(1), const Color(0xFF010203));
+    expect(AvatarService.branchColor(2), const Color(0xFF040506));
+    expect(AvatarService.branchColor(3), const Color(0xFF010203));
   });
 
   test('the committer color follows the active palette', () {
@@ -1823,6 +1865,23 @@ void main() {
     expect(find.text('Timeline colors'), findsOneWidget);
     expect(find.byKey(const Key('lane-swatch-7')), findsOneWidget);
     expect(swatch(0), const Color(0xFFFF2D95));
+    // The mainline swatch is fixed white and sits outside the editable palette.
+    expect(
+      (tester
+                  .widget<Container>(find.byKey(const Key('lane-swatch-main')))
+                  .decoration!
+              as BoxDecoration)
+          .color,
+      const Color(0xFFFFFFFF),
+    );
+    expect(find.byKey(const Key('lane-color-main')), findsNothing);
+    // No row context in the preview, so those avatars stay identity-colored.
+    expect(
+      tester
+          .widgetList<IdentityAvatar>(find.byType(IdentityAvatar))
+          .map((avatar) => avatar.discColor),
+      everyElement(isNull),
+    );
 
     await tester.enterText(find.byKey(const Key('lane-color-0')), '#123456');
     await tester.pumpAndSettle();
@@ -1870,7 +1929,10 @@ void main() {
                 .widget<CustomPaint>(find.byKey(const Key('graph-painter-0')))
                 .painter!
             as CommitGraphPainter;
-    expect(painter.committerColor, const Color(0xFF0B7285));
+    // The mainline is white; the stored palette colors the lines off it.
+    expect(painter.row.branch, 0);
+    expect(painter.committerColor, const Color(0xFFFFFFFF));
+    expect(AvatarService.branchColor(1), const Color(0xFF0B7285));
   });
 
   test('social time spells out the elapsed distance', () {

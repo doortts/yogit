@@ -469,11 +469,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
           TextButton(
             key: const Key('reset-lane-colors'),
             onPressed: _resetLaneColors,
-            child: const Text('Reset to GitHub dark'),
+            child: const Text('Reset to defaults'),
           ),
         ],
       ),
       const SizedBox(height: 6),
+      // The mainline is always white and not part of the editable palette.
+      Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(
+          children: [
+            Container(
+              key: const Key('lane-swatch-main'),
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                color: AvatarService.branchColor(0),
+                borderRadius: BorderRadius.circular(5),
+              ),
+            ),
+            const SizedBox(width: 10),
+            const Text(
+              'Main line (fixed)',
+              style: TextStyle(color: Color(0xFF8D94A8), fontSize: 11),
+            ),
+          ],
+        ),
+      ),
       for (var index = 0; index < _laneFields.length; index++)
         Padding(
           padding: const EdgeInsets.only(bottom: 8),

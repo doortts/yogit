@@ -243,10 +243,13 @@ class AvatarService {
   }
 
   /// A branch line's color. Every rail, curve, chip and dot on one line shares
-  /// it, so the graph reads by branch rather than by person.
+  /// it, so the graph reads by branch rather than by person. Line 0 is the
+  /// mainline — the leftmost, first-born line — and always renders white; the
+  /// palette colors the lines that branch off it.
   static Color branchColor(int branch) {
+    if (branch == 0) return const Color(0xFFFFFFFF);
     final colors = palette.isEmpty ? defaultColors : palette;
-    return colors[branch.abs() % colors.length];
+    return colors[(branch.abs() - 1) % colors.length];
   }
 
   /// Person color, for avatars only: the graph is colored by branch.
@@ -320,6 +323,7 @@ class IdentityAvatar extends StatelessWidget {
     required this.identity,
     this.remoteAvatar,
     this.size = 22,
+    this.discColor,
     super.key,
   });
 
@@ -327,9 +331,13 @@ class IdentityAvatar extends StatelessWidget {
   final RemoteAvatar? remoteAvatar;
   final double size;
 
+  /// The disc color for an avatar sitting in a row: its branch line. Without one
+  /// — the settings preview — the disc falls back to the identity color.
+  final Color? discColor;
+
   @override
   Widget build(BuildContext context) {
-    final color = AvatarService.color(identity);
+    final color = discColor ?? AvatarService.color(identity);
     final avatar = _safeAvatar(remoteAvatar);
     return Container(
       width: size,
@@ -384,6 +392,7 @@ class CommitAvatarStack extends StatelessWidget {
     this.avatarService,
     this.showRemoteAvatars = true,
     this.size = 22,
+    this.discColor,
     super.key,
   });
 
@@ -391,6 +400,9 @@ class CommitAvatarStack extends StatelessWidget {
   final AvatarService? avatarService;
   final bool showRemoteAvatars;
   final double size;
+
+  /// Passed straight through to both discs: a row's avatars wear its branch.
+  final Color? discColor;
 
   bool get _hasSeparateCommitter =>
       commit.author.name != commit.committer.name ||
@@ -422,6 +434,7 @@ class CommitAvatarStack extends StatelessWidget {
                 identity: commit.committer,
                 remoteAvatar: avatars?.committer,
                 size: size,
+                discColor: discColor,
               ),
             ),
           Positioned(
@@ -431,6 +444,7 @@ class CommitAvatarStack extends StatelessWidget {
               identity: commit.author,
               remoteAvatar: avatars?.author,
               size: size,
+              discColor: discColor,
             ),
           ),
         ],

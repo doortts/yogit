@@ -181,6 +181,10 @@ class GraphRow {
 
   final GitCommit commit;
   final int lane;
+
+  /// The column each of [commit]'s parents ends up in, in parent order. A parent
+  /// that is not in the laid-out list reads as [lane], so its edge draws as this
+  /// row's own rail rather than as a sweep to nowhere.
   final List<int> parentLanes;
   final List<int> activeLanes;
   final List<int> nextLanes;
@@ -300,6 +304,9 @@ List<GraphRow> layoutGraph(List<GitCommit> commits) {
     // sweep is drawn from the row above, so the column is busy up to there.
     for (var column = 0; column < columns.length; column++) {
       if (column == lane || columns[column].sha != commit.sha) continue;
+      // That line was opened by a child expecting its first parent in its own
+      // column; the parent landed here instead, so the child has to say so.
+      rows[columns[column].row].parentLanes[0] = lane;
       columns[column] = (sha: null, row: index - 1, line: -1);
       rows[index - 1].transitions.add((
         from: column,
@@ -337,7 +344,10 @@ List<GraphRow> layoutGraph(List<GitCommit> commits) {
           for (var column = 0; column < columns.length; column++)
             if (columns[column].sha != null) column: columns[column].line,
         },
-        parentLanes: [if (commit.parents.isNotEmpty) lane],
+        // One entry per parent. Both a first parent continuing this column and a
+        // parent that never loads read as this row's own lane; the entry is
+        // patched to the parent's real column when the parent is placed.
+        parentLanes: [for (final _ in commit.parents) lane],
       ),
     );
 
@@ -351,7 +361,9 @@ List<GraphRow> layoutGraph(List<GitCommit> commits) {
           rows[row].enteringBranches[lane] = branch;
         }
       }
-      rows[child].parentLanes.add(lane);
+      // Merge parents are never the first, so the search starts past it.
+      final parent = rows[child].commit.parents.indexOf(commit.sha, 1);
+      rows[child].parentLanes[parent] = lane;
       if (rows[child].lane != lane) {
         rows[child].transitions.add((
           from: rows[child].lane,
