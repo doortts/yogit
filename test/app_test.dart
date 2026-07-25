@@ -5877,6 +5877,27 @@ void main() {
       Color(0xFFBAFFC9),
       Color(0xFFBAE1FF),
     ]);
+    // The cloud badge rides the top-right corner, inside the same IgnorePointer.
+    final cloud = find.byKey(const Key('wordmark-cloud'));
+    expect(
+      find.descendant(of: find.byKey(const Key('wordmark')), matching: cloud),
+      findsOneWidget,
+    );
+    final badge = tester.getRect(cloud);
+    final glyphs = tester.getRect(
+      find.descendant(
+        of: find.byKey(const Key('wordmark')),
+        matching: find.byType(Text),
+      ),
+    );
+    expect(badge.top, lessThan(glyphs.top));
+    expect(badge.right, greaterThanOrEqualTo(glyphs.right));
+    // Sized off the font, so the 20px variant stays proportional.
+    expect(
+      tester.widget<CustomPaint>(cloud).size.width,
+      closeTo(26 * 0.92, 0.1),
+    );
+
     // It never eats a pointer.
     expect(
       tester

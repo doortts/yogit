@@ -843,10 +843,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// it. Landing near the bar's centre is a happy side effect, not a promise.
   Widget _pathAndWordmark() => LayoutBuilder(
     builder: (context, constraints) {
-      // fontSize * 5 over-states 'Yogit' in DancingScript, so this errs toward
-      // leaving the path room.
+      // fontSize * 5.5 over-states 'Yogit' plus its badge overhang in
+      // DancingScript, so this errs toward leaving the path room.
       final size = [26.0, 20.0].firstWhere(
-        (size) => constraints.maxWidth - (size * 5 + 24) >= _minDragWidth,
+        (size) => constraints.maxWidth - (size * 5.5 + 24) >= _minDragWidth,
         orElse: () => 0.0,
       );
       // The whole leftover is the window's drag handle — the name is short now,
@@ -2620,8 +2620,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 }
 
-/// One of the toolbar's traffic lights: a color at rest, its glyph on hover.
-/// The app's wordmark: one soft pastel per letter, legible on the dark bar.
+/// The app's wordmark: one soft pastel per letter, legible on the dark bar, with
+/// a small cloud badge tucked over the final letter.
 class _Wordmark extends StatelessWidget {
   const _Wordmark({required this.fontSize, super.key});
 
@@ -2635,23 +2635,96 @@ class _Wordmark extends StatelessWidget {
     ('t', Color(0xFFBAE1FF)),
   ];
 
+  /// How far the badge reaches past the last glyph. Reserved as padding so the
+  /// widget's own box covers it and the toolbar's fit rules keep working.
+  double get _overhang => fontSize * 0.38;
+
   @override
-  Widget build(BuildContext context) => Text.rich(
-    TextSpan(
-      children: [
-        for (final (glyph, color) in letters)
+  Widget build(BuildContext context) => Stack(
+    clipBehavior: Clip.none,
+    children: [
+      Padding(
+        padding: EdgeInsets.only(right: _overhang),
+        child: Text.rich(
           TextSpan(
-            text: glyph,
-            style: TextStyle(color: color),
+            children: [
+              for (final (glyph, color) in letters)
+                TextSpan(
+                  text: glyph,
+                  style: TextStyle(color: color),
+                ),
+            ],
           ),
-      ],
-    ),
-    style: TextStyle(
-      fontFamily: 'DancingScript',
-      fontSize: fontSize,
-      fontWeight: FontWeight.w700,
-    ),
+          style: TextStyle(
+            fontFamily: 'DancingScript',
+            fontSize: fontSize,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+      Positioned(
+        right: 0,
+        top: -fontSize * 0.12,
+        child: CustomPaint(
+          key: const Key('wordmark-cloud'),
+          size: Size(fontSize * 0.92, fontSize * 0.54),
+          painter: const _CloudBadgePainter(),
+        ),
+      ),
+    ],
   );
+}
+
+/// The little blue cloud with wind streaks that rides the wordmark. Drawn at a
+/// nominal 24x14 and scaled by whatever size the wordmark asks for.
+class _CloudBadgePainter extends CustomPainter {
+  const _CloudBadgePainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final unit = size.width / 24;
+    Offset at(double x, double y) => Offset(x * unit, y * unit);
+
+    final cloud = Path()
+      ..addOval(Rect.fromCircle(center: at(5, 9), radius: 3.2 * unit))
+      ..addOval(Rect.fromCircle(center: at(9, 6.6), radius: 4.4 * unit))
+      ..addOval(Rect.fromCircle(center: at(13, 8.6), radius: 3.4 * unit))
+      ..addRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(2 * unit, 8.4 * unit, 12.4 * unit, 3.6 * unit),
+          Radius.circular(1.8 * unit),
+        ),
+      );
+    canvas.drawPath(
+      cloud,
+      Paint()
+        ..isAntiAlias = true
+        ..shader = const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFFCFE8FF), Color(0xFF8EC9FF)],
+        ).createShader(Rect.fromLTWH(0, 0, size.width, size.height)),
+    );
+
+    final wind = Paint()
+      ..color = const Color(0xFFBAE1FF)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6 * unit
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(at(16.6, 4.8), at(19.8, 4.8), wind);
+    canvas.drawLine(at(16.8, 10.6), at(19.2, 10.6), wind);
+    // The long middle streak curls up at the tail.
+    canvas.drawPath(
+      Path()
+        ..moveTo(17 * unit, 7.7 * unit)
+        ..lineTo(21.4 * unit, 7.7 * unit)
+        ..quadraticBezierTo(23.2 * unit, 7.7 * unit, 22.4 * unit, 5.9 * unit),
+      wind,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_CloudBadgePainter oldDelegate) => false;
 }
 
 /// A keycap that also works as a button — the Enter chip runs the same toggle the
