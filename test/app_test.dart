@@ -4199,6 +4199,90 @@ void main() {
       ),
     );
   });
+  test('the exact commit time pads every field', () {
+    int stamp(DateTime time) => time.millisecondsSinceEpoch ~/ 1000;
+
+    expect(
+      exactCommitTime(stamp(DateTime(2026, 7, 26, 14, 5, 9))),
+      '2026-07-26 14:05:09',
+    );
+    // Single digits everywhere, and midnight stays 00 rather than 24 or 12.
+    expect(
+      exactCommitTime(stamp(DateTime(2026, 1, 2, 0, 0, 0))),
+      '2026-01-02 00:00:00',
+    );
+    expect(
+      exactCommitTime(stamp(DateTime(2025, 12, 31, 23, 59, 59))),
+      '2025-12-31 23:59:59',
+    );
+    expect(
+      exactCommitTime(stamp(DateTime(2026, 3, 4, 9, 8, 7))),
+      '2026-03-04 09:08:07',
+    );
+  });
+
+  testWidgets('exact commit times ride the Date cell and the person block', (
+    tester,
+  ) async {
+    final moment = DateTime.now().subtract(const Duration(hours: 3));
+    final stamp = moment.millisecondsSinceEpoch ~/ 1000;
+    final exact = exactCommitTime(stamp);
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit', timestamp: stamp)],
+          workingTree: () async => workingTreeCommit('1'),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    String? tooltipOn(String label) => tester
+        .widgetList<Tooltip>(
+          find.ancestor(of: find.text(label), matching: find.byType(Tooltip)),
+        )
+        .map((tooltip) => tooltip.message)
+        .firstOrNull;
+
+    // The commit row's Date cell carries the exact moment; the WIP row does not.
+    expect(tooltipOn('3 hours ago'), exact);
+    expect(tooltipOn('working tree'), isNull);
+    // Nor does a date heading.
+    expect(tooltipOn('Today'), isNull);
+
+    // The preview person block spells it out under the social line. The working
+    // tree leads the list, so the commit is two rows down.
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    final preview = find.byKey(const Key('preview-panel'));
+    expect(
+      find.descendant(of: preview, matching: find.text(exact)),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<Text>(
+            find.descendant(of: preview, matching: find.text(exact)),
+          )
+          .style
+          ?.fontFamily,
+      'monospace',
+    );
+
+    // The working tree row has no commit, so its preview shows no timestamp.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+    expect(find.text('No commit object or committer'), findsOneWidget);
+    expect(
+      find.descendant(of: preview, matching: find.text(exact)),
+      findsNothing,
+    );
+  });
 }
 
 /// Points along [path], for probing where a rail actually runs.

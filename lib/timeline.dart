@@ -31,6 +31,9 @@ const _dateGroup = Color(0xFF5AB0FF);
 /// A ref chip narrower than this is unreadable, so the extra chips hide instead.
 const _minChipWidth = 40.0;
 
+/// Long enough that arrowing past a row does not flash tooltips.
+const _tooltipDelay = Duration(milliseconds: 400);
+
 /// The design's `--yo-main` accent: additions, lane dots, the name tint.
 const _main = Color(0xFF8AD6A1);
 
@@ -1415,15 +1418,21 @@ class _TimelineScreenState extends State<TimelineScreen> {
               ),
               _cell(
                 _w('time'),
-                Text(
+                // The cell reads socially; the tooltip gives the exact moment.
+                _tooltip(
                   commit.isWorkingTree
-                      ? 'working tree'
-                      : _socialTime(commit.committerTimestamp),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: selected ? _text : _muted,
-                    fontSize: 12,
+                      ? null
+                      : exactCommitTime(commit.committerTimestamp),
+                  Text(
+                    commit.isWorkingTree
+                        ? 'working tree'
+                        : _socialTime(commit.committerTimestamp),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: selected ? _text : _muted,
+                      fontSize: 12,
+                    ),
                   ),
                 ),
               ),
@@ -1685,6 +1694,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
             ),
     );
   }
+
+  /// Wraps [child] only when there is something to say about it.
+  Widget _tooltip(String? message, Widget child) => message == null
+      ? child
+      : Tooltip(message: message, waitDuration: _tooltipDelay, child: child);
 
   /// No hairlines anywhere: the hash column's 2px line color is the only rule.
   Widget _cell(double width, Widget child, {Color? leftBorder}) => Container(
@@ -1967,6 +1981,17 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: _muted, fontSize: 10),
               ),
+              // The working tree has no commit, so it has no exact moment.
+              if (!commit.isWorkingTree)
+                Text(
+                  exactCommitTime(commit.committerTimestamp),
+                  maxLines: 1,
+                  style: const TextStyle(
+                    color: _muted,
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                  ),
+                ),
             ],
           ),
         ),
@@ -2715,6 +2740,15 @@ class _LegendDotPainter extends CustomPainter {
       'C' => (background: _renamed.withValues(alpha: 0.2), letter: _renamed),
       _ => (background: _accent, letter: _text),
     };
+
+/// The commit's own moment, local and zero-padded, for the places where "2 hours
+/// ago" is not precise enough.
+String exactCommitTime(int timestamp) {
+  final time = DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
+  String pad(int value) => value.toString().padLeft(2, '0');
+  return '${time.year}-${pad(time.month)}-${pad(time.day)} '
+      '${pad(time.hour)}:${pad(time.minute)}:${pad(time.second)}';
+}
 
 String _socialTime(int timestamp) => socialTimeLabel(
   DateTime.now().difference(
