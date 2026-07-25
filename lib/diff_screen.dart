@@ -464,20 +464,42 @@ class _DiffScreenState extends State<DiffScreen> {
             color: _surface,
             border: Border(bottom: BorderSide(color: _border)),
           ),
+          // Wrap, so a narrow diff column moves the picker to its own line
+          // instead of overflowing — with enough spacing that the mode segments
+          // never read as touching the picker beside them.
           child: Wrap(
-            spacing: 8,
-            runSpacing: 2,
+            spacing: 16,
+            runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              ToggleButtons(
-                constraints: const BoxConstraints(minHeight: 28, minWidth: 70),
-                isSelected: [
-                  _mode == DiffViewMode.unified,
-                  _mode == DiffViewMode.sideBySide,
-                ],
-                onPressed: (index) =>
-                    setState(() => _mode = DiffViewMode.values[index]),
-                children: const [Text('Unified'), Text('Side-by-side')],
+              Container(
+                key: const Key('diff-mode-toggle'),
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: ToggleButtons(
+                  constraints: const BoxConstraints(
+                    minHeight: 28,
+                    minWidth: 72,
+                  ),
+                  // Mono glyphs are wide, so the segment labels carry their own
+                  // smaller size instead of pushing the picker off the row.
+                  textStyle: const TextStyle(fontSize: 11),
+                  isSelected: [
+                    _mode == DiffViewMode.unified,
+                    _mode == DiffViewMode.sideBySide,
+                  ],
+                  onPressed: (index) =>
+                      setState(() => _mode = DiffViewMode.values[index]),
+                  children: const [
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 4),
+                      child: Text('Unified'),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 4),
+                      child: Text('Side-by-side'),
+                    ),
+                  ],
+                ),
               ),
               Focus(
                 key: const Key('diff-algorithm-focus'),
@@ -494,6 +516,15 @@ class _DiffScreenState extends State<DiffScreen> {
                   child: DropdownButton<DiffAlgorithm>(
                     key: const Key('diff-algorithm'),
                     value: _algorithm,
+                    // Dense and sized like the segments beside it, so the whole
+                    // control row still fits one line at the minimum window.
+                    isDense: true,
+                    style: const TextStyle(
+                      color: _text,
+                      fontSize: 11,
+                      fontFamily: cellFont,
+                      fontFamilyFallback: cellFontFallback,
+                    ),
                     items: [
                       for (final algorithm in DiffAlgorithm.values)
                         DropdownMenuItem(
@@ -508,11 +539,15 @@ class _DiffScreenState extends State<DiffScreen> {
                   ),
                 ),
               ),
-              Text(
-                'Algorithm: ${_displayedAlgorithm.status}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: _muted, fontSize: 11),
+              // The hint is the first thing to give up room.
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 260),
+                child: Text(
+                  'Algorithm: ${_displayedAlgorithm.status}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: _muted, fontSize: 11),
+                ),
               ),
             ],
           ),
@@ -662,11 +697,13 @@ class _DiffScreenState extends State<DiffScreen> {
     );
   }
 
+  /// The gutter tints only where it carries a number; header and hunk rows would
+  /// otherwise stack into a column of pale blocks down the left edge.
   Widget _number(int? number) => Container(
     width: 42,
     padding: const EdgeInsets.only(right: 6),
     alignment: Alignment.centerRight,
-    color: _raised,
+    color: number == null ? null : _raised,
     child: Text(
       number?.toString() ?? '',
       style: const TextStyle(

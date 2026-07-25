@@ -5314,6 +5314,83 @@ void main() {
       expect(style.fontFamilyFallback, ['Menlo'], reason: label);
     }
   });
+  // ------------------------------------------------------------------ G1/G2
+  testWidgets('the diff controls keep their gap and the gutter stays dark', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    // The native window stops at 960, so this is the tightest the row gets.
+    tester.view.physicalSize = const Size(960, 700);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('1', 'commit')],
+            files: (_, _) async => [
+              const GitFileChange(
+                path: 'lib/a.dart',
+                status: 'M',
+                additions: 1,
+                deletions: 1,
+              ),
+            ],
+            diff: (_, _, _, _) async => const [
+              DiffLine(kind: DiffLineKind.header, text: 'diff --git a/x b/x'),
+              DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+              DiffLine(kind: DiffLineKind.delete, text: 'old', oldNumber: 1),
+              DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
+            ],
+          ),
+          commits: [commit('1', 'commit')],
+          initialIndex: 0,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Rendering at 960 is the overflow assertion; the gap is explicit.
+    final toggle = tester.getRect(find.byKey(const Key('diff-mode-toggle')));
+    final picker = tester.getRect(find.byKey(const Key('diff-algorithm')));
+    expect(toggle.right + 12, lessThanOrEqualTo(picker.left));
+    expect(
+      tester.getRect(find.text('Side-by-side')).right,
+      lessThan(picker.left),
+    );
+
+    // The hint yields first: it ellipsizes rather than widening the row.
+    final hint = tester.widget<Text>(find.textContaining('Algorithm:'));
+    expect(hint.overflow, TextOverflow.ellipsis);
+    expect(hint.maxLines, 1);
+
+    // Gutters: numbered rows keep their tint, header and hunk rows do not, so no
+    // pale blocks stack down the left edge.
+    Iterable<Color?> rowGutters(String text) => tester
+        .widgetList<Container>(
+          find.descendant(
+            of: find
+                .ancestor(of: find.text(text), matching: find.byType(Row))
+                .first,
+            matching: find.byType(Container),
+          ),
+        )
+        .map((box) => box.color);
+    for (final text in ['diff --git a/x b/x', '@@ -1 +1 @@']) {
+      expect(rowGutters(text), everyElement(isNull), reason: text);
+    }
+    // A numbered row still shows its number, on the raised gutter.
+    expect(find.text('1'), findsWidgets);
+    expect(rowGutters('old'), contains(const Color(0xFF252936)));
+
+    // Side-by-side follows the same rule.
+    await tester.tap(find.text('Side-by-side'));
+    await tester.pumpAndSettle();
+    expect(rowGutters('@@ -1 +1 @@'), everyElement(isNull));
+    expect(rowGutters('old'), contains(const Color(0xFF252936)));
+  });
 }
 
 /// Points along [path], for probing where a rail actually runs.
