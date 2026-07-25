@@ -341,22 +341,27 @@ void main() {
       y: 30,
     );
 
+    // The rail is centred on the lane, so a stroke thinner than 2px straddles
+    // the two pixels either side of it and the probe reads partial coverage —
+    // half of it for today's 1px rail. Deriving the fraction from railWidth keeps
+    // the expectation honest if the rail ever gets thicker, where the sampled
+    // pixel goes fully covered.
+    final coverage = (CommitGraphPainter.railWidth / 2).clamp(0.0, 1.0);
+    Color rail(Color color) => _quantize(
+      Color.alphaBlend(
+        color.withValues(alpha: CommitGraphPainter.railOpacity * coverage),
+        _canvasBackground,
+      ),
+    );
+
     // The rail passing this row belongs to B's line, not to the row's own line
     // and not to B's committer — the graph colors by branch.
     expect(row.branch, 0);
     expect(row.activeLaneBranches[1], 1);
-    expect(
-      pixel,
-      _quantize(
-        Color.alphaBlend(
-          AvatarService.branchColor(
-            row.activeLaneBranches[1]!,
-          ).withValues(alpha: CommitGraphPainter.railOpacity),
-          _canvasBackground,
-        ),
-      ),
-    );
-    expect(pixel, isNot(_quantize(AvatarService.color(branch.committer))));
+    expect(pixel, rail(AvatarService.branchColor(row.activeLaneBranches[1]!)));
+    // Same coverage math on both sides, so this still fails if the rail goes
+    // back to being colored by the committer.
+    expect(pixel, isNot(rail(AvatarService.color(branch.committer))));
   });
 
   test('selected band spans the full row to the graph boundary', () {
@@ -806,8 +811,9 @@ GitCommit _commit(
   subject: sha,
 );
 
-/// Rails paint at [CommitGraphPainter.railOpacity], so the sampled pixel is the
-/// rail blended over this background rather than the raw committer color.
+/// Rails paint at [CommitGraphPainter.railOpacity] over this background, and a
+/// thin stroke only partly covers the pixel it is centred on, so a probe reads a
+/// blend rather than the branch color itself.
 const _canvasBackground = Color(0xFF15171E);
 
 /// The rasterized pixel is 8 bits per channel, so the blended expectation has

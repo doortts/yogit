@@ -47,8 +47,8 @@ void main() {
     final list = tester.widget<ListView>(
       find.byKey(const Key('timeline-list')),
     );
-    expect(TimelineScreen.rowHeight, 34);
-    expect(list.itemExtent, 34);
+    expect(TimelineScreen.rowHeight, 32);
+    expect(list.itemExtent, TimelineScreen.rowHeight);
     expect(list.cacheExtent, 200);
 
     // The preview starts hidden and only a key opens it.
@@ -519,7 +519,7 @@ void main() {
     expect(painter.laneX(0), 28);
     expect(painter.laneX(1), 58);
     expect(painter.laneX(2), 88);
-    expect(CommitGraphPainter.railWidth, 2.0);
+    expect(CommitGraphPainter.railWidth, 1.0);
     expect(CommitGraphPainter.railOpacity, 1.0);
     // One corner radius for both kinds; the flat run carries the rest.
     expect(CommitGraphPainter.cornerRadius, 8);
@@ -2584,7 +2584,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('open-full-diff')));
+    await tester.tap(find.byKey(const Key('preview-full-diff')));
     await tester.pumpAndSettle();
 
     expect(tester.getSize(find.byKey(const Key('nearby-column'))).width, 210);
@@ -3500,10 +3500,15 @@ void main() {
       tester.getRect(find.text('a')).left - 5,
     );
     // The date row is a row of the list, as tall as the rest.
-    expect(
-      tester.getSize(find.byKey(const Key('date-row-0'))).height,
-      TimelineScreen.rowHeight,
-    );
+    final rowRect = tester.getRect(find.byKey(const Key('date-row-0')));
+    final boxRect = tester.getRect(find.byKey(const Key('date-box-0')));
+    expect(rowRect.height, TimelineScreen.rowHeight);
+    // The box hangs below centre and still fits the row uncut.
+    final centred = (TimelineScreen.rowHeight - boxRect.height) / 2;
+    expect(boxRect.top - rowRect.top, greaterThan(centred));
+    expect(boxRect.top, greaterThanOrEqualTo(rowRect.top));
+    expect(boxRect.bottom, lessThanOrEqualTo(rowRect.bottom));
+    expect(boxRect.height, greaterThanOrEqualTo(20));
 
     // Underlines are gone from commit rows too.
     expect(
@@ -4428,6 +4433,19 @@ void main() {
       final rect = tester.getRect(rule);
       expect(rect.width, 2);
       expect(rect.height, TimelineScreen.rowHeight - 2);
+      // A 22px node still centres cleanly in the shorter row.
+      final cell = tester.getRect(find.byKey(Key('graph-cell-$index')));
+      final node = find.descendant(
+        of: find.byKey(Key('graph-cell-$index')),
+        matching: find.byType(CommitAvatarStack),
+      );
+      if (node.evaluate().isNotEmpty) {
+        expect(tester.getRect(node).height, 22);
+        expect(
+          tester.getRect(node).top - cell.top,
+          (TimelineScreen.rowHeight - 22) / 2,
+        );
+      }
       // 1px shy of the row at both ends.
       final row = tester.getRect(find.byKey(Key('graph-cell-$index')));
       expect(rect.top - row.top, 1);
@@ -4803,44 +4821,70 @@ void main() {
     expect(tester.getRect(title).top, lessThan(before));
   });
 
-  // ------------------------------------------------------------------ C3
-  testWidgets('the full diff CTA sits under the header, wide and bright', (
+  // ------------------------------------------------------------------ C3/H2
+  testWidgets('the preview header carries the compact green Show Diff', (
     tester,
   ) async {
+    final opened = <String>[];
     await tester.pumpWidget(
-      app(
-        FakeGitRepository((_, _) async => [commit('1', 'first commit')]),
-        controller,
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+          ),
+          controller: controller,
+          onOpenFullDiff: (commit) => opened.add(commit.sha),
+        ),
       ),
     );
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
-    final cta = find.byKey(const Key('open-full-diff'));
-    final rect = tester.getRect(cta);
-    final panel = tester.getRect(find.byKey(const Key('preview-panel')));
-    expect(rect.height, 32);
-    // Near full width, and above everything but the header.
-    expect(rect.width, greaterThan(panel.width - 40));
+    // The full-width blue CTA is gone.
+    expect(find.byKey(const Key('open-full-diff')), findsNothing);
+    expect(find.text('Open full diff'), findsNothing);
+
+    // A compact green twin of the toolbar's button sits at the header's right.
+    final button = find.byKey(const Key('preview-full-diff'));
+    final header = tester.getRect(find.text('Commit & Diff'));
+    final rect = tester.getRect(button);
+    expect(rect.height, 28);
+    expect(rect.left, greaterThan(header.right));
     expect(
-      rect.top,
-      lessThan(tester.getRect(find.text('first commit').last).top),
+      find.descendant(of: button, matching: find.text('Show Diff')),
+      findsOneWidget,
     );
     expect(
-      find.descendant(of: cta, matching: find.byIcon(Icons.open_in_full)),
+      find.descendant(of: button, matching: find.text('⌘D')),
       findsOneWidget,
+    );
+    expect(
+      (tester
+                  .widget<Container>(
+                    find.descendant(
+                      of: button,
+                      matching: find.byType(Container),
+                    ),
+                  )
+                  .decoration!
+              as BoxDecoration)
+          .color,
+      const Color(0xFF2EA043),
     );
     expect(
       tester
           .widget<Text>(
-            find.descendant(of: cta, matching: find.text('Open full diff')),
+            find.descendant(of: button, matching: find.text('Show Diff')),
           )
           .style
           ?.fontSize,
-      13,
+      11,
     );
-    expect(tester.widget<FilledButton>(cta).onPressed, isNotNull);
+
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(opened, ['1']);
   });
 
   // ------------------------------------------------------------------ C5/C6
@@ -4996,7 +5040,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-a')), findsNothing);
     expect(background(), const Color(0xFF252936));
-    expect(tester.widget<GestureDetector>(button).onTap, isNull);
+    expect(
+      tester
+          .widget<GestureDetector>(
+            find.descendant(of: button, matching: find.byType(GestureDetector)),
+          )
+          .onTap,
+      isNull,
+    );
     await tester.tap(button);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
@@ -5390,6 +5441,194 @@ void main() {
     await tester.pumpAndSettle();
     expect(rowGutters('@@ -1 +1 @@'), everyElement(isNull));
     expect(rowGutters('old'), contains(const Color(0xFF252936)));
+  });
+  // ------------------------------------------------------------------ H1
+  testWidgets('the diff pane selects across lines without losing the arrows', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('1', 'commit')],
+            files: (_, _) async => [
+              for (final name in ['one', 'two'])
+                GitFileChange(
+                  path: 'lib/$name.dart',
+                  status: 'M',
+                  additions: 1,
+                  deletions: 0,
+                ),
+            ],
+            diff: (_, _, path, _) async => [
+              DiffLine(
+                kind: DiffLineKind.add,
+                text: 'alpha $path',
+                newNumber: 1,
+              ),
+              DiffLine(
+                kind: DiffLineKind.add,
+                text: 'beta $path',
+                newNumber: 2,
+              ),
+            ],
+          ),
+          commits: [commit('1', 'commit')],
+          initialIndex: 0,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Drag with a mouse from the first line into the second.
+    final first = find.text('alpha lib/one.dart');
+    final second = find.text('beta lib/one.dart');
+    final paragraph = tester.renderObject<RenderParagraph>(
+      find.descendant(of: first, matching: find.byType(RichText)),
+    );
+    final start = paragraph.localToGlobal(
+      paragraph.getOffsetForCaret(const TextPosition(offset: 0), Rect.zero) +
+          const Offset(1, 6),
+    );
+    final gesture = await tester.startGesture(
+      start,
+      kind: PointerDeviceKind.mouse,
+    );
+    addTearDown(gesture.removePointer);
+    await tester.pump();
+    await gesture.moveTo(tester.getCenter(second));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    final screen = tester.state<State<DiffScreen>>(find.byType(DiffScreen));
+    final selection = (screen as dynamic).debugDiffSelection as String?;
+    expect(selection, isNotNull);
+    expect(selection, contains('alpha lib/one.dart'));
+    expect(selection, contains('beta'));
+
+    // And the keyboard still drives the screen after selecting.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(find.text('alpha lib/two.dart'), findsOneWidget);
+    expect(find.byKey(const Key('selected-file-lib/two.dart')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+    expect(find.text('alpha lib/one.dart'), findsOneWidget);
+  });
+
+  // ------------------------------------------------------------------ H3
+  testWidgets('meta arrows walk the open preview through its files', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [
+            commit('1', 'first commit'),
+            commit('2', 'second commit'),
+          ],
+          files: (_, _) async => [
+            for (final name in ['one', 'two', 'three'])
+              GitFileChange(
+                path: 'lib/$name.dart',
+                status: 'M',
+                additions: 1,
+                deletions: 0,
+              ),
+          ],
+          diff: (_, _, path, _) async => [
+            DiffLine(
+              kind: DiffLineKind.add,
+              text: 'body of $path',
+              newNumber: 1,
+            ),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    Future<void> metaArrow(LogicalKeyboardKey key) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(key);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+    }
+
+    // Closed panel: the combination has nothing to walk and changes nothing.
+    expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
+    await metaArrow(LogicalKeyboardKey.arrowDown);
+    expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
+    expect(find.text('Commit & Diff'), findsNothing);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    final preview = find.byKey(const Key('preview-panel'));
+    expect(
+      find.descendant(
+        of: preview,
+        matching: find.text('+body of lib/one.dart'),
+      ),
+      findsOneWidget,
+    );
+
+    // Down walks the files, up walks back, and both ends clamp.
+    await metaArrow(LogicalKeyboardKey.arrowDown);
+    expect(
+      find.descendant(
+        of: preview,
+        matching: find.text('+body of lib/two.dart'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('preview-state-lib/two.dart')), findsOneWidget);
+    await metaArrow(LogicalKeyboardKey.arrowDown);
+    await metaArrow(LogicalKeyboardKey.arrowDown);
+    expect(
+      find.descendant(
+        of: preview,
+        matching: find.text('+body of lib/three.dart'),
+      ),
+      findsOneWidget,
+    );
+    await metaArrow(LogicalKeyboardKey.arrowUp);
+    expect(
+      find.descendant(
+        of: preview,
+        matching: find.text('+body of lib/two.dart'),
+      ),
+      findsOneWidget,
+    );
+    await metaArrow(LogicalKeyboardKey.arrowUp);
+    await metaArrow(LogicalKeyboardKey.arrowUp);
+    expect(
+      find.descendant(
+        of: preview,
+        matching: find.text('+body of lib/one.dart'),
+      ),
+      findsOneWidget,
+    );
+    // The commit selection never moved while walking files.
+    expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
+
+    // Bare arrows still move the commit selection, with its own first file.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-2')), findsOneWidget);
   });
 }
 

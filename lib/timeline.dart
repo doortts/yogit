@@ -203,7 +203,7 @@ class TimelineScreen extends StatefulWidget {
   });
 
   /// Every row is this tall — commits and date headings alike.
-  static const rowHeight = 34.0;
+  static const rowHeight = 32.0;
 
   final GitRepository repository;
   final WindowFrameController? controller;
@@ -253,6 +253,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   Object? _loadError;
   Future<void>? _inFlight;
   final _previewFiles = <String, Future<List<GitFileChange>>>{};
+  final _previewFileLists = <String, List<GitFileChange>>{};
   final _previewDiffs = <({String sha, String path}), Future<List<DiffLine>>>{};
   final _previewPaths = <String, String>{};
 
@@ -483,15 +484,23 @@ class _TimelineScreenState extends State<TimelineScreen> {
   KeyEventResult _onKeyEvent(FocusNode _, KeyEvent event) {
     // Holding an arrow keeps moving; everything else acts once per press.
     if (event is KeyDownEvent || event is KeyRepeatEvent) {
-      // Autorepeat jumps instead of animating: queued animations would lag
-      // behind a held key and never catch up.
-      final animate = event is KeyDownEvent;
-      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-        _moveSelection(1, animate: animate);
+      final step = switch (event.logicalKey) {
+        LogicalKeyboardKey.arrowDown => 1,
+        LogicalKeyboardKey.arrowUp => -1,
+        _ => 0,
+      };
+      // With the panel open, meta walks the files it is showing; with the panel
+      // closed the combination has nothing to walk and stays inert.
+      if (step != 0 && HardwareKeyboard.instance.isMetaPressed) {
+        if (_previewController.previewPlacement != PreviewPlacement.closed) {
+          _stepPreviewFile(step);
+        }
         return KeyEventResult.handled;
       }
-      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-        _moveSelection(-1, animate: animate);
+      // Autorepeat jumps instead of animating: queued animations would lag
+      // behind a held key and never catch up.
+      if (step != 0) {
+        _moveSelection(step, animate: event is KeyDownEvent);
         return KeyEventResult.handled;
       }
     }
@@ -823,47 +832,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// under it, dimmed while the selection is a date heading with no commit.
   Widget _toolbarFullDiffButton() => ValueListenableBuilder<int>(
     valueListenable: _selectedIndex,
-    builder: (context, _, _) {
-      final enabled = _selectedCommit != null;
-      const green = Color(0xFF2EA043);
-      final ink = enabled ? AvatarService.onColor(green) : _muted;
-      return GestureDetector(
-        key: const Key('toolbar-full-diff'),
-        behavior: HitTestBehavior.opaque,
-        onTap: enabled ? _openFullDiff : null,
-        child: Container(
-          height: 40,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: enabled ? green : _raised,
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                'Show Diff',
-                style: TextStyle(
-                  color: ink,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  height: 1.1,
-                ),
-              ),
-              Text(
-                '⌘D',
-                style: TextStyle(
-                  color: ink.withValues(alpha: 0.75),
-                  fontSize: 10,
-                  height: 1.2,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    },
+    builder: (context, _, _) => _ShowDiffButton(
+      key: const Key('toolbar-full-diff'),
+      onTap: _selectedCommit == null ? null : _openFullDiff,
+    ),
   );
 
   Widget _placementButton(String label, PreviewPlacement placement) {
@@ -1467,13 +1439,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
         graphWidth,
       ),
       Padding(
-        // The hash column's 2px rule shifts its text, so the box follows it.
-        // 5px left of the hash text, so the box reads as heading the row rather
-        // than sitting in the hash column.
-        padding: const EdgeInsets.only(left: 6, right: 9),
+        // 5px left of the hash text (whose 2px rule shifts it), so the box reads
+        // as heading the row rather than sitting in the hash column, and pushed
+        // down far enough to hang under the group above without clipping.
+        padding: const EdgeInsets.only(left: 6, right: 9, top: 4),
         child: Container(
           key: Key('date-box-$index'),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          // Tight enough that the box plus its downward shift clears the row.
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
           decoration: BoxDecoration(
             border: Border.all(color: _dateGroup),
             borderRadius: BorderRadius.circular(7),
@@ -2089,7 +2062,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _previewHeader(commit),
-                _fullDiffButton(commit),
                 Expanded(
                   child: commit == null
                       ? const Center(
@@ -2113,7 +2085,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 
   Widget _previewHeader(GitCommit? commit) => Container(
-    height: 32,
+    height: 36,
     padding: const EdgeInsets.only(left: 12, right: 6),
     decoration: const BoxDecoration(
       border: Border(bottom: BorderSide(color: _border)),
@@ -2135,18 +2107,15 @@ class _TimelineScreenState extends State<TimelineScreen> {
             ),
           ),
         ),
-        TextButton(
-          style: TextButton.styleFrom(
-            foregroundColor: _muted,
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-            minimumSize: const Size(0, 24),
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            textStyle: const TextStyle(fontSize: 10),
-          ),
-          onPressed: commit == null ? null : _openFullDiff,
-          child: const Text('Open full diff'),
+        const SizedBox(width: 8),
+        _ShowDiffButton(
+          key: const Key('preview-full-diff'),
+          onTap: commit == null ? null : _openFullDiff,
+          height: 28,
+          labelSize: 11,
+          shortcutSize: 8,
         ),
-        const SizedBox(width: 6),
+        const SizedBox(width: 8),
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 64),
           child: Text(
@@ -2168,35 +2137,33 @@ class _TimelineScreenState extends State<TimelineScreen> {
     ),
   );
 
-  /// The panel's one call to action, right under its header.
-  Widget _fullDiffButton(GitCommit? commit) => Padding(
-    padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
-    child: SizedBox(
-      height: 32,
-      child: FilledButton.icon(
-        key: const Key('open-full-diff'),
-        onPressed: commit == null ? null : _openFullDiff,
-        style: FilledButton.styleFrom(
-          backgroundColor: _selectedRow,
-          foregroundColor: Colors.white,
-          disabledBackgroundColor: _raised,
-          disabledForegroundColor: _muted,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-        ),
-        icon: const Icon(Icons.open_in_full, size: 15),
-        label: const Text(
-          'Open full diff',
-          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-        ),
-      ),
-    ),
-  );
+  /// The commit's changed files, remembered in resolved form as well so ⌘↑/⌘↓ can
+  /// walk them without waiting on a future.
+  Future<List<GitFileChange>> _previewFilesFor(GitCommit commit) =>
+      _previewFiles.putIfAbsent(commit.sha, () {
+        final request = widget.repository.loadFiles(commit);
+        unawaited(
+          request
+              .then((files) => _previewFileLists[commit.sha] = files)
+              .catchError((_) => const <GitFileChange>[]),
+        );
+        return request;
+      });
+
+  /// Steps the open preview through the commit's files, clamped at both ends.
+  void _stepPreviewFile(int delta) {
+    final commit = _selectedCommit;
+    if (commit == null) return;
+    final files = _previewFileLists[commit.sha];
+    if (files == null || files.isEmpty) return;
+    final current = _previewPaths[commit.sha] ?? files.first.path;
+    final index = files.indexWhere((file) => file.path == current);
+    final next = (index + delta).clamp(0, files.length - 1);
+    setState(() => _previewPaths[commit.sha] = files[next].path);
+  }
 
   Widget _previewBody(GitCommit commit, bool bottom) {
-    final files = _previewFiles.putIfAbsent(
-      commit.sha,
-      () => widget.repository.loadFiles(commit),
-    );
+    final files = _previewFilesFor(commit);
     return FutureBuilder<List<GitFileChange>>(
       future: files,
       builder: (context, snapshot) {
@@ -2568,6 +2535,65 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 }
 
+/// The green 'Show Diff' affordance, name over shortcut. The toolbar and the
+/// preview header show the same button at their own scale.
+class _ShowDiffButton extends StatelessWidget {
+  const _ShowDiffButton({
+    required this.onTap,
+    this.height = 40,
+    this.labelSize = 13,
+    this.shortcutSize = 10,
+    super.key,
+  });
+
+  static const green = Color(0xFF2EA043);
+
+  final VoidCallback? onTap;
+  final double height;
+  final double labelSize;
+  final double shortcutSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final ink = onTap == null ? _muted : AvatarService.onColor(green);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Container(
+        height: height,
+        padding: EdgeInsets.symmetric(horizontal: height * 0.3),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: onTap == null ? _raised : green,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              'Show Diff',
+              style: TextStyle(
+                color: ink,
+                fontSize: labelSize,
+                fontWeight: FontWeight.w600,
+                height: 1.1,
+              ),
+            ),
+            Text(
+              '⌘D',
+              style: TextStyle(
+                color: ink.withValues(alpha: 0.75),
+                fontSize: shortcutSize,
+                height: 1.2,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Copies a ref name and answers with a check for a moment, so the click has
 /// feedback without a snackbar.
 class _CopyButton extends StatefulWidget {
@@ -2709,7 +2735,7 @@ class CommitGraphPainter extends CustomPainter {
 
   static const laneInset = 28.0;
   static const defaultLaneSpacing = 30.0;
-  static const railWidth = 2.0;
+  static const railWidth = 1.0;
 
   /// Stage 3: at or below this cell width the graph collapses to one lane.
   static const compactWidth = 56.0;

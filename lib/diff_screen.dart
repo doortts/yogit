@@ -52,6 +52,10 @@ class _DiffScreenState extends State<DiffScreen> {
   final _algorithmFocusNode = FocusNode();
   final _diffScroll = ScrollController();
 
+  /// Test hook: the text the user last selected on this screen.
+  @visibleForTesting
+  String? debugDiffSelection;
+
   late int _selectedIndex;
   String? _parent;
   List<GitFileChange> _files = const [];
@@ -296,25 +300,27 @@ class _DiffScreenState extends State<DiffScreen> {
           ),
         ),
         Expanded(
-          child: ListView.builder(
-            key: const Key('nearby-commits-list'),
-            itemCount: widget.commits.length,
-            itemBuilder: (context, index) {
-              final commit = widget.commits[index];
-              final selected = index == _selectedIndex;
-              return ListTile(
-                key: selected ? Key('selected-nearby-${commit.sha}') : null,
-                selected: selected,
-                dense: true,
-                title: Text(
-                  commit.subject,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(commit.shortSha),
-                onTap: () => _selectCommit(index),
-              );
-            },
+          child: _selectable(
+            ListView.builder(
+              key: const Key('nearby-commits-list'),
+              itemCount: widget.commits.length,
+              itemBuilder: (context, index) {
+                final commit = widget.commits[index];
+                final selected = index == _selectedIndex;
+                return ListTile(
+                  key: selected ? Key('selected-nearby-${commit.sha}') : null,
+                  selected: selected,
+                  dense: true,
+                  title: Text(
+                    commit.subject,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(commit.shortSha),
+                  onTap: () => _selectCommit(index),
+                );
+              },
+            ),
           ),
         ),
       ],
@@ -378,36 +384,38 @@ class _DiffScreenState extends State<DiffScreen> {
         Expanded(
           child: Stack(
             children: [
-              ListView.builder(
-                key: const Key('changed-files-list'),
-                itemCount: _files.length,
-                itemBuilder: (context, index) {
-                  final file = _files[index];
-                  final selected = file.path == _selectedPath;
-                  return ListTile(
-                    key: selected ? Key('selected-file-${file.path}') : null,
-                    dense: true,
-                    selected: selected,
-                    minLeadingWidth: 18,
-                    horizontalTitleGap: 7,
-                    leading: _statusChip(file.status),
-                    title: Text(
-                      file.path,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontFamily: cellFont,
-                        fontFamilyFallback: cellFontFallback,
-                        fontSize: 12,
+              _selectable(
+                ListView.builder(
+                  key: const Key('changed-files-list'),
+                  itemCount: _files.length,
+                  itemBuilder: (context, index) {
+                    final file = _files[index];
+                    final selected = file.path == _selectedPath;
+                    return ListTile(
+                      key: selected ? Key('selected-file-${file.path}') : null,
+                      dense: true,
+                      selected: selected,
+                      minLeadingWidth: 18,
+                      horizontalTitleGap: 7,
+                      leading: _statusChip(file.status),
+                      title: Text(
+                        file.path,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontFamily: cellFont,
+                          fontFamilyFallback: cellFontFallback,
+                          fontSize: 12,
+                        ),
                       ),
-                    ),
-                    trailing: Text(
-                      '+${file.additions ?? '-'} −${file.deletions ?? '-'}',
-                      style: const TextStyle(color: _muted, fontSize: 10),
-                    ),
-                    onTap: () => _selectFile(file.path),
-                  );
-                },
+                      trailing: Text(
+                        '+${file.additions ?? '-'} −${file.deletions ?? '-'}',
+                        style: const TextStyle(color: _muted, fontSize: 10),
+                      ),
+                      onTap: () => _selectFile(file.path),
+                    );
+                  },
+                ),
               ),
               if (_loadingFiles)
                 const Center(
@@ -585,11 +593,25 @@ class _DiffScreenState extends State<DiffScreen> {
     ),
   );
 
-  Widget _unifiedDiff() => ListView.builder(
-    key: const Key('unified-diff-list'),
-    controller: _diffScroll,
-    itemCount: _lines.length,
-    itemBuilder: (context, index) => _unifiedLine(_lines[index]),
+  /// One file's diff at a time, so its rows are built eagerly inside a single
+  /// scroll view: a drag can then select across lines, which a lazy list cannot.
+  Widget _unifiedDiff() => _selectable(
+    SingleChildScrollView(
+      key: const Key('unified-diff-list'),
+      controller: _diffScroll,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [for (final line in _lines) _unifiedLine(line)],
+      ),
+    ),
+  );
+
+  /// Text in here is code worth copying, and the screen's own Focus keeps the
+  /// arrow keys.
+  Widget _selectable(Widget child) => SelectionArea(
+    onSelectionChanged: (selection) =>
+        debugDiffSelection = selection?.plainText,
+    child: child,
   );
 
   Widget _unifiedLine(DiffLine line) {
@@ -634,20 +656,24 @@ class _DiffScreenState extends State<DiffScreen> {
     );
   }
 
-  Widget _sideBySideDiff() => ListView.builder(
-    key: const Key('side-by-side-diff-list'),
-    controller: _diffScroll,
-    itemCount: _pairs.length,
-    itemBuilder: (context, index) {
-      final pair = _pairs[index];
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _sideBySideDiff() => _selectable(
+    SingleChildScrollView(
+      key: const Key('side-by-side-diff-list'),
+      controller: _diffScroll,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(child: _sideLine(pair.left, old: true)),
-          Expanded(child: _sideLine(pair.right, old: false)),
+          for (final pair in _pairs)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: _sideLine(pair.left, old: true)),
+                Expanded(child: _sideLine(pair.right, old: false)),
+              ],
+            ),
         ],
-      );
-    },
+      ),
+    ),
   );
 
   Widget _sideLine(DiffLine? line, {required bool old}) {
