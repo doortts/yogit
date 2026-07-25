@@ -230,6 +230,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
   static const _pageSize = 500;
 
   static const _sidebarRange = (min: 120.0, max: 320.0);
+
+  /// The window drag stretch the path keeps for itself before the wordmark is
+  /// allowed any room.
+  static const _minDragWidth = 200.0;
   static const _previewWidthRange = (min: 240.0, max: 560.0);
   static const _previewHeightRange = (min: 200.0, max: 480.0);
 
@@ -758,18 +762,60 @@ class _TimelineScreenState extends State<TimelineScreen> {
   Widget _toolbar() => Container(
     key: const Key('toolbar'),
     height: 56,
-    padding: const EdgeInsets.symmetric(horizontal: 14),
     color: _surface,
-    // The '미리보기' caption is the first thing to go when the window is narrow:
-    // the three placement buttons say the same thing without it.
-    child: LayoutBuilder(
-      builder: (context, constraints) =>
-          _toolbarRow(constraints.maxWidth >= 900),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      // Decoration goes before anything functional when the window narrows:
+      // the wordmark first, then the caption, then the shortcut keycaps.
+      child: LayoutBuilder(
+        builder: (context, constraints) => _toolbarRow(
+          showPreviewLabel: constraints.maxWidth >= 900,
+          showShortcuts: constraints.maxWidth >= 880,
+        ),
+      ),
     ),
   );
 
-  Widget _toolbarRow(bool showPreviewLabel) => Row(
+  /// The window controls the titlebar no longer draws, in macOS order.
+  Widget _windowButtons() => Row(
     children: [
+      _WindowButton(
+        key: const Key('window-close'),
+        color: const Color(0xFFFF5F57),
+        glyph: '×',
+        onTap: () => unawaited(_previewController.closeWindow()),
+      ),
+      const SizedBox(width: 8),
+      _WindowButton(
+        key: const Key('window-minimize'),
+        color: const Color(0xFFFEBC2E),
+        glyph: '−',
+        onTap: () => unawaited(_previewController.minimizeWindow()),
+      ),
+      const SizedBox(width: 8),
+      _WindowButton(
+        key: const Key('window-zoom'),
+        color: const Color(0xFF28C840),
+        glyph: '+',
+        onTap: () => unawaited(_previewController.toggleZoom()),
+      ),
+      const SizedBox(width: 14),
+    ],
+  );
+
+  Widget _toolbarRow({
+    required bool showPreviewLabel,
+    required bool showShortcuts,
+  }) => Row(
+    children: [
+      Expanded(child: _toolbarLeft()),
+      _toolbarRight(showPreviewLabel, showShortcuts),
+    ],
+  );
+
+  Widget _toolbarLeft() => Row(
+    children: [
+      _windowButtons(),
       const Icon(
         Icons.account_tree_outlined,
         size: 24,
@@ -782,16 +828,66 @@ class _TimelineScreenState extends State<TimelineScreen> {
         onPressed: () => unawaited(_pickRepository()),
         icon: const Icon(Icons.folder_open_outlined, size: 24, color: _muted),
       ),
-      Expanded(
-        child: Text(
-          widget.repository.root,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(color: _muted, fontSize: 18),
+      Expanded(child: _pathAndWordmark()),
+    ],
+  );
+
+  /// The path and the wordmark share whatever the two clusters leave. Measuring
+  /// here means the right cluster's width never has to be guessed: the wordmark
+  /// keeps its intrinsic slot, the path takes the rest, and the drag stretch wins
+  /// the tie — the wordmark steps down to 20px and then goes rather than squeeze
+  /// it. Landing near the bar's centre is a happy side effect, not a promise.
+  Widget _pathAndWordmark() => LayoutBuilder(
+    builder: (context, constraints) {
+      // fontSize * 5 over-states 'Yogit' in DancingScript, so this errs toward
+      // leaving the path room.
+      final size = [26.0, 20.0].firstWhere(
+        (size) => constraints.maxWidth - (size * 5 + 24) >= _minDragWidth,
+        orElse: () => 0.0,
+      );
+      return Row(
+        children: [
+          // The path stretch doubles as the window's drag handle: it is the one
+          // wide area with no control in it, so no button fights it for a
+          // gesture.
+          Expanded(
+            child: GestureDetector(
+              key: const Key('toolbar-drag'),
+              behavior: HitTestBehavior.opaque,
+              onPanStart: (_) => unawaited(_previewController.startDrag()),
+              onDoubleTap: () => unawaited(_previewController.toggleZoom()),
+              child: Text(
+                widget.repository.root,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: _muted, fontSize: 18),
+              ),
+            ),
+          ),
+          if (size > 0) ...[
+            const SizedBox(width: 12),
+            IgnorePointer(
+              child: _Wordmark(key: const Key('wordmark'), fontSize: size),
+            ),
+            const SizedBox(width: 12),
+          ],
+        ],
+      );
+    },
+  );
+
+  Widget _toolbarRight(bool showPreviewLabel, bool showShortcuts) => Row(
+    mainAxisAlignment: MainAxisAlignment.end,
+    children: [
+      if (showShortcuts) ...[_shortcutHint(), const SizedBox(width: 12)],
+      // The caption sits beside the box, not inside it.
+      if (showPreviewLabel)
+        const Padding(
+          padding: EdgeInsets.only(right: 8),
+          child: Text('미리보기', style: TextStyle(color: _muted, fontSize: 14)),
         ),
-      ),
-      const SizedBox(width: 10),
       Container(
+        key: const Key('preview-placement'),
         padding: const EdgeInsets.all(3),
         decoration: BoxDecoration(
           color: _panelSoft,
@@ -800,14 +896,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ),
         child: Row(
           children: [
-            if (showPreviewLabel)
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 7),
-                child: Text(
-                  '미리보기',
-                  style: TextStyle(color: _muted, fontSize: 14),
-                ),
-              ),
             _placementButton('좌측', PreviewPlacement.left),
             _placementButton('우측', PreviewPlacement.right),
             _placementButton('하단', PreviewPlacement.bottom),
@@ -815,7 +903,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ),
       ),
       const SizedBox(width: 12),
-      _shortcutHint(),
       _toolbarFullDiffButton(),
       const SizedBox(width: 8),
       IconButton(
@@ -867,21 +954,15 @@ class _TimelineScreenState extends State<TimelineScreen> {
     );
   }
 
-  Widget _shortcutHint() => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
-    decoration: BoxDecoration(
-      border: Border.all(color: _border),
-      borderRadius: BorderRadius.circular(6),
-    ),
-    child: Row(
-      children: [
-        _kbd('↑'),
-        _kbd('↓'),
-        const Text(' 이동 · ', style: TextStyle(color: _muted, fontSize: 14)),
-        _kbd('Enter'),
-        const Text(' 상세', style: TextStyle(color: _muted, fontSize: 14)),
-      ],
-    ),
+  Widget _shortcutHint() => Row(
+    key: const Key('shortcut-hint'),
+    children: [
+      _kbd('↑'),
+      _kbd('↓'),
+      const Text(' 이동 · ', style: TextStyle(color: _muted, fontSize: 14)),
+      _kbd('Enter'),
+      const Text(' 상세', style: TextStyle(color: _muted, fontSize: 14)),
+    ],
   );
 
   Widget _kbd(String label) => Container(
@@ -2535,6 +2616,92 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 }
 
+/// One of the toolbar's traffic lights: a color at rest, its glyph on hover.
+/// The app's wordmark: one soft pastel per letter, legible on the dark bar.
+class _Wordmark extends StatelessWidget {
+  const _Wordmark({required this.fontSize, super.key});
+
+  final double fontSize;
+
+  static const letters = <(String, Color)>[
+    ('Y', Color(0xFFFFB3BA)),
+    ('o', Color(0xFFFFDFBA)),
+    ('g', Color(0xFFFFFFB3)),
+    ('i', Color(0xFFBAFFC9)),
+    ('t', Color(0xFFBAE1FF)),
+  ];
+
+  @override
+  Widget build(BuildContext context) => Text.rich(
+    TextSpan(
+      children: [
+        for (final (glyph, color) in letters)
+          TextSpan(
+            text: glyph,
+            style: TextStyle(color: color),
+          ),
+      ],
+    ),
+    style: TextStyle(
+      fontFamily: 'DancingScript',
+      fontSize: fontSize,
+      fontWeight: FontWeight.w700,
+    ),
+  );
+}
+
+class _WindowButton extends StatefulWidget {
+  const _WindowButton({
+    required this.color,
+    required this.glyph,
+    required this.onTap,
+    super.key,
+  });
+
+  final Color color;
+  final String glyph;
+  final VoidCallback onTap;
+
+  @override
+  State<_WindowButton> createState() => _WindowButtonState();
+}
+
+class _WindowButtonState extends State<_WindowButton> {
+  var _hovered = false;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: SystemMouseCursors.click,
+    onEnter: (_) => setState(() => _hovered = true),
+    onExit: (_) => setState(() => _hovered = false),
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: widget.onTap,
+      child: Container(
+        width: 12,
+        height: 12,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: widget.color,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.black.withValues(alpha: 0.18)),
+        ),
+        child: _hovered
+            ? Text(
+                widget.glyph,
+                style: TextStyle(
+                  color: Colors.black.withValues(alpha: 0.55),
+                  fontSize: 9,
+                  height: 1,
+                  fontWeight: FontWeight.w700,
+                ),
+              )
+            : null,
+      ),
+    ),
+  );
+}
+
 /// The green 'Show Diff' affordance, name over shortcut. The toolbar and the
 /// preview header show the same button at their own scale.
 class _ShowDiffButton extends StatelessWidget {
@@ -2735,7 +2902,7 @@ class CommitGraphPainter extends CustomPainter {
 
   static const laneInset = 28.0;
   static const defaultLaneSpacing = 30.0;
-  static const railWidth = 1.0;
+  static const railWidth = 2.0;
 
   /// Stage 3: at or below this cell width the graph collapses to one lane.
   static const compactWidth = 56.0;

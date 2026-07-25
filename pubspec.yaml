@@ -62,9 +62,15 @@ flutter:
           weight: 400
         - asset: assets/fonts/D2Coding-Bold.ttf
           weight: 700
+    # Dancing Script for the wordmark. OFL 1.1, license bundled beside it.
+    - family: DancingScript
+      fonts:
+        - asset: assets/fonts/DancingScript.ttf
+          weight: 700
 
   assets:
     - assets/fonts/D2Coding-OFL.txt
+    - assets/fonts/DancingScript-OFL.txt
 
   # To add assets to your application, add an assets section, like this:
   # assets:

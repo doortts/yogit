@@ -11,6 +11,16 @@ class MainFlutterWindow: NSWindow {
     self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)
 
+    // The toolbar draws its own traffic lights and title, so the native titlebar
+    // steps aside. The menu bar keeps Cmd+W and Cmd+Q, and .resizable stays in
+    // the mask, so resizing and fullscreen still work.
+    self.titlebarAppearsTransparent = true
+    self.titleVisibility = .hidden
+    self.styleMask.insert(.fullSizeContentView)
+    for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+      self.standardWindowButton(button)?.isHidden = true
+    }
+
     RegisterGeneratedPlugins(registry: flutterViewController)
     let channel = FlutterMethodChannel(
       name: "yogit/window",
@@ -27,6 +37,23 @@ class MainFlutterWindow: NSWindow {
         result(nil)
       case "pickRepository":
         result(MainFlutterWindow.pickRepository())
+      case "closeWindow":
+        self?.performClose(nil)
+        result(nil)
+      case "minimizeWindow":
+        self?.miniaturize(nil)
+        result(nil)
+      case "toggleZoom":
+        self?.zoom(nil)
+        result(nil)
+      case "isZoomed":
+        result(self?.isZoomed ?? false)
+      case "startDrag":
+        // Without a current event there is no drag to hand to AppKit.
+        if let event = NSApp.currentEvent {
+          self?.performDrag(with: event)
+        }
+        result(nil)
       default:
         result(FlutterMethodNotImplemented)
       }

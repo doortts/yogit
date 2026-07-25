@@ -519,7 +519,7 @@ void main() {
     expect(painter.laneX(0), 28);
     expect(painter.laneX(1), 58);
     expect(painter.laneX(2), 88);
-    expect(CommitGraphPainter.railWidth, 1.0);
+    expect(CommitGraphPainter.railWidth, 2.0);
     expect(CommitGraphPainter.railOpacity, 1.0);
     // One corner radius for both kinds; the flat run carries the rest.
     expect(CommitGraphPainter.cornerRadius, 8);
@@ -4066,9 +4066,55 @@ void main() {
     double sizeOf(String label) =>
         tester.widget<Text>(find.text(label)).style!.fontSize!;
     expect(sizeOf('미리보기'), 14);
+    // The caption sits outside the bordered box, to its left.
+    final box = tester.getRect(find.byKey(const Key('preview-placement')));
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('preview-placement')),
+        matching: find.text('미리보기'),
+      ),
+      findsNothing,
+    );
+    expect(
+      tester.getRect(find.text('미리보기')).right,
+      lessThanOrEqualTo(box.left),
+    );
     expect(sizeOf('하단'), 14);
     expect(sizeOf('Enter'), 13);
     expect(sizeOf(' 이동 · '), 14);
+    // The keycap group carries no box of its own — only the chips do.
+    expect(
+      tester
+          .widgetList<Container>(
+            find.ancestor(
+              of: find.text(' 이동 · '),
+              matching: find.byType(Container),
+            ),
+          )
+          .whereType<Container>()
+          .any((box) => (box.decoration as BoxDecoration?)?.border != null),
+      isFalse,
+    );
+    expect(
+      tester
+          .widgetList<Container>(
+            find.ancestor(
+              of: find.text('Enter'),
+              matching: find.byType(Container),
+            ),
+          )
+          .any((box) => (box.decoration as BoxDecoration?)?.border != null),
+      isTrue,
+    );
+    // Right cluster order: keycaps, caption, placement box, Show Diff, gear.
+    final lefts = [
+      tester.getRect(find.text(' 이동 · ')).left,
+      tester.getRect(find.text('미리보기')).left,
+      box.left,
+      tester.getRect(find.byKey(const Key('toolbar-full-diff'))).left,
+      tester.getRect(find.byIcon(Icons.settings_outlined)).left,
+    ];
+    expect(lefts, orderedEquals(([...lefts]..sort())));
     expect(tester.widget<Icon>(find.byIcon(Icons.settings_outlined)).size, 22);
     // Rendering at all is the fit assertion: an overflow would have thrown.
     expect(tester.getSize(find.byKey(const Key('toolbar'))).width, 960);
@@ -5629,6 +5675,223 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-2')), findsOneWidget);
+  });
+  // ------------------------------------------------------------------ J2
+  test('the window controls speak to the native window', () async {
+    final calls = <String>[];
+    const channel = MethodChannel('test/yogit-window-controls');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          calls.add(call.method);
+          return null;
+        });
+    final frame = WindowFrameController(channel: channel);
+
+    await frame.closeWindow();
+    await frame.minimizeWindow();
+    await frame.toggleZoom();
+    await frame.startDrag();
+    expect(calls, ['closeWindow', 'minimizeWindow', 'toggleZoom', 'startDrag']);
+
+    // No native side, no crash.
+    final orphan = WindowFrameController(
+      channel: const MethodChannel('test/yogit-window-none'),
+    );
+    await orphan.closeWindow();
+    await orphan.startDrag();
+  });
+
+  test('the native window hides its own chrome and answers the toolbar', () {
+    final source = File(
+      'macos/Runner/MainFlutterWindow.swift',
+    ).readAsStringSync();
+
+    for (final line in [
+      'titlebarAppearsTransparent = true',
+      'titleVisibility = .hidden',
+      'styleMask.insert(.fullSizeContentView)',
+      'standardWindowButton(button)?.isHidden = true',
+      'case "closeWindow":',
+      'case "minimizeWindow":',
+      'case "toggleZoom":',
+      'case "startDrag":',
+      'performDrag(with: event)',
+    ]) {
+      expect(source, contains(line), reason: line);
+    }
+    // The window keeps its own handles: resizing and the menu bar still work.
+    expect(source, isNot(contains('styleMask.remove(.resizable)')));
+    expect(source, contains('case "setPreview":'));
+    expect(source, contains('case "pickRepository":'));
+  });
+
+  testWidgets('the toolbar drags the window and keeps its buttons tappable', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final calls = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('test/yogit-window'), (
+          call,
+        ) async {
+          calls.add(call.method);
+          return null;
+        });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository((_, _) async => [commit('1', 'first commit')]),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Three lights, in macOS order, at the left edge.
+    final close = tester.getRect(find.byKey(const Key('window-close')));
+    final minimize = tester.getRect(find.byKey(const Key('window-minimize')));
+    final zoom = tester.getRect(find.byKey(const Key('window-zoom')));
+    expect(close.width, 12);
+    expect(close.right, lessThan(minimize.left));
+    expect(minimize.right, lessThan(zoom.left));
+    expect(zoom.right, lessThan(tester.getRect(find.text('.')).left));
+
+    calls.clear();
+    await tester.tap(find.byKey(const Key('window-close')));
+    await tester.tap(find.byKey(const Key('window-minimize')));
+    await tester.tap(find.byKey(const Key('window-zoom')));
+    await tester.pumpAndSettle();
+    expect(calls, ['closeWindow', 'minimizeWindow', 'toggleZoom']);
+
+    // Dragging the bar moves the window; double-tapping zooms it.
+    calls.clear();
+    await tester.drag(
+      find.byKey(const Key('toolbar-drag')),
+      const Offset(40, 10),
+    );
+    await tester.pumpAndSettle();
+    expect(calls, ['startDrag']);
+    calls.clear();
+    await tester.tap(find.byKey(const Key('toolbar-drag')));
+    await tester.pump(kDoubleTapMinTime);
+    await tester.tap(find.byKey(const Key('toolbar-drag')));
+    await tester.pumpAndSettle();
+    expect(calls, ['toggleZoom']);
+
+    // The controls on top of the drag region still take their own taps.
+    calls.clear();
+    await tester.tap(find.text('하단'));
+    await tester.pumpAndSettle();
+    expect(controller.previewPlacement, PreviewPlacement.bottom);
+    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('nearby-commits-list')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(const Key('pick-repository')))
+          .onPressed,
+      isNotNull,
+    );
+  });
+
+  // ------------------------------------------------------------------ J3
+  testWidgets('the Yogit wordmark sits centered in the toolbar', (
+    tester,
+  ) async {
+    const root = '/Users/ada/repos/yogit-480bbcc5-8064-43d5-976e-5e5ec891eba5';
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1660, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          root: root,
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final mark = tester.widget<Text>(
+      find.descendant(
+        of: find.byKey(const Key('wordmark')),
+        matching: find.byType(Text),
+      ),
+    );
+    expect(mark.style?.fontFamily, 'DancingScript');
+    expect(mark.style?.fontSize, 26);
+    expect(mark.style?.fontWeight, FontWeight.w700);
+    // One pastel per letter, in order.
+    final spans = (mark.textSpan! as TextSpan).children!.cast<TextSpan>();
+    expect(spans.map((span) => span.text), ['Y', 'o', 'g', 'i', 't']);
+    expect(spans.map((span) => span.style?.color), const [
+      Color(0xFFFFB3BA),
+      Color(0xFFFFDFBA),
+      Color(0xFFFFFFB3),
+      Color(0xFFBAFFC9),
+      Color(0xFFBAE1FF),
+    ]);
+    // It never eats a pointer.
+    expect(
+      tester
+          .widgetList<IgnorePointer>(
+            find.ancestor(
+              of: find.byKey(const Key('wordmark')),
+              matching: find.byType(IgnorePointer),
+            ),
+          )
+          .any((box) => box.ignoring),
+      isTrue,
+    );
+    // Nothing may run under it: the path ellipsizes before the wordmark, and the
+    // right cluster starts after it.
+    final slot = tester.getRect(find.byKey(const Key('wordmark')));
+    expect(
+      tester.getRect(find.text(root)).right,
+      lessThanOrEqualTo(slot.left - 8),
+    );
+    expect(
+      tester.getRect(find.byKey(const Key('preview-placement'))).left,
+      greaterThanOrEqualTo(slot.right + 8),
+    );
+    // The drag handle keeps a usable stretch of bar.
+    expect(
+      tester.getRect(find.byKey(const Key('toolbar-drag'))).width,
+      greaterThanOrEqualTo(200),
+    );
+
+    // The user's own window size: still there, still clear of both sides.
+    tester.view.physicalSize = const Size(1548, 800);
+    await tester.pumpAndSettle();
+    final narrow = tester.getRect(find.byKey(const Key('wordmark')));
+    final path = tester.getRect(find.byKey(const Key('toolbar-drag')));
+    expect(path.width, greaterThanOrEqualTo(200));
+    expect(
+      tester.getRect(find.text(root)).right,
+      lessThanOrEqualTo(narrow.left - 8),
+    );
+    expect(
+      narrow.right + 8,
+      lessThanOrEqualTo(
+        tester.getRect(find.byKey(const Key('shortcut-hint'))).left,
+      ),
+    );
+
+    // Too narrow for even the small size: the wordmark goes, the path stays, and
+    // rendering at all is the no-overflow assertion.
+    tester.view.physicalSize = const Size(960, 800);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('wordmark')), findsNothing);
+    expect(find.byKey(const Key('toolbar-drag')), findsOneWidget);
   });
 }
 
