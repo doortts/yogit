@@ -4073,20 +4073,18 @@ void main() {
     tester,
   ) async {
     final now = DateTime.now();
-    int stamp(Duration ago) => now.subtract(ago).millisecondsSinceEpoch ~/ 1000;
+    final today = DateTime(now.year, now.month, now.day);
+    int stampOn(DateTime day, {int minute = 0}) =>
+        day.add(Duration(minutes: minute)).millisecondsSinceEpoch ~/ 1000;
     await tester.pumpWidget(
       app(
         FakeGitRepository(
           (_, _) async => [
-            commit(
-              'a',
-              'today commit',
-              timestamp: stamp(const Duration(hours: 2)),
-            ),
+            commit('a', 'today commit', timestamp: stampOn(today)),
             commit(
               'b',
               'older commit',
-              timestamp: stamp(const Duration(days: 2)),
+              timestamp: stampOn(today.subtract(const Duration(days: 2))),
             ),
           ],
         ),
@@ -4148,20 +4146,18 @@ void main() {
     tester,
   ) async {
     final now = DateTime.now();
-    int stamp(Duration ago) => now.subtract(ago).millisecondsSinceEpoch ~/ 1000;
+    final today = DateTime(now.year, now.month, now.day);
+    int stampOn(DateTime day, {int minute = 0}) =>
+        day.add(Duration(minutes: minute)).millisecondsSinceEpoch ~/ 1000;
     await tester.pumpWidget(
       app(
         FakeGitRepository(
           (_, _) async => [
-            commit(
-              'a',
-              'today commit',
-              timestamp: stamp(const Duration(hours: 2)),
-            ),
+            commit('a', 'today commit', timestamp: stampOn(today)),
             commit(
               'b',
               'older commit',
-              timestamp: stamp(const Duration(days: 2)),
+              timestamp: stampOn(today.subtract(const Duration(days: 2))),
             ),
           ],
         ),
@@ -4512,7 +4508,9 @@ void main() {
     tester,
   ) async {
     final now = DateTime.now();
-    int stamp(Duration ago) => now.subtract(ago).millisecondsSinceEpoch ~/ 1000;
+    final today = DateTime(now.year, now.month, now.day);
+    int stampOn(DateTime day, {int minute = 0}) =>
+        day.add(Duration(minutes: minute)).millisecondsSinceEpoch ~/ 1000;
     await tester.pumpWidget(
       MaterialApp(
         home: TimelineScreen(
@@ -4522,15 +4520,19 @@ void main() {
                 'M',
                 'merge',
                 parents: const ['P', 'F'],
-                timestamp: stamp(const Duration(hours: 1)),
+                timestamp: stampOn(today, minute: 2),
               ),
               commit(
                 'F',
                 'feature today',
                 parents: const ['P'],
-                timestamp: stamp(const Duration(hours: 2)),
+                timestamp: stampOn(today, minute: 1),
               ),
-              commit('P', 'parent', timestamp: stamp(const Duration(days: 2))),
+              commit(
+                'P',
+                'parent',
+                timestamp: stampOn(today.subtract(const Duration(days: 2))),
+              ),
             ],
           ),
           controller: controller,
