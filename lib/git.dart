@@ -433,6 +433,20 @@ class DiffLine {
   final int? newNumber;
 }
 
+class GitBlameLine {
+  const GitBlameLine({
+    required this.lineNumber,
+    required this.sha,
+    required this.author,
+    required this.uncommitted,
+  });
+
+  final int lineNumber;
+  final String sha;
+  final String author;
+  final bool uncommitted;
+}
+
 List<DiffLine> parseUnifiedDiff(String diff) {
   final lines = <DiffLine>[];
   int? oldLine;

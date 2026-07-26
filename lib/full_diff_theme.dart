@@ -1,0 +1,29 @@
+import 'package:flutter/material.dart';
+
+const fullDiffHeader = Color(0xFF242424);
+const fullDiffControl = Color(0xF5363636);
+const fullDiffDivider = Color(0x15FFFFFF);
+const fullDiffCanvas = Color(0xFF181818);
+const fullDiffHunkHeader = Color(0xFF292929);
+const fullDiffSelection = Color(0xFF0D273F);
+const fullDiffSelectedChip = Color(0xFF273E52);
+const fullDiffAccent = Color(0xFF83C4FF);
+const fullDiffChip = Color(0xFF3A3A3A);
+const fullDiffMuted = Color(0xFF919191);
+const fullDiffAddedSource = Color(0xFF262E36);
+const fullDiffAddedGutter = Color(0xFF3D434A);
+const fullDiffDeletedSource = Color(0xFF34251F);
+const fullDiffDeletedGutter = Color(0xFF493B35);
+const fullDiffWordChange = Color(0xFF394C5E);
+const fullDiffString = Color(0xFFFFBFA0);
+const fullDiffMinimapTrack = Color(0xFF2F2F2F);
+const fullDiffMinimapViewport = Color(0xFF353A3E);
+const fullDiffDeletedMark = Color(0xFFF68B59);
+
+const fullDiffOuterPadding = 12.0;
+const fullDiffOuterRadius = 20.0;
+const fullDiffControlHeight = 28.0;
+const fullDiffControlRadius = 12.5;
+const fullDiffChipRadius = 7.5;
+const fullDiffMinimapWidth = 18.0;
+const fullDiffLineNumberWidth = 74.0;

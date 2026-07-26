@@ -1,5 +1,23 @@
+import 'dart:convert';
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:yogit/git.dart';
+
+enum FullDiffView { file, diff, blame, history }
+
+enum DiffPresentation { hunk, inline, split }
+
+enum FullDiffInitialView { hunk, fullFile }
+
+enum FileContentKind { utf8, binary, unsupportedEncoding, tooLarge }
+
+enum FileDocumentSide { old, result }
+
+const fullDiffLargeByteLimit = 2 * 1024 * 1024;
+const fullDiffLargeLineLimit = 50000;
+const fullDiffTextByteLimit = 10 * 1024 * 1024;
+const fullDiffTextLineLimit = 200000;
 
 final _hunkHeader = RegExp(
   r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: ?(.*))?$',
@@ -134,4 +152,181 @@ class DiffDocument {
       rows: List<DiffLine>.unmodifiable(rows),
     );
   }
+}
+
+extension DiffHunkRows on DiffHunk {
+  List<DiffLine> get changedLines => List.unmodifiable(
+    lines.where(
+      (line) =>
+          line.kind == DiffLineKind.add || line.kind == DiffLineKind.delete,
+    ),
+  );
+
+  String get displayRange {
+    final useOld = newCount == 0;
+    final start = useOld ? oldStart : newStart;
+    final count = useOld ? oldCount : newCount;
+    final end = count <= 1 ? start : start + count - 1;
+    return start == end ? '$start' : '$start–$end';
+  }
+}
+
+extension DiffDocumentDerived on DiffDocument {
+  List<DiffPair> get splitRows =>
+      List.unmodifiable(hunks.expand((hunk) => pairDiff(hunk.lines)));
+
+  int get sourceLineCount {
+    final newNumbers = rows.map((line) => line.newNumber).whereType<int>();
+    final oldNumbers = rows.map((line) => line.oldNumber).whereType<int>();
+    return newNumbers.isNotEmpty
+        ? newNumbers.reduce(math.max)
+        : oldNumbers.isEmpty
+        ? 0
+        : oldNumbers.reduce(math.max);
+  }
+}
+
+@immutable
+class FileDocument {
+  const FileDocument({
+    required this.revision,
+    required this.path,
+    required this.side,
+    required this.bytes,
+    required this.kind,
+    required this.lines,
+    required this.hasTrailingNewline,
+    required this.disableRichRendering,
+    required this.fingerprint,
+  });
+
+  final String revision;
+  final String path;
+  final FileDocumentSide side;
+  final Uint8List bytes;
+  final FileContentKind kind;
+  final List<String> lines;
+  final bool hasTrailingNewline;
+  final bool disableRichRendering;
+  final String fingerprint;
+
+  factory FileDocument.fromBytes({
+    required String revision,
+    required String path,
+    required FileDocumentSide side,
+    required Uint8List bytes,
+    required bool gitMarkedBinary,
+  }) {
+    final fingerprint = '${bytes.length}:${Object.hashAll(bytes)}';
+    if (gitMarkedBinary || bytes.contains(0)) {
+      return FileDocument(
+        revision: revision,
+        path: path,
+        side: side,
+        bytes: bytes,
+        kind: FileContentKind.binary,
+        lines: const [],
+        hasTrailingNewline: false,
+        disableRichRendering: true,
+        fingerprint: fingerprint,
+      );
+    }
+    late final String text;
+    try {
+      text = utf8.decode(bytes, allowMalformed: false);
+    } on FormatException {
+      return FileDocument(
+        revision: revision,
+        path: path,
+        side: side,
+        bytes: bytes,
+        kind: FileContentKind.unsupportedEncoding,
+        lines: const [],
+        hasTrailingNewline: false,
+        disableRichRendering: true,
+        fingerprint: fingerprint,
+      );
+    }
+    final trailing = text.endsWith('\n');
+    final lines = text.isEmpty ? <String>[] : text.split('\n');
+    if (trailing) lines.removeLast();
+    final tooLarge =
+        bytes.length > fullDiffTextByteLimit ||
+        lines.length > fullDiffTextLineLimit;
+    return FileDocument(
+      revision: revision,
+      path: path,
+      side: side,
+      bytes: bytes,
+      kind: tooLarge ? FileContentKind.tooLarge : FileContentKind.utf8,
+      lines: List.unmodifiable(tooLarge ? const <String>[] : lines),
+      hasTrailingNewline: trailing,
+      disableRichRendering:
+          bytes.length > fullDiffLargeByteLimit ||
+          lines.length > fullDiffLargeLineLimit,
+      fingerprint: fingerprint,
+    );
+  }
+}
+
+@immutable
+class BlameLine {
+  const BlameLine({
+    required this.lineNumber,
+    required this.sha,
+    required this.author,
+    required this.uncommitted,
+  });
+
+  final int lineNumber;
+  final String sha;
+  final String author;
+  final bool uncommitted;
+}
+
+@immutable
+class BlameDocument {
+  const BlameDocument({required this.file, required this.lines});
+
+  final FileDocument file;
+  final List<BlameLine> lines;
+
+  factory BlameDocument.fromGitLines(
+    FileDocument file,
+    List<GitBlameLine> lines,
+  ) {
+    if (file.lines.length != lines.length) {
+      throw FormatException(
+        'Blame row count ${lines.length} != file row count '
+        '${file.lines.length}',
+      );
+    }
+    return BlameDocument(
+      file: file,
+      lines: List.unmodifiable([
+        for (final line in lines)
+          BlameLine(
+            lineNumber: line.lineNumber,
+            sha: line.sha,
+            author: line.author,
+            uncommitted: line.uncommitted,
+          ),
+      ]),
+    );
+  }
+}
+
+@immutable
+class FileHistoryEntry {
+  const FileHistoryEntry({
+    required this.commit,
+    required this.path,
+    required this.oldPath,
+    required this.status,
+  });
+
+  final GitCommit commit;
+  final String path;
+  final String? oldPath;
+  final String status;
 }
