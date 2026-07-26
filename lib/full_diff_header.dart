@@ -109,33 +109,9 @@ class DiffToolbar extends StatelessWidget {
               dimension: 16,
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
-          Semantics(
-            container: true,
-            button: true,
-            label: 'diff 알고리즘: ${algorithm.label}',
-            child: ExcludeSemantics(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  PopupMenuButton<DiffAlgorithm>(
-                    key: const Key('diff-algorithm'),
-                    tooltip: 'diff 알고리즘',
-                    onSelected: onAlgorithmSelected,
-                    itemBuilder: (context) => [
-                      for (final value in DiffAlgorithm.values)
-                        PopupMenuItem(value: value, child: Text(value.label)),
-                    ],
-                    child: const Text('diff 알고리즘'),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    algorithm.label,
-                    key: const Key('diff-algorithm-value'),
-                    style: technicalTextStyle,
-                  ),
-                ],
-              ),
-            ),
+          _DiffAlgorithmButton(
+            algorithm: algorithm,
+            onSelected: onAlgorithmSelected,
           ),
           _SemanticToggle(
             key: const Key('ignore-whitespace'),
@@ -159,6 +135,59 @@ class DiffToolbar extends StatelessWidget {
             onChanged: onFocusModeChanged,
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _DiffAlgorithmButton extends StatefulWidget {
+  const _DiffAlgorithmButton({
+    required this.algorithm,
+    required this.onSelected,
+  });
+
+  final DiffAlgorithm algorithm;
+  final ValueChanged<DiffAlgorithm> onSelected;
+
+  @override
+  State<_DiffAlgorithmButton> createState() => _DiffAlgorithmButtonState();
+}
+
+class _DiffAlgorithmButtonState extends State<_DiffAlgorithmButton> {
+  final _popupKey = GlobalKey<PopupMenuButtonState<DiffAlgorithm>>();
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      container: true,
+      button: true,
+      label: 'diff 알고리즘: ${widget.algorithm.label}',
+      onTap: () => _popupKey.currentState?.showButtonMenu(),
+      child: ExcludeSemantics(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            KeyedSubtree(
+              key: const Key('diff-algorithm'),
+              child: PopupMenuButton<DiffAlgorithm>(
+                key: _popupKey,
+                tooltip: 'diff 알고리즘',
+                onSelected: widget.onSelected,
+                itemBuilder: (context) => [
+                  for (final value in DiffAlgorithm.values)
+                    PopupMenuItem(value: value, child: Text(value.label)),
+                ],
+                child: const Text('diff 알고리즘'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              widget.algorithm.label,
+              key: const Key('diff-algorithm-value'),
+              style: technicalTextStyle,
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -178,6 +178,7 @@ void main() {
     (tester) async {
       final semanticsHandle = tester.ensureSemantics();
       bool? ignoreWhitespace;
+      DiffAlgorithm? selectedAlgorithm;
       await _pumpToolbar(
         tester,
         activeHunkIndex: 1,
@@ -186,20 +187,25 @@ void main() {
         ignoreWhitespace: false,
         wrapLines: true,
         focusMode: false,
+        onAlgorithmSelected: (value) => selectedAlgorithm = value,
         onIgnoreWhitespaceChanged: (value) => ignoreWhitespace = value,
       );
 
       final algorithmFinder = find.semantics.byLabel('diff 알고리즘: Histogram');
       expect(algorithmFinder, findsOne);
+      final algorithmNode = algorithmFinder.evaluate().single;
+      expect(algorithmNode.getSemanticsData().flagsCollection.isButton, isTrue);
       expect(
-        algorithmFinder
-            .evaluate()
-            .single
-            .getSemanticsData()
-            .flagsCollection
-            .isButton,
+        algorithmNode.getSemanticsData().hasAction(SemanticsAction.tap),
         isTrue,
       );
+
+      tester.semantics.tap(algorithmFinder);
+      await tester.pumpAndSettle();
+      expect(find.text('Minimal'), findsOneWidget);
+      await tester.tap(find.text('Minimal'));
+      await tester.pumpAndSettle();
+      expect(selectedAlgorithm, DiffAlgorithm.minimal);
 
       final ignoreFinder = find.semantics.byLabel('Ignore whitespace');
       final wrapFinder = find.semantics.byLabel('Wrap lines');
