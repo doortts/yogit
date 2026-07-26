@@ -1,7 +1,8 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/full_diff_code_row.dart';
 import 'package:yogit/full_diff_header.dart';
@@ -405,6 +406,66 @@ void main() {
     expect(anchorKey.currentContext, isNotNull);
   });
 
+  testWidgets('split copies paired sources as tab-separated text', (
+    tester,
+  ) async {
+    final copied = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copied.add(
+              (call.arguments as Map<Object?, Object?>)['text']! as String,
+            );
+          }
+          return null;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null),
+    );
+    final document = DiffDocument.fromLines(const [
+      DiffLine(kind: DiffLineKind.hunk, text: '@@ -7 +7 @@ paired'),
+      DiffLine(kind: DiffLineKind.delete, text: 'old source', oldNumber: 7),
+      DiffLine(kind: DiffLineKind.add, text: 'new source', newNumber: 7),
+    ]);
+    await pumpPresentation(
+      tester,
+      presentation: DiffPresentation.split,
+      document: document,
+    );
+
+    final oldParagraph = tester.renderObject<RenderParagraph>(
+      find.descendant(
+        of: find.text('old source'),
+        matching: find.byType(RichText),
+      ),
+    );
+    final newParagraph = tester.renderObject<RenderParagraph>(
+      find.descendant(
+        of: find.text('new source'),
+        matching: find.byType(RichText),
+      ),
+    );
+    await _dragSelection(
+      tester,
+      oldParagraph,
+      0,
+      newParagraph,
+      'new source'.length,
+    );
+
+    Actions.invoke(
+      tester.element(find.text('old source')),
+      CopySelectionTextIntent.copy,
+    );
+    await tester.pump();
+
+    expect(copied, ['old source\tnew source']);
+    expect(copied.single, isNot(contains('7')));
+    expect(copied.single, isNot(contains('−')));
+    expect(copied.single, isNot(contains('+')));
+  });
+
   testWidgets('split avoids intrinsic layout for a large unwrapped hunk', (
     tester,
   ) async {
@@ -536,6 +597,173 @@ void main() {
       isTrue,
     );
   });
+
+  testWidgets('resolves source order once per large copy and per area', (
+    tester,
+  ) async {
+    final copied = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copied.add(
+              (call.arguments as Map<Object?, Object?>)['text']! as String,
+            );
+          }
+          return null;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null),
+    );
+    var firstAreaResolutions = 0;
+    var secondAreaResolutions = 0;
+    await tester.pumpWidget(
+      qaApp(
+        SingleChildScrollView(
+          child: Column(
+            children: [
+              FullDiffSelectionArea(
+                debugOnSelectionOrderResolved: () => firstAreaResolutions++,
+                child: Column(
+                  children: [
+                    for (var index = 0; index < 400; index++)
+                      FullDiffCodeRow(
+                        line: DiffLine(
+                          kind: DiffLineKind.add,
+                          text: 'bulk source $index',
+                          newNumber: index + 1,
+                        ),
+                        path: fileA.path,
+                        wrapLines: false,
+                        highlighter: fakeHighlighter,
+                      ),
+                  ],
+                ),
+              ),
+              FullDiffSelectionArea(
+                debugOnSelectionOrderResolved: () => secondAreaResolutions++,
+                child: FullDiffCodeRow(
+                  line: const DiffLine(
+                    kind: DiffLineKind.add,
+                    text: 'other area',
+                    newNumber: 1,
+                  ),
+                  path: fileA.path,
+                  wrapLines: false,
+                  highlighter: fakeHighlighter,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final firstSource = tester.element(find.text('bulk source 0'));
+
+    Actions.invoke(
+      firstSource,
+      const SelectAllTextIntent(SelectionChangedCause.keyboard),
+    );
+    await tester.pump();
+    Actions.invoke(firstSource, CopySelectionTextIntent.copy);
+
+    expect(firstAreaResolutions, 1);
+    expect(secondAreaResolutions, 0);
+    Actions.invoke(firstSource, CopySelectionTextIntent.copy);
+
+    expect(firstAreaResolutions, 2);
+    expect(secondAreaResolutions, 0);
+    await tester.pump();
+
+    expect(copied, hasLength(2));
+    for (final content in copied) {
+      expect(content.split('\n'), hasLength(400));
+      expect(content, startsWith('bulk source 0\nbulk source 1\n'));
+      expect(content, endsWith('\nbulk source 399'));
+      expect(content, isNot(contains('+')));
+    }
+  });
+
+  testWidgets('refreshes source order after rows move and unregister', (
+    tester,
+  ) async {
+    final copied = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copied.add(
+              (call.arguments as Map<Object?, Object?>)['text']! as String,
+            );
+          }
+          return null;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null),
+    );
+    final rows = ValueNotifier(const ['alpha source', 'beta source']);
+    addTearDown(rows.dispose);
+    await tester.pumpWidget(
+      qaApp(
+        ValueListenableBuilder<List<String>>(
+          valueListenable: rows,
+          builder: (context, values, child) => FullDiffSelectionArea(
+            child: Column(
+              children: [
+                for (final (index, value) in values.indexed)
+                  FullDiffCodeRow(
+                    key: ValueKey(value),
+                    line: DiffLine(
+                      kind: DiffLineKind.add,
+                      text: value,
+                      newNumber: index + 1,
+                    ),
+                    path: fileA.path,
+                    wrapLines: false,
+                    highlighter: fakeHighlighter,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final alphaSource = tester.element(find.text('alpha source'));
+
+    Actions.invoke(
+      alphaSource,
+      const SelectAllTextIntent(SelectionChangedCause.keyboard),
+    );
+    await tester.pump();
+    Actions.invoke(alphaSource, CopySelectionTextIntent.copy);
+    await tester.pump();
+    expect(copied, ['alpha source\nbeta source']);
+
+    final selectionArea = find.ancestor(
+      of: find.text('alpha source'),
+      matching: find.byType(SelectionArea),
+    );
+    tester
+        .state<SelectionAreaState>(selectionArea)
+        .selectableRegion
+        .clearSelection();
+    rows.value = const ['gamma source', 'beta source'];
+    await tester.pumpAndSettle();
+    final gammaSource = tester.element(find.text('gamma source'));
+
+    Actions.invoke(
+      gammaSource,
+      const SelectAllTextIntent(SelectionChangedCause.keyboard),
+    );
+    await tester.pump();
+    Actions.invoke(gammaSource, CopySelectionTextIntent.copy);
+    await tester.pump();
+
+    expect(copied, ['alpha source\nbeta source', 'gamma source\nbeta source']);
+    expect(find.text('alpha source'), findsNothing);
+  });
 }
 
 Future<void> _pumpToolbar(
@@ -582,6 +810,36 @@ IconButton _navigationButton(WidgetTester tester, String tooltip) =>
         matching: find.byType(IconButton),
       ),
     );
+
+Future<void> _dragSelection(
+  WidgetTester tester,
+  RenderParagraph startParagraph,
+  int startOffset,
+  RenderParagraph endParagraph,
+  int endOffset,
+) async {
+  final start = startParagraph.localToGlobal(
+    startParagraph.getOffsetForCaret(
+          TextPosition(offset: startOffset),
+          Rect.zero,
+        ) +
+        const Offset(1, 6),
+  );
+  final end = endParagraph.localToGlobal(
+    endParagraph.getOffsetForCaret(TextPosition(offset: endOffset), Rect.zero) +
+        const Offset(-1, 6),
+  );
+  final gesture = await tester.startGesture(
+    start,
+    kind: ui.PointerDeviceKind.mouse,
+  );
+  addTearDown(gesture.removePointer);
+  await tester.pump();
+  await gesture.moveTo(end);
+  await tester.pump();
+  await gesture.up();
+  await tester.pumpAndSettle();
+}
 
 Future<void> pumpPresentation(
   WidgetTester tester, {

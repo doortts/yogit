@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -24,9 +26,16 @@ const _gutterStyle = TextStyle(
 );
 
 class FullDiffSelectionArea extends StatefulWidget {
-  const FullDiffSelectionArea({required this.child, super.key});
+  const FullDiffSelectionArea({
+    required this.child,
+    this.debugOnSelectionOrderResolved,
+    super.key,
+  });
 
   final Widget child;
+
+  @visibleForTesting
+  final VoidCallback? debugOnSelectionOrderResolved;
 
   @override
   State<FullDiffSelectionArea> createState() => _FullDiffSelectionAreaState();
@@ -34,42 +43,73 @@ class FullDiffSelectionArea extends StatefulWidget {
 
 class _FullDiffSelectionAreaState extends State<FullDiffSelectionArea> {
   final _sources = <_SourceSelectionContainerState>[];
+  _SelectionSnapshot? _snapshot;
+  bool _snapshotClearScheduled = false;
+  bool _disposed = false;
 
   void register(_SourceSelectionContainerState source) {
-    if (!_sources.contains(source)) _sources.add(source);
+    if (_sources.contains(source)) return;
+    _sources.add(source);
+    invalidateSelectionSnapshot();
   }
 
   void unregister(_SourceSelectionContainerState source) {
     _sources.remove(source);
+    invalidateSelectionSnapshot();
   }
 
-  bool needsLineBreakAfter(_SourceSelectionContainerState source) {
-    final selected = [
-      for (final candidate in _sources)
-        if (candidate.rawSelectedContent != null) candidate,
-    ]..sort(_compareSources);
-    final index = selected.indexOf(source);
-    if (index < 0 || index == selected.length - 1) return false;
-
-    final currentOrigin = _sourceOrigin(selected[index]);
-    final nextOrigin = _sourceOrigin(selected[index + 1]);
-    if (currentOrigin == null || nextOrigin == null) return true;
-    return nextOrigin.dy - currentOrigin.dy > 0.5;
+  void invalidateSelectionSnapshot() {
+    _snapshot = null;
   }
 
-  int _compareSources(
-    _SourceSelectionContainerState left,
-    _SourceSelectionContainerState right,
-  ) {
-    final leftOrigin = _sourceOrigin(left);
-    final rightOrigin = _sourceOrigin(right);
-    if (leftOrigin == null || rightOrigin == null) {
-      return _sources.indexOf(left).compareTo(_sources.indexOf(right));
+  String separatorAfter(_SourceSelectionContainerState source) {
+    final existing = _snapshot;
+    if (existing == null || identical(existing.first, source)) {
+      _snapshot = _createSnapshot();
+      _scheduleSnapshotClear();
     }
-    final verticalDelta = leftOrigin.dy - rightOrigin.dy;
-    return verticalDelta.abs() > 0.5
-        ? verticalDelta.sign.toInt()
-        : leftOrigin.dx.compareTo(rightOrigin.dx);
+    return _snapshot?.separators[source] ?? '';
+  }
+
+  _SelectionSnapshot? _createSnapshot() {
+    final registrationOrder = <_SourceSelectionContainerState, int>{
+      for (final (index, source) in _sources.indexed) source: index,
+    };
+    final selected =
+        <_SourceSelectionContainerState>[
+          for (final source in _sources)
+            if (source.rawSelectedContent != null) source,
+        ]..sort((left, right) {
+          final leftOrigin = _sourceOrigin(left);
+          final rightOrigin = _sourceOrigin(right);
+          if (leftOrigin == null || rightOrigin == null) {
+            return registrationOrder[left]!.compareTo(
+              registrationOrder[right]!,
+            );
+          }
+          final verticalDelta = leftOrigin.dy - rightOrigin.dy;
+          return verticalDelta.abs() > 0.5
+              ? verticalDelta.sign.toInt()
+              : leftOrigin.dx.compareTo(rightOrigin.dx);
+        });
+    if (selected.isEmpty) return null;
+
+    widget.debugOnSelectionOrderResolved?.call();
+    final separators = <_SourceSelectionContainerState, String>{};
+    for (var index = 0; index < selected.length; index++) {
+      if (index == selected.length - 1) {
+        separators[selected[index]] = '';
+        continue;
+      }
+      final currentOrigin = _sourceOrigin(selected[index]);
+      final nextOrigin = _sourceOrigin(selected[index + 1]);
+      separators[selected[index]] = currentOrigin == null || nextOrigin == null
+          ? '\n'
+          : nextOrigin.dy - currentOrigin.dy > 0.5
+          ? '\n'
+          : '\t';
+    }
+    return _SelectionSnapshot(first: selected.first, separators: separators);
   }
 
   Offset? _sourceOrigin(_SourceSelectionContainerState source) {
@@ -78,11 +118,36 @@ class _FullDiffSelectionAreaState extends State<FullDiffSelectionArea> {
     return renderObject.localToGlobal(Offset.zero);
   }
 
+  void _scheduleSnapshotClear() {
+    if (_snapshotClearScheduled) return;
+    _snapshotClearScheduled = true;
+    scheduleMicrotask(() {
+      if (_disposed) return;
+      _snapshot = null;
+      _snapshotClearScheduled = false;
+    });
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _snapshot = null;
+    _sources.clear();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => _FullDiffSelectionGroup(
     state: this,
     child: SelectionArea(child: widget.child),
   );
+}
+
+class _SelectionSnapshot {
+  const _SelectionSnapshot({required this.first, required this.separators});
+
+  final _SourceSelectionContainerState first;
+  final Map<_SourceSelectionContainerState, String> separators;
 }
 
 class _FullDiffSelectionGroup extends InheritedWidget {
@@ -241,10 +306,15 @@ class _SourceSelectionContainer extends StatefulWidget {
 }
 
 class _SourceSelectionContainerState extends State<_SourceSelectionContainer> {
-  late final _delegate = _SourceSelectionContainerDelegate(this);
+  late final _delegate = _SourceSelectionContainerDelegate(this)
+    ..addListener(_handleSelectionChanged);
   _FullDiffSelectionAreaState? _selectionGroup;
 
   SelectedContent? get rawSelectedContent => _delegate.rawSelectedContent;
+
+  void _handleSelectionChanged() {
+    _selectionGroup?.invalidateSelectionSnapshot();
+  }
 
   @override
   void didChangeDependencies() {
@@ -259,12 +329,10 @@ class _SourceSelectionContainerState extends State<_SourceSelectionContainer> {
   @override
   void dispose() {
     _selectionGroup?.unregister(this);
+    _delegate.removeListener(_handleSelectionChanged);
     _delegate.dispose();
     super.dispose();
   }
-
-  bool get needsLineBreak =>
-      _selectionGroup?.needsLineBreakAfter(this) ?? false;
 
   @override
   Widget build(BuildContext context) =>
@@ -283,9 +351,8 @@ class _SourceSelectionContainerDelegate
   SelectedContent? getSelectedContent() {
     final content = rawSelectedContent;
     if (content == null) return null;
-    return source.needsLineBreak
-        ? SelectedContent(plainText: '${content.plainText}\n')
-        : content;
+    final separator = source._selectionGroup?.separatorAfter(source) ?? '';
+    return SelectedContent(plainText: '${content.plainText}$separator');
   }
 }
 
