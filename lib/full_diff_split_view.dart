@@ -17,6 +17,8 @@ class SplitPresentationView extends StatelessWidget {
     required this.wrapLines,
     required this.showOldSide,
     required this.highlighter,
+    required this.anchorKeys,
+    this.controller,
     super.key,
   });
 
@@ -27,6 +29,8 @@ class SplitPresentationView extends StatelessWidget {
   final bool wrapLines;
   final bool showOldSide;
   final FullDiffSyntaxHighlighter highlighter;
+  final Map<String, GlobalKey> anchorKeys;
+  final ScrollController? controller;
 
   @override
   Widget build(BuildContext context) {
@@ -40,13 +44,14 @@ class SplitPresentationView extends StatelessWidget {
     }
 
     return ListView.builder(
-      primary: true,
+      controller: controller,
+      primary: controller == null,
       itemCount: document.hunks.length,
       itemBuilder: (context, hunkIndex) {
         final hunk = document.hunks[hunkIndex];
         final current = activeAnchor?.hunkIndex == hunk.index;
         return KeyedSubtree(
-          key: GlobalObjectKey<State<StatefulWidget>>(hunk.anchor.id),
+          key: _anchorKey(hunk.anchor),
           child: SelectionArea(
             child: Column(
               key: Key('split-hunk-$hunkIndex'),
@@ -75,6 +80,10 @@ class SplitPresentationView extends StatelessWidget {
       },
     );
   }
+
+  GlobalKey _anchorKey(DiffAnchor anchor) =>
+      anchorKeys[anchor.id] ??
+      (throw StateError('Missing GlobalKey for ${anchor.id}'));
 }
 
 class _SplitRow extends StatelessWidget {
@@ -122,27 +131,28 @@ class _SplitRow extends StatelessWidget {
 
     if (!showOldSide) return newSide;
 
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: left == null
-                ? HatchedDiffCell(key: Key('split-missing-old-$rowIndex'))
-                : FullDiffCodeRow(
-                    line: left,
-                    path: oldPath,
-                    wrapLines: wrapLines,
-                    highlighter: highlighter,
-                    current: markCurrent,
-                    wordRanges: wordChanges.oldRanges,
-                  ),
-          ),
-          const VerticalDivider(width: 1, color: fullDiffDivider),
-          Expanded(child: newSide),
-        ],
-      ),
+    final row = Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: left == null
+              ? HatchedDiffCell(key: Key('split-missing-old-$rowIndex'))
+              : FullDiffCodeRow(
+                  line: left,
+                  path: oldPath,
+                  wrapLines: wrapLines,
+                  highlighter: highlighter,
+                  current: markCurrent,
+                  wordRanges: wordChanges.oldRanges,
+                ),
+        ),
+        const VerticalDivider(width: 1, color: fullDiffDivider),
+        Expanded(child: newSide),
+      ],
     );
+    return wrapLines
+        ? IntrinsicHeight(child: row)
+        : SizedBox(height: 27, child: row);
   }
 }
 

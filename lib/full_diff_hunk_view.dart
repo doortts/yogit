@@ -17,6 +17,8 @@ class HunkPresentationView extends StatelessWidget {
     required this.path,
     required this.wrapLines,
     required this.highlighter,
+    required this.anchorKeys,
+    this.controller,
     super.key,
   });
 
@@ -25,6 +27,8 @@ class HunkPresentationView extends StatelessWidget {
   final String path;
   final bool wrapLines;
   final FullDiffSyntaxHighlighter highlighter;
+  final Map<String, GlobalKey> anchorKeys;
+  final ScrollController? controller;
 
   @override
   Widget build(BuildContext context) {
@@ -44,10 +48,11 @@ class HunkPresentationView extends StatelessWidget {
     final wordRanges = _wordRangesByLine(hunk.lines);
     return SelectionArea(
       child: ListView(
-        primary: true,
+        controller: controller,
+        primary: controller == null,
         children: [
           KeyedSubtree(
-            key: GlobalObjectKey<State<StatefulWidget>>(hunk.anchor.id),
+            key: _anchorKey(hunk.anchor),
             child: _PresentationHunkHeader(
               hunk: hunk,
               path: path,
@@ -67,6 +72,10 @@ class HunkPresentationView extends StatelessWidget {
       ),
     );
   }
+
+  GlobalKey _anchorKey(DiffAnchor anchor) =>
+      anchorKeys[anchor.id] ??
+      (throw StateError('Missing GlobalKey for ${anchor.id}'));
 }
 
 class _PresentationHunkHeader extends StatelessWidget {

@@ -15,6 +15,8 @@ class InlinePresentationView extends StatelessWidget {
     required this.path,
     required this.wrapLines,
     required this.highlighter,
+    required this.anchorKeys,
+    this.controller,
     super.key,
   });
 
@@ -23,6 +25,8 @@ class InlinePresentationView extends StatelessWidget {
   final String path;
   final bool wrapLines;
   final FullDiffSyntaxHighlighter highlighter;
+  final Map<String, GlobalKey> anchorKeys;
+  final ScrollController? controller;
 
   @override
   Widget build(BuildContext context) {
@@ -36,14 +40,15 @@ class InlinePresentationView extends StatelessWidget {
     }
 
     return ListView.builder(
-      primary: true,
+      controller: controller,
+      primary: controller == null,
       itemCount: document.hunks.length,
       itemBuilder: (context, index) {
         final hunk = document.hunks[index];
         final wordRanges = _wordRangesByLine(hunk.lines);
         final current = activeAnchor?.hunkIndex == hunk.index;
         return KeyedSubtree(
-          key: GlobalObjectKey<State<StatefulWidget>>(hunk.anchor.id),
+          key: _anchorKey(hunk.anchor),
           child: SelectionArea(
             child: Column(
               key: Key('inline-hunk-$index'),
@@ -73,6 +78,10 @@ class InlinePresentationView extends StatelessWidget {
       },
     );
   }
+
+  GlobalKey _anchorKey(DiffAnchor anchor) =>
+      anchorKeys[anchor.id] ??
+      (throw StateError('Missing GlobalKey for ${anchor.id}'));
 }
 
 class _InlineHunkHeader extends StatelessWidget {

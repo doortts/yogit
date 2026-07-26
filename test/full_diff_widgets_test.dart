@@ -562,11 +562,16 @@ void main() {
   testWidgets('hunk shows only changed rows for the active block', (
     tester,
   ) async {
+    final anchorKeys = {
+      for (final hunk in twoHunkDocument.hunks)
+        hunk.anchor.id: GlobalKey(debugLabel: hunk.anchor.id),
+    };
     await pumpPresentation(
       tester,
       presentation: DiffPresentation.hunk,
       document: twoHunkDocument,
       activeAnchor: twoHunkDocument.hunks.last.anchor,
+      anchorKeys: anchorKeys,
     );
 
     expect(find.text('second old'), findsOneWidget);
@@ -576,6 +581,10 @@ void main() {
     expect(
       find.text('SetupBase · lines 20–21 · change 2 of 2'),
       findsOneWidget,
+    );
+    expect(
+      anchorKeys[twoHunkDocument.hunks.last.anchor.id]!.currentContext,
+      isNotNull,
     );
   });
 
@@ -594,17 +603,106 @@ void main() {
     expect(find.text('context after 3'), findsOneWidget);
   });
 
+  testWidgets('inline mounts supplied anchor keys for ensureVisible', (
+    tester,
+  ) async {
+    final anchorKeys = {
+      for (final hunk in twoHunkDocument.hunks)
+        hunk.anchor.id: GlobalKey(debugLabel: hunk.anchor.id),
+    };
+    final controller = ScrollController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      qaApp(
+        SizedBox(
+          width: 800,
+          height: 200,
+          child: InlinePresentationView(
+            document: twoHunkDocument,
+            activeAnchor: twoHunkDocument.hunks.first.anchor,
+            path: fileA.path,
+            wrapLines: false,
+            highlighter: fakeHighlighter,
+            anchorKeys: anchorKeys,
+            controller: controller,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final targetKey = anchorKeys[twoHunkDocument.hunks.last.anchor.id]!;
+    expect(targetKey.currentContext, isNotNull);
+    expect(
+      tester.widget<ListView>(find.byType(ListView)).controller,
+      same(controller),
+    );
+
+    await Scrollable.ensureVisible(
+      targetKey.currentContext!,
+      duration: Duration.zero,
+      alignment: 0.1,
+    );
+    await tester.pump();
+
+    expect(controller.offset, greaterThan(0));
+  });
+
   testWidgets('split pairs replacements and hatches a missing side', (
     tester,
   ) async {
+    final anchorKey = GlobalKey(debugLabel: 'added-only-anchor');
     await pumpPresentation(
       tester,
       presentation: DiffPresentation.split,
       document: addedOnlyDocument,
+      anchorKeys: {addedOnlyDocument.hunks.single.anchor.id: anchorKey},
     );
 
     expect(find.byKey(const Key('split-missing-old-0')), findsOneWidget);
     expect(find.text('added line'), findsOneWidget);
+    expect(anchorKey.currentContext, isNotNull);
+  });
+
+  testWidgets('split avoids intrinsic layout for a large unwrapped hunk', (
+    tester,
+  ) async {
+    final document = DiffDocument.fromLines([
+      const DiffLine(kind: DiffLineKind.hunk, text: '@@ -0,0 +1,600 @@ large'),
+      for (var index = 1; index <= 600; index++)
+        DiffLine(
+          kind: DiffLineKind.add,
+          text: 'added line $index',
+          newNumber: index,
+        ),
+    ]);
+    final controller = ScrollController();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      qaApp(
+        SizedBox(
+          width: 800,
+          height: 200,
+          child: SplitPresentationView(
+            document: document,
+            activeAnchor: document.hunks.single.anchor,
+            oldPath: fileA.path,
+            newPath: fileA.path,
+            wrapLines: false,
+            showOldSide: true,
+            highlighter: fakeHighlighter,
+            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
+            controller: controller,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(FullDiffCodeRow), findsNWidgets(600));
+    expect(find.byType(IntrinsicHeight), findsNothing);
   });
 
   testWidgets('split keeps a deletion hatch when the old side is hidden', (
@@ -627,6 +725,9 @@ void main() {
             wrapLines: false,
             showOldSide: false,
             highlighter: fakeHighlighter,
+            anchorKeys: {
+              deletedOnlyDocument.hunks.single.anchor.id: GlobalKey(),
+            },
           ),
         ),
       ),
@@ -808,7 +909,11 @@ Future<void> pumpPresentation(
   required DiffPresentation presentation,
   required DiffDocument document,
   DiffAnchor? activeAnchor,
+  Map<String, GlobalKey>? anchorKeys,
 }) async {
+  final resolvedAnchorKeys =
+      anchorKeys ??
+      {for (final hunk in document.hunks) hunk.anchor.id: GlobalKey()};
   final child = switch (presentation) {
     DiffPresentation.hunk => HunkPresentationView(
       document: document,
@@ -818,6 +923,7 @@ Future<void> pumpPresentation(
       path: fileA.path,
       wrapLines: false,
       highlighter: fakeHighlighter,
+      anchorKeys: resolvedAnchorKeys,
     ),
     DiffPresentation.inline => InlinePresentationView(
       document: document,
@@ -827,6 +933,7 @@ Future<void> pumpPresentation(
       path: fileA.path,
       wrapLines: false,
       highlighter: fakeHighlighter,
+      anchorKeys: resolvedAnchorKeys,
     ),
     DiffPresentation.split => SplitPresentationView(
       document: document,
@@ -838,6 +945,7 @@ Future<void> pumpPresentation(
       wrapLines: false,
       showOldSide: true,
       highlighter: fakeHighlighter,
+      anchorKeys: resolvedAnchorKeys,
     ),
   };
   await tester.pumpWidget(qaApp(SizedBox(width: 800, child: child)));
