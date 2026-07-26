@@ -10,6 +10,7 @@ import 'diff_screen.dart';
 import 'git.dart';
 import 'page_scroll_shortcuts.dart';
 import 'settings.dart';
+import 'typography.dart';
 import 'window_frame.dart';
 
 const _background = Color(0xFF15171E);
@@ -2012,8 +2013,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                       style: TextStyle(
                         color: selected ? _text : _hash,
                         fontSize: 12,
-                        fontFamily: cellFont,
-                        fontFamilyFallback: cellFontFallback,
+                        fontFamily: technicalFontFamily,
+                        fontFamilyFallback: technicalFontFallback,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -2026,12 +2027,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                       commit.subject,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: _text,
-                        fontSize: 14,
-                        fontFamily: cellFont,
-                        fontFamilyFallback: cellFontFallback,
-                      ),
+                      style: const TextStyle(color: _text, fontSize: 14),
                     ),
                   ),
                   if (_showTime)
@@ -2051,8 +2047,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
                           style: TextStyle(
                             color: selected ? _text : _muted,
                             fontSize: 12,
-                            fontFamily: cellFont,
-                            fontFamilyFallback: cellFontFallback,
                           ),
                         ),
                       ),
@@ -2063,12 +2057,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                       commit.isWorkingTree
                           ? const Text(
                               '—',
-                              style: TextStyle(
-                                color: _muted,
-                                fontSize: 12,
-                                fontFamily: cellFont,
-                                fontFamilyFallback: cellFontFallback,
-                              ),
+                              style: TextStyle(color: _muted, fontSize: 12),
                             )
                           : Row(
                               children: [
@@ -2092,8 +2081,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
                                           ? _text
                                           : Color.lerp(_text, _main, 0.12),
                                       fontSize: 12,
-                                      fontFamily: cellFont,
-                                      fontFamilyFallback: cellFontFallback,
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
@@ -2470,8 +2457,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     style: TextStyle(
                       color: _muted,
                       fontSize: 10,
-                      fontFamily: cellFont,
-                      fontFamilyFallback: cellFontFallback,
+                      fontFamily: technicalFontFamily,
+                      fontFamilyFallback: technicalFontFallback,
                     ),
                   ),
                 ),
@@ -2543,8 +2530,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
             style: const TextStyle(
               color: _muted,
               fontSize: 11,
-              fontFamily: cellFont,
-              fontFamilyFallback: cellFontFallback,
+              fontFamily: technicalFontFamily,
+              fontFamilyFallback: technicalFontFallback,
             ),
           ),
         ),

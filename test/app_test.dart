@@ -13,6 +13,7 @@ import 'package:yogit/git.dart';
 import 'package:yogit/main.dart';
 import 'package:yogit/settings.dart';
 import 'package:yogit/timeline.dart';
+import 'package:yogit/typography.dart';
 import 'package:yogit/window_frame.dart';
 
 void main() {
@@ -5789,10 +5790,16 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    for (final label in ['1', '한글 커밋 메시지도 정렬됩니다', 'just now', 'Ada Author']) {
-      final style = tester.widget<Text>(find.text(label).first).style!;
-      expect(style.fontFamily, 'D2Coding', reason: label);
-      expect(style.fontFamilyFallback, ['Menlo'], reason: label);
+    final hash = tester.widget<Text>(find.text('1').first);
+    expect(hash.style?.fontFamily, technicalFontFamily);
+    expect(hash.style?.fontFamilyFallback, technicalFontFallback);
+
+    for (final label in ['한글 커밋 메시지도 정렬됩니다', 'just now', 'Ada Author']) {
+      expect(
+        tester.widget<Text>(find.text(label).first).style?.fontFamily,
+        isNull,
+        reason: label,
+      );
     }
   });
   // ------------------------------------------------------------------ E2
@@ -6065,18 +6072,18 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-nearby-newer')), findsOneWidget);
 
-    // Every word on the screen is code, so it all reads in D2Coding.
-    for (final label in [
-      'body of newer/one.dart',
-      'newer/one.dart',
-      'newer commit',
-    ]) {
-      final style = DefaultTextStyle.of(
-        tester.element(find.text(label).first),
-      ).style.merge(tester.widget<Text>(find.text(label).first).style);
-      expect(style.fontFamily, 'D2Coding', reason: label);
-      expect(style.fontFamilyFallback, ['Menlo'], reason: label);
-    }
+    final source = tester.widget<Text>(
+      find.text('body of newer/one.dart').first,
+    );
+    expect(source.style?.fontFamily, technicalFontFamily);
+    expect(source.style?.fontFamilyFallback, technicalFontFallback);
+
+    final path = tester.widget<Text>(find.text('newer/one.dart').first);
+    expect(path.style?.fontFamily, technicalFontFamily);
+    expect(path.style?.fontFamilyFallback, technicalFontFallback);
+
+    final commitTitle = tester.widget<Text>(find.text('newer commit').first);
+    expect(commitTitle.style?.fontFamily, isNull);
   });
   // ------------------------------------------------------------------ G1/G2
   testWidgets('the diff controls keep their gap and the gutter stays dark', (
@@ -6293,8 +6300,13 @@ void main() {
       findsOneWidget,
     );
     final hash = tester.widget<Text>(find.byKey(const Key('preview-hash')));
-    expect(hash.style?.fontFamily, cellFont);
-    expect(hash.style?.fontFamilyFallback, cellFontFallback);
+    expect(hash.style?.fontFamily, technicalFontFamily);
+    expect(hash.style?.fontFamilyFallback, technicalFontFallback);
+    final shortcut = tester.widget<Text>(
+      find.text('파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓'),
+    );
+    expect(shortcut.style?.fontFamily, technicalFontFamily);
+    expect(shortcut.style?.fontFamilyFallback, technicalFontFallback);
     final author = find.byKey(const Key('preview-author'));
     final committer = find.byKey(const Key('preview-committer'));
     final authorAvatar = find.descendant(
@@ -6308,6 +6320,15 @@ void main() {
     expect(
       find.descendant(of: author, matching: find.text('Ada Author')),
       findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<Text>(
+            find.descendant(of: author, matching: find.text('Ada Author')),
+          )
+          .style
+          ?.fontFamily,
+      isNull,
     );
     expect(
       find.descendant(of: author, matching: find.text('Author')),

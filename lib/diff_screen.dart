@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'git.dart';
 import 'settings.dart';
+import 'typography.dart';
 
 const _background = Color(0xFF15171E);
 const _surface = Color(0xFF1D2029);
@@ -17,12 +18,6 @@ const _added = Color(0xFF9BE7B2);
 const _addedFill = Color(0xFF8AD6A1);
 const _deleted = Color(0xFFF29AB2);
 const _renamed = Color(0xFFB6A0EA);
-
-/// D2Coding is monospace *and* covers Hangul, so Korean commit messages keep
-/// their columns aligned instead of falling back to a proportional face. Shared
-/// with the timeline's data columns.
-const cellFont = 'D2Coding';
-const cellFontFallback = ['Menlo'];
 
 enum DiffViewMode { unified, sideBySide }
 
@@ -238,64 +233,45 @@ class _DiffScreenState extends State<DiffScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    // Every word on this screen is code or a path, so the whole screen reads in
-    // the same Hangul-capable monospace the timeline's columns use.
-    return Theme(
-      data: theme.copyWith(
-        textTheme: theme.textTheme.apply(
-          fontFamily: cellFont,
-          fontFamilyFallback: cellFontFallback,
-        ),
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: _background,
+    body: Focus(
+      autofocus: true,
+      onKeyEvent: _handleKey,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final widths = _effectiveColumnWidths(constraints.maxWidth);
+          return Row(
+            children: [
+              _resizableColumn(
+                columnKey: 'nearby',
+                width: widths.commits,
+                child: _nearbyCommits(),
+                onStart: () => _commitsWidth = widths.commits,
+                onUpdate: (delta) => _resizeCommits(
+                  delta,
+                  viewportWidth: constraints.maxWidth,
+                  filesWidth: widths.files,
+                ),
+              ),
+              _resizableColumn(
+                columnKey: 'details-files',
+                width: widths.files,
+                child: _detailsAndFiles(),
+                onStart: () => _filesWidth = widths.files,
+                onUpdate: (delta) => _resizeFiles(
+                  delta,
+                  viewportWidth: constraints.maxWidth,
+                  commitsWidth: widths.commits,
+                ),
+              ),
+              Expanded(key: const Key('diff-column'), child: _diff()),
+            ],
+          );
+        },
       ),
-      child: Scaffold(
-        backgroundColor: _background,
-        body: DefaultTextStyle.merge(
-          style: const TextStyle(
-            fontFamily: cellFont,
-            fontFamilyFallback: cellFontFallback,
-          ),
-          child: Focus(
-            autofocus: true,
-            onKeyEvent: _handleKey,
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final widths = _effectiveColumnWidths(constraints.maxWidth);
-                return Row(
-                  children: [
-                    _resizableColumn(
-                      columnKey: 'nearby',
-                      width: widths.commits,
-                      child: _nearbyCommits(),
-                      onStart: () => _commitsWidth = widths.commits,
-                      onUpdate: (delta) => _resizeCommits(
-                        delta,
-                        viewportWidth: constraints.maxWidth,
-                        filesWidth: widths.files,
-                      ),
-                    ),
-                    _resizableColumn(
-                      columnKey: 'details-files',
-                      width: widths.files,
-                      child: _detailsAndFiles(),
-                      onStart: () => _filesWidth = widths.files,
-                      onUpdate: (delta) => _resizeFiles(
-                        delta,
-                        viewportWidth: constraints.maxWidth,
-                        commitsWidth: widths.commits,
-                      ),
-                    ),
-                    Expanded(key: const Key('diff-column'), child: _diff()),
-                  ],
-                );
-              },
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+    ),
+  );
 
   ({double commits, double files}) _effectiveColumnWidths(double viewport) {
     var commits = _commitsWidth.clamp(
@@ -544,14 +520,19 @@ class _DiffScreenState extends State<DiffScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontFamily: cellFont,
-                          fontFamilyFallback: cellFontFallback,
+                          fontFamily: technicalFontFamily,
+                          fontFamilyFallback: technicalFontFallback,
                           fontSize: 12,
                         ),
                       ),
                       trailing: Text(
                         '+${file.additions ?? '-'} −${file.deletions ?? '-'}',
-                        style: const TextStyle(color: _muted, fontSize: 10),
+                        style: const TextStyle(
+                          color: _muted,
+                          fontSize: 10,
+                          fontFamily: technicalFontFamily,
+                          fontFamilyFallback: technicalFontFallback,
+                        ),
                       ),
                       onTap: () => _selectFile(file.path),
                     );
@@ -671,8 +652,8 @@ class _DiffScreenState extends State<DiffScreen> {
                     style: const TextStyle(
                       color: _text,
                       fontSize: 11,
-                      fontFamily: cellFont,
-                      fontFamilyFallback: cellFontFallback,
+                      fontFamily: technicalFontFamily,
+                      fontFamilyFallback: technicalFontFallback,
                     ),
                     items: [
                       for (final algorithm in DiffAlgorithm.values)
@@ -775,8 +756,8 @@ class _DiffScreenState extends State<DiffScreen> {
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: color,
-                fontFamily: cellFont,
-                fontFamilyFallback: cellFontFallback,
+                fontFamily: technicalFontFamily,
+                fontFamilyFallback: technicalFontFallback,
                 fontSize: 12,
               ),
             ),
@@ -786,8 +767,8 @@ class _DiffScreenState extends State<DiffScreen> {
               line.text,
               style: TextStyle(
                 color: color,
-                fontFamily: cellFont,
-                fontFamilyFallback: cellFontFallback,
+                fontFamily: technicalFontFamily,
+                fontFamilyFallback: technicalFontFallback,
                 fontSize: 12,
               ),
             ),
@@ -842,8 +823,8 @@ class _DiffScreenState extends State<DiffScreen> {
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: color,
-                fontFamily: cellFont,
-                fontFamilyFallback: cellFontFallback,
+                fontFamily: technicalFontFamily,
+                fontFamilyFallback: technicalFontFallback,
                 fontSize: 12,
               ),
             ),
@@ -853,8 +834,8 @@ class _DiffScreenState extends State<DiffScreen> {
               line?.text ?? '',
               style: TextStyle(
                 color: color,
-                fontFamily: cellFont,
-                fontFamilyFallback: cellFontFallback,
+                fontFamily: technicalFontFamily,
+                fontFamilyFallback: technicalFontFallback,
                 fontSize: 12,
               ),
             ),
@@ -875,8 +856,8 @@ class _DiffScreenState extends State<DiffScreen> {
       number?.toString() ?? '',
       style: const TextStyle(
         color: _muted,
-        fontFamily: cellFont,
-        fontFamilyFallback: cellFontFallback,
+        fontFamily: technicalFontFamily,
+        fontFamilyFallback: technicalFontFallback,
         fontSize: 10,
       ),
     ),
