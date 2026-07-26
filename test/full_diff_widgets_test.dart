@@ -3,11 +3,18 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yogit/full_diff_code_row.dart';
 import 'package:yogit/full_diff_header.dart';
 import 'package:yogit/full_diff_hunk_view.dart';
+import 'package:yogit/full_diff_inline_view.dart';
 import 'package:yogit/full_diff_model.dart';
+import 'package:yogit/full_diff_split_view.dart';
+import 'package:yogit/full_diff_syntax.dart';
+import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/typography.dart';
+
+import 'support/full_diff_fixtures.dart';
 
 void main() {
   testWidgets('keeps the algorithm name fixed beside its selected value', (
@@ -551,6 +558,143 @@ void main() {
     );
     expect(tester.widget<Text>(find.text(longLine)).softWrap, isTrue);
   });
+
+  testWidgets('hunk shows only changed rows for the active block', (
+    tester,
+  ) async {
+    await pumpPresentation(
+      tester,
+      presentation: DiffPresentation.hunk,
+      document: twoHunkDocument,
+      activeAnchor: twoHunkDocument.hunks.last.anchor,
+    );
+
+    expect(find.text('second old'), findsOneWidget);
+    expect(find.text('second new'), findsOneWidget);
+    expect(find.text('second context'), findsNothing);
+    expect(find.text('first old'), findsNothing);
+    expect(
+      find.text('SetupBase · lines 20–21 · change 2 of 2'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('inline shows every hunk with three context lines', (
+    tester,
+  ) async {
+    await pumpPresentation(
+      tester,
+      presentation: DiffPresentation.inline,
+      document: twoHunkDocument,
+    );
+
+    expect(find.byKey(const Key('inline-hunk-0')), findsOneWidget);
+    expect(find.byKey(const Key('inline-hunk-1')), findsOneWidget);
+    expect(find.text('context before 3'), findsOneWidget);
+    expect(find.text('context after 3'), findsOneWidget);
+  });
+
+  testWidgets('split pairs replacements and hatches a missing side', (
+    tester,
+  ) async {
+    await pumpPresentation(
+      tester,
+      presentation: DiffPresentation.split,
+      document: addedOnlyDocument,
+    );
+
+    expect(find.byKey(const Key('split-missing-old-0')), findsOneWidget);
+    expect(find.text('added line'), findsOneWidget);
+  });
+
+  testWidgets('split keeps a deletion hatch when the old side is hidden', (
+    tester,
+  ) async {
+    final deletedOnlyDocument = DiffDocument.fromLines(const [
+      DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +0,0 @@'),
+      DiffLine(kind: DiffLineKind.delete, text: 'deleted line', oldNumber: 1),
+    ]);
+
+    await tester.pumpWidget(
+      qaApp(
+        SizedBox(
+          width: 400,
+          child: SplitPresentationView(
+            document: deletedOnlyDocument,
+            activeAnchor: deletedOnlyDocument.hunks.single.anchor,
+            oldPath: fileA.path,
+            newPath: fileA.path,
+            wrapLines: false,
+            showOldSide: false,
+            highlighter: fakeHighlighter,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('split-missing-new-0')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'hunk empty state and each hunk selection boundary are explicit',
+    (tester) async {
+      await pumpPresentation(
+        tester,
+        presentation: DiffPresentation.hunk,
+        document: DiffDocument.fromLines(const []),
+      );
+      expect(find.text('현재 옵션으로 표시할 변경이 없습니다'), findsOneWidget);
+
+      await pumpPresentation(
+        tester,
+        presentation: DiffPresentation.inline,
+        document: twoHunkDocument,
+      );
+      expect(find.byType(SelectionArea), findsNWidgets(2));
+    },
+  );
+
+  testWidgets('code rows expose sign current line and word emphasis', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      qaApp(
+        FullDiffCodeRow(
+          line: const DiffLine(
+            kind: DiffLineKind.add,
+            text: 'Scale := WindowPixelRatio;',
+            newNumber: 314,
+          ),
+          path: fileA.path,
+          wrapLines: false,
+          highlighter: fakeHighlighter,
+          current: true,
+          wordRanges: const [
+            WordRange(text: 'WindowPixelRatio', start: 9, end: 25),
+          ],
+        ),
+      ),
+    );
+
+    expect(find.text('+'), findsOneWidget);
+    expect(find.text('314'), findsOneWidget);
+    expect(find.byKey(const Key('code-row-current-marker')), findsOneWidget);
+    expect(find.byKey(const Key('code-row-horizontal-scroll')), findsOneWidget);
+    final richText = tester.widget<RichText>(
+      find.byKey(const Key('code-row-source-text')),
+    );
+    final spans = (richText.text as TextSpan).children!.cast<TextSpan>();
+    expect(
+      spans.any(
+        (span) =>
+            span.style?.backgroundColor == fullDiffWordChange &&
+            span.style?.decoration == TextDecoration.underline,
+      ),
+      isTrue,
+    );
+  });
 }
 
 Future<void> _pumpToolbar(
@@ -657,4 +801,45 @@ DiffDocument _manyHunkDocument(int count) {
       );
   }
   return DiffDocument.fromLines(lines);
+}
+
+Future<void> pumpPresentation(
+  WidgetTester tester, {
+  required DiffPresentation presentation,
+  required DiffDocument document,
+  DiffAnchor? activeAnchor,
+}) async {
+  final child = switch (presentation) {
+    DiffPresentation.hunk => HunkPresentationView(
+      document: document,
+      activeAnchor:
+          activeAnchor ??
+          (document.hunks.isEmpty ? null : document.hunks.first.anchor),
+      path: fileA.path,
+      wrapLines: false,
+      highlighter: fakeHighlighter,
+    ),
+    DiffPresentation.inline => InlinePresentationView(
+      document: document,
+      activeAnchor:
+          activeAnchor ??
+          (document.hunks.isEmpty ? null : document.hunks.first.anchor),
+      path: fileA.path,
+      wrapLines: false,
+      highlighter: fakeHighlighter,
+    ),
+    DiffPresentation.split => SplitPresentationView(
+      document: document,
+      activeAnchor:
+          activeAnchor ??
+          (document.hunks.isEmpty ? null : document.hunks.first.anchor),
+      oldPath: fileA.oldPath ?? fileA.path,
+      newPath: fileA.path,
+      wrapLines: false,
+      showOldSide: true,
+      highlighter: fakeHighlighter,
+    ),
+  };
+  await tester.pumpWidget(qaApp(SizedBox(width: 800, child: child)));
+  await tester.pumpAndSettle();
 }

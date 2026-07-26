@@ -2,10 +2,126 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'full_diff_code_row.dart';
 import 'full_diff_model.dart';
+import 'full_diff_syntax.dart';
+import 'full_diff_syntax_contract.dart';
+import 'full_diff_theme.dart';
 import 'git.dart';
 import 'typography.dart';
 
+class HunkPresentationView extends StatelessWidget {
+  const HunkPresentationView({
+    required this.document,
+    required this.activeAnchor,
+    required this.path,
+    required this.wrapLines,
+    required this.highlighter,
+    super.key,
+  });
+
+  final DiffDocument document;
+  final DiffAnchor? activeAnchor;
+  final String path;
+  final bool wrapLines;
+  final FullDiffSyntaxHighlighter highlighter;
+
+  @override
+  Widget build(BuildContext context) {
+    final hunkIndex = activeAnchor?.hunkIndex;
+    if (hunkIndex == null ||
+        hunkIndex < 0 ||
+        hunkIndex >= document.hunks.length) {
+      return const Center(
+        child: Text(
+          '현재 옵션으로 표시할 변경이 없습니다',
+          style: TextStyle(color: fullDiffMuted, fontSize: 14),
+        ),
+      );
+    }
+
+    final hunk = document.hunks[hunkIndex];
+    final wordRanges = _wordRangesByLine(hunk.lines);
+    return SelectionArea(
+      child: ListView(
+        primary: true,
+        children: [
+          KeyedSubtree(
+            key: GlobalObjectKey<State<StatefulWidget>>(hunk.anchor.id),
+            child: _PresentationHunkHeader(
+              hunk: hunk,
+              path: path,
+              hunkCount: document.hunks.length,
+            ),
+          ),
+          for (final line in hunk.changedLines)
+            FullDiffCodeRow(
+              line: line,
+              path: path,
+              wrapLines: wrapLines,
+              highlighter: highlighter,
+              current: true,
+              wordRanges: wordRanges[line] ?? const [],
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PresentationHunkHeader extends StatelessWidget {
+  const _PresentationHunkHeader({
+    required this.hunk,
+    required this.path,
+    required this.hunkCount,
+  });
+
+  final DiffHunk hunk;
+  final String path;
+  final int hunkCount;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    decoration: const BoxDecoration(
+      color: fullDiffHunkHeader,
+      border: Border(
+        top: BorderSide(color: fullDiffDivider),
+        bottom: BorderSide(color: fullDiffDivider),
+      ),
+    ),
+    child: Text(
+      '${hunk.context.isEmpty ? path : hunk.context} · '
+      'lines ${hunk.displayRange} · '
+      'change ${hunk.index + 1} of $hunkCount',
+      style: const TextStyle(
+        fontFamily: technicalFontFamily,
+        fontFamilyFallback: technicalFontFallback,
+        fontSize: 14,
+        height: 21 / 14,
+        color: fullDiffMuted,
+      ),
+    ),
+  );
+}
+
+Map<DiffLine, List<WordRange>> _wordRangesByLine(List<DiffLine> lines) {
+  final ranges = <DiffLine, List<WordRange>>{};
+  for (final pair in pairDiff(lines)) {
+    final left = pair.left;
+    final right = pair.right;
+    if (left?.kind != DiffLineKind.delete || right?.kind != DiffLineKind.add) {
+      continue;
+    }
+    final changes = changedWordRanges(left!.text, right!.text);
+    ranges[left] = changes.oldRanges;
+    ranges[right] = changes.newRanges;
+  }
+  return ranges;
+}
+
+// TODO(full-diff-workspace): Remove this compatibility surface after
+// DiffScreen switches to HunkPresentationView.
 const _background = Color(0xFF15171E);
 const _surface = Color(0xFF1D2029);
 const _raised = Color(0xFF252936);
@@ -27,6 +143,7 @@ const _codeStyle = TextStyle(
   fontSize: 12,
 );
 
+@Deprecated('Use HunkPresentationView')
 class HunkListView extends StatelessWidget {
   const HunkListView({
     required this.document,
@@ -82,6 +199,7 @@ class HunkListView extends StatelessWidget {
   }
 }
 
+@Deprecated('Use HunkPresentationView')
 class HunkCard extends StatelessWidget {
   const HunkCard({
     required this.hunk,
