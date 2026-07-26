@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/full_diff_syntax.dart';
+import 'package:yogit/full_diff_syntax_contract.dart';
 
 void main() {
   test('maps source and configuration names without guessing', () {
@@ -116,4 +117,49 @@ void main() {
 
     expect(spans.isNotEmpty, shouldHighlight);
   });
+
+  test('highlights Handlebars embedded in an XML script block', () {
+    const source =
+        '<script type="text/x-handlebars-template">'
+        '{{#each items}}{{/each}}'
+        '</script>';
+    final spans = HighlightJsSyntaxHighlighter().highlightLine(
+      'template.html',
+      source,
+    );
+
+    expect(_colorForToken(spans, source, 'each'), const Color(0xFF83C4FF));
+  });
+
+  test('highlights Mojolicious embedded in a Perl data block', () {
+    const shouldHighlight = bool.fromEnvironment(
+      'YOGIT_EXTENDED_SYNTAX',
+      defaultValue: true,
+    );
+    const source = '''
+__DATA__
+% if (\$ready) {
+<p>ready</p>
+% }
+__END__''';
+    final spans = HighlightJsSyntaxHighlighter().highlightLine(
+      'template.pl',
+      source,
+    );
+
+    expect(
+      _colorForToken(spans, source, 'if'),
+      shouldHighlight ? const Color(0xFF83C4FF) : null,
+    );
+  });
+}
+
+Color? _colorForToken(List<CodeTokenSpan> spans, String source, String token) {
+  final start = source.indexOf(token);
+  for (final span in spans) {
+    if (span.start == start && span.end == start + token.length) {
+      return span.style.color;
+    }
+  }
+  return null;
 }

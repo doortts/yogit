@@ -20,6 +20,7 @@ import 'package:highlighting/languages/go.dart' as lang_go;
 import 'package:highlighting/languages/gradle.dart' as lang_gradle;
 import 'package:highlighting/languages/graphql.dart' as lang_graphql;
 import 'package:highlighting/languages/groovy.dart' as lang_groovy;
+import 'package:highlighting/languages/handlebars.dart' as lang_handlebars;
 import 'package:highlighting/languages/haskell.dart' as lang_haskell;
 import 'package:highlighting/languages/http.dart' as lang_http;
 import 'package:highlighting/languages/ini.dart' as lang_ini;
@@ -34,6 +35,7 @@ import 'package:highlighting/languages/lua.dart' as lang_lua;
 import 'package:highlighting/languages/makefile.dart' as lang_makefile;
 import 'package:highlighting/languages/markdown.dart' as lang_markdown;
 import 'package:highlighting/languages/matlab.dart' as lang_matlab;
+import 'package:highlighting/languages/mojolicious.dart' as lang_mojolicious;
 import 'package:highlighting/languages/nginx.dart' as lang_nginx;
 import 'package:highlighting/languages/nix.dart' as lang_nix;
 import 'package:highlighting/languages/objectivec.dart' as lang_objectivec;
@@ -250,6 +252,7 @@ final _baseLanguages = [
   lang_nix.nix,
   lang_apache.apache,
   lang_http.http,
+  lang_handlebars.handlebars,
 ];
 
 List<dynamic> get _extendedLanguages => [
@@ -273,6 +276,7 @@ List<dynamic> get _extendedLanguages => [
   lang_matlab.matlab,
   lang_qml.qml,
   lang_latex.latex,
+  lang_mojolicious.mojolicious,
 ];
 
 var _languagesRegistered = false;
