@@ -1,7 +1,10 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'git.dart';
+import 'settings.dart';
 
 const _background = Color(0xFF15171E);
 const _surface = Color(0xFF1D2029);
@@ -35,18 +38,24 @@ class DiffScreen extends StatefulWidget {
     required this.repository,
     required this.commits,
     required this.initialIndex,
+    this.columnWidths = const FullDiffColumnWidths(),
+    this.onColumnWidthsChanged,
     super.key,
   });
 
   final GitRepository repository;
   final List<GitCommit> commits;
   final int initialIndex;
+  final FullDiffColumnWidths columnWidths;
+  final ValueChanged<FullDiffColumnWidths>? onColumnWidthsChanged;
 
   @override
   State<DiffScreen> createState() => _DiffScreenState();
 }
 
 class _DiffScreenState extends State<DiffScreen> {
+  static const _minDiffWidth = 360.0;
+
   final _diffCache = <DiffCacheKey, Future<List<DiffLine>>>{};
   final _algorithmTooltipKey = GlobalKey<TooltipState>();
   final _algorithmFocusNode = FocusNode();
@@ -57,6 +66,8 @@ class _DiffScreenState extends State<DiffScreen> {
   String? debugDiffSelection;
 
   late int _selectedIndex;
+  late double _commitsWidth;
+  late double _filesWidth;
   String? _parent;
   List<GitFileChange> _files = const [];
   String? _selectedPath;
@@ -77,6 +88,8 @@ class _DiffScreenState extends State<DiffScreen> {
   void initState() {
     super.initState();
     _selectedIndex = widget.initialIndex.clamp(0, widget.commits.length - 1);
+    _commitsWidth = widget.columnWidths.commits;
+    _filesWidth = widget.columnWidths.files;
     _parent = _commit.parents.isEmpty ? null : _commit.parents.first;
     _loadFiles();
   }
@@ -246,26 +259,158 @@ class _DiffScreenState extends State<DiffScreen> {
           child: Focus(
             autofocus: true,
             onKeyEvent: _handleKey,
-            child: Row(
-              children: [
-                SizedBox(
-                  key: const Key('nearby-column'),
-                  width: 210,
-                  child: _nearbyCommits(),
-                ),
-                SizedBox(
-                  key: const Key('details-files-column'),
-                  width: 290,
-                  child: _detailsAndFiles(),
-                ),
-                Expanded(key: const Key('diff-column'), child: _diff()),
-              ],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final widths = _effectiveColumnWidths(constraints.maxWidth);
+                return Row(
+                  children: [
+                    _resizableColumn(
+                      columnKey: 'nearby',
+                      width: widths.commits,
+                      child: _nearbyCommits(),
+                      onStart: () => _commitsWidth = widths.commits,
+                      onUpdate: (delta) => _resizeCommits(
+                        delta,
+                        viewportWidth: constraints.maxWidth,
+                        filesWidth: widths.files,
+                      ),
+                    ),
+                    _resizableColumn(
+                      columnKey: 'details-files',
+                      width: widths.files,
+                      child: _detailsAndFiles(),
+                      onStart: () => _filesWidth = widths.files,
+                      onUpdate: (delta) => _resizeFiles(
+                        delta,
+                        viewportWidth: constraints.maxWidth,
+                        commitsWidth: widths.commits,
+                      ),
+                    ),
+                    Expanded(key: const Key('diff-column'), child: _diff()),
+                  ],
+                );
+              },
             ),
           ),
         ),
       ),
     );
   }
+
+  ({double commits, double files}) _effectiveColumnWidths(double viewport) {
+    var commits = _commitsWidth.clamp(
+      FullDiffColumnWidths.minCommits,
+      FullDiffColumnWidths.maxCommits,
+    );
+    var files = _filesWidth.clamp(
+      FullDiffColumnWidths.minFiles,
+      FullDiffColumnWidths.maxFiles,
+    );
+    final minimumPanels =
+        FullDiffColumnWidths.minCommits + FullDiffColumnWidths.minFiles;
+    final panelBudget = math.max(minimumPanels, viewport - _minDiffWidth);
+    var overflow = math.max(0, commits + files - panelBudget);
+    final fileShrink = math.min(
+      overflow,
+      files - FullDiffColumnWidths.minFiles,
+    );
+    files -= fileShrink;
+    overflow -= fileShrink;
+    commits -= math.min(overflow, commits - FullDiffColumnWidths.minCommits);
+    return (commits: commits, files: files);
+  }
+
+  void _resizeCommits(
+    double delta, {
+    required double viewportWidth,
+    required double filesWidth,
+  }) {
+    final max = math.min(
+      FullDiffColumnWidths.maxCommits,
+      math.max(
+        FullDiffColumnWidths.minCommits,
+        viewportWidth - filesWidth - _minDiffWidth,
+      ),
+    );
+    setState(() {
+      _commitsWidth = (_commitsWidth + delta).clamp(
+        FullDiffColumnWidths.minCommits,
+        max,
+      );
+    });
+  }
+
+  void _resizeFiles(
+    double delta, {
+    required double viewportWidth,
+    required double commitsWidth,
+  }) {
+    final max = math.min(
+      FullDiffColumnWidths.maxFiles,
+      math.max(
+        FullDiffColumnWidths.minFiles,
+        viewportWidth - commitsWidth - _minDiffWidth,
+      ),
+    );
+    setState(() {
+      _filesWidth = (_filesWidth + delta).clamp(
+        FullDiffColumnWidths.minFiles,
+        max,
+      );
+    });
+  }
+
+  Widget _resizableColumn({
+    required String columnKey,
+    required double width,
+    required Widget child,
+    required VoidCallback onStart,
+    required ValueChanged<double> onUpdate,
+  }) => SizedBox(
+    key: Key('$columnKey-column'),
+    width: width,
+    child: Stack(
+      children: [
+        Positioned.fill(child: child),
+        Positioned(
+          right: 0,
+          top: 0,
+          bottom: 0,
+          width: 8,
+          child: Focus(
+            onKeyEvent: (_, event) {
+              if (event is KeyUpEvent) return KeyEventResult.ignored;
+              final delta = switch (event.logicalKey) {
+                LogicalKeyboardKey.arrowLeft => -8.0,
+                LogicalKeyboardKey.arrowRight => 8.0,
+                _ => null,
+              };
+              if (delta == null) return KeyEventResult.ignored;
+              onStart();
+              onUpdate(delta);
+              _saveColumnWidths();
+              return KeyEventResult.handled;
+            },
+            child: MouseRegion(
+              cursor: SystemMouseCursors.resizeColumn,
+              child: GestureDetector(
+                key: Key('$columnKey-column-resizer'),
+                behavior: HitTestBehavior.opaque,
+                onHorizontalDragStart: (_) => onStart(),
+                onHorizontalDragUpdate: (details) => onUpdate(details.delta.dx),
+                onHorizontalDragEnd: (_) => _saveColumnWidths(),
+                onHorizontalDragCancel: _saveColumnWidths,
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  void _saveColumnWidths() => widget.onColumnWidthsChanged?.call(
+    FullDiffColumnWidths(commits: _commitsWidth, files: _filesWidth),
+  );
 
   Widget _nearbyCommits() => DecoratedBox(
     decoration: const BoxDecoration(

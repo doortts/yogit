@@ -122,6 +122,44 @@ class TimelineColumnWidths {
   );
 }
 
+class FullDiffColumnWidths {
+  const FullDiffColumnWidths({this.commits = 210, this.files = 290});
+
+  static const minCommits = 140.0;
+  static const maxCommits = 420.0;
+  static const minFiles = 200.0;
+  static const maxFiles = 520.0;
+
+  final double commits;
+  final double files;
+
+  factory FullDiffColumnWidths.fromJson(Object? value) {
+    final json = value is Map<String, dynamic>
+        ? value
+        : const <String, dynamic>{};
+    double width(String key, double fallback, double min, double max) =>
+        (json[key] is num ? (json[key] as num).toDouble() : fallback).clamp(
+          min,
+          max,
+        );
+    return FullDiffColumnWidths(
+      commits: width('commits', 210, minCommits, maxCommits),
+      files: width('files', 290, minFiles, maxFiles),
+    );
+  }
+
+  Map<String, Object> toJson() => {'commits': commits, 'files': files};
+
+  @override
+  bool operator ==(Object other) =>
+      other is FullDiffColumnWidths &&
+      commits == other.commits &&
+      files == other.files;
+
+  @override
+  int get hashCode => Object.hash(commits, files);
+}
+
 /// `#RRGGBB` (or bare `RRGGBB`) to a color, or null when malformed.
 Color? parseHexColor(String value) {
   final match = RegExp(r'^#?([0-9a-fA-F]{6})$').firstMatch(value.trim());
@@ -141,6 +179,7 @@ class AppSettings {
     this.showAvatars = true,
     this.previewPlacement = PreviewPlacement.right,
     this.columnWidths = const TimelineColumnWidths(),
+    this.fullDiffColumnWidths = const FullDiffColumnWidths(),
     this.laneColors = defaultLaneColors,
     this.previewWidth = 288,
     this.previewHeight = 280,
@@ -175,6 +214,7 @@ class AppSettings {
   final bool showAvatars;
   final PreviewPlacement previewPlacement;
   final TimelineColumnWidths columnWidths;
+  final FullDiffColumnWidths fullDiffColumnWidths;
   final List<String> laneColors;
 
   /// The detail panel's size, per placement axis.
@@ -194,6 +234,7 @@ class AppSettings {
     bool? showAvatars,
     PreviewPlacement? previewPlacement,
     TimelineColumnWidths? columnWidths,
+    FullDiffColumnWidths? fullDiffColumnWidths,
     List<String>? laneColors,
     double? previewWidth,
     double? previewHeight,
@@ -201,6 +242,7 @@ class AppSettings {
     showAvatars: showAvatars ?? this.showAvatars,
     previewPlacement: previewPlacement ?? this.previewPlacement,
     columnWidths: columnWidths ?? this.columnWidths,
+    fullDiffColumnWidths: fullDiffColumnWidths ?? this.fullDiffColumnWidths,
     laneColors: laneColors ?? this.laneColors,
     previewWidth: previewWidth ?? this.previewWidth,
     previewHeight: previewHeight ?? this.previewHeight,
@@ -227,6 +269,9 @@ class AppSettings {
         _ => PreviewPlacement.right,
       },
       columnWidths: TimelineColumnWidths.fromJson(value['columnWidths']),
+      fullDiffColumnWidths: FullDiffColumnWidths.fromJson(
+        value['fullDiffColumnWidths'],
+      ),
       laneColors: valid ? laneColors : defaultLaneColors,
       previewWidth: _clamped(value['previewWidth'], 288, 240, 560),
       previewHeight: _clamped(value['previewHeight'], 280, 200, 480),
@@ -237,6 +282,7 @@ class AppSettings {
     'showAvatars': showAvatars,
     'previewPlacement': previewPlacement.name,
     'columnWidths': columnWidths.toJson(),
+    'fullDiffColumnWidths': fullDiffColumnWidths.toJson(),
     'laneColors': laneColors,
     'previewWidth': previewWidth,
     'previewHeight': previewHeight,
@@ -248,6 +294,7 @@ class AppSettings {
       showAvatars == other.showAvatars &&
       previewPlacement == other.previewPlacement &&
       columnWidths == other.columnWidths &&
+      fullDiffColumnWidths == other.fullDiffColumnWidths &&
       listEquals(laneColors, other.laneColors) &&
       previewWidth == other.previewWidth &&
       previewHeight == other.previewHeight;
@@ -257,6 +304,7 @@ class AppSettings {
     showAvatars,
     previewPlacement,
     columnWidths,
+    fullDiffColumnWidths,
     Object.hashAll(laneColors),
     previewWidth,
     previewHeight,

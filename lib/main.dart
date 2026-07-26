@@ -246,6 +246,7 @@ class _YogitAppState extends State<YogitApp> {
         showRemoteAvatars: _settingsLoaded && _settings.showAvatars,
         preferredPreviewPlacement: _settings.previewPlacement,
         columnWidths: _settings.columnWidths,
+        fullDiffColumnWidths: _settings.fullDiffColumnWidths,
         previewWidth: _settings.previewWidth,
         previewHeight: _settings.previewHeight,
         onOpenSettings: _settingsLoaded ? () => _openSettings(context) : null,
@@ -257,6 +258,11 @@ class _YogitAppState extends State<YogitApp> {
         onColumnWidthsChanged: _settingsLoaded
             ? (widths) =>
                   _changeSettings(_settings.copyWith(columnWidths: widths))
+            : null,
+        onFullDiffColumnWidthsChanged: _settingsLoaded
+            ? (widths) => _changeSettings(
+                _settings.copyWith(fullDiffColumnWidths: widths),
+              )
             : null,
         onPreviewSizeChanged: _settingsLoaded
             ? (size) => _changeSettings(

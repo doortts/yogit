@@ -2472,6 +2472,21 @@ void main() {
     },
   );
 
+  test('full diff column widths round-trip and clamp damaged settings', () {
+    const widths = FullDiffColumnWidths(commits: 240, files: 330);
+    final decoded = AppSettings.fromJson(
+      const AppSettings(fullDiffColumnWidths: widths).toJson(),
+    );
+
+    expect(decoded.fullDiffColumnWidths, widths);
+    expect(
+      AppSettings.fromJson({
+        'fullDiffColumnWidths': {'commits': 1, 'files': 9999},
+      }).fullDiffColumnWidths,
+      const FullDiffColumnWidths(commits: 140, files: 520),
+    );
+  });
+
   testWidgets('uncommitted changes lead the timeline as a working tree row', (
     tester,
   ) async {
@@ -2939,6 +2954,172 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-merge')), findsOneWidget);
     expect(find.text('Commit & Diff'), findsOneWidget);
+  });
+
+  testWidgets('full diff starts with saved column widths', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('1', 'commit')],
+      files: (_, _) async => const [],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: repository,
+          commits: [commit('1', 'commit')],
+          initialIndex: 0,
+          columnWidths: const FullDiffColumnWidths(commits: 240, files: 330),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.getSize(find.byKey(const Key('nearby-column'))).width, 240);
+    expect(
+      tester.getSize(find.byKey(const Key('details-files-column'))).width,
+      330,
+    );
+  });
+
+  testWidgets('full diff resizes and saves both navigation columns', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('1', 'commit')],
+      files: (_, _) async => const [],
+    );
+    FullDiffColumnWidths? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: repository,
+          commits: [commit('1', 'commit')],
+          initialIndex: 0,
+          onColumnWidthsChanged: (value) => saved = value,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.drag(
+      find.byKey(const Key('nearby-column-resizer')),
+      const Offset(30, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byKey(const Key('nearby-column'))).width, 240);
+    expect(saved?.commits, 240);
+
+    await tester.drag(
+      find.byKey(const Key('details-files-column-resizer')),
+      const Offset(40, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.getSize(find.byKey(const Key('details-files-column'))).width,
+      330,
+    );
+    expect(saved, const FullDiffColumnWidths(commits: 240, files: 330));
+  });
+
+  testWidgets('narrow full diff compresses columns without saving them', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(800, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('1', 'commit')],
+      files: (_, _) async => const [],
+    );
+    FullDiffColumnWidths? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: repository,
+          commits: [commit('1', 'commit')],
+          initialIndex: 0,
+          columnWidths: const FullDiffColumnWidths(commits: 240, files: 330),
+          onColumnWidthsChanged: (value) => saved = value,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.getSize(find.byKey(const Key('nearby-column'))).width, 240);
+    expect(
+      tester.getSize(find.byKey(const Key('details-files-column'))).width,
+      200,
+    );
+    expect(tester.getSize(find.byKey(const Key('diff-column'))).width, 360);
+    expect(saved, isNull);
+
+    tester.view.physicalSize = const Size(1200, 800);
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byKey(const Key('nearby-column'))).width, 240);
+    expect(
+      tester.getSize(find.byKey(const Key('details-files-column'))).width,
+      330,
+    );
+    expect(saved, isNull);
+  });
+
+  testWidgets('full diff widths load from and save to app settings', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final store = MemorySettingsStore()
+      ..current = const AppSettings(
+        fullDiffColumnWidths: FullDiffColumnWidths(commits: 240, files: 330),
+      );
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository(
+          (_, _) async => [commit('1', 'commit')],
+          files: (_, _) async => const [],
+        ),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.pumpAndSettle();
+
+    expect(tester.getSize(find.byKey(const Key('nearby-column'))).width, 240);
+    expect(
+      tester.getSize(find.byKey(const Key('details-files-column'))).width,
+      330,
+    );
+
+    await tester.drag(
+      find.byKey(const Key('nearby-column-resizer')),
+      const Offset(30, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      store.current.fullDiffColumnWidths,
+      const FullDiffColumnWidths(commits: 270, files: 330),
+    );
   });
 
   testWidgets('failed algorithm keeps the displayed algorithm and lines', (

@@ -306,10 +306,12 @@ class TimelineScreen extends StatefulWidget {
     this.showRemoteAvatars = true,
     this.preferredPreviewPlacement = PreviewPlacement.right,
     this.columnWidths = const TimelineColumnWidths(),
+    this.fullDiffColumnWidths = const FullDiffColumnWidths(),
     this.previewWidth = 288,
     this.previewHeight = 280,
     this.onPreviewPlacementChanged,
     this.onColumnWidthsChanged,
+    this.onFullDiffColumnWidthsChanged,
     this.onPreviewSizeChanged,
     super.key,
   });
@@ -328,10 +330,12 @@ class TimelineScreen extends StatefulWidget {
   final bool showRemoteAvatars;
   final PreviewPlacement preferredPreviewPlacement;
   final TimelineColumnWidths columnWidths;
+  final FullDiffColumnWidths fullDiffColumnWidths;
   final double previewWidth;
   final double previewHeight;
   final ValueChanged<PreviewPlacement>? onPreviewPlacementChanged;
   final ValueChanged<TimelineColumnWidths>? onColumnWidthsChanged;
+  final ValueChanged<FullDiffColumnWidths>? onFullDiffColumnWidthsChanged;
   final ValueChanged<({double width, double height})>? onPreviewSizeChanged;
 
   @override
@@ -2981,6 +2985,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
           repository: widget.repository,
           commits: List.unmodifiable(_commits),
           initialIndex: _commits.indexOf(commit),
+          columnWidths: widget.fullDiffColumnWidths,
+          onColumnWidthsChanged: widget.onFullDiffColumnWidthsChanged,
         ),
       ),
     );
