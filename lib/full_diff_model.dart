@@ -19,6 +19,16 @@ const fullDiffLargeLineLimit = 50000;
 const fullDiffTextByteLimit = 10 * 1024 * 1024;
 const fullDiffTextLineLimit = 200000;
 
+bool _exceedsFullDiffTextLineLimit(Uint8List bytes) {
+  var lineCount = 0;
+  for (final byte in bytes) {
+    if (byte == 0x0A && ++lineCount > fullDiffTextLineLimit) return true;
+  }
+  return lineCount == fullDiffTextLineLimit &&
+      bytes.isNotEmpty &&
+      bytes.last != 0x0A;
+}
+
 final _hunkHeader = RegExp(
   r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: ?(.*))?$',
 );
@@ -231,6 +241,20 @@ class FileDocument {
         fingerprint: fingerprint,
       );
     }
+    if (bytes.length > fullDiffTextByteLimit ||
+        _exceedsFullDiffTextLineLimit(bytes)) {
+      return FileDocument(
+        revision: revision,
+        path: path,
+        side: side,
+        bytes: bytes,
+        kind: FileContentKind.tooLarge,
+        lines: const [],
+        hasTrailingNewline: false,
+        disableRichRendering: true,
+        fingerprint: fingerprint,
+      );
+    }
     late final String text;
     try {
       text = utf8.decode(bytes, allowMalformed: false);
@@ -250,16 +274,13 @@ class FileDocument {
     final trailing = text.endsWith('\n');
     final lines = text.isEmpty ? <String>[] : text.split('\n');
     if (trailing) lines.removeLast();
-    final tooLarge =
-        bytes.length > fullDiffTextByteLimit ||
-        lines.length > fullDiffTextLineLimit;
     return FileDocument(
       revision: revision,
       path: path,
       side: side,
       bytes: bytes,
-      kind: tooLarge ? FileContentKind.tooLarge : FileContentKind.utf8,
-      lines: List.unmodifiable(tooLarge ? const <String>[] : lines),
+      kind: FileContentKind.utf8,
+      lines: List.unmodifiable(lines),
       hasTrailingNewline: trailing,
       disableRichRendering:
           bytes.length > fullDiffLargeByteLimit ||

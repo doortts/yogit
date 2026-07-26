@@ -154,4 +154,40 @@ void main() {
       expect(file.disableRichRendering, isTrue);
     }
   });
+
+  test('applies the byte hard limit before decoding invalid UTF-8', () {
+    final bytes = Uint8List(fullDiffTextByteLimit + 1)
+      ..fillRange(0, fullDiffTextByteLimit + 1, 0x80);
+
+    final file = FileDocument.fromBytes(
+      revision: 'abc',
+      path: 'large.txt',
+      side: FileDocumentSide.result,
+      bytes: bytes,
+      gitMarkedBinary: false,
+    );
+
+    expect(file.kind, FileContentKind.tooLarge);
+    expect(file.lines, isEmpty);
+  });
+
+  test('stops at the row hard limit before decoding later invalid UTF-8', () {
+    final bytes = Uint8List.fromList([
+      ...utf8.encode(
+        '${List.filled(fullDiffTextLineLimit + 1, 'x').join('\n')}\n',
+      ),
+      0x80,
+    ]);
+
+    final file = FileDocument.fromBytes(
+      revision: 'abc',
+      path: 'many-lines.txt',
+      side: FileDocumentSide.result,
+      bytes: bytes,
+      gitMarkedBinary: false,
+    );
+
+    expect(file.kind, FileContentKind.tooLarge);
+    expect(file.lines, isEmpty);
+  });
 }
