@@ -1,5 +1,11 @@
 # Full Diff 작업 화면 설계
 
+> **상태:** 이 문서는 Full Diff 1차 구현의 설계 기록입니다. 현재 구현
+> 기준은
+> [Full Diff 웹 시안 일치 설계](2026-07-27-full-diff-web-mockup-parity-design.md)입니다.
+> 두 문서가 다르면 새 설계를 따릅니다. 특히 새 설계는 `Inline`을
+> `Diff` 화면의 표시 방식으로 다시 포함합니다.
+
 ## 목표
 
 Yogit의 빠른 커밋·파일 탐색은 유지하면서 Full Diff 화면을 코드 리뷰

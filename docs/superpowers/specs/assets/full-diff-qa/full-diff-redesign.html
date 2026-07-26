@@ -1,0 +1,862 @@
+<div id="fd-concept-0727">
+  <style>
+    #fd-concept-0727 {
+      width: 100%;
+      color: var(--foreground);
+    }
+
+    #fd-concept-0727 .fd-app {
+      overflow: hidden;
+    }
+
+    #fd-concept-0727 .fd-filebar,
+    #fd-concept-0727 .fd-toolbar,
+    #fd-concept-0727 .fd-actions,
+    #fd-concept-0727 .fd-path,
+    #fd-concept-0727 .fd-nav-title,
+    #fd-concept-0727 .fd-file-row,
+    #fd-concept-0727 .fd-commit-row,
+    #fd-concept-0727 .fd-history-row {
+      display: flex;
+      align-items: center;
+    }
+
+    #fd-concept-0727 .fd-filebar,
+    #fd-concept-0727 .fd-toolbar {
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    #fd-concept-0727 .fd-filebar {
+      flex-wrap: wrap;
+    }
+
+    #fd-concept-0727 .fd-path {
+      min-width: 0;
+      gap: 8px;
+    }
+
+    #fd-concept-0727 .fd-path code {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #fd-concept-0727 .fd-actions {
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    #fd-concept-0727 .fd-toolbar {
+      flex-wrap: wrap;
+    }
+
+    #fd-concept-0727 .fd-tool-left,
+    #fd-concept-0727 .fd-tool-right {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    #fd-concept-0727 .fd-main {
+      display: grid;
+      grid-template-columns:
+        minmax(126px, 0.82fr)
+        minmax(158px, 1fr)
+        minmax(0, 4.2fr);
+      min-height: 520px;
+    }
+
+    #fd-concept-0727 .fd-pane {
+      min-width: 0;
+      border-right: 1px solid var(--border);
+    }
+
+    #fd-concept-0727 .fd-pane-head {
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted-foreground);
+    }
+
+    #fd-concept-0727 .fd-nav-title {
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    #fd-concept-0727 .fd-commit-row,
+    #fd-concept-0727 .fd-file-row {
+      min-width: 0;
+      gap: 7px;
+      padding: 9px 10px;
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+    }
+
+    #fd-concept-0727 .fd-commit-row.is-selected,
+    #fd-concept-0727 .fd-file-row.is-selected {
+      background: var(--accent);
+      color: var(--accent-foreground);
+    }
+
+    #fd-concept-0727 .fd-row-copy {
+      min-width: 0;
+      flex: 1;
+    }
+
+    #fd-concept-0727 .fd-row-copy > * {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #fd-concept-0727 .fd-file-status {
+      flex: 0 0 auto;
+      min-width: 18px;
+      text-align: center;
+      color: var(--foreground);
+    }
+
+    #fd-concept-0727 .fd-diff {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 18px;
+      background: var(--background);
+    }
+
+    #fd-concept-0727 .fd-code {
+      min-width: 0;
+      padding: 8px 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    #fd-concept-0727 .fd-pair {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      min-width: 0;
+    }
+
+    #fd-concept-0727 .fd-side {
+      display: grid;
+      grid-template-columns: 74px minmax(0, 1fr);
+      min-width: 0;
+      border-right: 1px solid var(--border);
+    }
+
+    #fd-concept-0727 .fd-gutter {
+      display: grid;
+      grid-template-columns: 1fr 1fr 16px;
+      align-items: start;
+      gap: 3px;
+      padding: 2px 4px;
+      color: var(--muted-foreground);
+      background: var(--muted);
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #fd-concept-0727 .fd-line {
+      min-width: 0;
+      padding: 2px 8px;
+      white-space: pre;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #fd-concept-0727 .fd-app.is-wrap .fd-line {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      text-overflow: clip;
+    }
+
+    #fd-concept-0727 .fd-side.is-add {
+      background: color-mix(in srgb, var(--primary) 13%, transparent);
+    }
+
+    #fd-concept-0727 .fd-side.is-delete {
+      background: color-mix(in srgb, var(--destructive) 12%, transparent);
+    }
+
+    #fd-concept-0727 .fd-side.is-current {
+      box-shadow: inset 3px 0 0 var(--ring);
+    }
+
+    #fd-concept-0727 .fd-side.is-empty {
+      background:
+        repeating-linear-gradient(
+          -45deg,
+          transparent 0 6px,
+          color-mix(in srgb, var(--border) 62%, transparent) 6px 8px
+        );
+    }
+
+    #fd-concept-0727 .fd-side.is-empty .fd-line {
+      color: transparent;
+    }
+
+    #fd-concept-0727 .fd-hunk {
+      grid-column: 1 / -1;
+      padding: 6px 10px;
+      color: var(--muted-foreground);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      background: color-mix(in srgb, var(--muted) 72%, transparent);
+    }
+
+    #fd-concept-0727 .fd-word {
+      background: color-mix(in srgb, var(--ring) 26%, transparent);
+      border-bottom: 1px solid var(--ring);
+    }
+
+    #fd-concept-0727 .tok-key {
+      color: color-mix(in srgb, var(--primary) 72%, var(--foreground));
+    }
+
+    #fd-concept-0727 .tok-string {
+      color: color-mix(in srgb, var(--destructive) 52%, var(--foreground));
+    }
+
+    #fd-concept-0727 .tok-num {
+      color: color-mix(in srgb, var(--accent-foreground) 74%, var(--muted-foreground));
+    }
+
+    #fd-concept-0727 .fd-minimap {
+      position: relative;
+      border-left: 1px solid var(--border);
+      background: var(--muted);
+    }
+
+    #fd-concept-0727 .fd-map-mark {
+      position: absolute;
+      left: 3px;
+      right: 3px;
+      height: 3px;
+      background: var(--primary);
+    }
+
+    #fd-concept-0727 .fd-map-mark.is-delete {
+      background: var(--destructive);
+    }
+
+    #fd-concept-0727 .fd-map-window {
+      position: absolute;
+      left: 1px;
+      right: 1px;
+      top: 28%;
+      height: 24%;
+      border: 1px solid var(--ring);
+      background: color-mix(in srgb, var(--ring) 10%, transparent);
+    }
+
+    #fd-concept-0727 .fd-blame {
+      display: none;
+      padding-right: 8px;
+      color: var(--muted-foreground);
+    }
+
+    #fd-concept-0727 .fd-app.view-blame .fd-blame {
+      display: inline;
+    }
+
+    #fd-concept-0727 .fd-history {
+      display: none;
+      padding: 12px;
+    }
+
+    #fd-concept-0727 .fd-history-row {
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    #fd-concept-0727 .fd-history-row code {
+      flex: 0 0 auto;
+    }
+
+    #fd-concept-0727 .fd-app.view-history .fd-code,
+    #fd-concept-0727 .fd-app.view-history .fd-minimap {
+      display: none;
+    }
+
+    #fd-concept-0727 .fd-app.view-history .fd-diff {
+      display: block;
+    }
+
+    #fd-concept-0727 .fd-app.view-history .fd-history {
+      display: block;
+    }
+
+    #fd-concept-0727 .fd-app.view-file .fd-old,
+    #fd-concept-0727 .fd-app.view-blame .fd-old,
+    #fd-concept-0727 .fd-app.mode-inline .fd-old,
+    #fd-concept-0727 .fd-app.mode-hunk .fd-old {
+      display: none;
+    }
+
+    #fd-concept-0727 .fd-app.view-file .fd-pair,
+    #fd-concept-0727 .fd-app.view-blame .fd-pair,
+    #fd-concept-0727 .fd-app.mode-inline .fd-pair,
+    #fd-concept-0727 .fd-app.mode-hunk .fd-pair {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    #fd-concept-0727 .fd-app.view-file .fd-side,
+    #fd-concept-0727 .fd-app.view-blame .fd-side {
+      background: transparent;
+      box-shadow: none;
+    }
+
+    #fd-concept-0727 .fd-app.mode-hunk .fd-context {
+      display: none;
+    }
+
+    #fd-concept-0727 .fd-app.is-focus .fd-main {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    #fd-concept-0727 .fd-app.is-focus .fd-pane {
+      display: none;
+    }
+
+    #fd-concept-0727 .fd-app.is-ignore .fd-whitespace-only {
+      display: none;
+    }
+
+    #fd-concept-0727 [aria-disabled="true"] {
+      cursor: default;
+    }
+
+    #fd-concept-0727 .fd-app.qa-tools .fd-filebar,
+    #fd-concept-0727 .fd-app.qa-tools .fd-tool-left,
+    #fd-concept-0727 .fd-app.qa-tools .fd-pane {
+      display: none;
+    }
+
+    #fd-concept-0727 .fd-app.qa-tools .fd-toolbar {
+      justify-content: flex-end;
+    }
+
+    #fd-concept-0727 .fd-app.qa-tools .fd-main {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    @media (max-width: 650px) {
+      #fd-concept-0727 .fd-main {
+        grid-template-columns: minmax(138px, 0.8fr) minmax(0, 2.8fr);
+      }
+
+      #fd-concept-0727 .fd-commits {
+        display: none;
+      }
+    }
+
+    @media (max-width: 480px) {
+      #fd-concept-0727 .fd-main {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      #fd-concept-0727 .fd-files {
+        display: none;
+      }
+
+      #fd-concept-0727 .fd-pair {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      #fd-concept-0727 .fd-old {
+        display: none;
+      }
+    }
+  </style>
+
+  <div class="card fd-app mode-hunk view-diff" aria-label="Yogit Full Diff redesign mockup">
+    <div class="fd-filebar">
+      <div class="fd-path">
+        <i data-lucide="file-code-2" aria-hidden="true"></i>
+        <code>src/drlua.pas</code>
+        <span class="viz-badge">M · +12 −4</span>
+      </div>
+      <div class="fd-actions">
+        <button type="button" class="btn" data-role="external" data-tooltip="현재 작업 디렉터리의 파일을 외부 편집기로 엽니다">
+          <i data-lucide="square-arrow-out-up-right" aria-hidden="true"></i>
+          편집기로 열기
+        </button>
+        <button type="button" class="btn fd-view" data-view="file">File</button>
+        <button type="button" class="btn btn-primary fd-view" data-view="diff" aria-pressed="true">Diff</button>
+        <button type="button" class="btn fd-view" data-view="blame">Blame</button>
+        <button type="button" class="btn fd-view" data-view="history">History</button>
+        <span class="viz-badge">UTF-8</span>
+      </div>
+    </div>
+
+    <div class="fd-toolbar">
+      <div class="fd-tool-left">
+        <button type="button" class="btn fd-focus" aria-pressed="false">
+          <i data-lucide="panel-left-close" aria-hidden="true"></i>
+          집중 모드
+        </button>
+        <button type="button" class="btn btn-primary fd-mode" data-mode="hunk" aria-pressed="true">Hunk</button>
+        <button type="button" class="btn fd-mode" data-mode="inline">Inline</button>
+        <button type="button" class="btn fd-mode" data-mode="split">Split</button>
+      </div>
+      <div class="fd-tool-right">
+        <button type="button" class="btn btn-ghost fd-prev" aria-label="이전 변경 구간" data-tooltip="이전 변경 구간">
+          <i data-lucide="arrow-up" aria-hidden="true"></i>
+        </button>
+        <span class="text-small text-muted fd-change-count">2 / 7</span>
+        <button type="button" class="btn btn-ghost fd-next" aria-label="다음 변경 구간" data-tooltip="다음 변경 구간">
+          <i data-lucide="arrow-down" aria-hidden="true"></i>
+        </button>
+        <label class="form-label">
+          <span class="sr-only">diff 알고리즘</span>
+          <select class="form-select fd-algorithm" data-selected-algorithm="Git setting">
+            <option selected disabled>diff 알고리즘</option>
+            <option>Git setting</option>
+            <option>Myers</option>
+            <option>Minimal</option>
+            <option>Patience</option>
+            <option>Histogram</option>
+          </select>
+        </label>
+        <button type="button" class="btn fd-ignore" aria-pressed="false">
+          <i data-lucide="pilcrow" aria-hidden="true"></i>
+          공백 무시
+        </button>
+        <button type="button" class="btn fd-wrap" aria-pressed="false">
+          <i data-lucide="wrap-text" aria-hidden="true"></i>
+          줄바꿈
+        </button>
+      </div>
+    </div>
+
+    <div class="fd-main">
+      <aside class="fd-pane fd-commits" aria-label="주변 커밋">
+        <div class="fd-pane-head fd-nav-title">
+          <span>주변 커밋</span>
+          <span class="text-small text-muted">⌘↑↓</span>
+        </div>
+        <div class="fd-commit-row">
+          <div class="fd-row-copy">
+            <span>Persist manually resized window dimensions</span>
+            <code class="text-small text-muted">2db06c0</code>
+          </div>
+        </div>
+        <div class="fd-commit-row is-selected">
+          <div class="fd-row-copy">
+            <span>Make Retina windows pixel-aware</span>
+            <code class="text-small">40aff6d</code>
+          </div>
+        </div>
+        <div class="fd-commit-row">
+          <div class="fd-row-copy">
+            <span>Use pixel dimensions for Retina windows</span>
+            <code class="text-small text-muted">65f4c80</code>
+          </div>
+        </div>
+        <div class="fd-commit-row">
+          <div class="fd-row-copy">
+            <span>Port Android mobile gameplay controls</span>
+            <code class="text-small text-muted">1aaf1bd</code>
+          </div>
+        </div>
+      </aside>
+
+      <aside class="fd-pane fd-files" aria-label="변경 파일">
+        <div class="fd-pane-head">
+          <div>Make Retina windows pixel-aware</div>
+          <div class="text-small text-muted"><code>40aff6d</code> · Suwon Chae</div>
+        </div>
+        <div class="fd-nav-title fd-pane-head">
+          <span>변경 파일</span>
+          <span class="text-small text-muted">4 files · +34 −12</span>
+        </div>
+        <div class="fd-file-row is-selected">
+          <span class="fd-file-status">M</span>
+          <div class="fd-row-copy">
+            <code>src/drlua.pas</code>
+            <span class="text-small">+12 −4</span>
+          </div>
+        </div>
+        <div class="fd-file-row">
+          <span class="fd-file-status">M</span>
+          <div class="fd-row-copy">
+            <code>src/window_sdl.pas</code>
+            <span class="text-small text-muted">+9 −3</span>
+          </div>
+        </div>
+        <div class="fd-file-row">
+          <span class="fd-file-status">A</span>
+          <div class="fd-row-copy">
+            <code>macos/retina.pas</code>
+            <span class="text-small text-muted">+13 −0</span>
+          </div>
+        </div>
+        <div class="fd-file-row">
+          <span class="fd-file-status">D</span>
+          <div class="fd-row-copy">
+            <code>macos/legacy_scale.pas</code>
+            <span class="text-small text-muted">+0 −5</span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="fd-diff" aria-label="파일 비교">
+        <div class="fd-code">
+          <div class="fd-pair fd-context">
+            <div class="fd-side fd-old">
+              <div class="fd-gutter"><span>309</span><span></span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>VersionModuleSave := LuaSystem.Get(<span class="tok-string">'VERSION_MODULE_SAVE'</span>);</div>
+            </div>
+            <div class="fd-side">
+              <div class="fd-gutter"><span></span><span>309</span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>VersionModuleSave := LuaSystem.Get(<span class="tok-string">'VERSION_MODULE_SAVE'</span>);</div>
+            </div>
+          </div>
+          <div class="fd-pair fd-context">
+            <div class="fd-side fd-old">
+              <div class="fd-gutter"><span>310</span><span></span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>DemoVersion := <span class="tok-key">False</span>;</div>
+            </div>
+            <div class="fd-side">
+              <div class="fd-gutter"><span></span><span>310</span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>DemoVersion := <span class="tok-key">False</span>;</div>
+            </div>
+          </div>
+          <div class="fd-pair fd-context fd-whitespace-only">
+            <div class="fd-side fd-old">
+              <div class="fd-gutter"><span>311</span><span></span><span>−</span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>  <span class="tok-key">if</span> LuaSystem.RawDefined(<span class="tok-string">'DEMO'</span>) <span class="tok-key">then</span></div>
+            </div>
+            <div class="fd-side">
+              <div class="fd-gutter"><span></span><span>311</span><span>+</span></div>
+              <div class="fd-line"><span class="fd-blame">40aff6d SC</span>    <span class="tok-key">if</span> LuaSystem.RawDefined(<span class="tok-string">'DEMO'</span>) <span class="tok-key">then</span></div>
+            </div>
+          </div>
+          <div class="fd-hunk">SetupBase · lines 312–316 · change 2 of 7</div>
+          <div class="fd-pair">
+            <div class="fd-side fd-old is-empty">
+              <div class="fd-gutter"><span></span><span></span><span></span></div>
+              <div class="fd-line"> </div>
+            </div>
+            <div class="fd-side is-add is-current">
+              <div class="fd-gutter"><span></span><span>313</span><span>+</span></div>
+              <div class="fd-line"><span class="fd-blame">40aff6d SC</span>Log(LOGINFO, <span class="tok-string">'BASE MODULE VERSION: '</span> + <span class="fd-word">VersionModule</span>);</div>
+            </div>
+          </div>
+          <div class="fd-pair">
+            <div class="fd-side is-delete">
+              <div class="fd-gutter"><span>313</span><span></span><span>−</span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>Scale := WindowScale;</div>
+            </div>
+            <div class="fd-side is-add">
+              <div class="fd-gutter"><span></span><span>314</span><span>+</span></div>
+              <div class="fd-line"><span class="fd-blame">40aff6d SC</span>Scale := <span class="fd-word">WindowPixelRatio</span>;</div>
+            </div>
+          </div>
+          <div class="fd-pair fd-context">
+            <div class="fd-side fd-old">
+              <div class="fd-gutter"><span>314</span><span></span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span><span class="tok-key">end</span>;</div>
+            </div>
+            <div class="fd-side">
+              <div class="fd-gutter"><span></span><span>315</span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span><span class="tok-key">end</span>;</div>
+            </div>
+          </div>
+          <div class="fd-pair fd-context">
+            <div class="fd-side fd-old">
+              <div class="fd-gutter"><span>315</span><span></span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span></div>
+            </div>
+            <div class="fd-side">
+              <div class="fd-gutter"><span></span><span>316</span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span></div>
+            </div>
+          </div>
+          <div class="fd-pair fd-context">
+            <div class="fd-side fd-old">
+              <div class="fd-gutter"><span>316</span><span></span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span><span class="tok-key">begin</span></div>
+            </div>
+            <div class="fd-side">
+              <div class="fd-gutter"><span></span><span>317</span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span><span class="tok-key">begin</span></div>
+            </div>
+          </div>
+          <div class="fd-pair fd-context">
+            <div class="fd-side fd-old">
+              <div class="fd-gutter"><span>317</span><span></span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>VersionModule := <span class="tok-string">''</span>;</div>
+            </div>
+            <div class="fd-side">
+              <div class="fd-gutter"><span></span><span>318</span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>VersionModule := <span class="tok-string">''</span>;</div>
+            </div>
+          </div>
+          <div class="fd-pair fd-context">
+            <div class="fd-side fd-old">
+              <div class="fd-gutter"><span>318</span><span></span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>VersionModuleSave := <span class="tok-string">''</span>;</div>
+            </div>
+            <div class="fd-side">
+              <div class="fd-gutter"><span></span><span>319</span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>VersionModuleSave := <span class="tok-string">''</span>;</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="fd-minimap" aria-label="변경 위치 미니맵">
+          <span class="fd-map-mark" style="top: 18%"></span>
+          <span class="fd-map-mark is-delete" style="top: 34%"></span>
+          <span class="fd-map-mark" style="top: 49%"></span>
+          <span class="fd-map-mark" style="top: 76%"></span>
+          <span class="fd-map-window"></span>
+        </div>
+
+        <div class="fd-history" aria-label="파일 이력">
+          <div class="fd-history-row">
+            <code>40aff6d</code>
+            <div><div>Make Retina windows pixel-aware</div><span class="text-small text-muted">Suwon Chae · 16 days ago</span></div>
+          </div>
+          <div class="fd-history-row">
+            <code>65f4c80</code>
+            <div><div>Use pixel dimensions for Retina windows</div><span class="text-small text-muted">Suwon Chae · 16 days ago</span></div>
+          </div>
+          <div class="fd-history-row">
+            <code>c78b2ff</code>
+            <div><div>Fix held diagonal arrow movement</div><span class="text-small text-muted">Suwon Chae · 22 days ago</span></div>
+          </div>
+          <div class="fd-history-row">
+            <code>91f7c63</code>
+            <div><div>Merge branch 'hotfix/0_10_9a'</div><span class="text-small text-muted">epyon · 1 month ago</span></div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const root = document.getElementById('fd-concept-0727');
+      const app = root.querySelector('.fd-app');
+      const focusButton = root.querySelector('.fd-focus');
+      const wrapButton = root.querySelector('.fd-wrap');
+      const ignoreButton = root.querySelector('.fd-ignore');
+      const count = root.querySelector('.fd-change-count');
+      const previousButton = root.querySelector('.fd-prev');
+      const nextButton = root.querySelector('.fd-next');
+      const algorithm = root.querySelector('.fd-algorithm');
+      const hunkLabel = root.querySelector('.fd-hunk');
+      const changePairs = root.querySelectorAll('.fd-pair:not(.fd-context)');
+      const mapWindow = root.querySelector('.fd-map-window');
+      let currentChange = 2;
+      let currentView = 'diff';
+
+      const changeSamples = [
+        {
+          name: 'State.Init',
+          range: '292–296',
+          addLine: 295,
+          add: 'Result := 0;',
+          oldLine: 296,
+          old: 'end;',
+          newLine: 296,
+          next: 'end;'
+        },
+        {
+          name: 'SetupBase',
+          range: '312–316',
+          addLine: 313,
+          add: "Log(LOGINFO, 'BASE MODULE VERSION: ' + VersionModule);",
+          oldLine: 313,
+          old: 'Scale := WindowScale;',
+          newLine: 314,
+          next: 'Scale := WindowPixelRatio;'
+        },
+        {
+          name: 'LoadCurrent',
+          range: '318–322',
+          addLine: 320,
+          add: 'WindowWidth := SavedPixelWidth;',
+          oldLine: 320,
+          old: 'WindowWidth := SavedWidth;',
+          newLine: 321,
+          next: 'WindowHeight := SavedPixelHeight;'
+        },
+        {
+          name: 'CreateWindow',
+          range: '344–349',
+          addLine: 346,
+          add: 'SDL_SetWindowSize(Window, PixelWidth, PixelHeight);',
+          oldLine: 346,
+          old: 'SDL_SetWindowSize(Window, Width, Height);',
+          newLine: 347,
+          next: 'WindowScale := SDL_GetWindowPixelDensity(Window);'
+        },
+        {
+          name: 'ResizeWindow',
+          range: '371–375',
+          addLine: 373,
+          add: 'ApplyPixelDimensions(NewWidth, NewHeight);',
+          oldLine: 373,
+          old: 'ApplyDimensions(NewWidth, NewHeight);',
+          newLine: 374,
+          next: 'SaveWindowPixelDimensions;'
+        },
+        {
+          name: 'SaveWindow',
+          range: '402–406',
+          addLine: 404,
+          add: 'SavedPixelWidth := CurrentPixelWidth;',
+          oldLine: 404,
+          old: 'SavedWidth := CurrentWidth;',
+          newLine: 405,
+          next: 'SavedPixelHeight := CurrentPixelHeight;'
+        },
+        {
+          name: 'Finalize',
+          range: '438–441',
+          addLine: 439,
+          add: 'PersistWindowPixelScale;',
+          oldLine: 439,
+          old: 'PersistWindowScale;',
+          newLine: 440,
+          next: 'State.Done := True;'
+        }
+      ];
+
+      function press(button, active) {
+        button.setAttribute('aria-pressed', String(active));
+        button.classList.toggle('btn-primary', active);
+      }
+
+      function selectGroup(selector, selected, attribute) {
+        root.querySelectorAll(selector).forEach((button) => {
+          const active = button.dataset[attribute] === selected;
+          press(button, active);
+        });
+      }
+
+      function sideMarkup(oldLine, newLine, mark, code) {
+        return `
+          <div class="fd-gutter"><span>${oldLine ?? ''}</span><span>${newLine ?? ''}</span><span>${mark}</span></div>
+          <div class="fd-line">${code}</div>
+        `;
+      }
+
+      function renderCurrentChange() {
+        const sample = changeSamples[currentChange - 1];
+        hunkLabel.textContent =
+          `${sample.name} · lines ${sample.range} · change ${currentChange} of 7`;
+
+        const firstOld = changePairs[0].firstElementChild;
+        const firstNew = changePairs[0].lastElementChild;
+        const secondOld = changePairs[1].firstElementChild;
+        const secondNew = changePairs[1].lastElementChild;
+
+        firstOld.innerHTML = sideMarkup(null, null, '', ' ');
+        firstNew.innerHTML = sideMarkup(null, sample.addLine, '+', sample.add);
+        secondOld.innerHTML = sideMarkup(sample.oldLine, null, '−', sample.old);
+        secondNew.innerHTML = sideMarkup(null, sample.newLine, '+', sample.next);
+        count.textContent = `${currentChange} / 7`;
+        mapWindow.style.top = `${12 + ((currentChange - 1) / 6) * 64}%`;
+      }
+
+      function syncHistoryControls() {
+        const unavailable = currentView === 'history';
+        previousButton.setAttribute('aria-disabled', String(unavailable));
+        nextButton.setAttribute('aria-disabled', String(unavailable));
+      }
+
+      focusButton.addEventListener('click', () => {
+        const active = app.classList.toggle('is-focus');
+        press(focusButton, active);
+        focusButton.innerHTML = active
+          ? '<i data-lucide="panel-left-open" aria-hidden="true"></i> 탐색 패널'
+          : '<i data-lucide="panel-left-close" aria-hidden="true"></i> 집중 모드';
+        if (window.lucide) lucide.createIcons({ attrs: { width: 16, height: 16 } });
+      });
+
+      root.querySelectorAll('.fd-mode').forEach((button) => {
+        button.addEventListener('click', () => {
+          app.classList.remove('mode-hunk', 'mode-inline', 'mode-split');
+          app.classList.add(`mode-${button.dataset.mode}`);
+          selectGroup('.fd-mode', button.dataset.mode, 'mode');
+        });
+      });
+
+      root.querySelectorAll('.fd-view').forEach((button) => {
+        button.addEventListener('click', () => {
+          currentView = button.dataset.view;
+          app.classList.remove('view-file', 'view-diff', 'view-blame', 'view-history');
+          app.classList.add(`view-${button.dataset.view}`);
+          selectGroup('.fd-view', button.dataset.view, 'view');
+          syncHistoryControls();
+        });
+      });
+
+      wrapButton.addEventListener('click', () => {
+        press(wrapButton, app.classList.toggle('is-wrap'));
+      });
+
+      ignoreButton.addEventListener('click', () => {
+        press(ignoreButton, app.classList.toggle('is-ignore'));
+      });
+
+      previousButton.addEventListener('click', () => {
+        if (currentView === 'history') return;
+        currentChange = Math.max(1, currentChange - 1);
+        renderCurrentChange();
+      });
+
+      nextButton.addEventListener('click', () => {
+        if (currentView === 'history') return;
+        currentChange = Math.min(7, currentChange + 1);
+        renderCurrentChange();
+      });
+
+      algorithm.addEventListener('change', () => {
+        algorithm.dataset.selectedAlgorithm = algorithm.value;
+        algorithm.setAttribute(
+          'aria-description',
+          `선택한 알고리즘: ${algorithm.value}`
+        );
+        algorithm.selectedIndex = 0;
+      });
+
+      const requestedAlgorithm =
+        new URLSearchParams(window.location.search).get('algorithm');
+      if (requestedAlgorithm && [
+        'Git setting',
+        'Myers',
+        'Minimal',
+        'Patience',
+        'Histogram'
+      ].includes(requestedAlgorithm)) {
+        algorithm.dataset.selectedAlgorithm = requestedAlgorithm;
+        algorithm.setAttribute(
+          'aria-description',
+          `선택한 알고리즘: ${requestedAlgorithm}`
+        );
+      }
+
+      const requestedChange = Number(
+        new URLSearchParams(window.location.search).get('change')
+      );
+      if (Number.isInteger(requestedChange) &&
+          requestedChange >= 1 &&
+          requestedChange <= 7) {
+        currentChange = requestedChange;
+        renderCurrentChange();
+      }
+
+      if (new URLSearchParams(window.location.search).get('qa') === 'tools') {
+        app.classList.add('qa-tools');
+      }
+
+      syncHistoryControls();
+    })();
+  </script>
+</div>

@@ -1,0 +1,1969 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Full Diff Redesign Approved</title>
+<style>:root {
+  color-scheme: light dark;
+  background-color: var(
+    --background,
+    var(--color-background-primary, light-dark(rgb(255 255 255), rgb(24 24 24)))
+  ) !important;
+
+  /* Agent-facing contract; keep in sync with SKILL.md. */
+  --background: var(
+    --color-background-primary,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --card: color-mix(in oklab, var(--foreground) 5%, transparent);
+  --card-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --popover: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255), rgb(45 45 45))
+  );
+  --popover-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --primary: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --primary-foreground: var(
+    --color-text-inverse,
+    light-dark(rgb(255 255 255), rgb(13 13 13))
+  );
+  --secondary: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%))
+  );
+  --secondary-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --muted-foreground: var(
+    --color-text-secondary,
+    light-dark(rgb(26 28 31 / 49.4%), rgb(255 255 255 / 49.8%))
+  );
+  --accent: var(
+    --color-background-info,
+    light-dark(rgb(229 242 255), rgb(13 39 63))
+  );
+  --accent-foreground: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --destructive: var(
+    --color-text-warning,
+    light-dark(rgb(226 85 7), rgb(255 133 73))
+  );
+  --border: var(
+    --color-border-secondary,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+  --input: var(
+    --color-border-primary,
+    light-dark(
+      rgb(26 28 31 / 11.8%),
+      color-mix(in oklab, rgb(0 0 0) 10%, transparent)
+    )
+  );
+  --ring: var(
+    --color-ring-primary,
+    light-dark(rgb(51 156 255), rgb(131 195 255 / 76%))
+  );
+  --font-size-base: var(--font-text-md-size, 14px);
+  --red: light-dark(rgb(186 38 35), rgb(250 66 62));
+  --green: light-dark(rgb(0 162 64), rgb(64 201 119));
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(243 136 59), rgb(245 154 86));
+  --viz-series-3: light-dark(rgb(93 201 119), rgb(116 213 139));
+  --viz-series-4: light-dark(rgb(235 119 177), rgb(240 143 192));
+  --viz-series-5: light-dark(rgb(155 121 236), rgb(170 145 239));
+  --viz-series-6: light-dark(rgb(58 185 177), rgb(90 203 194));
+
+  /* Internal implementation variables; not part of the agent contract. */
+  --font-sans: -apple-system, system-ui, "Segoe UI", sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
+  --font-size-normal: max(11px, var(--font-size-base));
+  --font-size-tooltip: calc(var(--font-size-base) - 1px);
+  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
+  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
+  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
+  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
+  --font-weight-normal: 430;
+  --font-weight-medium: 500;
+  --line-height-normal: calc(var(--font-size-normal) * 1.5);
+  --line-height-tooltip: calc(var(--font-size-tooltip) * 1.4285714286);
+  --line-height-small: calc(var(--font-size-small) + 4px);
+  --radius: var(--border-radius-lg, 12.5px);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --checkmark-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 17 17'%3E%3Cpath d='M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z'/%3E%3C/svg%3E");
+
+  /* Legacy aliases; not part of the current agent contract. */
+  --viz-bg: transparent;
+  --viz-panel: var(--card);
+  --viz-border: var(--border);
+  --viz-text: var(--foreground);
+  --viz-muted: var(--muted-foreground);
+  --viz-accent: var(--primary);
+  --viz-accent-text: var(--primary-foreground);
+  --viz-accent-bg: var(--accent);
+  --viz-font-size: var(--font-size-base);
+  --viz-warning: var(--destructive);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html > body {
+  /* Preserve MCP aliases for older inline renderers without creating :root cycles. */
+  --color-background-primary: var(
+    --background,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --color-text-primary: var(
+    --foreground,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --color-border-secondary: var(
+    --border,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+
+  margin: 0;
+  padding: 5px;
+  color: var(--foreground);
+  background: transparent !important;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-normal);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+}
+
+a {
+  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
+  cursor: pointer;
+  font-weight: var(--font-weight-medium, 500);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+a:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.5px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin-block: 0;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+
+b,
+strong,
+th {
+  font-weight: var(--font-weight-medium);
+}
+
+code:not(pre code) {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  word-break: break-word;
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--foreground);
+  font: inherit;
+  text-align: start;
+}
+
+.table :is(th, td) {
+  padding-block: 10px;
+  padding-inline: 0 24px;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+}
+
+.table-responsive > .table :is(th, td) {
+  overflow-wrap: break-word;
+}
+
+.table :is(th, td):last-child {
+  padding-inline-end: 0;
+}
+
+.table :is(caption, thead th) {
+  font-weight: 600;
+}
+
+.table thead th {
+  padding-block: 8px;
+  border-bottom-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+}
+
+.table tbody tr:last-child :is(th, td) {
+  border-bottom: 0;
+}
+
+.table.table-sm :is(th, td) {
+  padding-block: 6px;
+}
+
+.table.table-sm :is(th, td):not(:last-child) {
+  padding-inline-end: 16px;
+}
+
+.table :is(.text-end, [align="right"]) {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.table :is(.text-center, [align="center"]) {
+  text-align: center;
+}
+
+.table .text-nowrap {
+  white-space: nowrap;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent !important;
+}
+
+.card {
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  border-radius: var(--radius-2xl);
+  corner-shape: superellipse(1.5);
+  color: var(--card-foreground);
+  background: var(--card);
+}
+
+#widget > :not(.card) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(
+    20rem,
+    var(--tooltip-available-width, calc(100vw - 10px)),
+    calc(100vw - 10px)
+  );
+  max-height: min(
+    var(--tooltip-available-height, calc(100vh - 10px)),
+    calc(100vh - 10px)
+  );
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: none;
+  font-size: var(--font-size-tooltip);
+  line-height: var(--line-height-tooltip);
+  overflow-wrap: break-word;
+  white-space: normal;
+  pointer-events: none;
+  user-select: none;
+}
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
+  gap: 10px;
+}
+
+.viz-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-stat-value {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+.viz-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.viz-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+small,
+.text-small,
+.viz-badge {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+.text-muted {
+  color: var(--muted-foreground);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-controls > .form-label {
+  display: grid;
+  min-width: min(100%, 260px);
+  flex: 1 1 280px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 0;
+}
+
+.viz-controls > .form-label > :is(.form-control, .form-range, .form-select) {
+  grid-column: 1 / -1;
+}
+
+.btn,
+.form-check-input,
+.form-control,
+.form-range,
+.form-select {
+  font: inherit;
+}
+
+.btn {
+  appearance: button;
+  display: inline-flex;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: var(--cursor-interaction, pointer);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.btn:is(.btn-block, .viz-tile) {
+  inline-size: 100%;
+}
+
+.btn.viz-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+a.btn {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn-primary {
+  border-color: transparent;
+  color: var(--primary-foreground);
+  background: var(--foreground);
+  background-clip: padding-box;
+}
+
+.btn-primary .text-muted {
+  color: color-mix(in srgb, var(--primary-foreground) 50%, transparent);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent);
+  background-clip: padding-box;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.btn-ghost:not(:disabled):hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+[data-lucide] {
+  stroke-width: 1.6;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--foreground);
+}
+
+.form-control {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.form-control::placeholder {
+  color: var(--muted-foreground);
+}
+
+.form-control[type="file"] {
+  padding: 0;
+  overflow: hidden;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control[type="file"]::file-selector-button {
+  min-height: 26px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--input);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: inherit;
+  font: inherit;
+}
+
+.form-control[type="file"]:not(:disabled):hover::file-selector-button {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-control-color[type="color"] {
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control-color[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-control-color[type="color"]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 4px);
+  corner-shape: superellipse(1.5);
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.form-control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 32px 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background-color: var(--secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-select:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-select:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-check {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-check-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--input);
+  color: var(--primary-foreground);
+  background-color: transparent;
+  cursor: var(--cursor-interaction, default);
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
+}
+
+.form-check:not(.form-switch) .form-check-input[type="checkbox"] {
+  border-color: var(--input);
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background-color: var(--secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input:not(:disabled):not(:checked):hover {
+  background-color: var(--card);
+}
+
+.form-check:not(.form-switch) .form-check-input[type="checkbox"]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input[type="checkbox"]:checked::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-foreground);
+  content: "";
+  mask: var(--checkmark-image) center / 12px 12px no-repeat;
+}
+
+.form-check-input[type="radio"] {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.form-check-input[type="radio"]:checked {
+  border: 2px solid var(--primary);
+  background:
+    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
+    var(--primary);
+}
+
+.form-check:not(.form-switch) .form-check-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+}
+
+.form-switch .form-check-input:disabled,
+.form-switch .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-check-label {
+  color: var(--foreground);
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-switch .form-check-input {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+  box-shadow: var(--shadow-sm);
+  content: "";
+  transform: translate(2px, -50%);
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input:checked {
+  background: var(--primary);
+}
+
+.form-switch .form-check-input:checked::before {
+  transform: translate(14px, -50%);
+}
+
+.form-switch .form-check-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 28px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border: 0;
+  accent-color: var(--primary);
+  background: linear-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 7%, transparent)
+    )
+    center / 100% 2px no-repeat;
+}
+
+.form-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-webkit-slider-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-moz-range-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.btn:not(.btn-primary, .viz-tile):is(
+    [aria-pressed="true"],
+    [aria-selected="true"],
+    .is-selected
+  ) {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.btn.viz-tile:is([aria-pressed="true"], [aria-selected="true"], .is-selected) {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+#widget > svg {
+  width: 100%;
+}
+
+.text-warning,
+.text-destructive {
+  color: var(--destructive);
+}
+
+html>body{padding:0}</style>
+</head>
+<body>
+<div id="fd-concept-0727">
+  <style>
+    #fd-concept-0727 {
+      width: 100%;
+      color: var(--foreground);
+    }
+
+    #fd-concept-0727 .fd-app {
+      overflow: hidden;
+    }
+
+    #fd-concept-0727 .fd-filebar,
+    #fd-concept-0727 .fd-toolbar,
+    #fd-concept-0727 .fd-actions,
+    #fd-concept-0727 .fd-path,
+    #fd-concept-0727 .fd-nav-title,
+    #fd-concept-0727 .fd-file-row,
+    #fd-concept-0727 .fd-commit-row,
+    #fd-concept-0727 .fd-history-row {
+      display: flex;
+      align-items: center;
+    }
+
+    #fd-concept-0727 .fd-filebar,
+    #fd-concept-0727 .fd-toolbar {
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    #fd-concept-0727 .fd-filebar {
+      flex-wrap: wrap;
+    }
+
+    #fd-concept-0727 .fd-path {
+      min-width: 0;
+      gap: 8px;
+    }
+
+    #fd-concept-0727 .fd-path code {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #fd-concept-0727 .fd-actions {
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    #fd-concept-0727 .fd-toolbar {
+      flex-wrap: wrap;
+    }
+
+    #fd-concept-0727 .fd-tool-left,
+    #fd-concept-0727 .fd-tool-right {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    #fd-concept-0727 .fd-main {
+      display: grid;
+      grid-template-columns:
+        minmax(126px, 0.82fr)
+        minmax(158px, 1fr)
+        minmax(0, 4.2fr);
+      min-height: 520px;
+    }
+
+    #fd-concept-0727 .fd-pane {
+      min-width: 0;
+      border-right: 1px solid var(--border);
+    }
+
+    #fd-concept-0727 .fd-pane-head {
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted-foreground);
+    }
+
+    #fd-concept-0727 .fd-nav-title {
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    #fd-concept-0727 .fd-commit-row,
+    #fd-concept-0727 .fd-file-row {
+      min-width: 0;
+      gap: 7px;
+      padding: 9px 10px;
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+    }
+
+    #fd-concept-0727 .fd-commit-row.is-selected,
+    #fd-concept-0727 .fd-file-row.is-selected {
+      background: var(--accent);
+      color: var(--accent-foreground);
+    }
+
+    #fd-concept-0727 .fd-row-copy {
+      min-width: 0;
+      flex: 1;
+    }
+
+    #fd-concept-0727 .fd-row-copy > * {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #fd-concept-0727 .fd-file-status {
+      flex: 0 0 auto;
+      min-width: 18px;
+      text-align: center;
+      color: var(--foreground);
+    }
+
+    #fd-concept-0727 .fd-diff {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 18px;
+      background: var(--background);
+    }
+
+    #fd-concept-0727 .fd-code {
+      min-width: 0;
+      padding: 8px 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    #fd-concept-0727 .fd-pair {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      min-width: 0;
+    }
+
+    #fd-concept-0727 .fd-side {
+      display: grid;
+      grid-template-columns: 74px minmax(0, 1fr);
+      min-width: 0;
+      border-right: 1px solid var(--border);
+    }
+
+    #fd-concept-0727 .fd-gutter {
+      display: grid;
+      grid-template-columns: 1fr 1fr 16px;
+      align-items: start;
+      gap: 3px;
+      padding: 2px 4px;
+      color: var(--muted-foreground);
+      background: var(--muted);
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #fd-concept-0727 .fd-line {
+      min-width: 0;
+      padding: 2px 8px;
+      white-space: pre;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #fd-concept-0727 .fd-app.is-wrap .fd-line {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      text-overflow: clip;
+    }
+
+    #fd-concept-0727 .fd-side.is-add {
+      background: color-mix(in srgb, var(--primary) 13%, transparent);
+    }
+
+    #fd-concept-0727 .fd-side.is-delete {
+      background: color-mix(in srgb, var(--destructive) 12%, transparent);
+    }
+
+    #fd-concept-0727 .fd-side.is-current {
+      box-shadow: inset 3px 0 0 var(--ring);
+    }
+
+    #fd-concept-0727 .fd-side.is-empty {
+      background:
+        repeating-linear-gradient(
+          -45deg,
+          transparent 0 6px,
+          color-mix(in srgb, var(--border) 62%, transparent) 6px 8px
+        );
+    }
+
+    #fd-concept-0727 .fd-side.is-empty .fd-line {
+      color: transparent;
+    }
+
+    #fd-concept-0727 .fd-hunk {
+      grid-column: 1 / -1;
+      padding: 6px 10px;
+      color: var(--muted-foreground);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      background: color-mix(in srgb, var(--muted) 72%, transparent);
+    }
+
+    #fd-concept-0727 .fd-word {
+      background: color-mix(in srgb, var(--ring) 26%, transparent);
+      border-bottom: 1px solid var(--ring);
+    }
+
+    #fd-concept-0727 .tok-key {
+      color: color-mix(in srgb, var(--primary) 72%, var(--foreground));
+    }
+
+    #fd-concept-0727 .tok-string {
+      color: color-mix(in srgb, var(--destructive) 52%, var(--foreground));
+    }
+
+    #fd-concept-0727 .tok-num {
+      color: color-mix(in srgb, var(--accent-foreground) 74%, var(--muted-foreground));
+    }
+
+    #fd-concept-0727 .fd-minimap {
+      position: relative;
+      border-left: 1px solid var(--border);
+      background: var(--muted);
+    }
+
+    #fd-concept-0727 .fd-map-mark {
+      position: absolute;
+      left: 3px;
+      right: 3px;
+      height: 3px;
+      background: var(--primary);
+    }
+
+    #fd-concept-0727 .fd-map-mark.is-delete {
+      background: var(--destructive);
+    }
+
+    #fd-concept-0727 .fd-map-window {
+      position: absolute;
+      left: 1px;
+      right: 1px;
+      top: 28%;
+      height: 24%;
+      border: 1px solid var(--ring);
+      background: color-mix(in srgb, var(--ring) 10%, transparent);
+    }
+
+    #fd-concept-0727 .fd-blame {
+      display: none;
+      padding-right: 8px;
+      color: var(--muted-foreground);
+    }
+
+    #fd-concept-0727 .fd-app.view-blame .fd-blame {
+      display: inline;
+    }
+
+    #fd-concept-0727 .fd-history {
+      display: none;
+      padding: 12px;
+    }
+
+    #fd-concept-0727 .fd-history-row {
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    #fd-concept-0727 .fd-history-row code {
+      flex: 0 0 auto;
+    }
+
+    #fd-concept-0727 .fd-app.view-history .fd-code,
+    #fd-concept-0727 .fd-app.view-history .fd-minimap {
+      display: none;
+    }
+
+    #fd-concept-0727 .fd-app.view-history .fd-diff {
+      display: block;
+    }
+
+    #fd-concept-0727 .fd-app.view-history .fd-history {
+      display: block;
+    }
+
+    #fd-concept-0727 .fd-app.view-file .fd-old,
+    #fd-concept-0727 .fd-app.view-blame .fd-old,
+    #fd-concept-0727 .fd-app.mode-inline .fd-old,
+    #fd-concept-0727 .fd-app.mode-hunk .fd-old {
+      display: none;
+    }
+
+    #fd-concept-0727 .fd-app.view-file .fd-pair,
+    #fd-concept-0727 .fd-app.view-blame .fd-pair,
+    #fd-concept-0727 .fd-app.mode-inline .fd-pair,
+    #fd-concept-0727 .fd-app.mode-hunk .fd-pair {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    #fd-concept-0727 .fd-app.view-file .fd-side,
+    #fd-concept-0727 .fd-app.view-blame .fd-side {
+      background: transparent;
+      box-shadow: none;
+    }
+
+    #fd-concept-0727 .fd-app.mode-hunk .fd-context {
+      display: none;
+    }
+
+    #fd-concept-0727 .fd-app.is-focus .fd-main {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    #fd-concept-0727 .fd-app.is-focus .fd-pane {
+      display: none;
+    }
+
+    #fd-concept-0727 .fd-app.is-ignore .fd-whitespace-only {
+      display: none;
+    }
+
+    #fd-concept-0727 [aria-disabled="true"] {
+      cursor: default;
+    }
+
+    #fd-concept-0727 .fd-app.qa-tools .fd-filebar,
+    #fd-concept-0727 .fd-app.qa-tools .fd-tool-left,
+    #fd-concept-0727 .fd-app.qa-tools .fd-pane {
+      display: none;
+    }
+
+    #fd-concept-0727 .fd-app.qa-tools .fd-toolbar {
+      justify-content: flex-end;
+    }
+
+    #fd-concept-0727 .fd-app.qa-tools .fd-main {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    @media (max-width: 650px) {
+      #fd-concept-0727 .fd-main {
+        grid-template-columns: minmax(138px, 0.8fr) minmax(0, 2.8fr);
+      }
+
+      #fd-concept-0727 .fd-commits {
+        display: none;
+      }
+    }
+
+    @media (max-width: 480px) {
+      #fd-concept-0727 .fd-main {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      #fd-concept-0727 .fd-files {
+        display: none;
+      }
+
+      #fd-concept-0727 .fd-pair {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      #fd-concept-0727 .fd-old {
+        display: none;
+      }
+    }
+  </style>
+
+  <div class="card fd-app mode-hunk view-diff" aria-label="Yogit Full Diff redesign mockup">
+    <div class="fd-filebar">
+      <div class="fd-path">
+        <i data-lucide="file-code-2" aria-hidden="true"></i>
+        <code>src/drlua.pas</code>
+        <span class="viz-badge">M · +12 −4</span>
+      </div>
+      <div class="fd-actions">
+        <button type="button" class="btn" data-role="external" data-tooltip="현재 작업 디렉터리의 파일을 외부 편집기로 엽니다">
+          <i data-lucide="square-arrow-out-up-right" aria-hidden="true"></i>
+          편집기로 열기
+        </button>
+        <button type="button" class="btn fd-view" data-view="file">File</button>
+        <button type="button" class="btn btn-primary fd-view" data-view="diff" aria-pressed="true">Diff</button>
+        <button type="button" class="btn fd-view" data-view="blame">Blame</button>
+        <button type="button" class="btn fd-view" data-view="history">History</button>
+        <span class="viz-badge">UTF-8</span>
+      </div>
+    </div>
+
+    <div class="fd-toolbar">
+      <div class="fd-tool-left">
+        <button type="button" class="btn fd-focus" aria-pressed="false">
+          <i data-lucide="panel-left-close" aria-hidden="true"></i>
+          집중 모드
+        </button>
+        <button type="button" class="btn btn-primary fd-mode" data-mode="hunk" aria-pressed="true">Hunk</button>
+        <button type="button" class="btn fd-mode" data-mode="inline">Inline</button>
+        <button type="button" class="btn fd-mode" data-mode="split">Split</button>
+      </div>
+      <div class="fd-tool-right">
+        <button type="button" class="btn btn-ghost fd-prev" aria-label="이전 변경 구간" data-tooltip="이전 변경 구간">
+          <i data-lucide="arrow-up" aria-hidden="true"></i>
+        </button>
+        <span class="text-small text-muted fd-change-count">2 / 7</span>
+        <button type="button" class="btn btn-ghost fd-next" aria-label="다음 변경 구간" data-tooltip="다음 변경 구간">
+          <i data-lucide="arrow-down" aria-hidden="true"></i>
+        </button>
+        <label class="form-label">
+          <span class="sr-only">diff 알고리즘</span>
+          <select class="form-select fd-algorithm" data-selected-algorithm="Git setting">
+            <option selected disabled>diff 알고리즘</option>
+            <option>Git setting</option>
+            <option>Myers</option>
+            <option>Minimal</option>
+            <option>Patience</option>
+            <option>Histogram</option>
+          </select>
+        </label>
+        <button type="button" class="btn fd-ignore" aria-pressed="false">
+          <i data-lucide="pilcrow" aria-hidden="true"></i>
+          공백 무시
+        </button>
+        <button type="button" class="btn fd-wrap" aria-pressed="false">
+          <i data-lucide="wrap-text" aria-hidden="true"></i>
+          줄바꿈
+        </button>
+      </div>
+    </div>
+
+    <div class="fd-main">
+      <aside class="fd-pane fd-commits" aria-label="주변 커밋">
+        <div class="fd-pane-head fd-nav-title">
+          <span>주변 커밋</span>
+          <span class="text-small text-muted">⌘↑↓</span>
+        </div>
+        <div class="fd-commit-row">
+          <div class="fd-row-copy">
+            <span>Persist manually resized window dimensions</span>
+            <code class="text-small text-muted">2db06c0</code>
+          </div>
+        </div>
+        <div class="fd-commit-row is-selected">
+          <div class="fd-row-copy">
+            <span>Make Retina windows pixel-aware</span>
+            <code class="text-small">40aff6d</code>
+          </div>
+        </div>
+        <div class="fd-commit-row">
+          <div class="fd-row-copy">
+            <span>Use pixel dimensions for Retina windows</span>
+            <code class="text-small text-muted">65f4c80</code>
+          </div>
+        </div>
+        <div class="fd-commit-row">
+          <div class="fd-row-copy">
+            <span>Port Android mobile gameplay controls</span>
+            <code class="text-small text-muted">1aaf1bd</code>
+          </div>
+        </div>
+      </aside>
+
+      <aside class="fd-pane fd-files" aria-label="변경 파일">
+        <div class="fd-pane-head">
+          <div>Make Retina windows pixel-aware</div>
+          <div class="text-small text-muted"><code>40aff6d</code> · Suwon Chae</div>
+        </div>
+        <div class="fd-nav-title fd-pane-head">
+          <span>변경 파일</span>
+          <span class="text-small text-muted">4 files · +34 −12</span>
+        </div>
+        <div class="fd-file-row is-selected">
+          <span class="fd-file-status">M</span>
+          <div class="fd-row-copy">
+            <code>src/drlua.pas</code>
+            <span class="text-small">+12 −4</span>
+          </div>
+        </div>
+        <div class="fd-file-row">
+          <span class="fd-file-status">M</span>
+          <div class="fd-row-copy">
+            <code>src/window_sdl.pas</code>
+            <span class="text-small text-muted">+9 −3</span>
+          </div>
+        </div>
+        <div class="fd-file-row">
+          <span class="fd-file-status">A</span>
+          <div class="fd-row-copy">
+            <code>macos/retina.pas</code>
+            <span class="text-small text-muted">+13 −0</span>
+          </div>
+        </div>
+        <div class="fd-file-row">
+          <span class="fd-file-status">D</span>
+          <div class="fd-row-copy">
+            <code>macos/legacy_scale.pas</code>
+            <span class="text-small text-muted">+0 −5</span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="fd-diff" aria-label="파일 비교">
+        <div class="fd-code">
+          <div class="fd-pair fd-context">
+            <div class="fd-side fd-old">
+              <div class="fd-gutter"><span>309</span><span></span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>VersionModuleSave := LuaSystem.Get(<span class="tok-string">'VERSION_MODULE_SAVE'</span>);</div>
+            </div>
+            <div class="fd-side">
+              <div class="fd-gutter"><span></span><span>309</span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>VersionModuleSave := LuaSystem.Get(<span class="tok-string">'VERSION_MODULE_SAVE'</span>);</div>
+            </div>
+          </div>
+          <div class="fd-pair fd-context">
+            <div class="fd-side fd-old">
+              <div class="fd-gutter"><span>310</span><span></span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>DemoVersion := <span class="tok-key">False</span>;</div>
+            </div>
+            <div class="fd-side">
+              <div class="fd-gutter"><span></span><span>310</span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>DemoVersion := <span class="tok-key">False</span>;</div>
+            </div>
+          </div>
+          <div class="fd-pair fd-context fd-whitespace-only">
+            <div class="fd-side fd-old">
+              <div class="fd-gutter"><span>311</span><span></span><span>−</span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>  <span class="tok-key">if</span> LuaSystem.RawDefined(<span class="tok-string">'DEMO'</span>) <span class="tok-key">then</span></div>
+            </div>
+            <div class="fd-side">
+              <div class="fd-gutter"><span></span><span>311</span><span>+</span></div>
+              <div class="fd-line"><span class="fd-blame">40aff6d SC</span>    <span class="tok-key">if</span> LuaSystem.RawDefined(<span class="tok-string">'DEMO'</span>) <span class="tok-key">then</span></div>
+            </div>
+          </div>
+          <div class="fd-hunk">SetupBase · lines 312–316 · change 2 of 7</div>
+          <div class="fd-pair">
+            <div class="fd-side fd-old is-empty">
+              <div class="fd-gutter"><span></span><span></span><span></span></div>
+              <div class="fd-line"> </div>
+            </div>
+            <div class="fd-side is-add is-current">
+              <div class="fd-gutter"><span></span><span>313</span><span>+</span></div>
+              <div class="fd-line"><span class="fd-blame">40aff6d SC</span>Log(LOGINFO, <span class="tok-string">'BASE MODULE VERSION: '</span> + <span class="fd-word">VersionModule</span>);</div>
+            </div>
+          </div>
+          <div class="fd-pair">
+            <div class="fd-side is-delete">
+              <div class="fd-gutter"><span>313</span><span></span><span>−</span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>Scale := WindowScale;</div>
+            </div>
+            <div class="fd-side is-add">
+              <div class="fd-gutter"><span></span><span>314</span><span>+</span></div>
+              <div class="fd-line"><span class="fd-blame">40aff6d SC</span>Scale := <span class="fd-word">WindowPixelRatio</span>;</div>
+            </div>
+          </div>
+          <div class="fd-pair fd-context">
+            <div class="fd-side fd-old">
+              <div class="fd-gutter"><span>314</span><span></span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span><span class="tok-key">end</span>;</div>
+            </div>
+            <div class="fd-side">
+              <div class="fd-gutter"><span></span><span>315</span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span><span class="tok-key">end</span>;</div>
+            </div>
+          </div>
+          <div class="fd-pair fd-context">
+            <div class="fd-side fd-old">
+              <div class="fd-gutter"><span>315</span><span></span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span></div>
+            </div>
+            <div class="fd-side">
+              <div class="fd-gutter"><span></span><span>316</span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span></div>
+            </div>
+          </div>
+          <div class="fd-pair fd-context">
+            <div class="fd-side fd-old">
+              <div class="fd-gutter"><span>316</span><span></span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span><span class="tok-key">begin</span></div>
+            </div>
+            <div class="fd-side">
+              <div class="fd-gutter"><span></span><span>317</span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span><span class="tok-key">begin</span></div>
+            </div>
+          </div>
+          <div class="fd-pair fd-context">
+            <div class="fd-side fd-old">
+              <div class="fd-gutter"><span>317</span><span></span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>VersionModule := <span class="tok-string">''</span>;</div>
+            </div>
+            <div class="fd-side">
+              <div class="fd-gutter"><span></span><span>318</span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>VersionModule := <span class="tok-string">''</span>;</div>
+            </div>
+          </div>
+          <div class="fd-pair fd-context">
+            <div class="fd-side fd-old">
+              <div class="fd-gutter"><span>318</span><span></span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>VersionModuleSave := <span class="tok-string">''</span>;</div>
+            </div>
+            <div class="fd-side">
+              <div class="fd-gutter"><span></span><span>319</span><span></span></div>
+              <div class="fd-line"><span class="fd-blame">a8eda6d SC</span>VersionModuleSave := <span class="tok-string">''</span>;</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="fd-minimap" aria-label="변경 위치 미니맵">
+          <span class="fd-map-mark" style="top: 18%"></span>
+          <span class="fd-map-mark is-delete" style="top: 34%"></span>
+          <span class="fd-map-mark" style="top: 49%"></span>
+          <span class="fd-map-mark" style="top: 76%"></span>
+          <span class="fd-map-window"></span>
+        </div>
+
+        <div class="fd-history" aria-label="파일 이력">
+          <div class="fd-history-row">
+            <code>40aff6d</code>
+            <div><div>Make Retina windows pixel-aware</div><span class="text-small text-muted">Suwon Chae · 16 days ago</span></div>
+          </div>
+          <div class="fd-history-row">
+            <code>65f4c80</code>
+            <div><div>Use pixel dimensions for Retina windows</div><span class="text-small text-muted">Suwon Chae · 16 days ago</span></div>
+          </div>
+          <div class="fd-history-row">
+            <code>c78b2ff</code>
+            <div><div>Fix held diagonal arrow movement</div><span class="text-small text-muted">Suwon Chae · 22 days ago</span></div>
+          </div>
+          <div class="fd-history-row">
+            <code>91f7c63</code>
+            <div><div>Merge branch 'hotfix/0_10_9a'</div><span class="text-small text-muted">epyon · 1 month ago</span></div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const root = document.getElementById('fd-concept-0727');
+      const app = root.querySelector('.fd-app');
+      const focusButton = root.querySelector('.fd-focus');
+      const wrapButton = root.querySelector('.fd-wrap');
+      const ignoreButton = root.querySelector('.fd-ignore');
+      const count = root.querySelector('.fd-change-count');
+      const previousButton = root.querySelector('.fd-prev');
+      const nextButton = root.querySelector('.fd-next');
+      const algorithm = root.querySelector('.fd-algorithm');
+      const hunkLabel = root.querySelector('.fd-hunk');
+      const changePairs = root.querySelectorAll('.fd-pair:not(.fd-context)');
+      const mapWindow = root.querySelector('.fd-map-window');
+      let currentChange = 2;
+      let currentView = 'diff';
+
+      const changeSamples = [
+        {
+          name: 'State.Init',
+          range: '292–296',
+          addLine: 295,
+          add: 'Result := 0;',
+          oldLine: 296,
+          old: 'end;',
+          newLine: 296,
+          next: 'end;'
+        },
+        {
+          name: 'SetupBase',
+          range: '312–316',
+          addLine: 313,
+          add: "Log(LOGINFO, 'BASE MODULE VERSION: ' + VersionModule);",
+          oldLine: 313,
+          old: 'Scale := WindowScale;',
+          newLine: 314,
+          next: 'Scale := WindowPixelRatio;'
+        },
+        {
+          name: 'LoadCurrent',
+          range: '318–322',
+          addLine: 320,
+          add: 'WindowWidth := SavedPixelWidth;',
+          oldLine: 320,
+          old: 'WindowWidth := SavedWidth;',
+          newLine: 321,
+          next: 'WindowHeight := SavedPixelHeight;'
+        },
+        {
+          name: 'CreateWindow',
+          range: '344–349',
+          addLine: 346,
+          add: 'SDL_SetWindowSize(Window, PixelWidth, PixelHeight);',
+          oldLine: 346,
+          old: 'SDL_SetWindowSize(Window, Width, Height);',
+          newLine: 347,
+          next: 'WindowScale := SDL_GetWindowPixelDensity(Window);'
+        },
+        {
+          name: 'ResizeWindow',
+          range: '371–375',
+          addLine: 373,
+          add: 'ApplyPixelDimensions(NewWidth, NewHeight);',
+          oldLine: 373,
+          old: 'ApplyDimensions(NewWidth, NewHeight);',
+          newLine: 374,
+          next: 'SaveWindowPixelDimensions;'
+        },
+        {
+          name: 'SaveWindow',
+          range: '402–406',
+          addLine: 404,
+          add: 'SavedPixelWidth := CurrentPixelWidth;',
+          oldLine: 404,
+          old: 'SavedWidth := CurrentWidth;',
+          newLine: 405,
+          next: 'SavedPixelHeight := CurrentPixelHeight;'
+        },
+        {
+          name: 'Finalize',
+          range: '438–441',
+          addLine: 439,
+          add: 'PersistWindowPixelScale;',
+          oldLine: 439,
+          old: 'PersistWindowScale;',
+          newLine: 440,
+          next: 'State.Done := True;'
+        }
+      ];
+
+      function press(button, active) {
+        button.setAttribute('aria-pressed', String(active));
+        button.classList.toggle('btn-primary', active);
+      }
+
+      function selectGroup(selector, selected, attribute) {
+        root.querySelectorAll(selector).forEach((button) => {
+          const active = button.dataset[attribute] === selected;
+          press(button, active);
+        });
+      }
+
+      function sideMarkup(oldLine, newLine, mark, code) {
+        return `
+          <div class="fd-gutter"><span>${oldLine ?? ''}</span><span>${newLine ?? ''}</span><span>${mark}</span></div>
+          <div class="fd-line">${code}</div>
+        `;
+      }
+
+      function renderCurrentChange() {
+        const sample = changeSamples[currentChange - 1];
+        hunkLabel.textContent =
+          `${sample.name} · lines ${sample.range} · change ${currentChange} of 7`;
+
+        const firstOld = changePairs[0].firstElementChild;
+        const firstNew = changePairs[0].lastElementChild;
+        const secondOld = changePairs[1].firstElementChild;
+        const secondNew = changePairs[1].lastElementChild;
+
+        firstOld.innerHTML = sideMarkup(null, null, '', ' ');
+        firstNew.innerHTML = sideMarkup(null, sample.addLine, '+', sample.add);
+        secondOld.innerHTML = sideMarkup(sample.oldLine, null, '−', sample.old);
+        secondNew.innerHTML = sideMarkup(null, sample.newLine, '+', sample.next);
+        count.textContent = `${currentChange} / 7`;
+        mapWindow.style.top = `${12 + ((currentChange - 1) / 6) * 64}%`;
+      }
+
+      function syncHistoryControls() {
+        const unavailable = currentView === 'history';
+        previousButton.setAttribute('aria-disabled', String(unavailable));
+        nextButton.setAttribute('aria-disabled', String(unavailable));
+      }
+
+      focusButton.addEventListener('click', () => {
+        const active = app.classList.toggle('is-focus');
+        press(focusButton, active);
+        focusButton.innerHTML = active
+          ? '<i data-lucide="panel-left-open" aria-hidden="true"></i> 탐색 패널'
+          : '<i data-lucide="panel-left-close" aria-hidden="true"></i> 집중 모드';
+        if (window.lucide) lucide.createIcons({ attrs: { width: 16, height: 16 } });
+      });
+
+      root.querySelectorAll('.fd-mode').forEach((button) => {
+        button.addEventListener('click', () => {
+          app.classList.remove('mode-hunk', 'mode-inline', 'mode-split');
+          app.classList.add(`mode-${button.dataset.mode}`);
+          selectGroup('.fd-mode', button.dataset.mode, 'mode');
+        });
+      });
+
+      root.querySelectorAll('.fd-view').forEach((button) => {
+        button.addEventListener('click', () => {
+          currentView = button.dataset.view;
+          app.classList.remove('view-file', 'view-diff', 'view-blame', 'view-history');
+          app.classList.add(`view-${button.dataset.view}`);
+          selectGroup('.fd-view', button.dataset.view, 'view');
+          syncHistoryControls();
+        });
+      });
+
+      wrapButton.addEventListener('click', () => {
+        press(wrapButton, app.classList.toggle('is-wrap'));
+      });
+
+      ignoreButton.addEventListener('click', () => {
+        press(ignoreButton, app.classList.toggle('is-ignore'));
+      });
+
+      previousButton.addEventListener('click', () => {
+        if (currentView === 'history') return;
+        currentChange = Math.max(1, currentChange - 1);
+        renderCurrentChange();
+      });
+
+      nextButton.addEventListener('click', () => {
+        if (currentView === 'history') return;
+        currentChange = Math.min(7, currentChange + 1);
+        renderCurrentChange();
+      });
+
+      algorithm.addEventListener('change', () => {
+        algorithm.dataset.selectedAlgorithm = algorithm.value;
+        algorithm.setAttribute(
+          'aria-description',
+          `선택한 알고리즘: ${algorithm.value}`
+        );
+        algorithm.selectedIndex = 0;
+      });
+
+      const requestedAlgorithm =
+        new URLSearchParams(window.location.search).get('algorithm');
+      if (requestedAlgorithm && [
+        'Git setting',
+        'Myers',
+        'Minimal',
+        'Patience',
+        'Histogram'
+      ].includes(requestedAlgorithm)) {
+        algorithm.dataset.selectedAlgorithm = requestedAlgorithm;
+        algorithm.setAttribute(
+          'aria-description',
+          `선택한 알고리즘: ${requestedAlgorithm}`
+        );
+      }
+
+      const requestedChange = Number(
+        new URLSearchParams(window.location.search).get('change')
+      );
+      if (Number.isInteger(requestedChange) &&
+          requestedChange >= 1 &&
+          requestedChange <= 7) {
+        currentChange = requestedChange;
+        renderCurrentChange();
+      }
+
+      if (new URLSearchParams(window.location.search).get('qa') === 'tools') {
+        app.classList.add('qa-tools');
+      }
+
+      syncHistoryControls();
+    })();
+  </script>
+</div>
+
+<script src="https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js"></script>
+<script src="https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js"></script>
+<script>
+(() => {
+  if (window.FloatingUIDOM == null) {
+    return;
+  }
+  const { autoUpdate, computePosition, flip, offset, shift, size } =
+    window.FloatingUIDOM;
+  const tooltipPlacements = new Set(["top", "right", "bottom", "left"]);
+  const tooltipId = `codex-visualization-tooltip-${
+    window.crypto?.randomUUID?.() ?? Date.now().toString(36)
+  }`;
+  const tooltipGap = 5;
+  const hoverDelay = 700;
+  const skipDelay = 300;
+  let activeTrigger = null;
+  let pendingTrigger = null;
+  let tooltip = null;
+  let openTimeout = null;
+  let autoUpdateCleanup = null;
+  let positionRequest = 0;
+  let skipDelayUntil = 0;
+
+  const getTrigger = (target) =>
+    target?.nodeType === Node.ELEMENT_NODE
+      ? target.closest("[data-tooltip]")
+      : null;
+  const containsTarget = (trigger, target) =>
+    target?.nodeType != null && trigger.contains(target);
+  const getContent = (trigger) =>
+    trigger.getAttribute("data-tooltip")?.trim() ?? "";
+  const getPlacement = (trigger) => {
+    const placement = trigger.getAttribute("data-tooltip-placement");
+    return tooltipPlacements.has(placement) ? placement : "top";
+  };
+  const getTooltip = () => {
+    if (tooltip == null) {
+      tooltip = document.createElement("div");
+      tooltip.id = tooltipId;
+      tooltip.className = "tooltip";
+      tooltip.setAttribute("role", "tooltip");
+    }
+    return tooltip;
+  };
+  const setDescribedBy = (trigger, described) => {
+    const ids = new Set(
+      (trigger.getAttribute("aria-describedby") ?? "")
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    if (described) {
+      ids.add(tooltipId);
+    } else {
+      ids.delete(tooltipId);
+    }
+    if (ids.size === 0) {
+      trigger.removeAttribute("aria-describedby");
+    } else {
+      trigger.setAttribute("aria-describedby", [...ids].join(" "));
+    }
+  };
+  const clearOpenTimeout = () => {
+    if (openTimeout != null) {
+      window.clearTimeout(openTimeout);
+      openTimeout = null;
+    }
+    pendingTrigger = null;
+  };
+  const closeTooltip = (activateSkipDelay = true) => {
+    clearOpenTimeout();
+    positionRequest += 1;
+    autoUpdateCleanup?.();
+    autoUpdateCleanup = null;
+    if (activeTrigger == null) {
+      return;
+    }
+    setDescribedBy(activeTrigger, false);
+    activeTrigger = null;
+    tooltip?.remove();
+    if (activateSkipDelay) {
+      skipDelayUntil = Date.now() + skipDelay;
+    }
+  };
+  const updatePosition = (trigger, floating) => {
+    const request = ++positionRequest;
+    void computePosition(trigger, floating, {
+      middleware: [
+        offset(tooltipGap),
+        flip({ padding: tooltipGap }),
+        shift({ padding: tooltipGap }),
+        size({
+          padding: tooltipGap,
+          apply({ availableHeight, availableWidth, elements }) {
+            elements.floating.style.setProperty(
+              "--tooltip-available-width",
+              `${Math.max(0, availableWidth)}px`,
+            );
+            elements.floating.style.setProperty(
+              "--tooltip-available-height",
+              `${Math.max(0, availableHeight)}px`,
+            );
+          },
+        }),
+      ],
+      placement: getPlacement(trigger),
+      strategy: "fixed",
+    })
+      .then(({ x, y }) => {
+        if (activeTrigger !== trigger || request !== positionRequest) {
+          return;
+        }
+        const scale = window.devicePixelRatio || 1;
+        floating.style.transform = `translate(${Math.round(x * scale) / scale}px, ${Math.round(y * scale) / scale}px)`;
+        floating.style.visibility = "visible";
+      })
+      .catch(() => {
+        if (activeTrigger === trigger && request === positionRequest) {
+          closeTooltip(false);
+        }
+      });
+  };
+  const openTooltip = (trigger) => {
+    const content = getContent(trigger);
+    if (!trigger.isConnected || content.length === 0) {
+      return;
+    }
+    clearOpenTimeout();
+    if (activeTrigger === trigger) {
+      return;
+    }
+    closeTooltip();
+    const floating = getTooltip();
+    floating.textContent = content;
+    floating.style.visibility = "hidden";
+    floating.style.transform = "translate(0, 0)";
+    document.body.appendChild(floating);
+    activeTrigger = trigger;
+    setDescribedBy(trigger, true);
+    autoUpdateCleanup = autoUpdate(trigger, floating, () => {
+      updatePosition(trigger, floating);
+    });
+  };
+  const requestOpen = (trigger, immediate = false) => {
+    if (
+      getContent(trigger).length === 0 ||
+      activeTrigger === trigger ||
+      pendingTrigger === trigger
+    ) {
+      return;
+    }
+    clearOpenTimeout();
+    pendingTrigger = trigger;
+    const delay =
+      immediate || activeTrigger != null || Date.now() < skipDelayUntil
+        ? 0
+        : hoverDelay;
+    if (delay === 0) {
+      openTooltip(trigger);
+      return;
+    }
+    openTimeout = window.setTimeout(() => {
+      openTimeout = null;
+      pendingTrigger = null;
+      openTooltip(trigger);
+    }, delay);
+  };
+  const handlePointerOpen = (event) => {
+    if (event.pointerType === "touch") {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    requestOpen(trigger);
+  };
+  const handleLeave = (event) => {
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const handleFocusIn = (event) => {
+    const trigger = getTrigger(event.target);
+    if (trigger?.matches(":focus-visible")) {
+      requestOpen(trigger, true);
+    }
+  };
+  const handleKeyDown = (event) => {
+    if (event.key === "Escape") {
+      closeTooltip();
+    }
+  };
+  const handleContextMenu = (event) => {
+    const trigger = getTrigger(event.target);
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const destroy = () => {
+    closeTooltip(false);
+    document.removeEventListener("pointerover", handlePointerOpen);
+    document.removeEventListener("pointerout", handleLeave);
+    document.removeEventListener("focusin", handleFocusIn);
+    document.removeEventListener("focusout", handleLeave);
+    document.removeEventListener("keydown", handleKeyDown);
+    document.removeEventListener("contextmenu", handleContextMenu);
+    tooltip = null;
+  };
+
+  document.addEventListener("pointerover", handlePointerOpen);
+  document.addEventListener("pointerout", handleLeave);
+  document.addEventListener("focusin", handleFocusIn);
+  document.addEventListener("focusout", handleLeave);
+  document.addEventListener("keydown", handleKeyDown);
+  document.addEventListener("contextmenu", handleContextMenu);
+  window.addEventListener("pagehide", destroy, { once: true });
+})();
+</script>
+<script id="codex-visualization-lucide" async src="https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js"></script>
+<script>
+(() => {
+  const initialize = () => {
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+  };
+  if (globalThis.lucide != null) {
+    initialize();
+    return;
+  }
+  document
+    .getElementById("codex-visualization-lucide")
+    ?.addEventListener("load", initialize, { once: true });
+})();
+</script>
+
+</body>
+</html>
