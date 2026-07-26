@@ -60,6 +60,7 @@ class DiffScreen extends StatefulWidget {
     required this.repository,
     required this.commits,
     required this.initialIndex,
+    this.initialView = FullDiffInitialView.hunk,
     this.controller,
     this.columnWidths = const FullDiffColumnWidths(),
     this.onColumnWidthsChanged,
@@ -69,6 +70,7 @@ class DiffScreen extends StatefulWidget {
   final FullDiffRepository repository;
   final List<GitCommit> commits;
   final int initialIndex;
+  final FullDiffInitialView initialView;
   final FullDiffSessionController? controller;
   final FullDiffColumnWidths columnWidths;
   final ValueChanged<FullDiffColumnWidths>? onColumnWidthsChanged;
@@ -105,7 +107,7 @@ class _DiffScreenState extends State<DiffScreen> {
           repository: widget.repository,
           commits: widget.commits,
           initialIndex: widget.initialIndex,
-          initialView: FullDiffInitialView.hunk,
+          initialView: widget.initialView,
         );
     _observedState = _controller.state;
     _reconcileAnchorKeys(_observedState.patch.data);
@@ -137,7 +139,7 @@ class _DiffScreenState extends State<DiffScreen> {
           repository: widget.repository,
           commits: widget.commits,
           initialIndex: widget.initialIndex,
-          initialView: FullDiffInitialView.hunk,
+          initialView: widget.initialView,
         );
     _observedState = _controller.state;
     _reconcileAnchorKeys(_observedState.patch.data);

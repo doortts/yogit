@@ -2525,6 +2525,87 @@ void main() {
     );
   });
 
+  test('full diff initial view round-trips and defaults to hunk', () {
+    const settings = AppSettings(
+      fullDiffInitialView: FullDiffInitialView.fullFile,
+    );
+
+    expect(
+      AppSettings.fromJson(settings.toJson()).fullDiffInitialView,
+      FullDiffInitialView.fullFile,
+    );
+    expect(
+      AppSettings.fromJson(const {
+        'fullDiffInitialView': 'unknown',
+      }).fullDiffInitialView,
+      FullDiffInitialView.hunk,
+    );
+    expect(const AppSettings().fullDiffInitialView, FullDiffInitialView.hunk);
+  });
+
+  testWidgets('settings exposes both full diff starting views', (tester) async {
+    final saved = <AppSettings>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          settings: const AppSettings(),
+          onChanged: saved.add,
+        ),
+      ),
+    );
+    await tester.ensureVisible(find.text('Full file focused on first change'));
+
+    expect(find.text('Hunk'), findsOneWidget);
+    expect(find.text('Full file focused on first change'), findsOneWidget);
+
+    await tester.tap(find.text('Full file focused on first change'));
+    await tester.pump();
+
+    expect(saved.last.fullDiffInitialView, FullDiffInitialView.fullFile);
+  });
+
+  testWidgets('full diff initial view applies only when opening a new screen', (
+    tester,
+  ) async {
+    final store = MemorySettingsStore();
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository(
+          (_, _) async => [commit('1', 'commit')],
+          files: (_, _) async => const [],
+        ),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<DiffScreen>(find.byType(DiffScreen)).initialView,
+      FullDiffInitialView.hunk,
+    );
+
+    Navigator.of(tester.element(find.byType(DiffScreen))).pop();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('open-settings')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Full file focused on first change'));
+    await tester.tap(find.text('Full file focused on first change'));
+    await tester.pump();
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<DiffScreen>(find.byType(DiffScreen)).initialView,
+      FullDiffInitialView.fullFile,
+    );
+  });
+
   testWidgets('uncommitted changes lead the timeline as a working tree row', (
     tester,
   ) async {

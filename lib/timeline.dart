@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import 'avatars.dart';
 import 'diff_screen.dart';
+import 'full_diff_model.dart';
 import 'git.dart';
 import 'page_scroll_shortcuts.dart';
 import 'settings.dart';
@@ -308,6 +309,7 @@ class TimelineScreen extends StatefulWidget {
     this.preferredPreviewPlacement = PreviewPlacement.right,
     this.columnWidths = const TimelineColumnWidths(),
     this.fullDiffColumnWidths = const FullDiffColumnWidths(),
+    this.fullDiffInitialView = FullDiffInitialView.hunk,
     this.previewWidth = 288,
     this.previewHeight = 280,
     this.onPreviewPlacementChanged,
@@ -332,6 +334,7 @@ class TimelineScreen extends StatefulWidget {
   final PreviewPlacement preferredPreviewPlacement;
   final TimelineColumnWidths columnWidths;
   final FullDiffColumnWidths fullDiffColumnWidths;
+  final FullDiffInitialView fullDiffInitialView;
   final double previewWidth;
   final double previewHeight;
   final ValueChanged<PreviewPlacement>? onPreviewPlacementChanged;
@@ -2981,6 +2984,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
           repository: widget.repository,
           commits: List.unmodifiable(_commits),
           initialIndex: _commits.indexOf(commit),
+          initialView: widget.fullDiffInitialView,
           columnWidths: widget.fullDiffColumnWidths,
           onColumnWidthsChanged: widget.onFullDiffColumnWidthsChanged,
         ),
