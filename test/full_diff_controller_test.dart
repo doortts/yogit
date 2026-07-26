@@ -1,357 +1,328 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/full_diff_controller.dart';
+import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/git.dart';
 
-typedef FileRequest = ({String sha, String? parent});
-typedef DiffRequest = ({
-  String sha,
-  String? parent,
-  String path,
-  DiffAlgorithm algorithm,
-  bool ignoreWhitespace,
-});
-
-class FakeFullDiffRepository implements FullDiffRepository {
-  FakeFullDiffRepository({
-    this.files = const <GitFileChange>[],
-    this.lines = const <DiffLine>[],
-    this.onLoadFiles,
-    this.onLoadDiff,
-  });
-
-  final List<GitFileChange> files;
-  final List<DiffLine> lines;
-  Future<List<GitFileChange>> Function(FileRequest request)? onLoadFiles;
-  Future<List<DiffLine>> Function(DiffRequest request)? onLoadDiff;
-  final fileRequests = <FileRequest>[];
-  final diffRequests = <DiffRequest>[];
-
-  @override
-  final String root = '/repo';
-
-  @override
-  Future<List<GitFileChange>> loadFiles(GitCommit commit, {String? parent}) {
-    final request = (sha: commit.sha, parent: parent);
-    fileRequests.add(request);
-    return onLoadFiles?.call(request) ?? Future.value(files);
-  }
-
-  @override
-  Future<List<DiffLine>> loadDiff(
-    GitCommit commit,
-    GitFileChange file, {
-    String? parent,
-    DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
-    bool ignoreWhitespace = false,
-  }) {
-    final request = (
-      sha: commit.sha,
-      parent: parent,
-      path: file.path,
-      algorithm: algorithm,
-      ignoreWhitespace: ignoreWhitespace,
-    );
-    diffRequests.add(request);
-    return onLoadDiff?.call(request) ?? Future.value(lines);
-  }
-
-  @override
-  Future<Uint8List> loadFileBytes(
-    GitCommit commit,
-    GitFileChange file, {
-    String? parent,
-  }) async => Uint8List(0);
-
-  @override
-  Future<List<GitBlameLine>> loadBlame(
-    GitCommit commit,
-    GitFileChange file, {
-    String? parent,
-    Uint8List? workingTreeBytes,
-  }) async => const [];
-
-  @override
-  Future<List<GitFileHistoryRecord>> loadFileHistory(
-    GitCommit commit,
-    GitFileChange file,
-  ) async => const [];
-}
-
-GitCommit commit(String sha, {List<String> parents = const <String>[]}) =>
-    GitCommit(
-      sha: sha,
-      shortSha: sha,
-      parents: parents,
-      author: const GitIdentity(name: 'Author', email: 'author@example.com'),
-      authorTimestamp: 1,
-      committer: const GitIdentity(
-        name: 'Committer',
-        email: 'committer@example.com',
-      ),
-      committerTimestamp: 1,
-      refs: const <GitRef>[],
-      subject: sha.isEmpty ? 'Working tree' : 'Commit $sha',
-    );
-
-const fileA = GitFileChange(
-  path: 'lib/a.dart',
-  status: 'M',
-  additions: 1,
-  deletions: 1,
-);
-const fileB = GitFileChange(
-  path: 'lib/b.dart',
-  status: 'M',
-  additions: 1,
-  deletions: 1,
-);
-
-const oneHunkLines = <DiffLine>[
-  DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@ main'),
-  DiffLine(kind: DiffLineKind.delete, text: 'old', oldNumber: 1),
-  DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
-];
-
-const twoHunkLines = <DiffLine>[
-  DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@ first'),
-  DiffLine(kind: DiffLineKind.delete, text: 'old', oldNumber: 1),
-  DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
-  DiffLine(kind: DiffLineKind.hunk, text: '@@ -5 +5 @@ second'),
-  DiffLine(kind: DiffLineKind.delete, text: 'before', oldNumber: 5),
-  DiffLine(kind: DiffLineKind.add, text: 'after', newNumber: 5),
-];
+import 'support/full_diff_fixtures.dart';
 
 void main() {
-  test('loads the first file and selects the first hunk', () async {
-    final repository = FakeFullDiffRepository(
-      files: const <GitFileChange>[fileA],
-      lines: oneHunkLines,
+  test(
+    'loads patch and content together and keeps views independent',
+    () async {
+      final patch = Completer<List<DiffLine>>();
+      final content = Completer<Uint8List>();
+      final repository = FakeFullDiffRepository()
+        ..files = ((_, _) async => const [fileA])
+        ..diff = ((_, _, _, _, _) => patch.future)
+        ..content = ((_, _, _) => content.future);
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [commitA],
+        initialIndex: 0,
+        initialView: FullDiffInitialView.hunk,
+      );
+
+      final loading = controller.initialize();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.state.patch.loading, isTrue);
+      expect(controller.state.file.loading, isTrue);
+      expect(controller.state.encodingLabel, 'Loading');
+      controller
+        ..setView(FullDiffView.file)
+        ..setPresentation(DiffPresentation.split);
+      expect(controller.state.view, FullDiffView.file);
+      expect(controller.state.presentation, DiffPresentation.split);
+      expect(repository.diffRequests, hasLength(1));
+
+      patch.complete(twoHunkLines);
+      content.complete(Uint8List.fromList(utf8.encode('one\ntwo\n')));
+      await loading;
+
+      expect(controller.state.patch.data?.hunks, hasLength(2));
+      expect(controller.state.file.data?.kind, FileContentKind.utf8);
+      expect(controller.state.activeAnchor?.hunkIndex, 0);
+    },
+  );
+
+  test('a late file cannot replace the current four resources', () async {
+    const fileB = GitFileChange(
+      path: 'src/window.pas',
+      status: 'M',
+      additions: 1,
+      deletions: 1,
     );
+    final patchA = Completer<List<DiffLine>>();
+    final patchB = Completer<List<DiffLine>>();
+    final contentA = Completer<Uint8List>();
+    final contentB = Completer<Uint8List>();
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA, fileB])
+      ..diff = ((_, file, _, _, _) =>
+          file.path == fileA.path ? patchA.future : patchB.future)
+      ..content = ((_, file, _) =>
+          file.path == fileA.path ? contentA.future : contentB.future)
+      ..blame = ((_, file, _, _) async => [
+        GitBlameLine(
+          lineNumber: 1,
+          sha: commitA.sha,
+          author: file.path,
+          uncommitted: false,
+        ),
+      ])
+      ..history = ((_, file) async => [
+        GitFileHistoryRecord(
+          commit: commitA,
+          path: file.path,
+          oldPath: null,
+          status: 'M',
+        ),
+      ]);
     final controller = FullDiffSessionController(
       repository: repository,
-      commits: <GitCommit>[
-        commit('1', parents: const <String>['0']),
-      ],
+      commits: const [commitA],
       initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
     );
-
-    await controller.initialize();
-
-    expect(controller.state.selectedPath, 'lib/a.dart');
-    expect(controller.state.document?.hunks, hasLength(1));
-    expect(controller.state.activeHunkIndex, 0);
-    expect(controller.state.loadingFiles, isFalse);
-    expect(controller.state.loadingDiff, isFalse);
-    expect(() => controller.state.files.add(fileB), throwsUnsupportedError);
-  });
-
-  test('a late file request cannot overwrite a newer commit', () async {
-    final firstFiles = Completer<List<GitFileChange>>();
-    final secondFiles = Completer<List<GitFileChange>>();
-    final repository = FakeFullDiffRepository(
-      lines: oneHunkLines,
-      onLoadFiles: (request) =>
-          request.sha == '1' ? firstFiles.future : secondFiles.future,
-    );
-    final controller = FullDiffSessionController(
-      repository: repository,
-      commits: <GitCommit>[
-        commit('1', parents: const <String>['0']),
-        commit('2', parents: const <String>['1']),
-      ],
-      initialIndex: 0,
-    );
-
     final firstLoad = controller.initialize();
-    final secondLoad = controller.selectCommit(1);
-    secondFiles.complete(const <GitFileChange>[fileB]);
+    await Future<void>.delayed(Duration.zero);
+    final secondLoad = controller.selectFile(fileB);
+    expect(controller.state.patch.data, isNull);
+    expect(controller.state.file.data, isNull);
+    expect(controller.state.blame.data, isNull);
+    expect(controller.state.history.data, isNull);
+
+    patchB.complete(const [
+      DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+      DiffLine(kind: DiffLineKind.add, text: 'current', newNumber: 1),
+    ]);
+    contentB.complete(Uint8List.fromList(utf8.encode('current\n')));
     await secondLoad;
-    firstFiles.complete(const <GitFileChange>[fileA]);
+    controller.setView(FullDiffView.blame);
+    await Future<void>.delayed(Duration.zero);
+    controller.setView(FullDiffView.history);
+    await Future<void>.delayed(Duration.zero);
+
+    patchA.complete(twoHunkLines);
+    contentA.complete(Uint8List.fromList(utf8.encode('stale\n')));
     await firstLoad;
 
-    expect(controller.state.commitIndex, 1);
-    expect(controller.state.parent, '1');
-    expect(controller.state.files.single.path, 'lib/b.dart');
-    expect(controller.state.selectedPath, 'lib/b.dart');
+    expect(controller.state.selectedFile, fileB);
+    expect(controller.state.patch.data?.rows.last.text, 'current');
+    expect(controller.state.file.data?.lines.single, 'current');
+    expect(controller.state.blame.data?.lines.single.author, fileB.path);
+    expect(controller.state.history.data?.single.path, fileB.path);
   });
 
   test(
-    'option refresh keeps the document and displays the latest request',
+    'history follows a file selection without waiting for patch or content',
     () async {
-      final repository = FakeFullDiffRepository(
-        files: const <GitFileChange>[fileA],
-        lines: oneHunkLines,
+      const fileB = GitFileChange(
+        path: 'src/window.pas',
+        status: 'M',
+        additions: 1,
+        deletions: 1,
       );
+      final patchB = Completer<List<DiffLine>>();
+      final contentB = Completer<Uint8List>();
+      final historyB = Completer<List<GitFileHistoryRecord>>();
+      final repository = FakeFullDiffRepository()
+        ..files = ((_, _) async => const [fileA, fileB])
+        ..diff = ((_, file, _, _, _) => file.path == fileB.path
+            ? patchB.future
+            : Future.value(twoHunkLines))
+        ..content = ((_, file, _) => file.path == fileB.path
+            ? contentB.future
+            : Future.value(Uint8List.fromList(utf8.encode('initial\n'))))
+        ..history = ((_, file) => file.path == fileB.path
+            ? historyB.future
+            : Future.value(const <GitFileHistoryRecord>[]));
       final controller = FullDiffSessionController(
         repository: repository,
-        commits: <GitCommit>[
-          commit('1', parents: const <String>['0']),
-        ],
+        commits: const [commitA],
         initialIndex: 0,
+        initialView: FullDiffInitialView.hunk,
       );
       await controller.initialize();
-      final originalDocument = controller.state.document;
-      final algorithmDiff = Completer<List<DiffLine>>();
-      final whitespaceDiff = Completer<List<DiffLine>>();
-      repository.onLoadDiff = (request) => request.ignoreWhitespace
-          ? whitespaceDiff.future
-          : algorithmDiff.future;
+      controller.setView(FullDiffView.history);
+      await Future<void>.delayed(Duration.zero);
 
-      final algorithmLoad = controller.selectAlgorithm(DiffAlgorithm.patience);
+      final selection = controller.selectFile(fileB);
+      await Future<void>.delayed(Duration.zero);
 
-      expect(controller.state.document, same(originalDocument));
-      expect(controller.state.loadingDiff, isTrue);
-      expect(controller.state.displayedAlgorithm, DiffAlgorithm.gitSetting);
+      expect(repository.historyRequests.last.path, fileB.path);
+      expect(controller.state.history.loading, isTrue);
+      historyB.complete([
+        GitFileHistoryRecord(
+          commit: commitA,
+          path: fileB.path,
+          oldPath: null,
+          status: 'M',
+        ),
+      ]);
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.state.history.data?.single.path, fileB.path);
 
-      final whitespaceLoad = controller.setIgnoreWhitespace(true);
-
-      expect(controller.state.document, same(originalDocument));
-      expect(controller.state.loadingDiff, isTrue);
-      whitespaceDiff.complete(twoHunkLines);
-      await whitespaceLoad;
-
-      expect(controller.state.document, isNot(same(originalDocument)));
-      expect(controller.state.displayedAlgorithm, DiffAlgorithm.patience);
-      expect(controller.state.displayedIgnoreWhitespace, isTrue);
-      algorithmDiff.complete(oneHunkLines);
-      await algorithmLoad;
-      expect(controller.state.displayedAlgorithm, DiffAlgorithm.patience);
-      expect(controller.state.displayedIgnoreWhitespace, isTrue);
+      patchB.complete(twoHunkLines);
+      contentB.complete(Uint8List.fromList(utf8.encode('current\n')));
+      await selection;
     },
   );
 
   test(
-    'a failed option refresh restores displayed options and can retry',
+    'failed options restore the last successful patch and controls',
     () async {
-      final repository = FakeFullDiffRepository(
-        files: const <GitFileChange>[fileA],
-        lines: oneHunkLines,
-      );
+      var calls = 0;
+      final repository = FakeFullDiffRepository()
+        ..files = ((_, _) async => const [fileA])
+        ..content = ((_, _, _) async =>
+            Uint8List.fromList(utf8.encode('current\n')))
+        ..diff = ((_, _, _, algorithm, whitespace) async {
+          calls++;
+          if (algorithm == DiffAlgorithm.histogram || whitespace) {
+            throw const GitRepositoryException('/repo', 'diff failed');
+          }
+          return twoHunkLines;
+        });
       final controller = FullDiffSessionController(
         repository: repository,
-        commits: <GitCommit>[
-          commit('1', parents: const <String>['0']),
-        ],
+        commits: const [commitA],
         initialIndex: 0,
+        initialView: FullDiffInitialView.hunk,
       );
       await controller.initialize();
-      final originalDocument = controller.state.document;
-      var attempts = 0;
-      repository.onLoadDiff = (request) async {
-        attempts += 1;
-        if (attempts == 1) {
-          return const <DiffLine>[
-            DiffLine(kind: DiffLineKind.hunk, text: 'malformed hunk'),
-          ];
-        }
-        return twoHunkLines;
-      };
+      final successful = controller.state.patch.data;
 
-      await controller.selectAlgorithm(DiffAlgorithm.histogram);
-
-      expect(controller.state.document, same(originalDocument));
-      expect(controller.state.loadingDiff, isFalse);
-      expect(controller.state.algorithm, DiffAlgorithm.gitSetting);
-      expect(controller.state.displayedAlgorithm, DiffAlgorithm.gitSetting);
-      expect(controller.state.error, isA<FormatException>());
-
-      await controller.selectAlgorithm(DiffAlgorithm.histogram);
-
-      expect(attempts, 2);
-      expect(controller.state.document?.hunks, hasLength(2));
-      expect(controller.state.algorithm, DiffAlgorithm.histogram);
-      expect(controller.state.displayedAlgorithm, DiffAlgorithm.histogram);
-      expect(controller.state.error, isNull);
-    },
-  );
-
-  test(
-    'commits cache diff keys while the working tree always reloads',
-    () async {
-      Future<int> visitsToA(String sha) async {
-        final repository = FakeFullDiffRepository(
-          files: const <GitFileChange>[fileA, fileB],
-          lines: oneHunkLines,
-        );
-        final controller = FullDiffSessionController(
-          repository: repository,
-          commits: <GitCommit>[commit(sha)],
-          initialIndex: 0,
-        );
-
-        await controller.initialize();
-        await controller.selectFile('lib/b.dart');
-        await controller.selectFile('lib/a.dart');
-
-        return repository.diffRequests
-            .where((request) => request.path == 'lib/a.dart')
-            .length;
-      }
-
-      expect(await visitsToA('1'), 1);
-      expect(await visitsToA(''), 2);
-    },
-  );
-
-  test(
-    'parent and file selection reset hunks and stepping stops at both ends',
-    () async {
-      final repository = FakeFullDiffRepository(
-        files: const <GitFileChange>[fileA, fileB],
-        lines: twoHunkLines,
+      await expectLater(
+        controller.selectAlgorithm(DiffAlgorithm.histogram),
+        throwsA(isA<GitRepositoryException>()),
       );
+      expect(controller.state.patch.data, same(successful));
+      expect(controller.state.requestedAlgorithm, DiffAlgorithm.gitSetting);
+      expect(controller.state.appliedAlgorithm, DiffAlgorithm.gitSetting);
+      expect(calls, 2);
+    },
+  );
+
+  test('file failure settles blame after leaving the blame view', () async {
+    final patch = Completer<List<DiffLine>>();
+    final content = Completer<Uint8List>();
+    const failure = GitRepositoryException('/repo', 'content failed');
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..diff = ((_, _, _, _, _) => patch.future)
+      ..content = ((_, _, _) => content.future);
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+    );
+
+    final loading = controller.initialize();
+    await Future<void>.delayed(Duration.zero);
+    controller
+      ..setView(FullDiffView.blame)
+      ..setView(FullDiffView.diff);
+    expect(controller.state.blame.loading, isTrue);
+
+    patch.complete(twoHunkLines);
+    content.completeError(failure);
+    await loading;
+
+    expect(controller.state.file.error, same(failure));
+    expect(controller.state.blame.loading, isFalse);
+    expect(controller.state.blame.error, same(failure));
+  });
+
+  test('committed caches stay within count and byte limits', () async {
+    final commits = List.generate(
+      40,
+      (index) => GitCommit(
+        sha: 'sha-$index',
+        shortSha: '$index'.padLeft(7, '0'),
+        parents: index == 39 ? const [] : ['sha-${index + 1}'],
+        author: fixtureIdentity,
+        authorTimestamp: 1720573200 - index,
+        committer: fixtureIdentity,
+        committerTimestamp: 1720573200 - index,
+        refs: const [],
+        subject: 'commit $index',
+      ),
+    );
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..diff = ((_, _, _, _, _) async => twoHunkLines)
+      ..content = ((_, _, _) async => Uint8List(2 * 1024 * 1024));
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: commits,
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+    );
+    await controller.initialize();
+    for (final commit in commits.skip(1)) {
+      await controller.selectCommit(commit);
+    }
+
+    expect(controller.debugPatchCacheLength, lessThanOrEqualTo(32));
+    expect(controller.debugFileCacheLength, lessThanOrEqualTo(32));
+    expect(controller.debugRawCacheBytes, lessThanOrEqualTo(64 * 1024 * 1024));
+  });
+
+  test(
+    'replaces a history-only commit with the canonical nearby object',
+    () async {
+      final historyCommit = GitCommit(
+        sha: 'history-sha',
+        shortSha: 'history',
+        parents: const ['40aff6d'],
+        author: fixtureIdentity,
+        authorTimestamp: 1720573100,
+        committer: fixtureIdentity,
+        committerTimestamp: 1720573100,
+        refs: const [],
+        subject: 'history copy',
+      );
+      final canonical = GitCommit(
+        sha: historyCommit.sha,
+        shortSha: historyCommit.shortSha,
+        parents: historyCommit.parents,
+        author: historyCommit.author,
+        authorTimestamp: historyCommit.authorTimestamp,
+        committer: historyCommit.committer,
+        committerTimestamp: historyCommit.committerTimestamp,
+        refs: const [GitRef(name: 'main', isHead: true)],
+        subject: 'canonical row',
+      );
+      final repository = FakeFullDiffRepository()
+        ..files = ((_, _) async => const [fileA])
+        ..diff = ((_, _, _, _, _) async => twoHunkLines)
+        ..content = ((_, _, _) async =>
+            Uint8List.fromList(utf8.encode('current\n')));
       final controller = FullDiffSessionController(
         repository: repository,
-        commits: <GitCommit>[
-          commit('merge', parents: const <String>['p1', 'p2']),
-        ],
+        commits: const [commitA],
         initialIndex: 0,
+        initialView: FullDiffInitialView.hunk,
       );
       await controller.initialize();
-
-      controller.stepHunk(-1);
-      expect(controller.state.activeHunkIndex, 0);
-      controller.selectHunk(1);
-      controller.stepHunk(1);
-      expect(controller.state.activeHunkIndex, 1);
-
-      await controller.selectParent('p2');
-      expect(controller.state.activeHunkIndex, 0);
-      controller.selectHunk(1);
-
-      await controller.selectFile('lib/b.dart');
-      expect(controller.state.activeHunkIndex, 0);
-    },
-  );
-
-  test(
-    'async completion cannot mutate state or notify after disposal',
-    () async {
-      final files = Completer<List<GitFileChange>>();
-      final repository = FakeFullDiffRepository(
-        lines: oneHunkLines,
-        onLoadFiles: (_) => files.future,
+      await controller.selectHistoryEntry(
+        FileHistoryEntry(
+          commit: historyCommit,
+          path: fileA.path,
+          oldPath: null,
+          status: 'M',
+        ),
       );
-      final controller = FullDiffSessionController(
-        repository: repository,
-        commits: <GitCommit>[commit('1')],
-        initialIndex: 0,
-      );
-      var notifications = 0;
-      controller.addListener(() => notifications += 1);
+      controller.replaceNearbyCommits([canonical, commitA]);
 
-      final load = controller.initialize();
-      final notificationsAtDispose = notifications;
-      controller.dispose();
-      files.complete(const <GitFileChange>[fileA]);
-      await load;
-
-      expect(notifications, notificationsAtDispose);
-      expect(controller.state.selectedPath, isNull);
-      expect(repository.diffRequests, isEmpty);
+      expect(controller.state.selectedCommit, same(canonical));
+      expect(controller.state.nearbyCommits.first, same(canonical));
     },
   );
 }

@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/avatars.dart';
 import 'package:yogit/diff_screen.dart';
 import 'package:yogit/full_diff_controller.dart';
+import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/main.dart';
 import 'package:yogit/settings.dart';
@@ -3545,6 +3546,7 @@ void main() {
       repository: repository,
       commits: commits,
       initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
     );
     addTearDown(session.dispose);
     await session.initialize();
@@ -6447,6 +6449,7 @@ void main() {
       repository: repository,
       commits: commits,
       initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
     );
     addTearDown(session.dispose);
     await session.initialize();
@@ -6466,7 +6469,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
     await tester.pumpAndSettle();
-    expect(session.state.activeHunkIndex, 1);
+    expect(session.state.activeAnchor?.hunkIndex, 1);
     final target = find.byKey(const Key('hunk-card-surface-hunk-1-10-10'));
     final viewport = tester.getRect(find.byKey(const Key('hunk-list')));
     final targetRect = tester.getRect(target);
@@ -6477,7 +6480,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
     await tester.pumpAndSettle();
-    expect(session.state.activeHunkIndex, 0);
+    expect(session.state.activeAnchor?.hunkIndex, 0);
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
@@ -6541,6 +6544,7 @@ void main() {
       repository: repository,
       commits: commits,
       initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
     );
     addTearDown(session.dispose);
     await session.initialize();
@@ -6564,13 +6568,24 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
     await tester.pumpAndSettle();
 
-    expect(session.state.activeHunkIndex, 1);
+    expect(session.state.activeAnchor?.hunkIndex, 1);
     final target = find.byKey(targetKey);
     expect(target, findsOneWidget);
     final viewport = tester.getRect(find.byKey(const Key('hunk-list')));
     final targetRect = tester.getRect(target);
     expect(targetRect.top, greaterThanOrEqualTo(viewport.top));
     expect(targetRect.bottom, lessThanOrEqualTo(viewport.bottom));
+
+    final scroll = tester
+        .widget<ListView>(find.byKey(const Key('hunk-list')))
+        .controller!;
+    final offset = scroll.offset;
+    final serial = session.state.navigationSerial;
+    session.syncAnchorFromScroll(session.state.patch.data!.hunks.first.anchor);
+    await tester.pumpAndSettle();
+
+    expect(session.state.navigationSerial, serial);
+    expect(scroll.offset, offset);
   });
 
   testWidgets('full diff shares preview page scrolling', (tester) async {
@@ -6610,6 +6625,7 @@ void main() {
       repository: repository,
       commits: commits,
       initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
     );
     addTearDown(session.dispose);
     await session.initialize();
@@ -6627,8 +6643,8 @@ void main() {
     final scroll = tester
         .widget<ListView>(find.byKey(const Key('hunk-list')))
         .controller!;
-    final selectedCommit = session.state.commitIndex;
-    final selectedPath = session.state.selectedPath;
+    final selectedCommit = session.state.selectedCommit;
+    final selectedFile = session.state.selectedFile;
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
@@ -6637,8 +6653,8 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
     expect(scroll.offset, 48);
-    expect(session.state.commitIndex, selectedCommit);
-    expect(session.state.selectedPath, selectedPath);
+    expect(session.state.selectedCommit, selectedCommit);
+    expect(session.state.selectedFile, selectedFile);
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
@@ -6653,8 +6669,8 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump();
-    expect(session.state.commitIndex, selectedCommit);
-    expect(session.state.selectedPath, selectedPath);
+    expect(session.state.selectedCommit, selectedCommit);
+    expect(session.state.selectedFile, selectedFile);
 
     scroll.jumpTo(0);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
@@ -6719,6 +6735,7 @@ void main() {
       repository: repository,
       commits: commits,
       initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
     );
     addTearDown(session.dispose);
     await session.initialize();
@@ -6736,9 +6753,9 @@ void main() {
     final scroll = tester
         .widget<ListView>(find.byKey(const Key('hunk-list')))
         .controller!;
-    final selectedCommit = session.state.commitIndex;
-    final selectedPath = session.state.selectedPath;
-    final activeHunk = session.state.activeHunkIndex;
+    final selectedCommit = session.state.selectedCommit;
+    final selectedFile = session.state.selectedFile;
+    final activeAnchor = session.state.activeAnchor;
     final offset = scroll.offset;
 
     await tester.tap(find.byKey(const Key('diff-algorithm')));
@@ -6747,9 +6764,9 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pump();
 
-    expect(session.state.commitIndex, selectedCommit);
-    expect(session.state.selectedPath, selectedPath);
-    expect(session.state.activeHunkIndex, activeHunk);
+    expect(session.state.selectedCommit, selectedCommit);
+    expect(session.state.selectedFile, selectedFile);
+    expect(session.state.activeAnchor, activeAnchor);
     expect(scroll.offset, offset);
     expect(find.text('Minimal'), findsOneWidget);
   });
@@ -7597,6 +7614,13 @@ class FakeGitRepository extends GitRepository {
   }) =>
       diff?.call(commit, parent, file.path, algorithm, ignoreWhitespace) ??
       Future.value(const []);
+
+  @override
+  Future<Uint8List> loadFileBytes(
+    GitCommit commit,
+    GitFileChange file, {
+    String? parent,
+  }) async => Uint8List(0);
 }
 
 class DelayedSettingsStore extends SettingsStore {

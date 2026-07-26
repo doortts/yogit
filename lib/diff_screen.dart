@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -104,9 +105,10 @@ class _DiffScreenState extends State<DiffScreen> {
           repository: widget.repository,
           commits: widget.commits,
           initialIndex: widget.initialIndex,
+          initialView: FullDiffInitialView.hunk,
         );
     _observedState = _controller.state;
-    _reconcileAnchorKeys(_observedState.document);
+    _reconcileAnchorKeys(_observedState.patch.data);
     _controller.addListener(_handleControllerChanged);
     if (_ownsController) _controller.initialize();
   }
@@ -135,9 +137,10 @@ class _DiffScreenState extends State<DiffScreen> {
           repository: widget.repository,
           commits: widget.commits,
           initialIndex: widget.initialIndex,
+          initialView: FullDiffInitialView.hunk,
         );
     _observedState = _controller.state;
-    _reconcileAnchorKeys(_observedState.document);
+    _reconcileAnchorKeys(_observedState.patch.data);
     _pendingScrollToTop = true;
     _pendingAnchorIndex = null;
     _controller.addListener(_handleControllerChanged);
@@ -158,23 +161,25 @@ class _DiffScreenState extends State<DiffScreen> {
     final next = _controller.state;
     _observedState = next;
     final movedContext =
-        previous.commitIndex != next.commitIndex ||
+        previous.selectedCommit.sha != next.selectedCommit.sha ||
         previous.parent != next.parent ||
-        previous.selectedPath != next.selectedPath;
-    final changedDocument = !identical(previous.document, next.document);
+        previous.selectedFile?.path != next.selectedFile?.path;
+    final changedDocument = !identical(previous.patch.data, next.patch.data);
+    final previousIndex = previous.activeAnchor?.hunkIndex ?? 0;
+    final nextIndex = next.activeAnchor?.hunkIndex ?? 0;
+    final navigationRequested =
+        previous.navigationSerial != next.navigationSerial;
 
-    if (changedDocument) _reconcileAnchorKeys(next.document);
+    if (changedDocument) _reconcileAnchorKeys(next.patch.data);
     if (movedContext) {
       _pendingScrollToTop = true;
-      if (next.activeHunkIndex == 0) _pendingAnchorIndex = null;
+      if (nextIndex == 0) _pendingAnchorIndex = null;
     }
     if (!_pendingScrollToTop &&
-        (changedDocument || previous.activeHunkIndex != next.activeHunkIndex) &&
-        !(movedContext && next.activeHunkIndex == 0)) {
-      _pendingAnchorIndex = next.activeHunkIndex;
-      _pendingAnchorDirection = next.activeHunkIndex.compareTo(
-        previous.activeHunkIndex,
-      );
+        navigationRequested &&
+        !(movedContext && nextIndex == 0)) {
+      _pendingAnchorIndex = nextIndex;
+      _pendingAnchorDirection = nextIndex.compareTo(previousIndex);
     }
     if (_pendingScrollToTop || _pendingAnchorIndex != null) {
       _scheduleScrollEffect();
@@ -205,9 +210,9 @@ class _DiffScreenState extends State<DiffScreen> {
       final pendingIndex = _pendingAnchorIndex;
       if (pendingIndex == null) return;
       final state = _controller.state;
-      final document = state.document;
+      final document = state.patch.data;
       if (document == null ||
-          pendingIndex != state.activeHunkIndex ||
+          pendingIndex != (state.activeAnchor?.hunkIndex ?? 0) ||
           pendingIndex < 0 ||
           pendingIndex >= document.hunks.length) {
         _pendingAnchorIndex = null;
@@ -258,24 +263,26 @@ class _DiffScreenState extends State<DiffScreen> {
   }
 
   void _stepHunk(int delta) {
-    _controller.stepHunk(delta);
+    _controller.stepAnchor(delta);
   }
 
   void _stepFile(int delta) {
     final state = _controller.state;
     if (state.files.isEmpty) return;
     final index = state.files.indexWhere(
-      (file) => file.path == state.selectedPath,
+      (file) => file.path == state.selectedFile?.path,
     );
     final next = (index + delta).clamp(0, state.files.length - 1);
-    final path = state.files[next].path;
-    if (path != state.selectedPath) _controller.selectFile(path);
+    final file = state.files[next];
+    if (file.path != state.selectedFile?.path) _controller.selectFile(file);
   }
 
   void _stepCommit(int delta) {
-    final index = _controller.state.commitIndex;
-    final next = (index + delta).clamp(0, _controller.commits.length - 1);
-    if (next != index) _controller.selectCommit(next);
+    final commits = _controller.state.nearbyCommits;
+    final selectedSha = _controller.state.selectedCommit.sha;
+    final index = commits.indexWhere((commit) => commit.sha == selectedSha);
+    final next = (index + delta).clamp(0, commits.length - 1);
+    if (next != index) _controller.selectCommit(commits[next]);
   }
 
   @override
@@ -591,10 +598,10 @@ class _DiffScreenState extends State<DiffScreen> {
           child: _selectable(
             ListView.builder(
               key: const Key('nearby-commits-list'),
-              itemCount: _controller.commits.length,
+              itemCount: state.nearbyCommits.length,
               itemBuilder: (context, index) {
-                final commit = _controller.commits[index];
-                final selected = index == state.commitIndex;
+                final commit = state.nearbyCommits[index];
+                final selected = commit.sha == state.selectedCommit.sha;
                 return ListTile(
                   key: selected ? Key('selected-nearby-${commit.sha}') : null,
                   selected: selected,
@@ -612,8 +619,8 @@ class _DiffScreenState extends State<DiffScreen> {
                     ),
                   ),
                   onTap: () {
-                    if (index != state.commitIndex) {
-                      _controller.selectCommit(index);
+                    if (!selected) {
+                      _controller.selectCommit(commit);
                     }
                   },
                 );
@@ -626,7 +633,7 @@ class _DiffScreenState extends State<DiffScreen> {
   );
 
   Widget _detailsAndFiles(FullDiffSessionState state) {
-    final commit = _controller.commits[state.commitIndex];
+    final commit = state.selectedCommit;
     return Material(
       color: _surface,
       shape: const Border(right: BorderSide(color: _border)),
@@ -715,7 +722,7 @@ class _DiffScreenState extends State<DiffScreen> {
                     itemCount: state.files.length,
                     itemBuilder: (context, index) {
                       final file = state.files[index];
-                      final selected = file.path == state.selectedPath;
+                      final selected = file.path == state.selectedFile?.path;
                       return ListTile(
                         key: selected
                             ? Key('selected-file-${file.path}')
@@ -745,15 +752,15 @@ class _DiffScreenState extends State<DiffScreen> {
                           ),
                         ),
                         onTap: () {
-                          if (file.path != state.selectedPath) {
-                            _controller.selectFile(file.path);
+                          if (!selected) {
+                            _controller.selectFile(file);
                           }
                         },
                       );
                     },
                   ),
                 ),
-                if (state.loadingFiles)
+                if (state.filesResource.loading)
                   const Center(
                     child: SizedBox.square(
                       dimension: 16,
@@ -799,13 +806,9 @@ class _DiffScreenState extends State<DiffScreen> {
   }
 
   Widget _diff(FullDiffSessionState state) {
-    GitFileChange? selectedFile;
-    for (final file in state.files) {
-      if (file.path == state.selectedPath) {
-        selectedFile = file;
-        break;
-      }
-    }
+    final selectedFile = state.selectedFile;
+    final activeHunkIndex = state.activeAnchor?.hunkIndex ?? 0;
+    final error = state.patch.error ?? state.filesResource.error;
 
     return ColoredBox(
       color: _background,
@@ -816,30 +819,34 @@ class _DiffScreenState extends State<DiffScreen> {
             color: _surface,
             child: DiffFileHeader(
               file: selectedFile,
-              path: state.selectedPath,
+              path: selectedFile?.path,
               hunkSelected: true,
             ),
           ),
           ColoredBox(
             color: _surface,
             child: DiffToolbar(
-              activeHunkIndex: state.activeHunkIndex,
-              hunkCount: state.document?.hunks.length ?? 0,
-              algorithm: state.algorithm,
-              ignoreWhitespace: state.ignoreWhitespace,
+              activeHunkIndex: activeHunkIndex,
+              hunkCount: state.patch.data?.hunks.length ?? 0,
+              algorithm: state.requestedAlgorithm,
+              ignoreWhitespace: state.requestedIgnoreWhitespace,
               wrapLines: state.wrapLines,
               focusMode: state.focusMode,
-              loading: state.loadingDiff,
+              loading: state.patch.loading,
               onPreviousHunk: () => _stepHunk(-1),
               onNextHunk: () => _stepHunk(1),
               onAlgorithmSelected: (algorithm) {
-                if (algorithm != state.algorithm) {
-                  _controller.selectAlgorithm(algorithm);
+                if (algorithm != state.requestedAlgorithm) {
+                  unawaited(
+                    _controller.selectAlgorithm(algorithm).catchError((_) {}),
+                  );
                 }
               },
               onIgnoreWhitespaceChanged: (value) {
-                if (value != state.ignoreWhitespace) {
-                  _controller.setIgnoreWhitespace(value);
+                if (value != state.requestedIgnoreWhitespace) {
+                  unawaited(
+                    _controller.setIgnoreWhitespace(value).catchError((_) {}),
+                  );
                 }
               },
               onWrapLinesChanged: (value) {
@@ -854,12 +861,12 @@ class _DiffScreenState extends State<DiffScreen> {
               },
             ),
           ),
-          if (state.error != null)
+          if (error != null)
             Container(
               color: const Color(0xFF492B37),
               padding: const EdgeInsets.all(8),
               child: Text(
-                state.error.toString(),
+                error.toString(),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: _deleted, fontSize: 11),
@@ -872,35 +879,37 @@ class _DiffScreenState extends State<DiffScreen> {
   }
 
   Widget _diffBody(FullDiffSessionState state) {
-    final document = state.document;
+    final document = state.patch.data;
+    final activeHunkIndex = state.activeAnchor?.hunkIndex ?? 0;
+    final error = state.patch.error ?? state.filesResource.error;
     if (document != null) {
       return HunkListView(
         document: document,
-        activeHunkIndex: state.activeHunkIndex,
+        activeHunkIndex: activeHunkIndex,
         wrapLines: state.wrapLines,
         controller: _diffScroll,
         anchorKeys: _anchorKeys,
         onHunkSelected: (index) {
-          if (index != state.activeHunkIndex) {
-            _controller.selectHunk(index);
+          if (index != activeHunkIndex) {
+            _controller.selectAnchor(document.hunks[index].anchor);
           }
         },
       );
     }
-    if (state.error != null) {
+    if (error != null) {
       return _diffStatus(
         key: const Key('diff-error-without-document'),
         message: 'Unable to load diff',
       );
     }
-    if (state.loadingFiles) {
+    if (state.filesResource.loading) {
       return _diffStatus(
         key: const Key('diff-pending-files'),
         message: 'Loading changed files…',
         loading: true,
       );
     }
-    if (state.loadingDiff) {
+    if (state.patch.loading) {
       return _diffStatus(
         key: const Key('diff-pending-first-diff'),
         message: 'Loading diff…',

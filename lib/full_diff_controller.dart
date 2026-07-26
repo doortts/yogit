@@ -1,118 +1,268 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/git.dart';
 
-typedef FullDiffCacheKey = ({
-  String sha,
+typedef PatchCacheKey = ({
+  String base,
+  String target,
   String? parent,
-  String path,
+  String? oldPath,
+  String newPath,
   DiffAlgorithm algorithm,
   bool ignoreWhitespace,
 });
 
+typedef FileCacheKey = ({String revision, String path, FileDocumentSide side});
+
+typedef BlameCacheKey = ({String revision, String path});
+typedef HistoryCacheKey = ({String startRevision, String path});
+
 const _unset = Object();
+const _cacheCapacity = 32;
+const _rawCacheByteLimit = 64 * 1024 * 1024;
 
 @immutable
-class FullDiffSessionState {
-  const FullDiffSessionState({
-    required this.commitIndex,
-    required this.parent,
-    required this.files,
-    required this.selectedPath,
-    required this.document,
-    required this.activeHunkIndex,
-    required this.algorithm,
-    required this.displayedAlgorithm,
-    required this.ignoreWhitespace,
-    required this.displayedIgnoreWhitespace,
-    required this.wrapLines,
-    required this.focusMode,
-    required this.loadingFiles,
-    required this.loadingDiff,
-    required this.error,
-  });
+class AsyncResource<T> {
+  const AsyncResource({this.data, this.loading = false, this.error});
 
-  final int commitIndex;
-  final String? parent;
-  final List<GitFileChange> files;
-  final String? selectedPath;
-  final DiffDocument? document;
-  final int activeHunkIndex;
-  final DiffAlgorithm algorithm;
-  final DiffAlgorithm displayedAlgorithm;
-  final bool ignoreWhitespace;
-  final bool displayedIgnoreWhitespace;
-  final bool wrapLines;
-  final bool focusMode;
-  final bool loadingFiles;
-  final bool loadingDiff;
+  final T? data;
+  final bool loading;
   final Object? error;
 
-  factory FullDiffSessionState.initial(GitCommit commit, int commitIndex) =>
-      FullDiffSessionState(
-        commitIndex: commitIndex,
-        parent: commit.parents.isEmpty ? null : commit.parents.first,
-        files: const <GitFileChange>[],
-        selectedPath: null,
-        document: null,
-        activeHunkIndex: 0,
-        algorithm: DiffAlgorithm.gitSetting,
-        displayedAlgorithm: DiffAlgorithm.gitSetting,
-        ignoreWhitespace: false,
-        displayedIgnoreWhitespace: false,
-        wrapLines: true,
-        focusMode: false,
-        loadingFiles: false,
-        loadingDiff: false,
-        error: null,
-      );
-
-  FullDiffSessionState copyWith({
-    int? commitIndex,
-    Object? parent = _unset,
-    List<GitFileChange>? files,
-    Object? selectedPath = _unset,
-    Object? document = _unset,
-    int? activeHunkIndex,
-    DiffAlgorithm? algorithm,
-    DiffAlgorithm? displayedAlgorithm,
-    bool? ignoreWhitespace,
-    bool? displayedIgnoreWhitespace,
-    bool? wrapLines,
-    bool? focusMode,
-    bool? loadingFiles,
-    bool? loadingDiff,
+  AsyncResource<T> copyWith({
+    Object? data = _unset,
+    bool? loading,
     Object? error = _unset,
-  }) => FullDiffSessionState(
-    commitIndex: commitIndex ?? this.commitIndex,
-    parent: identical(parent, _unset) ? this.parent : parent as String?,
-    files: files ?? this.files,
-    selectedPath: identical(selectedPath, _unset)
-        ? this.selectedPath
-        : selectedPath as String?,
-    document: identical(document, _unset)
-        ? this.document
-        : document as DiffDocument?,
-    activeHunkIndex: activeHunkIndex ?? this.activeHunkIndex,
-    algorithm: algorithm ?? this.algorithm,
-    displayedAlgorithm: displayedAlgorithm ?? this.displayedAlgorithm,
-    ignoreWhitespace: ignoreWhitespace ?? this.ignoreWhitespace,
-    displayedIgnoreWhitespace:
-        displayedIgnoreWhitespace ?? this.displayedIgnoreWhitespace,
-    wrapLines: wrapLines ?? this.wrapLines,
-    focusMode: focusMode ?? this.focusMode,
-    loadingFiles: loadingFiles ?? this.loadingFiles,
-    loadingDiff: loadingDiff ?? this.loadingDiff,
+  }) => AsyncResource<T>(
+    data: identical(data, _unset) ? this.data : data as T?,
+    loading: loading ?? this.loading,
     error: identical(error, _unset) ? this.error : error,
   );
 }
 
-FullDiffSessionState _initialState(List<GitCommit> commits, int initialIndex) {
+@immutable
+class FullDiffSessionState {
+  const FullDiffSessionState({
+    required this.nearbyCommits,
+    required this.selectedCommit,
+    required this.parent,
+    required this.files,
+    required this.selectedFile,
+    required this.view,
+    required this.presentation,
+    required this.activeAnchor,
+    required this.requestedAlgorithm,
+    required this.appliedAlgorithm,
+    required this.requestedIgnoreWhitespace,
+    required this.appliedIgnoreWhitespace,
+    required this.wrapLines,
+    required this.focusMode,
+    required this.filesResource,
+    required this.patch,
+    required this.file,
+    required this.blame,
+    required this.history,
+    required this.selectionGeneration,
+    required this.navigationSerial,
+  });
+
+  final List<GitCommit> nearbyCommits;
+  final GitCommit selectedCommit;
+  final String? parent;
+  final List<GitFileChange> files;
+  final GitFileChange? selectedFile;
+  final FullDiffView view;
+  final DiffPresentation presentation;
+  final DiffAnchor? activeAnchor;
+  final DiffAlgorithm requestedAlgorithm;
+  final DiffAlgorithm appliedAlgorithm;
+  final bool requestedIgnoreWhitespace;
+  final bool appliedIgnoreWhitespace;
+  final bool wrapLines;
+  final bool focusMode;
+  final AsyncResource<List<GitFileChange>> filesResource;
+  final AsyncResource<DiffDocument> patch;
+  final AsyncResource<FileDocument> file;
+  final AsyncResource<BlameDocument> blame;
+  final AsyncResource<List<FileHistoryEntry>> history;
+  final int selectionGeneration;
+  final int navigationSerial;
+
+  String get encodingLabel => switch (file.data?.kind) {
+    FileContentKind.utf8 => 'UTF-8',
+    FileContentKind.binary => 'Binary',
+    FileContentKind.unsupportedEncoding => 'Unsupported encoding',
+    FileContentKind.tooLarge => 'Too large',
+    null => file.loading ? 'Loading' : '—',
+  };
+
+  FullDiffSessionState copyWith({
+    List<GitCommit>? nearbyCommits,
+    GitCommit? selectedCommit,
+    Object? parent = _unset,
+    List<GitFileChange>? files,
+    Object? selectedFile = _unset,
+    FullDiffView? view,
+    DiffPresentation? presentation,
+    Object? activeAnchor = _unset,
+    DiffAlgorithm? requestedAlgorithm,
+    DiffAlgorithm? appliedAlgorithm,
+    bool? requestedIgnoreWhitespace,
+    bool? appliedIgnoreWhitespace,
+    bool? wrapLines,
+    bool? focusMode,
+    AsyncResource<List<GitFileChange>>? filesResource,
+    AsyncResource<DiffDocument>? patch,
+    AsyncResource<FileDocument>? file,
+    AsyncResource<BlameDocument>? blame,
+    AsyncResource<List<FileHistoryEntry>>? history,
+    int? selectionGeneration,
+    int? navigationSerial,
+  }) => FullDiffSessionState(
+    nearbyCommits: nearbyCommits ?? this.nearbyCommits,
+    selectedCommit: selectedCommit ?? this.selectedCommit,
+    parent: identical(parent, _unset) ? this.parent : parent as String?,
+    files: files ?? this.files,
+    selectedFile: identical(selectedFile, _unset)
+        ? this.selectedFile
+        : selectedFile as GitFileChange?,
+    view: view ?? this.view,
+    presentation: presentation ?? this.presentation,
+    activeAnchor: identical(activeAnchor, _unset)
+        ? this.activeAnchor
+        : activeAnchor as DiffAnchor?,
+    requestedAlgorithm: requestedAlgorithm ?? this.requestedAlgorithm,
+    appliedAlgorithm: appliedAlgorithm ?? this.appliedAlgorithm,
+    requestedIgnoreWhitespace:
+        requestedIgnoreWhitespace ?? this.requestedIgnoreWhitespace,
+    appliedIgnoreWhitespace:
+        appliedIgnoreWhitespace ?? this.appliedIgnoreWhitespace,
+    wrapLines: wrapLines ?? this.wrapLines,
+    focusMode: focusMode ?? this.focusMode,
+    filesResource: filesResource ?? this.filesResource,
+    patch: patch ?? this.patch,
+    file: file ?? this.file,
+    blame: blame ?? this.blame,
+    history: history ?? this.history,
+    selectionGeneration: selectionGeneration ?? this.selectionGeneration,
+    navigationSerial: navigationSerial ?? this.navigationSerial,
+  );
+}
+
+class _CacheEntry<V> {
+  _CacheEntry({required this.future, required this.tick});
+
+  final Future<V> future;
+  int tick;
+  int bytes = 0;
+}
+
+class _LruFutureCache<K, V> {
+  _LruFutureCache({
+    required this.capacity,
+    required this.sizeOf,
+    required this.nextTick,
+  });
+
+  final int capacity;
+  final int Function(V value) sizeOf;
+  final int Function() nextTick;
+  final _entries = <K, _CacheEntry<V>>{};
+
+  int get length => _entries.length;
+  int get resolvedBytes =>
+      _entries.values.fold(0, (sum, entry) => sum + entry.bytes);
+  int? get oldestTick => _entries.isEmpty
+      ? null
+      : _entries.values.map((entry) => entry.tick).reduce(math.min);
+
+  Future<V> getOrLoad(K key, Future<V> Function() loader) {
+    final cached = _entries.remove(key);
+    if (cached != null) {
+      cached.tick = nextTick();
+      _entries[key] = cached;
+      return cached.future;
+    }
+
+    final entry = _CacheEntry<V>(
+      future: Future<V>.sync(loader),
+      tick: nextTick(),
+    );
+    _entries[key] = entry;
+    unawaited(
+      entry.future.then<void>(
+        (value) {
+          if (!identical(_entries[key], entry)) return;
+          entry.bytes = sizeOf(value);
+          while (_entries.length > capacity) {
+            _entries.remove(_entries.keys.first);
+          }
+        },
+        onError: (Object _, StackTrace _) {
+          if (identical(_entries[key], entry)) _entries.remove(key);
+        },
+      ),
+    );
+    return entry.future;
+  }
+
+  void removeOldest() {
+    if (_entries.isNotEmpty) _entries.remove(_entries.keys.first);
+  }
+}
+
+FullDiffSessionState _initialState(
+  List<GitCommit> commits,
+  int initialIndex,
+  FullDiffInitialView initialView,
+) {
   if (commits.isEmpty) {
     throw ArgumentError.value(commits, 'commits', 'must not be empty');
   }
-  final index = initialIndex.clamp(0, commits.length - 1);
-  return FullDiffSessionState.initial(commits[index], index);
+  final nearbyCommits = List<GitCommit>.unmodifiable(commits);
+  final selectedCommit =
+      nearbyCommits[initialIndex.clamp(0, nearbyCommits.length - 1)];
+  return FullDiffSessionState(
+    nearbyCommits: nearbyCommits,
+    selectedCommit: selectedCommit,
+    parent: selectedCommit.parents.isEmpty
+        ? null
+        : selectedCommit.parents.first,
+    files: const [],
+    selectedFile: null,
+    view: initialView == FullDiffInitialView.fullFile
+        ? FullDiffView.file
+        : FullDiffView.diff,
+    presentation: DiffPresentation.hunk,
+    activeAnchor: null,
+    requestedAlgorithm: DiffAlgorithm.gitSetting,
+    appliedAlgorithm: DiffAlgorithm.gitSetting,
+    requestedIgnoreWhitespace: false,
+    appliedIgnoreWhitespace: false,
+    wrapLines: true,
+    focusMode: false,
+    filesResource: const AsyncResource(),
+    patch: const AsyncResource(),
+    file: const AsyncResource(),
+    blame: const AsyncResource(),
+    history: const AsyncResource(),
+    selectionGeneration: 0,
+    navigationSerial: 0,
+  );
+}
+
+DiffAnchor? nearestAnchor(DiffDocument document, int? sourceLine) {
+  if (document.hunks.isEmpty) return null;
+  if (sourceLine == null) return document.hunks.first.anchor;
+  return document.hunks.map((hunk) => hunk.anchor).reduce((best, candidate) {
+    int distance(DiffAnchor anchor) =>
+        ((anchor.newLine ?? anchor.oldLine ?? 0) - sourceLine).abs();
+    return distance(candidate) < distance(best) ? candidate : best;
+  });
 }
 
 class FullDiffSessionController extends ChangeNotifier {
@@ -120,103 +270,330 @@ class FullDiffSessionController extends ChangeNotifier {
     required this.repository,
     required List<GitCommit> commits,
     required int initialIndex,
-  }) : commits = List<GitCommit>.unmodifiable(commits),
-       state = _initialState(commits, initialIndex);
+    required FullDiffInitialView initialView,
+  }) : state = _initialState(commits, initialIndex, initialView) {
+    _patchCache = _LruFutureCache(
+      capacity: _cacheCapacity,
+      sizeOf: _patchSize,
+      nextTick: _nextCacheTick,
+    );
+    _fileCache = _LruFutureCache(
+      capacity: _cacheCapacity,
+      sizeOf: (document) => document.bytes.length,
+      nextTick: _nextCacheTick,
+    );
+    _blameCache = _LruFutureCache(
+      capacity: _cacheCapacity,
+      sizeOf: (_) => 0,
+      nextTick: _nextCacheTick,
+    );
+    _historyCache = _LruFutureCache(
+      capacity: _cacheCapacity,
+      sizeOf: (_) => 0,
+      nextTick: _nextCacheTick,
+    );
+  }
 
   final FullDiffRepository repository;
-  final List<GitCommit> commits;
-  final Map<FullDiffCacheKey, Future<DiffDocument>> _cache =
-      <FullDiffCacheKey, Future<DiffDocument>>{};
-  int _fileGeneration = 0;
-  int _diffGeneration = 0;
+  late final _LruFutureCache<PatchCacheKey, DiffDocument> _patchCache;
+  late final _LruFutureCache<FileCacheKey, FileDocument> _fileCache;
+  late final _LruFutureCache<BlameCacheKey, BlameDocument> _blameCache;
+  late final _LruFutureCache<HistoryCacheKey, List<FileHistoryEntry>>
+  _historyCache;
+
+  int _cacheClock = 0;
+  int _selectionGeneration = 0;
+  int _filesRequest = 0;
+  int _patchRequest = 0;
+  int _fileRequest = 0;
+  int _blameRequest = 0;
+  int _historyRequest = 0;
   bool _disposed = false;
+
   FullDiffSessionState state;
+
+  int get debugPatchCacheLength => _patchCache.length;
+  int get debugFileCacheLength => _fileCache.length;
+  int get debugRawCacheBytes =>
+      _patchCache.resolvedBytes + _fileCache.resolvedBytes;
+
+  int _nextCacheTick() => ++_cacheClock;
 
   Future<void> initialize() => _loadFiles();
 
-  Future<void> selectCommit(int index) {
-    if (_disposed) return Future<void>.value();
-    final selectedIndex = index.clamp(0, commits.length - 1);
-    final commit = commits[selectedIndex];
+  Future<void> selectCommit(GitCommit commit) async {
+    if (_disposed || state.selectedCommit.sha == commit.sha) return;
+    final commits =
+        state.nearbyCommits.any((candidate) => candidate.sha == commit.sha)
+        ? state.nearbyCommits
+        : [commit, ...state.nearbyCommits];
+    _beginSelection(
+      commits: commits,
+      commit: commit,
+      parent: commit.parents.isEmpty ? null : commit.parents.first,
+      files: const [],
+      selectedFile: null,
+      filesResource: const AsyncResource(),
+    );
+    await _loadFiles();
+  }
+
+  Future<void> selectParent(String? parent) async {
+    if (_disposed || state.parent == parent) return;
+    _beginSelection(
+      commits: state.nearbyCommits,
+      commit: state.selectedCommit,
+      parent: parent,
+      files: const [],
+      selectedFile: null,
+      filesResource: const AsyncResource(),
+    );
+    await _loadFiles();
+  }
+
+  Future<void> selectFile(GitFileChange file) async {
+    if (_disposed || _sameFile(state.selectedFile, file)) return;
+    _beginSelection(
+      commits: state.nearbyCommits,
+      commit: state.selectedCommit,
+      parent: state.parent,
+      files: state.files,
+      selectedFile: file,
+      filesResource: state.filesResource,
+    );
+    await _loadSelectedResources();
+  }
+
+  Future<void> selectHistoryEntry(FileHistoryEntry entry) async {
+    if (_disposed) return;
+    final commits = [
+      entry.commit,
+      for (final commit in state.nearbyCommits)
+        if (commit.sha != entry.commit.sha) commit,
+    ];
+    final parent = entry.commit.parents.isEmpty
+        ? null
+        : entry.commit.parents.first;
+    _beginSelection(
+      commits: commits,
+      commit: entry.commit,
+      parent: parent,
+      files: const [],
+      selectedFile: null,
+      filesResource: const AsyncResource(),
+    );
+    final generation = _selectionGeneration;
+    final request = ++_filesRequest;
+    _replace(state.copyWith(filesResource: const AsyncResource(loading: true)));
+
+    late final List<GitFileChange> files;
+    try {
+      files = await repository.loadFiles(entry.commit, parent: parent);
+    } catch (error) {
+      if (_acceptsFiles(
+        generation: generation,
+        request: request,
+        commit: entry.commit,
+        parent: parent,
+      )) {
+        _replace(state.copyWith(filesResource: AsyncResource(error: error)));
+      }
+      return;
+    }
+    if (!_acceptsFiles(
+      generation: generation,
+      request: request,
+      commit: entry.commit,
+      parent: parent,
+    )) {
+      return;
+    }
+
+    final immutableFiles = List<GitFileChange>.unmodifiable(files);
+    late final GitFileChange file;
+    try {
+      file = immutableFiles.firstWhere(
+        (candidate) =>
+            candidate.path == entry.path ||
+            candidate.oldPath == entry.path ||
+            candidate.path == entry.oldPath,
+      );
+    } catch (error) {
+      _replace(
+        state.copyWith(
+          files: immutableFiles,
+          filesResource: AsyncResource(data: immutableFiles, error: error),
+        ),
+      );
+      return;
+    }
     _replace(
       state.copyWith(
-        commitIndex: selectedIndex,
-        parent: commit.parents.isEmpty ? null : commit.parents.first,
+        files: immutableFiles,
+        selectedFile: file,
+        filesResource: AsyncResource(data: immutableFiles),
       ),
     );
-    return _loadFiles();
+    await _loadSelectedResources();
   }
 
-  Future<void> selectParent(String? parent) {
-    if (_disposed) return Future<void>.value();
-    _replace(state.copyWith(parent: parent));
-    return _loadFiles();
-  }
-
-  Future<void> selectFile(String path) {
-    if (_disposed) return Future<void>.value();
+  void replaceNearbyCommits(List<GitCommit> commits) {
+    if (_disposed) return;
+    final selectedSha = state.selectedCommit.sha;
+    final selected = commits.where((commit) => commit.sha == selectedSha);
     _replace(
       state.copyWith(
-        selectedPath: path,
-        document: null,
-        activeHunkIndex: 0,
-        error: null,
+        nearbyCommits: List.unmodifiable(
+          selected.isEmpty ? [state.selectedCommit, ...commits] : commits,
+        ),
+        selectedCommit: selected.isEmpty
+            ? state.selectedCommit
+            : selected.single,
       ),
     );
-    return _loadDiff();
   }
 
-  Future<void> selectAlgorithm(DiffAlgorithm algorithm) {
-    if (_disposed) return Future<void>.value();
-    _replace(state.copyWith(algorithm: algorithm, error: null));
-    if (state.selectedPath == null) return Future<void>.value();
-    return _loadDiff(retainDocumentOnFailure: true);
+  void setView(FullDiffView view) {
+    if (_disposed) return;
+    _replace(state.copyWith(view: view));
+    if (view == FullDiffView.blame) unawaited(_ensureBlame());
+    if (view == FullDiffView.history) unawaited(_ensureHistory());
   }
 
-  Future<void> setIgnoreWhitespace(bool ignoreWhitespace) {
-    if (_disposed) return Future<void>.value();
-    _replace(state.copyWith(ignoreWhitespace: ignoreWhitespace, error: null));
-    if (state.selectedPath == null) return Future<void>.value();
-    return _loadDiff(retainDocumentOnFailure: true);
+  void setPresentation(DiffPresentation presentation) {
+    if (_disposed) return;
+    _replace(state.copyWith(presentation: presentation));
+  }
+
+  Future<void> selectAlgorithm(DiffAlgorithm algorithm) async {
+    if (_disposed || state.requestedAlgorithm == algorithm) return;
+    final sourceLine = _anchorSourceLine(state.activeAnchor);
+    if (state.selectedFile == null) {
+      _replace(state.copyWith(requestedAlgorithm: algorithm));
+      return;
+    }
+    _replace(
+      state.copyWith(
+        requestedAlgorithm: algorithm,
+        patch: state.patch.copyWith(loading: true, error: null),
+      ),
+    );
+    await _loadPatch(
+      preserveDataOnFailure: true,
+      sourceLine: sourceLine,
+      propagateError: true,
+    );
+  }
+
+  Future<void> setIgnoreWhitespace(bool ignoreWhitespace) async {
+    if (_disposed || state.requestedIgnoreWhitespace == ignoreWhitespace) {
+      return;
+    }
+    final sourceLine = _anchorSourceLine(state.activeAnchor);
+    if (state.selectedFile == null) {
+      _replace(state.copyWith(requestedIgnoreWhitespace: ignoreWhitespace));
+      return;
+    }
+    _replace(
+      state.copyWith(
+        requestedIgnoreWhitespace: ignoreWhitespace,
+        patch: state.patch.copyWith(loading: true, error: null),
+      ),
+    );
+    await _loadPatch(
+      preserveDataOnFailure: true,
+      sourceLine: sourceLine,
+      propagateError: true,
+    );
   }
 
   void setWrapLines(bool wrapLines) {
-    if (_disposed) return;
+    if (_disposed || state.wrapLines == wrapLines) return;
     _replace(state.copyWith(wrapLines: wrapLines));
   }
 
   void setFocusMode(bool focusMode) {
-    if (_disposed) return;
+    if (_disposed || state.focusMode == focusMode) return;
     _replace(state.copyWith(focusMode: focusMode));
   }
 
-  void selectHunk(int index) {
+  void selectAnchor(DiffAnchor anchor) {
     if (_disposed) return;
-    final hunkCount = state.document?.hunks.length ?? 0;
-    final selectedIndex = hunkCount == 0 ? 0 : index.clamp(0, hunkCount - 1);
-    _replace(state.copyWith(activeHunkIndex: selectedIndex));
+    final selected = _anchorInDocument(anchor);
+    if (selected == null || _sameAnchor(state.activeAnchor, selected)) return;
+    _replace(
+      state.copyWith(
+        activeAnchor: selected,
+        navigationSerial: state.navigationSerial + 1,
+      ),
+    );
   }
 
-  void stepHunk(int delta) {
-    selectHunk(state.activeHunkIndex + delta);
+  void stepAnchor(int delta) {
+    if (_disposed || delta == 0) return;
+    final document = state.patch.data;
+    if (document == null || document.hunks.isEmpty) return;
+    final current = state.activeAnchor?.hunkIndex ?? 0;
+    final next = (current + delta).clamp(0, document.hunks.length - 1);
+    if (next == current) return;
+    _replace(
+      state.copyWith(
+        activeAnchor: document.hunks[next].anchor,
+        navigationSerial: state.navigationSerial + 1,
+      ),
+    );
+  }
+
+  void syncAnchorFromScroll(DiffAnchor anchor) {
+    if (_disposed) return;
+    final selected = _anchorInDocument(anchor);
+    if (selected == null || _sameAnchor(state.activeAnchor, selected)) return;
+    _replace(state.copyWith(activeAnchor: selected));
+  }
+
+  void _beginSelection({
+    required List<GitCommit> commits,
+    required GitCommit commit,
+    required String? parent,
+    required List<GitFileChange> files,
+    required GitFileChange? selectedFile,
+    required AsyncResource<List<GitFileChange>> filesResource,
+  }) {
+    _selectionGeneration++;
+    _replace(
+      state.copyWith(
+        nearbyCommits: List.unmodifiable(commits),
+        selectedCommit: commit,
+        parent: parent,
+        files: files,
+        selectedFile: selectedFile,
+        activeAnchor: null,
+        filesResource: filesResource,
+        patch: const AsyncResource(),
+        file: const AsyncResource(),
+        blame: const AsyncResource(),
+        history: const AsyncResource(),
+        selectionGeneration: _selectionGeneration,
+      ),
+    );
   }
 
   Future<void> _loadFiles() async {
     if (_disposed) return;
-    final generation = ++_fileGeneration;
-    ++_diffGeneration;
-    final commitIndex = state.commitIndex;
-    final commit = commits[commitIndex];
+    final generation = _selectionGeneration;
+    final request = ++_filesRequest;
+    final commit = state.selectedCommit;
     final parent = state.parent;
     _replace(
       state.copyWith(
-        files: const <GitFileChange>[],
-        selectedPath: null,
-        document: null,
-        activeHunkIndex: 0,
-        loadingFiles: true,
-        loadingDiff: false,
-        error: null,
+        files: const [],
+        selectedFile: null,
+        activeAnchor: null,
+        filesResource: const AsyncResource(loading: true),
+        patch: const AsyncResource(),
+        file: const AsyncResource(),
+        blame: const AsyncResource(),
+        history: const AsyncResource(),
       ),
     );
 
@@ -224,131 +601,281 @@ class FullDiffSessionController extends ChangeNotifier {
     try {
       files = await repository.loadFiles(commit, parent: parent);
     } catch (error) {
-      if (_matchesFileRequest(generation, commitIndex, commit.sha, parent)) {
-        _replace(
-          state.copyWith(loadingFiles: false, loadingDiff: false, error: error),
-        );
+      if (_acceptsFiles(
+        generation: generation,
+        request: request,
+        commit: commit,
+        parent: parent,
+      )) {
+        _replace(state.copyWith(filesResource: AsyncResource(error: error)));
       }
       return;
     }
-    if (!_matchesFileRequest(generation, commitIndex, commit.sha, parent)) {
+    if (!_acceptsFiles(
+      generation: generation,
+      request: request,
+      commit: commit,
+      parent: parent,
+    )) {
       return;
     }
 
     final immutableFiles = List<GitFileChange>.unmodifiable(files);
-    if (immutableFiles.isEmpty) {
-      _replace(
-        state.copyWith(
-          files: immutableFiles,
-          selectedPath: null,
-          document: null,
-          activeHunkIndex: 0,
-          loadingFiles: false,
-          loadingDiff: false,
-          error: null,
-        ),
-      );
-      return;
-    }
-
+    final selectedFile = immutableFiles.firstOrNull;
     _replace(
       state.copyWith(
         files: immutableFiles,
-        selectedPath: immutableFiles.first.path,
-        document: null,
-        activeHunkIndex: 0,
-        loadingFiles: false,
-        error: null,
+        selectedFile: selectedFile,
+        filesResource: AsyncResource(data: immutableFiles),
       ),
     );
-    await _loadDiff();
+    if (selectedFile == null) return;
+    await _loadSelectedResources();
   }
 
-  Future<void> _loadDiff({bool retainDocumentOnFailure = false}) async {
+  Future<void> _loadSelectedResources() => Future.wait([
+    _loadPatch(),
+    _loadFile(),
+    if (state.view == FullDiffView.history) _ensureHistory(),
+  ]);
+
+  Future<void> _loadPatch({
+    bool preserveDataOnFailure = false,
+    int? sourceLine,
+    bool propagateError = false,
+  }) async {
     if (_disposed) return;
-    final path = state.selectedPath;
-    if (path == null) return;
-    final file = state.files.firstWhere((file) => file.path == path);
-
-    final generation = ++_diffGeneration;
-    final commitIndex = state.commitIndex;
-    final commit = commits[commitIndex];
+    final file = state.selectedFile;
+    if (file == null) return;
+    final generation = _selectionGeneration;
+    final request = ++_patchRequest;
+    final commit = state.selectedCommit;
     final parent = state.parent;
-    final algorithm = state.algorithm;
-    final ignoreWhitespace = state.ignoreWhitespace;
-    _replace(state.copyWith(loadingDiff: true, error: null));
+    final algorithm = state.requestedAlgorithm;
+    final ignoreWhitespace = state.requestedIgnoreWhitespace;
+    _replace(
+      state.copyWith(
+        patch: state.patch.copyWith(
+          data: preserveDataOnFailure ? state.patch.data : null,
+          loading: true,
+          error: null,
+        ),
+      ),
+    );
 
-    late final DiffDocument document;
     try {
-      document = await _loadDocument(
+      final document = await _loadPatchDocument(
         commit,
         parent,
         file,
         algorithm,
         ignoreWhitespace,
       );
-    } catch (error) {
-      if (_matchesDiffRequest(
-        generation,
-        commitIndex,
-        commit.sha,
-        parent,
-        path,
-        algorithm,
-        ignoreWhitespace,
+      _trimRawCaches();
+      if (!_accepts(
+        generation: generation,
+        request: request,
+        currentRequest: _patchRequest,
+        commit: commit,
+        file: file,
+      )) {
+        return;
+      }
+      _replace(
+        state.copyWith(
+          patch: AsyncResource(data: document),
+          activeAnchor: nearestAnchor(document, sourceLine),
+          appliedAlgorithm: algorithm,
+          appliedIgnoreWhitespace: ignoreWhitespace,
+        ),
+      );
+    } catch (error, stackTrace) {
+      if (_accepts(
+        generation: generation,
+        request: request,
+        currentRequest: _patchRequest,
+        commit: commit,
+        file: file,
       )) {
         _replace(
           state.copyWith(
-            document: retainDocumentOnFailure ? state.document : null,
-            algorithm: retainDocumentOnFailure
-                ? state.displayedAlgorithm
-                : state.algorithm,
-            ignoreWhitespace: retainDocumentOnFailure
-                ? state.displayedIgnoreWhitespace
-                : state.ignoreWhitespace,
-            loadingDiff: false,
-            error: error,
+            requestedAlgorithm: preserveDataOnFailure
+                ? state.appliedAlgorithm
+                : state.requestedAlgorithm,
+            requestedIgnoreWhitespace: preserveDataOnFailure
+                ? state.appliedIgnoreWhitespace
+                : state.requestedIgnoreWhitespace,
+            patch: AsyncResource(
+              data: preserveDataOnFailure ? state.patch.data : null,
+              error: error,
+            ),
           ),
         );
       }
-      return;
+      if (propagateError) {
+        Error.throwWithStackTrace(error, stackTrace);
+      }
     }
-    if (!_matchesDiffRequest(
-      generation,
-      commitIndex,
-      commit.sha,
-      parent,
-      path,
-      algorithm,
-      ignoreWhitespace,
-    )) {
-      return;
-    }
-
-    final activeHunkIndex = document.hunks.isEmpty
-        ? 0
-        : state.activeHunkIndex.clamp(0, document.hunks.length - 1);
-    _replace(
-      state.copyWith(
-        document: document,
-        activeHunkIndex: activeHunkIndex,
-        displayedAlgorithm: algorithm,
-        displayedIgnoreWhitespace: ignoreWhitespace,
-        loadingDiff: false,
-        error: null,
-      ),
-    );
   }
 
-  Future<DiffDocument> _loadDocument(
+  Future<void> _loadFile() async {
+    if (_disposed) return;
+    final file = state.selectedFile;
+    if (file == null) return;
+    final generation = _selectionGeneration;
+    final request = ++_fileRequest;
+    final commit = state.selectedCommit;
+    final parent = state.parent;
+    final deleted = file.status.startsWith('D');
+    final side = deleted ? FileDocumentSide.old : FileDocumentSide.result;
+    final revision = commit.isWorkingTree && !deleted
+        ? '<working-tree>'
+        : deleted
+        ? parent ?? commit.parents.first
+        : commit.sha;
+    final path = deleted ? file.oldPath ?? file.path : file.path;
+    _replace(state.copyWith(file: const AsyncResource(loading: true)));
+
+    try {
+      final document = await _loadFileDocument(
+        commit: commit,
+        parent: parent,
+        file: file,
+        revision: revision,
+        path: path,
+        side: side,
+      );
+      _trimRawCaches();
+      if (!_accepts(
+        generation: generation,
+        request: request,
+        currentRequest: _fileRequest,
+        commit: commit,
+        file: file,
+      )) {
+        return;
+      }
+      _replace(state.copyWith(file: AsyncResource(data: document)));
+      if (state.view == FullDiffView.blame) await _ensureBlame();
+    } catch (error) {
+      if (_accepts(
+        generation: generation,
+        request: request,
+        currentRequest: _fileRequest,
+        commit: commit,
+        file: file,
+      )) {
+        _replace(
+          state.copyWith(
+            file: AsyncResource(error: error),
+            blame: state.blame.loading || state.view == FullDiffView.blame
+                ? AsyncResource(error: error)
+                : state.blame,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _ensureBlame() async {
+    if (_disposed) return;
+    final file = state.selectedFile;
+    final fileDocument = state.file.data;
+    if (file == null) return;
+    if (fileDocument == null) {
+      if (state.file.error != null) {
+        _replace(state.copyWith(blame: AsyncResource(error: state.file.error)));
+        return;
+      }
+      if (state.file.loading && !state.blame.loading) {
+        _replace(state.copyWith(blame: const AsyncResource(loading: true)));
+      }
+      return;
+    }
+    if (fileDocument.kind != FileContentKind.utf8) {
+      _replace(state.copyWith(blame: const AsyncResource()));
+      return;
+    }
+    if (state.blame.data?.file.fingerprint == fileDocument.fingerprint) return;
+
+    final generation = _selectionGeneration;
+    final request = ++_blameRequest;
+    final commit = state.selectedCommit;
+    final parent = state.parent;
+    _replace(state.copyWith(blame: const AsyncResource(loading: true)));
+    try {
+      final document = await _loadBlameDocument(
+        commit,
+        parent,
+        file,
+        fileDocument,
+      );
+      if (!_accepts(
+        generation: generation,
+        request: request,
+        currentRequest: _blameRequest,
+        commit: commit,
+        file: file,
+      )) {
+        return;
+      }
+      _replace(state.copyWith(blame: AsyncResource(data: document)));
+    } catch (error) {
+      if (_accepts(
+        generation: generation,
+        request: request,
+        currentRequest: _blameRequest,
+        commit: commit,
+        file: file,
+      )) {
+        _replace(state.copyWith(blame: AsyncResource(error: error)));
+      }
+    }
+  }
+
+  Future<void> _ensureHistory() async {
+    if (_disposed) return;
+    final file = state.selectedFile;
+    if (file == null || state.history.loading || state.history.data != null) {
+      return;
+    }
+    final generation = _selectionGeneration;
+    final request = ++_historyRequest;
+    final commit = state.selectedCommit;
+    _replace(state.copyWith(history: const AsyncResource(loading: true)));
+    try {
+      final entries = await _loadHistoryEntries(commit, file);
+      if (!_accepts(
+        generation: generation,
+        request: request,
+        currentRequest: _historyRequest,
+        commit: commit,
+        file: file,
+      )) {
+        return;
+      }
+      _replace(state.copyWith(history: AsyncResource(data: entries)));
+    } catch (error) {
+      if (_accepts(
+        generation: generation,
+        request: request,
+        currentRequest: _historyRequest,
+        commit: commit,
+        file: file,
+      )) {
+        _replace(state.copyWith(history: AsyncResource(error: error)));
+      }
+    }
+  }
+
+  Future<DiffDocument> _loadPatchDocument(
     GitCommit commit,
     String? parent,
     GitFileChange file,
     DiffAlgorithm algorithm,
     bool ignoreWhitespace,
   ) {
-    final path = file.path;
-    Future<DiffDocument> read() async => DiffDocument.fromLines(
+    Future<DiffDocument> load() async => DiffDocument.fromLines(
       await repository.loadDiff(
         commit,
         file,
@@ -357,55 +884,137 @@ class FullDiffSessionController extends ChangeNotifier {
         ignoreWhitespace: ignoreWhitespace,
       ),
     );
-
-    if (commit.isWorkingTree) return read();
+    if (commit.isWorkingTree) return load();
     final key = (
-      sha: commit.sha,
+      base: _baseRevision(commit, parent),
+      target: commit.sha,
       parent: parent,
-      path: path,
+      oldPath: file.oldPath,
+      newPath: file.path,
       algorithm: algorithm,
       ignoreWhitespace: ignoreWhitespace,
     );
-    final cached = _cache[key];
-    if (cached != null) return cached;
-
-    final future = read();
-    _cache[key] = future;
-    return future.onError((Object error, StackTrace stackTrace) {
-      if (identical(_cache[key], future)) _cache.remove(key);
-      Error.throwWithStackTrace(error, stackTrace);
-    });
+    return _patchCache.getOrLoad(key, load);
   }
 
-  bool _matchesFileRequest(
-    int generation,
-    int commitIndex,
-    String sha,
+  Future<FileDocument> _loadFileDocument({
+    required GitCommit commit,
+    required String? parent,
+    required GitFileChange file,
+    required String revision,
+    required String path,
+    required FileDocumentSide side,
+  }) {
+    Future<FileDocument> load() async => FileDocument.fromBytes(
+      revision: revision,
+      path: path,
+      side: side,
+      bytes: await repository.loadFileBytes(commit, file, parent: parent),
+      gitMarkedBinary: file.isBinary,
+    );
+    if (commit.isWorkingTree) return load();
+    return _fileCache.getOrLoad((
+      revision: revision,
+      path: path,
+      side: side,
+    ), load);
+  }
+
+  Future<BlameDocument> _loadBlameDocument(
+    GitCommit commit,
     String? parent,
-  ) =>
+    GitFileChange file,
+    FileDocument fileDocument,
+  ) {
+    Future<BlameDocument> load() async => BlameDocument.fromGitLines(
+      fileDocument,
+      await repository.loadBlame(
+        commit,
+        file,
+        parent: parent,
+        workingTreeBytes: commit.isWorkingTree ? fileDocument.bytes : null,
+      ),
+    );
+    if (commit.isWorkingTree) return load();
+    return _blameCache.getOrLoad((
+      revision: fileDocument.revision,
+      path: fileDocument.path,
+    ), load);
+  }
+
+  Future<List<FileHistoryEntry>> _loadHistoryEntries(
+    GitCommit commit,
+    GitFileChange file,
+  ) {
+    Future<List<FileHistoryEntry>> load() async => List.unmodifiable(
+      (await repository.loadFileHistory(commit, file)).map(
+        (record) => FileHistoryEntry(
+          commit: record.commit,
+          path: record.path,
+          oldPath: record.oldPath,
+          status: record.status,
+        ),
+      ),
+    );
+    if (commit.isWorkingTree) return load();
+    return _historyCache.getOrLoad((
+      startRevision: commit.sha,
+      path: file.path,
+    ), load);
+  }
+
+  String _baseRevision(GitCommit commit, String? parent) =>
+      parent ??
+      (commit.parents.isEmpty ? '<empty-tree>' : commit.parents.first);
+
+  void _trimRawCaches() {
+    while (debugRawCacheBytes > _rawCacheByteLimit) {
+      final patchTick = _patchCache.oldestTick;
+      final fileTick = _fileCache.oldestTick;
+      if (patchTick == null && fileTick == null) return;
+      if (fileTick == null || (patchTick != null && patchTick <= fileTick)) {
+        _patchCache.removeOldest();
+      } else {
+        _fileCache.removeOldest();
+      }
+    }
+  }
+
+  bool _acceptsFiles({
+    required int generation,
+    required int request,
+    required GitCommit commit,
+    required String? parent,
+  }) =>
       !_disposed &&
-      generation == _fileGeneration &&
-      state.commitIndex == commitIndex &&
-      commits[state.commitIndex].sha == sha &&
+      generation == _selectionGeneration &&
+      request == _filesRequest &&
+      state.selectedCommit.sha == commit.sha &&
       state.parent == parent;
 
-  bool _matchesDiffRequest(
-    int generation,
-    int commitIndex,
-    String sha,
-    String? parent,
-    String path,
-    DiffAlgorithm algorithm,
-    bool ignoreWhitespace,
-  ) =>
+  bool _accepts({
+    required int generation,
+    required int request,
+    required int currentRequest,
+    required GitCommit commit,
+    required GitFileChange file,
+  }) =>
       !_disposed &&
-      generation == _diffGeneration &&
-      state.commitIndex == commitIndex &&
-      commits[state.commitIndex].sha == sha &&
-      state.parent == parent &&
-      state.selectedPath == path &&
-      state.algorithm == algorithm &&
-      state.ignoreWhitespace == ignoreWhitespace;
+      generation == _selectionGeneration &&
+      request == currentRequest &&
+      state.selectedCommit.sha == commit.sha &&
+      state.selectedFile?.path == file.path &&
+      state.selectedFile?.oldPath == file.oldPath;
+
+  DiffAnchor? _anchorInDocument(DiffAnchor anchor) {
+    final document = state.patch.data;
+    if (document == null ||
+        anchor.hunkIndex < 0 ||
+        anchor.hunkIndex >= document.hunks.length) {
+      return null;
+    }
+    return document.hunks[anchor.hunkIndex].anchor;
+  }
 
   void _replace(FullDiffSessionState nextState) {
     if (_disposed) return;
@@ -417,8 +1026,32 @@ class FullDiffSessionController extends ChangeNotifier {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
-    _fileGeneration += 1;
-    _diffGeneration += 1;
+    _selectionGeneration++;
+    _filesRequest++;
+    _patchRequest++;
+    _fileRequest++;
+    _blameRequest++;
+    _historyRequest++;
     super.dispose();
   }
+}
+
+int _patchSize(DiffDocument document) => [
+  ...document.headers,
+  for (final row in document.rows) row.text,
+].fold(0, (bytes, text) => bytes + utf8.encode(text).length);
+
+int? _anchorSourceLine(DiffAnchor? anchor) =>
+    anchor?.newLine ?? anchor?.oldLine;
+
+bool _sameFile(GitFileChange? left, GitFileChange right) =>
+    left?.path == right.path && left?.oldPath == right.oldPath;
+
+bool _sameAnchor(DiffAnchor? left, DiffAnchor right) =>
+    left?.hunkIndex == right.hunkIndex &&
+    left?.oldLine == right.oldLine &&
+    left?.newLine == right.newLine;
+
+extension<T> on List<T> {
+  T? get firstOrNull => isEmpty ? null : first;
 }
