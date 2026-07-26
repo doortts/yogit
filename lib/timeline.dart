@@ -3422,7 +3422,7 @@ class CommitGraphPainter extends CustomPainter {
 
   /// Rails are opaque.
   static const railOpacity = 1.0;
-  static const connectorWidth = 2.0;
+  static const connectorWidth = 1.0;
   static const nodeRadius = 6.0;
   static const wipNodeRadius = 8.0;
   static const wipNodeDash = 2.5;

@@ -498,6 +498,32 @@ void main() {
     expect(scrollable.position.pixels, 360);
   });
 
+  test('ref connector is a solid one-pixel line', () {
+    const size = Size(120, TimelineScreen.rowHeight);
+    const color = Color(0xFF00E5FF);
+    final row = layoutGraph([commit('tip', 'tip')]).single;
+    final painter = CommitGraphPainter(
+      row: row,
+      selected: false,
+      committerColor: color,
+      refConnector: true,
+    );
+
+    expect(
+      (Canvas canvas) => painter.paint(canvas, size),
+      paints
+        ..line(
+          p1: const Offset(0, TimelineScreen.rowHeight / 2),
+          p2: const Offset(
+            CommitGraphPainter.laneInset,
+            TimelineScreen.rowHeight / 2,
+          ),
+          color: color,
+          strokeWidth: 1.0,
+        ),
+    );
+  });
+
   test('lane transitions turn on one 8px corner beside their node', () {
     GraphRow rowTo(int parentLane) => graphRow(
       commit: commit('1', 'first commit', parents: ['0']),
