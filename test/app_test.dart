@@ -300,7 +300,7 @@ void main() {
     expect(commitHeader.style?.fontFamily, 'monospace');
     expect(commitHeader.style?.fontSize, 12);
     expect(find.text('DATE'), findsOneWidget);
-    expect(find.text('NAME'), findsOneWidget);
+    expect(find.text('AUTHOR'), findsOneWidget);
 
     await tester.drag(
       find.byKey(const Key('graph-resizer')),
