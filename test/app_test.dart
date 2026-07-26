@@ -1639,6 +1639,164 @@ void main() {
     expect(saved?.showName, isTrue);
   });
 
+  testWidgets('Date and Author headers hide and restore their clicked widths', (
+    tester,
+  ) async {
+    TimelineColumnWidths? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+          ),
+          controller: controller,
+          columnWidths: const TimelineColumnWidths(time: 80, name: 70),
+          onColumnWidthsChanged: (value) => saved = value,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('time-header')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('time-header')), findsNothing);
+    expect(saved?.showTime, isFalse);
+    expect(saved?.time, 80);
+
+    await tester.tap(find.byKey(const Key('show-time-column')));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byKey(const Key('time-header'))).width, 80);
+
+    await tester.tap(find.byKey(const Key('name-header')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('name-header')), findsNothing);
+    expect(saved?.showName, isFalse);
+    expect(saved?.name, 70);
+
+    await tester.tap(find.byKey(const Key('show-name-column')));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byKey(const Key('name-header'))).width, 70);
+  });
+
+  testWidgets('column drags restore Date and Author to drag-start widths', (
+    tester,
+  ) async {
+    TimelineColumnWidths? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+          ),
+          controller: controller,
+          columnWidths: const TimelineColumnWidths(time: 80, name: 70),
+          onColumnWidthsChanged: (value) => saved = value,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    Future<void> hideWithOneDrag(String column) async {
+      final header = find.byKey(Key('$column-header'));
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(Key('$column-resizer'))),
+      );
+      for (var move = 0; move < 8 && header.evaluate().isNotEmpty; move++) {
+        await gesture.moveBy(const Offset(-16, 0));
+        await tester.pump();
+      }
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(header, findsNothing);
+    }
+
+    await hideWithOneDrag('time');
+    expect(saved?.time, 80);
+    await tester.tap(find.byKey(const Key('show-time-column')));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byKey(const Key('time-header'))).width, 80);
+
+    await hideWithOneDrag('name');
+    expect(saved?.name, 70);
+    await tester.tap(find.byKey(const Key('show-name-column')));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byKey(const Key('name-header'))).width, 70);
+  });
+
+  testWidgets(
+    'commit drag collapses Date then Author from their start widths',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(900, 800);
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+      TimelineColumnWidths? saved;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TimelineScreen(
+            repository: FakeGitRepository(
+              (_, _) async => [commit('1', 'first commit')],
+            ),
+            controller: controller,
+            columnWidths: const TimelineColumnWidths(time: 80, name: 70),
+            onColumnWidthsChanged: (value) => saved = value,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      double width(String column) =>
+          tester.getSize(find.byKey(Key('$column-header'))).width;
+      expect(width('time'), 80);
+      expect(width('name'), 70);
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(const Key('commit-resizer'))),
+      );
+      await gesture.moveBy(const Offset(20, 0));
+      await tester.pump();
+      expect(width('time'), lessThan(80));
+      expect(width('name'), 70);
+
+      for (
+        var move = 0;
+        move < 12 && find.byKey(const Key('time-header')).evaluate().isNotEmpty;
+        move++
+      ) {
+        await gesture.moveBy(const Offset(8, 0));
+        await tester.pump();
+      }
+      expect(find.byKey(const Key('time-header')), findsNothing);
+      expect(width('name'), 70);
+      expect(saved?.time, 80);
+
+      await gesture.moveBy(const Offset(8, 0));
+      await tester.pump();
+      expect(width('name'), lessThan(70));
+
+      for (
+        var move = 0;
+        move < 12 && find.byKey(const Key('name-header')).evaluate().isNotEmpty;
+        move++
+      ) {
+        await gesture.moveBy(const Offset(8, 0));
+        await tester.pump();
+      }
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('name-header')), findsNothing);
+      expect(saved?.name, 70);
+
+      await tester.tap(find.byKey(const Key('show-time-column')));
+      await tester.tap(find.byKey(const Key('show-name-column')));
+      await tester.pumpAndSettle();
+      expect(width('time'), 80);
+      expect(width('name'), 70);
+    },
+  );
+
   testWidgets('sidebar lists refs, filters them, and moves the selection', (
     tester,
   ) async {

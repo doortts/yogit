@@ -295,6 +295,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// it. Written while the timeline lays out, read by the status bar built right
   /// after it in the same frame.
   var _dateColumnLeft = 0.0;
+  var _commitAvailableWidth = 0.0;
   late double _previewWidth = widget.previewWidth;
   late double _previewHeight = widget.previewHeight;
 
@@ -304,6 +305,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   final _resizerFocus = {
     for (final column in timelineColumns.keys) column: FocusNode(),
   };
+  Map<String, double> _resizeStartWidths = const {};
 
   @override
   void initState() {
@@ -1335,6 +1337,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
         timelineColumns['commit']!.min,
         math.min(_commitWidth ?? available, available),
       );
+      _commitAvailableWidth = math.max(
+        timelineColumns['commit']!.min,
+        available,
+      );
       double width(String column) => switch (column) {
         'commit' => commitWidth,
         'graph' => graphWidth,
@@ -1409,37 +1415,43 @@ class _TimelineScreenState extends State<TimelineScreen> {
     child: Stack(
       children: [
         Positioned.fill(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 9),
-            decoration: const BoxDecoration(
-              color: _panelSoft,
-              border: Border(
-                bottom: BorderSide(color: _border),
-                right: BorderSide(color: _border),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: column == 'time' || column == 'name'
+                ? () => _hideColumn(column)
+                : null,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9),
+              decoration: const BoxDecoration(
+                color: _panelSoft,
+                border: Border(
+                  bottom: BorderSide(color: _border),
+                  right: BorderSide(color: _border),
+                ),
               ),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    timelineColumns[column]!.label.toUpperCase(),
-                    maxLines: 1,
-                    softWrap: false,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: _muted,
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                      fontWeight: FontWeight.w500,
-                      letterSpacing: 0.66,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      timelineColumns[column]!.label.toUpperCase(),
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _muted,
+                        fontSize: 12,
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.66,
+                      ),
                     ),
                   ),
-                ),
-                if (column == 'commit' && !_showTime)
-                  _restoreColumnButton('time', 'D'),
-                if (column == 'commit' && !_showName)
-                  _restoreColumnButton('name', 'A'),
-              ],
+                  if (column == 'commit' && !_showTime)
+                    _restoreColumnButton('time', 'D'),
+                  if (column == 'commit' && !_showName)
+                    _restoreColumnButton('name', 'A'),
+                ],
+              ),
             ),
           ),
         ),
@@ -1507,42 +1519,107 @@ class _TimelineScreenState extends State<TimelineScreen> {
         child: GestureDetector(
           key: Key('$column-resizer'),
           behavior: HitTestBehavior.opaque,
+          onHorizontalDragStart: (_) => _startResize(column),
           onHorizontalDragUpdate: (details) =>
               _resize(column, width + details.delta.dx),
-          onHorizontalDragEnd: (_) => _saveColumnWidths(),
-          onHorizontalDragCancel: _saveColumnWidths,
+          onHorizontalDragEnd: (_) => _finishResize(),
+          onHorizontalDragCancel: _finishResize,
         ),
       ),
     ),
   );
 
+  void _startResize(String column) {
+    _resizeStartWidths = {
+      if (column == 'commit' || column == 'time') 'time': _w('time'),
+      if (column == 'commit' || column == 'name') 'name': _w('name'),
+    };
+  }
+
+  void _finishResize() {
+    _saveColumnWidths();
+    _resizeStartWidths = const {};
+  }
+
   /// Resizes from the width on screen, so dragging a flexing title column picks
   /// up where it is rather than jumping to a stored value.
   void _resize(String column, double next) {
+    if (column == 'commit') {
+      _resizeCommit(next);
+      return;
+    }
     final spec = timelineColumns[column]!;
     if ((column == 'time' || column == 'name') &&
         next < spec.min &&
         _w(column) <= spec.min) {
-      setState(() {
-        if (column == 'time') {
-          _showTime = false;
-        } else {
-          _showName = false;
-        }
-      });
-      _saveColumnWidths();
+      _hideColumn(column, restoreWidth: _resizeStartWidths[column]);
       return;
     }
     final clamped = next.clamp(spec.min, spec.max);
     setState(() {
-      if (column == 'commit') {
-        _commitWidth = clamped;
-      } else if (column == 'graph') {
+      if (column == 'graph') {
         _graphWidth = clamped;
       } else {
         _widths[column] = clamped;
       }
     });
+  }
+
+  void _resizeCommit(double next) {
+    final spec = timelineColumns['commit']!;
+    if (next <= _commitAvailableWidth) {
+      setState(() {
+        _commitWidth = next.clamp(
+          spec.min,
+          math.max(spec.max, _commitAvailableWidth),
+        );
+      });
+      return;
+    }
+
+    var overflow = next - _commitAvailableWidth;
+    var commitWidth = _commitAvailableWidth;
+    var hidColumn = false;
+    setState(() {
+      void consume(String column) {
+        if (overflow <= 0 || !_columnVisible(column)) return;
+        final columnSpec = timelineColumns[column]!;
+        final current = _w(column);
+        final shrink = math.min(overflow, current - columnSpec.min);
+        _widths[column] = current - shrink;
+        commitWidth += shrink;
+        overflow -= shrink;
+        if (overflow <= 0 || _w(column) > columnSpec.min) return;
+
+        final hiddenWidth = _w(column);
+        commitWidth += hiddenWidth;
+        overflow = math.max(0, overflow - hiddenWidth);
+        _widths[column] = _resizeStartWidths[column] ?? hiddenWidth;
+        if (column == 'time') {
+          _showTime = false;
+        } else {
+          _showName = false;
+        }
+        hidColumn = true;
+      }
+
+      consume('time');
+      consume('name');
+      _commitWidth = commitWidth;
+    });
+    if (hidColumn) _saveColumnWidths();
+  }
+
+  void _hideColumn(String column, {double? restoreWidth}) {
+    setState(() {
+      if (restoreWidth != null) _widths[column] = restoreWidth;
+      if (column == 'time') {
+        _showTime = false;
+      } else {
+        _showName = false;
+      }
+    });
+    _saveColumnWidths();
   }
 
   void _saveColumnWidths() => widget.onColumnWidthsChanged?.call(
