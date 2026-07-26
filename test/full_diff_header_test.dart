@@ -199,6 +199,71 @@ void main() {
       expect(button.style?.foregroundColor?.resolve({}), Colors.black);
     }
   });
+
+  testWidgets('inactive controls use the approved dark outline', (
+    tester,
+  ) async {
+    await pumpHeaders(tester);
+
+    final openEditor = tester.widget<TextButton>(
+      find.ancestor(
+        of: find.text('편집기로 열기'),
+        matching: find.byType(TextButton),
+      ),
+    );
+    final openEditorShape =
+        openEditor.style?.shape?.resolve({}) as RoundedRectangleBorder;
+    expect(openEditorShape.side.color, const Color(0x1A000000));
+
+    final algorithmDecoration =
+        tester
+                .widget<Container>(
+                  find.descendant(
+                    of: find.byKey(const Key('diff-algorithm')),
+                    matching: find.byType(Container),
+                  ),
+                )
+                .decoration
+            as BoxDecoration;
+    expect(algorithmDecoration.border?.top.color, const Color(0x1A000000));
+  });
+
+  testWidgets('file summary and encoding badges keep a complete pill shape', (
+    tester,
+  ) async {
+    await pumpHeaders(tester);
+
+    for (final label in ['M · +12 −4', 'UTF-8']) {
+      final decoration =
+          tester
+                  .widget<Container>(
+                    find.ancestor(
+                      of: find.text(label),
+                      matching: find.byType(Container),
+                    ),
+                  )
+                  .decoration
+              as BoxDecoration;
+      expect(decoration.borderRadius, BorderRadius.circular(9999));
+    }
+  });
+
+  testWidgets('toggle semantics explicitly expose their enabled state', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await pumpHeaders(tester, ignoreWhitespace: true);
+
+    for (final label in ['집중 모드', '공백 무시', '줄바꿈']) {
+      final data = find.semantics
+          .byLabel(label)
+          .evaluate()
+          .single
+          .getSemanticsData();
+      expect(data.flagsCollection.isEnabled, ui.Tristate.isTrue);
+    }
+    semantics.dispose();
+  });
 }
 
 Future<void> pumpHeaders(

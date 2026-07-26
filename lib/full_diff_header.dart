@@ -5,6 +5,8 @@ import 'full_diff_theme.dart';
 import 'git.dart';
 import 'typography.dart';
 
+const _fullDiffInputBorder = Color(0x1A000000);
+
 String fileSummary(GitFileChange file) =>
     '${file.status.characters.first} · '
     '+${file.additions ?? '—'} −${file.deletions ?? '—'}';
@@ -381,7 +383,7 @@ class _HeaderButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(fullDiffControlRadius),
         side: selected
             ? BorderSide.none
-            : const BorderSide(color: Color(0x29FFFFFF)),
+            : const BorderSide(color: _fullDiffInputBorder),
       ),
     );
     return SizedBox(
@@ -421,7 +423,7 @@ class _HeaderBadge extends StatelessWidget {
     padding: const EdgeInsets.symmetric(horizontal: 9),
     decoration: BoxDecoration(
       color: background,
-      borderRadius: BorderRadius.circular(fullDiffControlRadius),
+      borderRadius: BorderRadius.circular(9999),
     ),
     child: Text(
       label,
@@ -498,7 +500,7 @@ class _AlgorithmMenu extends StatelessWidget {
         decoration: BoxDecoration(
           color: fullDiffControl,
           borderRadius: BorderRadius.circular(fullDiffControlRadius),
-          border: Border.all(color: const Color(0x29FFFFFF)),
+          border: Border.all(color: _fullDiffInputBorder),
         ),
         child: const Row(
           mainAxisSize: MainAxisSize.min,
@@ -533,6 +535,7 @@ class _HeaderToggle extends StatelessWidget {
     container: true,
     button: true,
     toggled: value,
+    enabled: true,
     label: label,
     onTap: () => onChanged(!value),
     child: ExcludeSemantics(
