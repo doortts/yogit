@@ -3303,6 +3303,51 @@ void main() {
     },
   );
 
+  testWidgets(
+    'bootstrap can recover from a non-repository with the folder picker',
+    (tester) async {
+      const picker = MethodChannel('test/yogit-bootstrap-picker');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            picker,
+            (call) async =>
+                call.method == 'pickRepository' ? '/Users/ada/repo' : null,
+          );
+      Future<ProcessResult> runner(
+        String executable,
+        List<String> arguments, {
+        String? workingDirectory,
+      }) async {
+        if (arguments.contains('--show-toplevel')) {
+          final path = arguments[1];
+          return path == '/Users/ada/plain'
+              ? ProcessResult(1, 128, '', 'not a git repository')
+              : ProcessResult(1, 0, '/Users/ada/repo\n', '');
+        }
+        return ProcessResult(1, 0, '', '');
+      }
+
+      await tester.pumpWidget(
+        YogitBootstrap(
+          requestedPath: '/Users/ada/plain',
+          gitExecutable: '/usr/bin/git',
+          runner: runner,
+          windowFrameController: WindowFrameController(channel: picker),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('저장소 열기'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('bootstrap-pick-repository')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('timeline-screen-/Users/ada/repo')),
+        findsOneWidget,
+      );
+    },
+  );
+
   testWidgets('the folder button opens a picked repository, or says why not', (
     tester,
   ) async {

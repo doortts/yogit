@@ -76,22 +76,49 @@ class YogitBootstrap extends StatefulWidget {
     required this.requestedPath,
     required this.gitExecutable,
     this.ghExecutable,
+    this.runner = runProcess,
+    this.windowFrameController,
     super.key,
   });
 
   final String requestedPath;
   final String gitExecutable;
   final String? ghExecutable;
+  final CommandRunner runner;
+  final WindowFrameController? windowFrameController;
 
   @override
   State<YogitBootstrap> createState() => _YogitBootstrapState();
 }
 
 class _YogitBootstrapState extends State<YogitBootstrap> {
-  late final Future<String> _root = resolveRepositoryRoot(
-    widget.requestedPath,
+  late final WindowFrameController _windowFrameController =
+      widget.windowFrameController ?? WindowFrameController();
+  late String _requestedPath = widget.requestedPath;
+  late Future<String> _root = _resolve(_requestedPath);
+
+  Future<String> _resolve(String path) => resolveRepositoryRoot(
+    path,
     gitExecutable: widget.gitExecutable,
+    runner: widget.runner,
   );
+
+  Future<void> _pickRepository() async {
+    final path = await _windowFrameController.pickRepository();
+    if (path == null || !mounted) return;
+    setState(() {
+      _requestedPath = path;
+      _root = _resolve(path);
+    });
+  }
+
+  @override
+  void dispose() {
+    if (widget.windowFrameController == null) {
+      _windowFrameController.dispose();
+    }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => FutureBuilder<String>(
@@ -99,14 +126,20 @@ class _YogitBootstrapState extends State<YogitBootstrap> {
     builder: (context, snapshot) {
       if (snapshot.hasError) {
         return _RepositoryError(
-          path: widget.requestedPath,
+          path: _requestedPath,
           detail: snapshot.error.toString(),
+          onPickRepository: () => unawaited(_pickRepository()),
         );
       }
       if (snapshot.data case final root?) {
         return YogitApp(
-          repository: GitRepository(root, gitExecutable: widget.gitExecutable),
+          repository: GitRepository(
+            root,
+            gitExecutable: widget.gitExecutable,
+            runner: widget.runner,
+          ),
           ghExecutable: widget.ghExecutable,
+          windowFrameController: _windowFrameController,
         );
       }
       return MaterialApp(
@@ -287,10 +320,15 @@ ThemeData yogitTheme() => ThemeData(
 );
 
 class _RepositoryError extends StatelessWidget {
-  const _RepositoryError({required this.path, required this.detail});
+  const _RepositoryError({
+    required this.path,
+    required this.detail,
+    this.onPickRepository,
+  });
 
   final String path;
   final String detail;
+  final VoidCallback? onPickRepository;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -344,6 +382,15 @@ class _RepositoryError extends StatelessWidget {
                       color: Color(0xFF8D94A8),
                       fontSize: 10,
                     ),
+                  ),
+                ],
+                if (onPickRepository != null) ...[
+                  const SizedBox(height: 18),
+                  OutlinedButton.icon(
+                    key: const Key('bootstrap-pick-repository'),
+                    onPressed: onPickRepository,
+                    icon: const Icon(Icons.folder_open_outlined, size: 18),
+                    label: const Text('저장소 열기'),
                   ),
                 ],
               ],
