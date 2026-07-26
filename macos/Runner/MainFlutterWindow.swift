@@ -1,8 +1,21 @@
 import Cocoa
 import FlutterMacOS
 
+protocol WorkspaceOpening {
+  @discardableResult
+  func open(_ url: URL) -> Bool
+}
+
+extension NSWorkspace: WorkspaceOpening {}
+
 class MainFlutterWindow: NSWindow {
+  static var workspace: WorkspaceOpening = NSWorkspace.shared
+
   private var previewBaseFrame: NSRect?
+
+  static func openFile(path: String) -> Bool {
+    workspace.open(URL(fileURLWithPath: path))
+  }
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -37,6 +50,21 @@ class MainFlutterWindow: NSWindow {
         result(nil)
       case "pickRepository":
         result(MainFlutterWindow.pickRepository())
+      case "openFile":
+        guard
+          let arguments = call.arguments as? [String: Any],
+          let path = arguments["path"] as? String
+        else {
+          result(
+            FlutterError(
+              code: "invalid_path",
+              message: "A file path is required.",
+              details: nil
+            )
+          )
+          return
+        }
+        result(MainFlutterWindow.openFile(path: path))
       case "closeWindow":
         self?.performClose(nil)
         result(nil)
