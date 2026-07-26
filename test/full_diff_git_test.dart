@@ -164,6 +164,27 @@ void main() {
     expect(untrackedBlame.single.author, 'Uncommitted');
   });
 
+  test(
+    'requires displayed bytes before blaming a tracked working file',
+    () async {
+      final root = await createGitFixture();
+      addTearDown(() => root.delete(recursive: true));
+      await writeAndCommit(root, 'tracked.txt', 'one\n', 'base');
+      await File('${root.path}/tracked.txt').writeAsString('one\ntwo\n');
+
+      final repository = GitRepository(root.path);
+      final working = (await repository.loadWorkingTree())!;
+      final tracked = (await repository.loadFiles(
+        working,
+      )).singleWhere((file) => file.path == 'tracked.txt');
+
+      await expectLater(
+        repository.loadBlame(working, tracked),
+        throwsA(isA<StateError>()),
+      );
+    },
+  );
+
   test('keeps special-character paths intact in blame and history', () async {
     final root = await createGitFixture();
     addTearDown(() => root.delete(recursive: true));

@@ -839,8 +839,10 @@ class GitRepository implements FullDiffRepository {
     final base = await _baseFor(commit, parent);
     final absolutePath = '$root/${file.path}';
     if (commit.isWorkingTree && !file.status.startsWith('D')) {
-      final expected =
-          workingTreeBytes ?? await File(absolutePath).readAsBytes();
+      final expected = workingTreeBytes;
+      if (expected == null) {
+        throw StateError('Working tree bytes are required');
+      }
       final before = await File(absolutePath).readAsBytes();
       final output = await _run(
         blameArguments(
