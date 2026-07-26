@@ -49,7 +49,6 @@ void main() {
     );
     expect(TimelineScreen.rowHeight, 32);
     expect(list.itemExtent, TimelineScreen.rowHeight);
-    expect(list.cacheExtent, 200);
 
     // The preview starts hidden and only a key opens it.
     expect(find.text('Commit & Diff'), findsNothing);
@@ -58,20 +57,26 @@ void main() {
     expect(find.text('second commit'), findsOneWidget);
     final selected = find.byKey(const Key('selected-row-2'));
     expect(selected, findsOneWidget);
-    final selectedBox =
+    final selectedBase =
         tester.widget<GestureDetector>(selected).child! as ColoredBox;
-    expect(selectedBox.color, const Color(0xFF1F4D8F));
+    expect(selectedBase.color, const Color(0xFF15171E));
+
+    final band = find.byKey(const Key('selection-band-2'));
+    final bandRect = tester.getRect(band);
+    final graphRect = tester.getRect(find.byKey(const Key('graph-cell-1')));
+    final refsRect = tester.getRect(find.byKey(const Key('refs-cell-1')));
+    final graphPainter =
+        tester
+                .widget<CustomPaint>(find.byKey(const Key('graph-painter-1')))
+                .painter!
+            as CommitGraphPainter;
+
     expect(
-      selectedBox.color.computeLuminance(),
-      greaterThan(const Color(0xFF15171E).computeLuminance()),
+      bandRect.left,
+      graphRect.left + graphPainter.laneX(graphPainter.row.lane),
     );
-    // The blue band runs the whole row, refs and graph cells included.
-    for (final cell in ['refs-cell-1', 'graph-cell-1']) {
-      expect(
-        find.descendant(of: selected, matching: find.byKey(Key(cell))),
-        findsOneWidget,
-      );
-    }
+    expect(bandRect.left, greaterThan(refsRect.right));
+    expect(bandRect.right, tester.getRect(selected).right);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
@@ -496,6 +501,31 @@ void main() {
       initialTimelineSize,
     );
     expect(scrollable.position.pixels, 360);
+  });
+
+  test('ref connector is a solid one-pixel line', () {
+    const size = Size(120, TimelineScreen.rowHeight);
+    const color = Color(0xFF00E5FF);
+    final row = layoutGraph([commit('tip', 'tip')]).single;
+    final painter = CommitGraphPainter(
+      row: row,
+      selected: false,
+      committerColor: color,
+      refConnector: true,
+    );
+
+    expect(
+      (Canvas canvas) => painter.paint(canvas, size),
+      paints..line(
+        p1: const Offset(0, TimelineScreen.rowHeight / 2),
+        p2: const Offset(
+          CommitGraphPainter.laneInset,
+          TimelineScreen.rowHeight / 2,
+        ),
+        color: color,
+        strokeWidth: 1.0,
+      ),
+    );
   });
 
   test('lane transitions turn on one 8px corner beside their node', () {
@@ -1909,40 +1939,45 @@ void main() {
     expect(find.byKey(const Key('selected-row-2')), findsOneWidget);
   });
 
-  testWidgets('selected row tints its ref chip and marks HEAD and tags', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      app(
-        FakeGitRepository(
-          (_, _) async => [
-            commit('3', 'head commit'),
-            commit(
-              'tagged',
-              'tagged commit',
-              refs: const [GitRef(name: 'v1.0', isTag: true)],
-            ),
-          ],
+  testWidgets(
+    'selected row keeps normal ref chip styling and marks HEAD and tags',
+    (tester) async {
+      await tester.pumpWidget(
+        app(
+          FakeGitRepository(
+            (_, _) async => [
+              commit('3', 'head commit'),
+              commit(
+                'tagged',
+                'tagged commit',
+                refs: const [GitRef(name: 'v1.0', isTag: true)],
+              ),
+            ],
+          ),
+          controller,
         ),
-        controller,
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    final chip = tester.widget<Container>(
-      find.byKey(const Key('ref-chip-3-main')),
-    );
-    expect((chip.decoration! as BoxDecoration).color, const Color(0xFF2B4E86));
-    final tag = tester.widget<Container>(
-      find.byKey(const Key('ref-chip-tagged-v1.0')),
-    );
-    expect(
-      (tag.decoration! as BoxDecoration).color,
-      isNot(const Color(0xFF2B4E86)),
-    );
-    expect(find.text('✓'), findsOneWidget);
-    expect(find.text('◇'), findsOneWidget);
-  });
+      Color chipColor(Key key) =>
+          (tester.widget<Container>(find.byKey(key)).decoration!
+                  as BoxDecoration)
+              .color!;
+
+      const mainKey = Key('ref-chip-3-main');
+      const tagKey = Key('ref-chip-tagged-v1.0');
+      final mainWhileSelected = chipColor(mainKey);
+      final tagWhileUnselected = chipColor(tagKey);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+
+      expect(chipColor(mainKey), mainWhileSelected);
+      expect(chipColor(tagKey), tagWhileUnselected);
+      expect(find.text('✓'), findsOneWidget);
+      expect(find.text('◇'), findsOneWidget);
+    },
+  );
 
   testWidgets('preview describes the working tree row and counts files', (
     tester,

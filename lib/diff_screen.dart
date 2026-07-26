@@ -412,11 +412,9 @@ class _DiffScreenState extends State<DiffScreen> {
     FullDiffColumnWidths(commits: _commitsWidth, files: _filesWidth),
   );
 
-  Widget _nearbyCommits() => DecoratedBox(
-    decoration: const BoxDecoration(
-      color: _surface,
-      border: Border(right: BorderSide(color: _border)),
-    ),
+  Widget _nearbyCommits() => Material(
+    color: _surface,
+    shape: const Border(right: BorderSide(color: _border)),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -472,11 +470,9 @@ class _DiffScreenState extends State<DiffScreen> {
     ),
   );
 
-  Widget _detailsAndFiles() => DecoratedBox(
-    decoration: const BoxDecoration(
-      color: _surface,
-      border: Border(right: BorderSide(color: _border)),
-    ),
+  Widget _detailsAndFiles() => Material(
+    color: _surface,
+    shape: const Border(right: BorderSide(color: _border)),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
