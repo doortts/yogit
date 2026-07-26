@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/full_diff_minimap.dart';
 import 'package:yogit/full_diff_model.dart';
@@ -57,6 +59,31 @@ void main() {
 
     expect(regular.markers.single.top, 79);
     expect(deleted.markers.single.top, 19);
+  });
+
+  test('uses the result hunk start for deletion-only changes', () {
+    final document = DiffDocument.fromLines(const [
+      DiffLine(kind: DiffLineKind.hunk, text: '@@ -81 +82,0 @@ delete'),
+      DiffLine(kind: DiffLineKind.delete, text: 'deleted', oldNumber: 81),
+    ]);
+
+    final regular = MinimapGeometry.fromDocument(
+      document: document,
+      activeAnchor: null,
+      sourceLineCount: 100,
+      height: 102,
+      deletedFile: false,
+    );
+    final deleted = MinimapGeometry.fromDocument(
+      document: document,
+      activeAnchor: null,
+      sourceLineCount: 100,
+      height: 102,
+      deletedFile: true,
+    );
+
+    expect(regular.markers.single.top, 81);
+    expect(deleted.markers.single.top, 80);
   });
 
   test('handles empty, short, and large source documents', () {
@@ -156,6 +183,7 @@ void main() {
             sourceLineCount: 100,
             deletedFile: false,
             view: FullDiffView.history,
+            presentation: DiffPresentation.hunk,
             scrollController: scrollController,
             onAnchorSelected: (_) {},
             onScrollFractionChanged: (_) {},
@@ -192,6 +220,7 @@ void main() {
                   sourceLineCount: 100,
                   deletedFile: false,
                   view: FullDiffView.diff,
+                  presentation: DiffPresentation.inline,
                   scrollController: scrollController,
                   onAnchorSelected: (_) {},
                   onScrollFractionChanged: (_) => scrollCallbacks++,
@@ -223,6 +252,62 @@ void main() {
     },
   );
 
+  testWidgets('scrolling a large document reuses marker geometry', (
+    tester,
+  ) async {
+    final lines = <DiffLine>[];
+    for (var line = 1; line <= 2000; line++) {
+      lines
+        ..add(
+          DiffLine(kind: DiffLineKind.hunk, text: '@@ -$line +$line @@ change'),
+        )
+        ..add(
+          DiffLine(kind: DiffLineKind.add, text: 'line $line', newNumber: line),
+        );
+    }
+    final document = DiffDocument.fromLines(lines);
+    final scrollController = ScrollController();
+    addTearDown(scrollController.dispose);
+
+    await tester.pumpWidget(
+      qaApp(
+        SizedBox(
+          height: 300,
+          child: Row(
+            children: [
+              Expanded(
+                child: ListView(
+                  controller: scrollController,
+                  children: const [SizedBox(height: 4000)],
+                ),
+              ),
+              FullDiffMinimap(
+                document: document,
+                activeAnchor: document.hunks.first.anchor,
+                sourceLineCount: 2000,
+                deletedFile: false,
+                view: FullDiffView.diff,
+                presentation: DiffPresentation.inline,
+                scrollController: scrollController,
+                onAnchorSelected: (_) {},
+                onScrollFractionChanged: (_) {},
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    final before = _minimapPainter(tester).geometry;
+
+    scrollController
+      ..jumpTo(300)
+      ..jumpTo(900);
+    await tester.pump();
+
+    expect(_minimapPainter(tester).geometry, same(before));
+  });
+
   testWidgets('track clicks select one nearest anchor at both boundaries', (
     tester,
   ) async {
@@ -241,6 +326,7 @@ void main() {
               sourceLineCount: 30,
               deletedFile: false,
               view: FullDiffView.diff,
+              presentation: DiffPresentation.inline,
               scrollController: scrollController,
               onAnchorSelected: selected.add,
               onScrollFractionChanged: (_) {},
@@ -263,6 +349,108 @@ void main() {
     ]);
   });
 
+  testWidgets('semantics names the current hunk and moves both directions', (
+    tester,
+  ) async {
+    final semanticsHandle = tester.ensureSemantics();
+    final scrollController = ScrollController();
+    addTearDown(scrollController.dispose);
+    var activeAnchor = twoHunkDocument.hunks.first.anchor;
+    final selected = <DiffAnchor>[];
+
+    await tester.pumpWidget(
+      qaApp(
+        StatefulBuilder(
+          builder: (context, setState) => SizedBox(
+            height: 300,
+            child: FullDiffMinimap(
+              document: twoHunkDocument,
+              activeAnchor: activeAnchor,
+              sourceLineCount: 30,
+              deletedFile: false,
+              view: FullDiffView.diff,
+              presentation: DiffPresentation.inline,
+              scrollController: scrollController,
+              onAnchorSelected: (anchor) {
+                selected.add(anchor);
+                setState(() => activeAnchor = anchor);
+              },
+              onScrollFractionChanged: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final minimap = find.semantics.byLabel('Diff minimap');
+    var data = minimap.evaluate().single.getSemanticsData();
+    expect(data.value, 'Change 1 of 2');
+    expect(data.hasAction(SemanticsAction.increase), isTrue);
+    expect(data.hasAction(SemanticsAction.decrease), isFalse);
+
+    tester.semantics.increase(minimap);
+    await tester.pump();
+    expect(selected.last, same(twoHunkDocument.hunks.last.anchor));
+    data = minimap.evaluate().single.getSemanticsData();
+    expect(data.value, 'Change 2 of 2');
+    expect(data.hasAction(SemanticsAction.increase), isFalse);
+    expect(data.hasAction(SemanticsAction.decrease), isTrue);
+
+    tester.semantics.decrease(minimap);
+    await tester.pump();
+    expect(selected.last, same(twoHunkDocument.hunks.first.anchor));
+    semanticsHandle.dispose();
+  });
+
+  testWidgets('focused minimap uses arrow keys for previous and next hunks', (
+    tester,
+  ) async {
+    final scrollController = ScrollController();
+    addTearDown(scrollController.dispose);
+    var activeAnchor = twoHunkDocument.hunks.first.anchor;
+    final selected = <DiffAnchor>[];
+
+    await tester.pumpWidget(
+      qaApp(
+        StatefulBuilder(
+          builder: (context, setState) => Center(
+            child: SizedBox(
+              height: 300,
+              child: FullDiffMinimap(
+                document: twoHunkDocument,
+                activeAnchor: activeAnchor,
+                sourceLineCount: 30,
+                deletedFile: false,
+                view: FullDiffView.diff,
+                presentation: DiffPresentation.inline,
+                scrollController: scrollController,
+                onAnchorSelected: (anchor) {
+                  selected.add(anchor);
+                  setState(() => activeAnchor = anchor);
+                },
+                onScrollFractionChanged: (_) {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final minimap = find.byKey(const Key('full-diff-minimap'));
+    final topLeft = tester.getTopLeft(minimap);
+    await tester.tapAt(topLeft + const Offset(9, 1));
+    await tester.pump();
+    selected.clear();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(selected.last, same(twoHunkDocument.hunks.last.anchor));
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+    expect(selected.last, same(twoHunkDocument.hunks.first.anchor));
+  });
+
   testWidgets('empty documents ignore track clicks and drags', (tester) async {
     final scrollController = ScrollController();
     addTearDown(scrollController.dispose);
@@ -279,6 +467,7 @@ void main() {
             sourceLineCount: 0,
             deletedFile: false,
             view: FullDiffView.diff,
+            presentation: DiffPresentation.hunk,
             scrollController: scrollController,
             onAnchorSelected: (_) => anchorCallbacks++,
             onScrollFractionChanged: (_) => scrollCallbacks++,
@@ -322,6 +511,7 @@ void main() {
                 sourceLineCount: 100,
                 deletedFile: false,
                 view: FullDiffView.diff,
+                presentation: DiffPresentation.inline,
                 scrollController: scrollController,
                 onAnchorSelected: (_) => anchorCallbacks++,
                 onScrollFractionChanged: fractions.add,
@@ -347,4 +537,97 @@ void main() {
     expect(fractions.last, 1);
     expect(anchorCallbacks, 0);
   });
+
+  for (final scenario in [
+    (
+      label: 'hunk',
+      view: FullDiffView.diff,
+      presentation: DiffPresentation.hunk,
+      scrolls: false,
+    ),
+    (
+      label: 'inline',
+      view: FullDiffView.diff,
+      presentation: DiffPresentation.inline,
+      scrolls: true,
+    ),
+    (
+      label: 'split',
+      view: FullDiffView.diff,
+      presentation: DiffPresentation.split,
+      scrolls: true,
+    ),
+    (
+      label: 'file',
+      view: FullDiffView.file,
+      presentation: DiffPresentation.hunk,
+      scrolls: true,
+    ),
+    (
+      label: 'blame',
+      view: FullDiffView.blame,
+      presentation: DiffPresentation.hunk,
+      scrolls: true,
+    ),
+  ]) {
+    testWidgets('${scenario.label} viewport drag uses the correct callback', (
+      tester,
+    ) async {
+      final scrollController = ScrollController();
+      addTearDown(scrollController.dispose);
+      final selected = <DiffAnchor>[];
+      final fractions = <double>[];
+
+      await tester.pumpWidget(
+        qaApp(
+          SizedBox(
+            height: 300,
+            child: Row(
+              children: [
+                Expanded(
+                  child: ListView(
+                    controller: scrollController,
+                    children: const [SizedBox(height: 1200)],
+                  ),
+                ),
+                FullDiffMinimap(
+                  document: twoHunkDocument,
+                  activeAnchor: twoHunkDocument.hunks.first.anchor,
+                  sourceLineCount: 100,
+                  deletedFile: false,
+                  view: scenario.view,
+                  presentation: scenario.presentation,
+                  scrollController: scrollController,
+                  onAnchorSelected: selected.add,
+                  onScrollFractionChanged: fractions.add,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      scrollController.jumpTo(300);
+      await tester.pump();
+
+      final minimap = find.byKey(const Key('full-diff-minimap'));
+      final topLeft = tester.getTopLeft(minimap);
+      final gesture = await tester.startGesture(topLeft + const Offset(9, 80));
+      await gesture.moveTo(topLeft + const Offset(9, 180));
+      await tester.pump();
+      await gesture.up();
+
+      expect(fractions, scenario.scrolls ? isNotEmpty : isEmpty);
+      expect(selected, scenario.scrolls ? isEmpty : isNotEmpty);
+    });
+  }
+}
+
+FullDiffMinimapPainter _minimapPainter(WidgetTester tester) {
+  final paint = tester.widget<CustomPaint>(
+    find.descendant(
+      of: find.byKey(const Key('full-diff-minimap')),
+      matching: find.byType(CustomPaint),
+    ),
+  );
+  return paint.painter! as FullDiffMinimapPainter;
 }

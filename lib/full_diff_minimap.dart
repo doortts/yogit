@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'full_diff_model.dart';
 import 'full_diff_theme.dart';
@@ -55,8 +56,8 @@ class MinimapGeometry {
         document.hunks.map((hunk) {
           final anchor = hunk.anchor;
           final line = deletedFile
-              ? anchor.oldLine ?? anchor.newLine ?? 1
-              : anchor.newLine ?? anchor.oldLine ?? 1;
+              ? anchor.oldLine ?? hunk.oldStart
+              : anchor.newLine ?? hunk.newStart;
           final hasAddition = hunk.lines.any(
             (line) => line.kind == DiffLineKind.add,
           );
@@ -136,6 +137,7 @@ class FullDiffMinimap extends StatefulWidget {
     required this.sourceLineCount,
     required this.deletedFile,
     required this.view,
+    required this.presentation,
     required this.scrollController,
     required this.onAnchorSelected,
     required this.onScrollFractionChanged,
@@ -147,6 +149,7 @@ class FullDiffMinimap extends StatefulWidget {
   final int sourceLineCount;
   final bool deletedFile;
   final FullDiffView view;
+  final DiffPresentation presentation;
   final ScrollController scrollController;
   final ValueChanged<DiffAnchor> onAnchorSelected;
   final ValueChanged<double> onScrollFractionChanged;
@@ -156,12 +159,21 @@ class FullDiffMinimap extends StatefulWidget {
 }
 
 class _FullDiffMinimapState extends State<FullDiffMinimap> {
+  final FocusNode _focusNode = FocusNode(debugLabel: 'Full diff minimap');
   bool _dragging = false;
   bool _draggingViewport = false;
   double _dragOffset = 0;
   int _programmaticScrollSerial = 0;
   DiffAnchor? _lastDragAnchor;
   bool _metricsRebuildScheduled = false;
+  MinimapGeometry? _cachedGeometry;
+  DiffDocument? _cachedDocument;
+  DiffAnchor? _cachedActiveAnchor;
+  int? _cachedSourceLineCount;
+  double? _cachedHeight;
+  bool? _cachedDeletedFile;
+  FullDiffView? _cachedView;
+  DiffPresentation? _cachedPresentation;
 
   @override
   void initState() {
@@ -181,6 +193,7 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
   @override
   void dispose() {
     widget.scrollController.removeListener(_handleExternalScroll);
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -219,6 +232,10 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
         position.maxScrollExtent > 0;
   }
 
+  bool get _usesAnchorDrag =>
+      widget.view == FullDiffView.diff &&
+      widget.presentation == DiffPresentation.hunk;
+
   void _scheduleMetricsRebuild() {
     if (_metricsRebuildScheduled) return;
     _metricsRebuildScheduled = true;
@@ -229,13 +246,7 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
   }
 
   void _selectAnchor(double y, double height, {required bool deduplicate}) {
-    final geometry = MinimapGeometry.fromDocument(
-      document: widget.document,
-      activeAnchor: widget.activeAnchor,
-      sourceLineCount: widget.sourceLineCount,
-      height: height,
-      deletedFile: widget.deletedFile,
-    );
+    final geometry = _geometryFor(height);
     final anchor = nearestAnchorForY(y, height, geometry.markers);
     if (anchor == null) return;
     if (deduplicate && _sameAnchor(anchor, _lastDragAnchor)) return;
@@ -248,7 +259,8 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
     _lastDragAnchor = null;
     final viewport = _viewport(height);
     final y = details.localPosition.dy;
-    _draggingViewport = _hasScrollableContent && viewport.contains(y);
+    _draggingViewport =
+        !_usesAnchorDrag && _hasScrollableContent && viewport.contains(y);
     if (_draggingViewport) {
       _dragOffset = y - viewport.top;
     } else {
@@ -285,6 +297,63 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
     _lastDragAnchor = null;
   }
 
+  int get _activeHunkIndex => widget.document.hunks.indexWhere(
+    (hunk) => _sameAnchor(hunk.anchor, widget.activeAnchor),
+  );
+
+  void _stepAnchor(int delta) {
+    final current = _activeHunkIndex;
+    final next = current + delta;
+    if (next < 0 || next >= widget.document.hunks.length) return;
+    widget.onAnchorSelected(widget.document.hunks[next].anchor);
+  }
+
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      _stepAnchor(-1);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      _stepAnchor(1);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  MinimapGeometry _geometryFor(double height) {
+    final cached = _cachedGeometry;
+    if (cached != null &&
+        identical(_cachedDocument, widget.document) &&
+        _sameAnchor(_cachedActiveAnchor, widget.activeAnchor) &&
+        _cachedSourceLineCount == widget.sourceLineCount &&
+        _cachedHeight == height &&
+        _cachedDeletedFile == widget.deletedFile &&
+        _cachedView == widget.view &&
+        _cachedPresentation == widget.presentation) {
+      return cached;
+    }
+
+    final geometry = MinimapGeometry.fromDocument(
+      document: widget.document,
+      activeAnchor: widget.activeAnchor,
+      sourceLineCount: widget.sourceLineCount,
+      height: height,
+      deletedFile: widget.deletedFile,
+    );
+    _cachedGeometry = geometry;
+    _cachedDocument = widget.document;
+    _cachedActiveAnchor = widget.activeAnchor;
+    _cachedSourceLineCount = widget.sourceLineCount;
+    _cachedHeight = height;
+    _cachedDeletedFile = widget.deletedFile;
+    _cachedView = widget.view;
+    _cachedPresentation = widget.presentation;
+    return geometry;
+  }
+
   @override
   Widget build(BuildContext context) {
     if (widget.view == FullDiffView.history) {
@@ -298,33 +367,52 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
           final height = constraints.maxHeight.isFinite
               ? math.max(0.0, constraints.maxHeight)
               : 0.0;
-          final geometry = MinimapGeometry.fromDocument(
-            document: widget.document,
-            activeAnchor: widget.activeAnchor,
-            sourceLineCount: widget.sourceLineCount,
-            height: height,
-            deletedFile: widget.deletedFile,
-          );
+          final geometry = _geometryFor(height);
           final viewport = _viewport(height);
-          return GestureDetector(
-            key: const Key('full-diff-minimap'),
-            behavior: HitTestBehavior.opaque,
-            dragStartBehavior: DragStartBehavior.down,
-            onTapUp: (details) => _selectAnchor(
-              details.localPosition.dy,
-              height,
-              deduplicate: false,
-            ),
-            onPanStart: (details) => _startDrag(details, height),
-            onPanUpdate: (details) => _updateDrag(details, height),
-            onPanEnd: (_) => _endDrag(),
-            onPanCancel: _endDrag,
-            child: CustomPaint(
-              painter: FullDiffMinimapPainter(
-                geometry: geometry,
-                viewport: viewport,
+          final activeIndex = _activeHunkIndex;
+          final hunkCount = widget.document.hunks.length;
+          return Semantics(
+            container: true,
+            label: 'Diff minimap',
+            value: hunkCount == 0
+                ? 'No changes'
+                : 'Change ${activeIndex + 1} of $hunkCount',
+            focusable: true,
+            increasedValue: activeIndex >= 0 && activeIndex < hunkCount - 1
+                ? 'Change ${activeIndex + 2} of $hunkCount'
+                : null,
+            decreasedValue: activeIndex > 0
+                ? 'Change $activeIndex of $hunkCount'
+                : null,
+            onIncrease: activeIndex >= 0 && activeIndex < hunkCount - 1
+                ? () => _stepAnchor(1)
+                : null,
+            onDecrease: activeIndex > 0 ? () => _stepAnchor(-1) : null,
+            child: Focus(
+              focusNode: _focusNode,
+              onKeyEvent: _handleKeyEvent,
+              child: GestureDetector(
+                key: const Key('full-diff-minimap'),
+                behavior: HitTestBehavior.opaque,
+                dragStartBehavior: DragStartBehavior.down,
+                onTapDown: (_) => _focusNode.requestFocus(),
+                onTapUp: (details) => _selectAnchor(
+                  details.localPosition.dy,
+                  height,
+                  deduplicate: false,
+                ),
+                onPanStart: (details) => _startDrag(details, height),
+                onPanUpdate: (details) => _updateDrag(details, height),
+                onPanEnd: (_) => _endDrag(),
+                onPanCancel: _endDrag,
+                child: CustomPaint(
+                  painter: FullDiffMinimapPainter(
+                    geometry: geometry,
+                    viewport: viewport,
+                  ),
+                  size: Size(fullDiffMinimapWidth, height),
+                ),
               ),
-              size: Size(fullDiffMinimapWidth, height),
             ),
           );
         },
