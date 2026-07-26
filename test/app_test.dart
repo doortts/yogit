@@ -49,7 +49,7 @@ void main() {
     );
     expect(TimelineScreen.rowHeight, 32);
     expect(list.itemExtent, TimelineScreen.rowHeight);
-    expect(list.cacheExtent, 200);
+    expect(list.scrollCacheExtent, const ScrollCacheExtent.pixels(200));
 
     // The preview starts hidden and only a key opens it.
     expect(find.text('Commit & Diff'), findsNothing);

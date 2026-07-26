@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 
 import 'avatars.dart';
@@ -1486,7 +1487,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                         key: const Key('timeline-list'),
                         controller: _scrollController,
                         // A little cache keeps rows from popping in mid-scroll.
-                        cacheExtent: 200,
+                        scrollCacheExtent: const ScrollCacheExtent.pixels(200),
                         itemExtent: TimelineScreen.rowHeight,
                         itemCount: _entries.length + (_showFooter ? 1 : 0),
                         itemBuilder: (context, index) {
