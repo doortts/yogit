@@ -26,6 +26,18 @@ void main() {
       qaApp(
         FullFileView(
           document: resultFile,
+          hunks: const [
+            DiffHunk(
+              index: 0,
+              oldStart: 313,
+              oldCount: 1,
+              newStart: 314,
+              newCount: 1,
+              context: '',
+              lines: [],
+              anchor: anchor,
+            ),
+          ],
           path: 'src/drlua.pas',
           activeAnchor: anchor,
           wrapLines: false,
@@ -78,6 +90,7 @@ void main() {
               disableRichRendering: true,
               fingerprint: '0:0',
             ),
+            hunks: const [],
             path: fileA.path,
             activeAnchor: null,
             wrapLines: false,
@@ -100,6 +113,7 @@ void main() {
       qaApp(
         FullFileView(
           document: empty,
+          hunks: const [],
           path: empty.path,
           activeAnchor: null,
           wrapLines: false,
@@ -121,6 +135,7 @@ void main() {
       qaApp(
         FullFileView(
           document: deleted,
+          hunks: const [],
           path: deleted.path,
           activeAnchor: null,
           wrapLines: false,
@@ -162,6 +177,7 @@ void main() {
               disableRichRendering: true,
               fingerprint: '0:0',
             ),
+            hunks: const [],
             path: 'deleted.txt',
             activeAnchor: null,
             wrapLines: false,
@@ -199,6 +215,7 @@ void main() {
       qaApp(
         FullFileView(
           document: document,
+          hunks: const [],
           path: document.path,
           activeAnchor: null,
           wrapLines: false,
@@ -225,6 +242,7 @@ void main() {
       qaApp(
         FullFileView(
           document: document,
+          hunks: const [],
           path: document.path,
           activeAnchor: null,
           wrapLines: false,
@@ -373,6 +391,18 @@ void main() {
       qaApp(
         FullBlameView(
           document: blame,
+          hunks: const [
+            DiffHunk(
+              index: 0,
+              oldStart: 1,
+              oldCount: 1,
+              newStart: 1,
+              newCount: 1,
+              context: '',
+              lines: [],
+              anchor: anchor,
+            ),
+          ],
           activeAnchor: anchor,
           wrapLines: false,
           highlighter: fakeHighlighter,
@@ -423,6 +453,7 @@ void main() {
       qaApp(
         FullBlameView(
           document: blame,
+          hunks: const [],
           activeAnchor: null,
           wrapLines: false,
           highlighter: const _ThrowingSyntaxHighlighter(),
@@ -456,6 +487,7 @@ void main() {
       qaApp(
         FullBlameView(
           document: blame,
+          hunks: const [],
           activeAnchor: null,
           wrapLines: false,
           highlighter: fakeHighlighter,

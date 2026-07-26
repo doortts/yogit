@@ -2521,7 +2521,13 @@ void main() {
       AppSettings.fromJson({
         'fullDiffColumnWidths': {'commits': 1, 'files': 9999},
       }).fullDiffColumnWidths,
-      const FullDiffColumnWidths(commits: 140, files: 520),
+      const FullDiffColumnWidths(commits: 126, files: 520),
+    );
+    expect(
+      FullDiffColumnWidths.fromJson(
+        const FullDiffColumnWidths(commits: 126, files: 158).toJson(),
+      ),
+      const FullDiffColumnWidths(commits: 126, files: 158),
     );
   });
 
@@ -3109,6 +3115,55 @@ void main() {
       tester.getSize(find.byKey(const Key('details-files-column'))).width,
       330,
     );
+  });
+
+  testWidgets('full diff restores and saves exact minimum column widths', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('1', 'commit')],
+      files: (_, _) async => const [],
+    );
+    final restored = AppSettings.fromJson({
+      'fullDiffColumnWidths': {'commits': 126, 'files': 158},
+    }).fullDiffColumnWidths;
+    FullDiffColumnWidths? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: repository,
+          commits: [commit('1', 'commit')],
+          initialIndex: 0,
+          columnWidths: restored,
+          onColumnWidthsChanged: (value) => saved = value,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.getSize(find.byKey(const Key('nearby-column'))).width, 126);
+    expect(
+      tester.getSize(find.byKey(const Key('details-files-column'))).width,
+      158,
+    );
+
+    await tester.drag(
+      find.byKey(const Key('nearby-column-resizer')),
+      const Offset(-80, 0),
+    );
+    await tester.drag(
+      find.byKey(const Key('details-files-column-resizer')),
+      const Offset(-80, 0),
+    );
+    await tester.pumpAndSettle();
+
+    expect(saved, const FullDiffColumnWidths(commits: 126, files: 158));
   });
 
   testWidgets('focus mode hides navigation and restores saved widths', (
@@ -7120,8 +7175,7 @@ void main() {
     Actions.invoke(tester.element(first), CopySelectionTextIntent.copy);
     await tester.pump();
     expect(copied, hasLength(1));
-    expect(copied.single, contains('alpha lib/one.dart'));
-    expect(copied.single, contains('beta lib/one.dart'));
+    expect(copied.single.trim(), 'alpha lib/one.dart\nbeta lib/one.dart');
 
     // The Hunk card keeps selection local, and the keyboard still drives the
     // screen after copying the drag selection.

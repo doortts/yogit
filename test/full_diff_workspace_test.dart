@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' as ui;
 
@@ -24,6 +25,16 @@ class _RecordingEditorService extends ExternalEditorService {
     this.relativePath = relativePath;
     this.line = line;
   }
+}
+
+class _CompletingEditorService extends ExternalEditorService {
+  _CompletingEditorService(this.completer) : super(repositoryRoot: '/unused');
+
+  final Completer<void> completer;
+
+  @override
+  Future<void> open({required String relativePath, int? line}) =>
+      completer.future;
 }
 
 void main() {
@@ -445,6 +456,348 @@ void main() {
       DiffPresentation.split,
     );
   });
+
+  testWidgets('file load errors stay distinct from an empty successful load', (
+    tester,
+  ) async {
+    var attempt = 0;
+    final repository = FakeFullDiffRepository();
+    repository.files = (_, _) async {
+      if (attempt++ == 0) throw StateError('files failed');
+      return const [];
+    };
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await pumpWorkspace(
+      tester,
+      controller: controller,
+      size: const Size(1070, 842),
+    );
+
+    expect(find.byKey(const Key('files-error')), findsOneWidget);
+    expect(find.textContaining('files failed'), findsOneWidget);
+    expect(find.byKey(const Key('files-empty')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('files-retry')));
+    await tester.pumpAndSettle();
+
+    expect(repository.fileRequests, hasLength(2));
+    expect(find.byKey(const Key('files-error')), findsNothing);
+    expect(find.byKey(const Key('files-empty')), findsOneWidget);
+  });
+
+  for (final view in [FullDiffView.file, FullDiffView.blame]) {
+    testWidgets('manual ${view.name} scroll synchronizes the active hunk', (
+      tester,
+    ) async {
+      final lines = <DiffLine>[
+        const DiffLine(kind: DiffLineKind.hunk, text: '@@ -5 +5 @@ first'),
+        const DiffLine(
+          kind: DiffLineKind.delete,
+          text: 'old first',
+          oldNumber: 5,
+        ),
+        const DiffLine(kind: DiffLineKind.add, text: 'new first', newNumber: 5),
+        const DiffLine(kind: DiffLineKind.hunk, text: '@@ -100 +100 @@ second'),
+        const DiffLine(
+          kind: DiffLineKind.delete,
+          text: 'old second',
+          oldNumber: 100,
+        ),
+        const DiffLine(
+          kind: DiffLineKind.add,
+          text: 'new second',
+          newNumber: 100,
+        ),
+      ];
+      final bytes = Uint8List.fromList(
+        utf8.encode(
+          '${[for (var line = 1; line <= 130; line++) 'line $line'].join('\n')}\n',
+        ),
+      );
+      final repository = FakeFullDiffRepository();
+      repository.files = (_, _) async => const [fileA];
+      repository.diff = (_, _, _, _, _) async => lines;
+      repository.content = (_, _, _) async => bytes;
+      repository.blame = (_, _, _, _) async => [
+        for (var line = 1; line <= 130; line++)
+          GitBlameLine(
+            lineNumber: line,
+            sha: commitA.sha,
+            author: fixtureIdentity.name,
+            uncommitted: false,
+          ),
+      ];
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [commitA],
+        initialIndex: 0,
+        initialView: FullDiffInitialView.hunk,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      controller.setView(view);
+      await pumpWorkspace(
+        tester,
+        controller: controller,
+        size: const Size(1070, 650),
+      );
+      final listKey = view == FullDiffView.file
+          ? const Key('file-list')
+          : const Key('blame-list');
+      final scrollable = find
+          .descendant(
+            of: find.byKey(listKey),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      final position = tester.state<ScrollableState>(scrollable).position;
+
+      while (position.pixels < position.maxScrollExtent - 0.5) {
+        await tester.drag(scrollable, const Offset(0, -240));
+        await tester.pump();
+      }
+
+      expect(controller.state.activeAnchor?.hunkIndex, 1);
+      expect(find.text('2 / 2'), findsOneWidget);
+      expect(
+        tester
+            .widget<FullDiffMinimap>(find.byType(FullDiffMinimap))
+            .activeAnchor
+            ?.hunkIndex,
+        1,
+      );
+    });
+  }
+
+  testWidgets('a deletion-only hunk opens its result-side boundary line', (
+    tester,
+  ) async {
+    const workingTree = GitCommit(
+      sha: '',
+      shortSha: '',
+      parents: ['HEAD'],
+      author: fixtureIdentity,
+      authorTimestamp: 1720573300,
+      committer: fixtureIdentity,
+      committerTimestamp: 1720573300,
+      refs: [],
+      subject: 'working tree',
+    );
+    final lines = <DiffLine>[
+      const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@ first'),
+      const DiffLine(
+        kind: DiffLineKind.delete,
+        text: 'old first',
+        oldNumber: 1,
+      ),
+      const DiffLine(kind: DiffLineKind.add, text: 'new first', newNumber: 1),
+      const DiffLine(kind: DiffLineKind.hunk, text: '@@ -10,2 +10 @@ middle'),
+      const DiffLine(
+        kind: DiffLineKind.context,
+        text: 'kept',
+        oldNumber: 10,
+        newNumber: 10,
+      ),
+      const DiffLine(kind: DiffLineKind.delete, text: 'removed', oldNumber: 11),
+      const DiffLine(kind: DiffLineKind.hunk, text: '@@ -20 +19 @@ last'),
+      const DiffLine(
+        kind: DiffLineKind.delete,
+        text: 'old last',
+        oldNumber: 20,
+      ),
+      const DiffLine(kind: DiffLineKind.add, text: 'new last', newNumber: 19),
+    ];
+    final repository = FakeFullDiffRepository();
+    repository.files = (_, _) async => const [fileA];
+    repository.diff = (_, _, _, _, _) async => lines;
+    repository.content = (_, _, _) async => resultFile.bytes;
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [workingTree],
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.selectAnchor(controller.state.patch.data!.hunks[1].anchor);
+    final editorService = _RecordingEditorService();
+    await pumpWorkspace(
+      tester,
+      controller: controller,
+      size: const Size(1070, 842),
+      editorService: editorService,
+    );
+
+    await tester.tap(find.byKey(const Key('open-editor')));
+    await tester.pump();
+
+    expect(editorService.line, 10);
+  });
+
+  testWidgets('a late editor failure cannot alter a replacement session', (
+    tester,
+  ) async {
+    const workingTree = GitCommit(
+      sha: '',
+      shortSha: '',
+      parents: ['HEAD'],
+      author: fixtureIdentity,
+      authorTimestamp: 1720573300,
+      committer: fixtureIdentity,
+      committerTimestamp: 1720573300,
+      refs: [],
+      subject: 'working tree',
+    );
+    Future<FullDiffSessionController> controllerFor(String path) async {
+      final file = GitFileChange(
+        path: path,
+        status: 'M',
+        additions: 1,
+        deletions: 1,
+      );
+      final repository = FakeFullDiffRepository();
+      repository.files = (_, _) async => [file];
+      repository.diff = (_, _, _, _, _) async => twoHunkLines;
+      repository.content = (_, _, _) async => resultFile.bytes;
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [workingTree],
+        initialIndex: 0,
+        initialView: FullDiffInitialView.hunk,
+      );
+      await controller.initialize();
+      return controller;
+    }
+
+    final first = await controllerFor('src/first.pas');
+    final second = await controllerFor('src/second.pas');
+    addTearDown(first.dispose);
+    addTearDown(second.dispose);
+    final editorCompleter = Completer<void>();
+    final editorService = _CompletingEditorService(editorCompleter);
+    await pumpWorkspace(
+      tester,
+      controller: first,
+      size: const Size(1070, 842),
+      editorService: editorService,
+    );
+    await tester.tap(find.byKey(const Key('open-editor')));
+    await tester.pump();
+    expect(editorButton(tester).onPressed, isNull);
+
+    await pumpWorkspace(
+      tester,
+      controller: second,
+      size: const Size(1070, 842),
+      editorService: editorService,
+    );
+    expect(find.text('src/second.pas'), findsWidgets);
+    expect(editorButton(tester).onPressed, isNotNull);
+
+    editorCompleter.completeError(StateError('late editor failed'));
+    await tester.pump();
+    await tester.pump();
+
+    final tooltip = tester.widget<Tooltip>(
+      find.ancestor(
+        of: find.byKey(const Key('open-editor')),
+        matching: find.byType(Tooltip),
+      ),
+    );
+    expect(tooltip.message, isNot(contains('late editor failed')));
+    expect(editorButton(tester).onPressed, isNotNull);
+  });
+
+  for (final presentation in [
+    DiffPresentation.inline,
+    DiffPresentation.split,
+  ]) {
+    testWidgets('${presentation.name} mounts and reveals a distant lazy hunk', (
+      tester,
+    ) async {
+      final lines = <DiffLine>[
+        for (var hunk = 0; hunk < 40; hunk++) ...[
+          DiffLine(
+            kind: DiffLineKind.hunk,
+            text: '@@ -${hunk * 12 + 1},12 +${hunk * 12 + 1},12 @@ hunk $hunk',
+          ),
+          for (var row = 0; row < 11; row++)
+            DiffLine(
+              kind: DiffLineKind.context,
+              text: 'hunk $hunk context $row',
+              oldNumber: hunk * 12 + row + 1,
+              newNumber: hunk * 12 + row + 1,
+            ),
+          DiffLine(
+            kind: DiffLineKind.add,
+            text: 'hunk $hunk changed',
+            newNumber: hunk * 12 + 12,
+          ),
+        ],
+      ];
+      final repository = FakeFullDiffRepository();
+      repository.files = (_, _) async => const [fileA];
+      repository.diff = (_, _, _, _, _) async => lines;
+      repository.content = (_, _, _) async => resultFile.bytes;
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [commitA],
+        initialIndex: 0,
+        initialView: FullDiffInitialView.hunk,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      controller.setPresentation(presentation);
+      await pumpWorkspace(
+        tester,
+        controller: controller,
+        size: const Size(1070, 650),
+      );
+      final target = controller.state.patch.data!.hunks.last.anchor;
+
+      expect(
+        find.byKey(
+          Key(
+            presentation == DiffPresentation.inline
+                ? 'inline-hunk-39'
+                : 'split-hunk-39',
+          ),
+        ),
+        findsNothing,
+      );
+      controller.selectAnchor(target);
+      await tester.pumpAndSettle();
+
+      expect(controller.state.activeAnchor?.hunkIndex, 39);
+      expect(
+        find.byKey(
+          Key(
+            presentation == DiffPresentation.inline
+                ? 'inline-hunk-39'
+                : 'split-hunk-39',
+          ),
+        ),
+        findsOneWidget,
+      );
+      final scrollable = find
+          .descendant(
+            of: find.byKey(const Key('content-scrollable')),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      expect(
+        tester.state<ScrollableState>(scrollable).position.pixels,
+        greaterThan(0),
+      );
+    });
+  }
 
   testWidgets(
     'external editor stays blocked outside an existing worktree file',

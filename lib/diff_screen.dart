@@ -99,6 +99,7 @@ class _DiffScreenState extends State<DiffScreen> {
   int _pendingAnchorDirection = 0;
   String? _editorError;
   bool _openingEditor = false;
+  int _editorRequestSerial = 0;
 
   @override
   void initState() {
@@ -134,8 +135,10 @@ class _DiffScreenState extends State<DiffScreen> {
   @override
   void didUpdateWidget(covariant DiffScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.editorService != oldWidget.editorService ||
-        widget.repository.root != oldWidget.repository.root) {
+    final editorContextChanged =
+        widget.editorService != oldWidget.editorService ||
+        widget.repository.root != oldWidget.repository.root;
+    if (editorContextChanged) {
       _editorService =
           widget.editorService ??
           ExternalEditorService(repositoryRoot: widget.repository.root);
@@ -152,6 +155,9 @@ class _DiffScreenState extends State<DiffScreen> {
             !identical(widget.commits, oldWidget.commits) ||
             widget.initialIndex != oldWidget.initialIndex ||
             widget.initialView != oldWidget.initialView);
+    if (editorContextChanged || controllerChanged || ownedInputsChanged) {
+      _invalidateEditorRequest();
+    }
     if (!controllerChanged && !ownedInputsChanged) return;
 
     _controller.removeListener(_handleControllerChanged);
@@ -159,19 +165,25 @@ class _DiffScreenState extends State<DiffScreen> {
     _attachController(_newController());
     _pendingScrollToTop = true;
     _pendingAnchorId = null;
-    _editorError = null;
     _scheduleScrollEffect();
     if (_ownsController) unawaited(_controller.initialize());
   }
 
   @override
   void dispose() {
+    _editorRequestSerial++;
     _controller.removeListener(_handleControllerChanged);
     _contentScroll
       ..removeListener(_handleContentScrolled)
       ..dispose();
     if (_ownsController) _controller.dispose();
     super.dispose();
+  }
+
+  void _invalidateEditorRequest() {
+    _editorRequestSerial++;
+    _openingEditor = false;
+    _editorError = null;
   }
 
   void _handleControllerChanged() {
@@ -191,9 +203,9 @@ class _DiffScreenState extends State<DiffScreen> {
 
     if (changedDocument) _reconcileAnchorKeys(next.patch.data);
     if (movedContext) {
+      _invalidateEditorRequest();
       _pendingScrollToTop = true;
       _pendingAnchorId = null;
-      _editorError = null;
     }
     if (!_pendingScrollToTop && navigationRequested && nextAnchor != null) {
       _pendingAnchorId = nextAnchor.id;
@@ -370,20 +382,40 @@ class _DiffScreenState extends State<DiffScreen> {
     final state = _controller.state;
     final file = state.selectedFile;
     if (file == null || !_canOpenEditor(state)) return;
+    final request = ++_editorRequestSerial;
     setState(() {
       _openingEditor = true;
       _editorError = null;
     });
+    String? errorMessage;
     try {
       await _editorService.open(
         relativePath: file.path,
-        line: state.activeAnchor?.newLine,
+        line: _editorLine(state),
       );
     } catch (error) {
-      if (mounted) setState(() => _editorError = error.toString());
+      errorMessage = error.toString();
     } finally {
-      if (mounted) setState(() => _openingEditor = false);
+      if (mounted && request == _editorRequestSerial) {
+        setState(() {
+          _openingEditor = false;
+          _editorError = errorMessage;
+        });
+      }
     }
+  }
+
+  int? _editorLine(FullDiffSessionState state) {
+    final anchor = state.activeAnchor;
+    if (anchor == null) return null;
+    if (anchor.newLine != null) return anchor.newLine;
+    final hunks = state.patch.data?.hunks;
+    if (hunks == null ||
+        anchor.hunkIndex < 0 ||
+        anchor.hunkIndex >= hunks.length) {
+      return null;
+    }
+    return math.max(1, hunks[anchor.hunkIndex].newStart);
   }
 
   @override
@@ -804,6 +836,47 @@ class _DiffScreenState extends State<DiffScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                   ),
+                if (!state.filesResource.loading &&
+                    state.filesResource.error != null)
+                  Center(
+                    key: const Key('files-error'),
+                    child: Semantics(
+                      liveRegion: true,
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              state.filesResource.error.toString(),
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: fullDiffDeletedMark,
+                                fontSize: 13,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            TextButton(
+                              key: const Key('files-retry'),
+                              onPressed: () =>
+                                  unawaited(_controller.retryFiles()),
+                              child: const Text('다시 시도'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                if (!state.filesResource.loading &&
+                    state.filesResource.error == null &&
+                    state.filesResource.data?.isEmpty == true)
+                  const Center(
+                    key: Key('files-empty'),
+                    child: Text(
+                      '변경된 파일이 없습니다',
+                      style: TextStyle(color: fullDiffMuted, fontSize: 13),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -865,6 +938,7 @@ class _DiffScreenState extends State<DiffScreen> {
     if (file == null) return _resourceStatus(state.file, '파일을 읽는 중입니다');
     return FullFileView(
       document: file,
+      hunks: state.patch.data?.hunks ?? const [],
       path: file.path,
       activeAnchor: state.activeAnchor,
       wrapLines: state.wrapLines,
@@ -945,6 +1019,7 @@ class _DiffScreenState extends State<DiffScreen> {
     }
     return FullBlameView(
       document: blame,
+      hunks: state.patch.data?.hunks ?? const [],
       activeAnchor: state.activeAnchor,
       wrapLines: state.wrapLines,
       highlighter: _highlighter,
@@ -991,16 +1066,28 @@ class _DiffScreenState extends State<DiffScreen> {
   }
 
   void _resizeCommits(double delta, double bodyWidth) {
-    final max = math.max(126.0, bodyWidth - _filesWidth - 80);
+    final max = math.max(
+      FullDiffColumnWidths.minCommits,
+      bodyWidth - _filesWidth - 80,
+    );
     setState(() {
-      _commitsWidth = (_commitsWidth + delta).clamp(126.0, max);
+      _commitsWidth = (_commitsWidth + delta).clamp(
+        FullDiffColumnWidths.minCommits,
+        max,
+      );
     });
   }
 
   void _resizeFiles(double delta, double bodyWidth) {
-    final max = math.max(158.0, bodyWidth - _commitsWidth - 80);
+    final max = math.max(
+      FullDiffColumnWidths.minFiles,
+      bodyWidth - _commitsWidth - 80,
+    );
     setState(() {
-      _filesWidth = (_filesWidth + delta).clamp(158.0, max);
+      _filesWidth = (_filesWidth + delta).clamp(
+        FullDiffColumnWidths.minFiles,
+        max,
+      );
     });
   }
 
@@ -1075,8 +1162,8 @@ class _ResponsiveDiffBody extends StatelessWidget {
         );
       }
 
-      const minCommits = 126.0;
-      const minFiles = 158.0;
+      const minCommits = FullDiffColumnWidths.minCommits;
+      const minFiles = FullDiffColumnWidths.minFiles;
       const minContent = 280.0;
       final navigationBudget = math.max(
         minCommits + minFiles,

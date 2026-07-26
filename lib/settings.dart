@@ -126,9 +126,9 @@ class TimelineColumnWidths {
 class FullDiffColumnWidths {
   const FullDiffColumnWidths({this.commits = 210, this.files = 290});
 
-  static const minCommits = 140.0;
+  static const minCommits = 126.0;
   static const maxCommits = 420.0;
-  static const minFiles = 200.0;
+  static const minFiles = 158.0;
   static const maxFiles = 520.0;
 
   final double commits;

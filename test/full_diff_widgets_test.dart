@@ -280,6 +280,54 @@ void main() {
     );
   });
 
+  testWidgets('an unwrapped hunk shares one movable horizontal scroll', (
+    tester,
+  ) async {
+    final document = DiffDocument.fromLines([
+      const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@ long'),
+      DiffLine(
+        kind: DiffLineKind.delete,
+        text: 'old ${'segment ' * 80}',
+        oldNumber: 1,
+      ),
+      DiffLine(
+        kind: DiffLineKind.add,
+        text: 'new ${'segment ' * 80}',
+        newNumber: 1,
+      ),
+    ]);
+    await tester.pumpWidget(
+      qaApp(
+        SizedBox(
+          width: 320,
+          height: 180,
+          child: HunkPresentationView(
+            document: document,
+            activeAnchor: document.hunks.single.anchor,
+            path: fileA.path,
+            wrapLines: false,
+            highlighter: fakeHighlighter,
+            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final horizontal = find.byWidgetPredicate(
+      (widget) =>
+          widget is Scrollable && widget.axisDirection == AxisDirection.right,
+    );
+    expect(horizontal, findsOneWidget);
+    final position = tester.state<ScrollableState>(horizontal).position;
+    expect(position.maxScrollExtent, greaterThan(0));
+
+    await tester.drag(horizontal, const Offset(-160, 0));
+    await tester.pumpAndSettle();
+
+    expect(position.pixels, greaterThan(0));
+  });
+
   testWidgets('inline shows every hunk with three context lines', (
     tester,
   ) async {

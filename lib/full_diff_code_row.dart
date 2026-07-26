@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import 'full_diff_syntax.dart';
 import 'full_diff_syntax_contract.dart';
@@ -90,7 +91,7 @@ class FullDiffCodeRow extends StatelessWidget {
                       constraints: const BoxConstraints(minHeight: 27),
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(10, 3, 10, 3),
-                        child: source,
+                        child: _SourceSelectionContainer(child: source),
                       ),
                     ),
                     if (current)
@@ -112,42 +113,78 @@ class FullDiffCodeRow extends StatelessWidget {
           Positioned(
             left: 0,
             top: 0,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (compactGutter)
-                  _GutterCell(
-                    number: line.newNumber ?? line.oldNumber,
-                    width: fullDiffLineNumberWidth - 18,
+            child: SelectionContainer.disabled(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (compactGutter)
+                    _GutterCell(
+                      number: line.newNumber ?? line.oldNumber,
+                      width: fullDiffLineNumberWidth - 18,
+                      color: gutterColor,
+                    )
+                  else ...[
+                    _GutterCell(
+                      number: line.oldNumber,
+                      width: (fullDiffLineNumberWidth - 18) / 2,
+                      color: gutterColor,
+                    ),
+                    _GutterCell(
+                      number: line.newNumber,
+                      width: (fullDiffLineNumberWidth - 18) / 2,
+                      color: gutterColor,
+                    ),
+                  ],
+                  Container(
+                    width: 18,
+                    constraints: const BoxConstraints(minHeight: 27),
+                    alignment: Alignment.topCenter,
                     color: gutterColor,
-                  )
-                else ...[
-                  _GutterCell(
-                    number: line.oldNumber,
-                    width: (fullDiffLineNumberWidth - 18) / 2,
-                    color: gutterColor,
-                  ),
-                  _GutterCell(
-                    number: line.newNumber,
-                    width: (fullDiffLineNumberWidth - 18) / 2,
-                    color: gutterColor,
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    child: Text(marker, style: _gutterStyle),
                   ),
                 ],
-                Container(
-                  width: 18,
-                  constraints: const BoxConstraints(minHeight: 27),
-                  alignment: Alignment.topCenter,
-                  color: gutterColor,
-                  padding: const EdgeInsets.symmetric(vertical: 3),
-                  child: Text(marker, style: _gutterStyle),
-                ),
-              ],
+              ),
             ),
           ),
         ],
       ),
     );
+  }
+}
+
+class _SourceSelectionContainer extends StatefulWidget {
+  const _SourceSelectionContainer({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_SourceSelectionContainer> createState() =>
+      _SourceSelectionContainerState();
+}
+
+class _SourceSelectionContainerState extends State<_SourceSelectionContainer> {
+  final _delegate = _LineTerminatedSelectionContainerDelegate();
+
+  @override
+  void dispose() {
+    _delegate.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      SelectionContainer(delegate: _delegate, child: widget.child);
+}
+
+class _LineTerminatedSelectionContainerDelegate
+    extends StaticSelectionContainerDelegate {
+  @override
+  SelectedContent? getSelectedContent() {
+    final content = super.getSelectedContent();
+    if (content == null) return null;
+    return SelectedContent(plainText: '${content.plainText}\n');
   }
 }
 
