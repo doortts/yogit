@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'avatars.dart';
 import 'diff_screen.dart';
 import 'git.dart';
+import 'page_scroll_shortcuts.dart';
 import 'settings.dart';
 import 'window_frame.dart';
 
@@ -630,19 +631,32 @@ class _TimelineScreenState extends State<TimelineScreen> {
   KeyEventResult _onKeyEvent(FocusNode _, KeyEvent event) {
     // Holding an arrow keeps moving; everything else acts once per press.
     if (event is KeyDownEvent || event is KeyRepeatEvent) {
+      final pageScrollIntent = pageScrollIntentFor(
+        event,
+        metaPressed: HardwareKeyboard.instance.isMetaPressed,
+        shiftPressed: HardwareKeyboard.instance.isShiftPressed,
+      );
+      if (pageScrollIntent != null) {
+        if (_previewController.previewPlacement != PreviewPlacement.closed) {
+          applyPageScroll(
+            _previewScrollController,
+            direction: pageScrollIntent.direction,
+            animate: event is KeyDownEvent,
+          );
+        }
+        return KeyEventResult.handled;
+      }
       final step = switch (event.logicalKey) {
         LogicalKeyboardKey.arrowDown => 1,
         LogicalKeyboardKey.arrowUp => -1,
         _ => 0,
       };
-      // Meta walks preview files; adding Shift scrolls the preview body.
-      if (step != 0 && HardwareKeyboard.instance.isMetaPressed) {
+      // Meta without Shift walks preview files.
+      if (step != 0 &&
+          HardwareKeyboard.instance.isMetaPressed &&
+          !HardwareKeyboard.instance.isShiftPressed) {
         if (_previewController.previewPlacement != PreviewPlacement.closed) {
-          if (HardwareKeyboard.instance.isShiftPressed) {
-            _scrollPreview(step, animate: event is KeyDownEvent);
-          } else {
-            _stepPreviewFile(step);
-          }
+          _stepPreviewFile(step);
         }
         return KeyEventResult.handled;
       }
@@ -2561,27 +2575,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
     final index = files.indexWhere((file) => file.path == current);
     final next = (index + delta).clamp(0, files.length - 1);
     setState(() => _previewPaths[commit.sha] = files[next].path);
-  }
-
-  void _scrollPreview(int delta, {required bool animate}) {
-    if (!_previewScrollController.hasClients) return;
-    final position = _previewScrollController.position;
-    final target = (position.pixels + delta * 48).clamp(
-      position.minScrollExtent,
-      position.maxScrollExtent,
-    );
-    if (target == position.pixels) return;
-    if (!animate) {
-      _previewScrollController.jumpTo(target);
-      return;
-    }
-    unawaited(
-      _previewScrollController.animateTo(
-        target,
-        duration: const Duration(milliseconds: 100),
-        curve: Curves.easeOut,
-      ),
-    );
   }
 
   Widget _previewBody(GitCommit commit, bool bottom) {

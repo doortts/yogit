@@ -6347,7 +6347,11 @@ void main() {
     expect(scrollable.position.pixels, 0);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
+    final beforeRepeat = scrollable.position.pixels;
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowDown);
+    expect(scrollable.position.pixels, moreOrLessEquals(beforeRepeat + 48));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
