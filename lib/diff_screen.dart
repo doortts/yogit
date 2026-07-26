@@ -8,6 +8,7 @@ import 'full_diff_header.dart';
 import 'full_diff_hunk_view.dart';
 import 'full_diff_model.dart';
 import 'git.dart';
+import 'page_scroll_shortcuts.dart';
 import 'settings.dart';
 import 'typography.dart';
 
@@ -21,6 +22,32 @@ const _muted = Color(0xFF8D94A8);
 const _addedFill = Color(0xFF8AD6A1);
 const _deleted = Color(0xFFF29AB2);
 const _renamed = Color(0xFFB6A0EA);
+
+class _ReturnToTimelineIntent extends Intent {
+  const _ReturnToTimelineIntent();
+}
+
+class _ToggleFocusModeIntent extends Intent {
+  const _ToggleFocusModeIntent();
+}
+
+class _StepHunkIntent extends Intent {
+  const _StepHunkIntent(this.delta);
+
+  final int delta;
+}
+
+class _StepCommitIntent extends Intent {
+  const _StepCommitIntent(this.delta);
+
+  final int delta;
+}
+
+class _StepFileIntent extends Intent {
+  const _StepFileIntent(this.delta);
+
+  final int delta;
+}
 
 class DiffScreen extends StatefulWidget {
   const DiffScreen({
@@ -45,7 +72,7 @@ class DiffScreen extends StatefulWidget {
 }
 
 class _DiffScreenState extends State<DiffScreen> {
-  static const _minDiffWidth = 360.0;
+  static const _minDiffWidth = 520.0;
 
   final _diffScroll = ScrollController();
   Map<String, GlobalKey> _anchorKeys = <String, GlobalKey>{};
@@ -133,39 +160,26 @@ class _DiffScreenState extends State<DiffScreen> {
       if (!_pendingActiveAnchor) return;
       _pendingActiveAnchor = false;
       final state = _controller.state;
-      final hunks = state.document?.hunks ?? const <DiffHunk>[];
-      if (hunks.isEmpty) return;
-      final index = state.activeHunkIndex.clamp(0, hunks.length - 1);
-      final context = _anchorKeys[hunks[index].anchor.id]?.currentContext;
+      final document = state.document;
+      final index = state.activeHunkIndex;
+      if (document == null || index < 0 || index >= document.hunks.length) {
+        return;
+      }
+      final context =
+          _anchorKeys[document.hunks[index].anchor.id]?.currentContext;
       if (context == null) return;
-      Scrollable.ensureVisible(context, alignment: 0.1);
+      Scrollable.ensureVisible(
+        context,
+        alignment: 0.1,
+        duration: const Duration(milliseconds: 100),
+      );
     });
   }
 
-  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
-    if (event is KeyDownEvent &&
-        event.logicalKey == LogicalKeyboardKey.escape) {
-      Navigator.of(context).maybePop();
-      return KeyEventResult.handled;
-    }
-    // Arrows repeat while held, like the timeline's.
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
-      return KeyEventResult.ignored;
-    }
-    final step = switch (event.logicalKey) {
-      LogicalKeyboardKey.arrowDown => 1,
-      LogicalKeyboardKey.arrowUp => -1,
-      _ => 0,
-    };
-    if (step == 0) return KeyEventResult.ignored;
-    // Meta walks the commits beside the diff; bare arrows walk this commit's
-    // files, which is the move you make far more often.
-    if (HardwareKeyboard.instance.isMetaPressed) {
-      _stepCommit(step);
-    } else {
-      _stepFile(step);
-    }
-    return KeyEventResult.handled;
+  void _stepHunk(int delta) {
+    _controller.stepHunk(delta);
+    _pendingActiveAnchor = true;
+    _scheduleScrollEffect();
   }
 
   void _stepFile(int delta) {
@@ -192,45 +206,162 @@ class _DiffScreenState extends State<DiffScreen> {
       final state = _controller.state;
       return Scaffold(
         backgroundColor: _background,
-        body: Focus(
-          autofocus: true,
-          onKeyEvent: _handleKey,
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final widths = _effectiveColumnWidths(constraints.maxWidth);
-              return Row(
-                children: [
-                  _resizableColumn(
-                    columnKey: 'nearby',
-                    width: widths.commits,
-                    child: _nearbyCommits(state),
-                    onStart: () => _commitsWidth = widths.commits,
-                    onUpdate: (delta) => _resizeCommits(
-                      delta,
-                      viewportWidth: constraints.maxWidth,
-                      filesWidth: widths.files,
-                    ),
-                  ),
-                  _resizableColumn(
-                    columnKey: 'details-files',
-                    width: widths.files,
-                    child: _detailsAndFiles(state),
-                    onStart: () => _filesWidth = widths.files,
-                    onUpdate: (delta) => _resizeFiles(
-                      delta,
-                      viewportWidth: constraints.maxWidth,
-                      commitsWidth: widths.commits,
-                    ),
-                  ),
-                  Expanded(key: const Key('diff-column'), child: _diff(state)),
-                ],
-              );
+        body: Shortcuts(
+          shortcuts: const <ShortcutActivator, Intent>{
+            SingleActivator(LogicalKeyboardKey.escape):
+                _ReturnToTimelineIntent(),
+            SingleActivator(
+              LogicalKeyboardKey.arrowUp,
+              meta: true,
+              shift: true,
+            ): PageScrollIntent(
+              -1,
+            ),
+            SingleActivator(
+              LogicalKeyboardKey.arrowDown,
+              meta: true,
+              shift: true,
+            ): PageScrollIntent(
+              1,
+            ),
+            SingleActivator(LogicalKeyboardKey.keyF, meta: true, shift: true):
+                _ToggleFocusModeIntent(),
+            SingleActivator(LogicalKeyboardKey.arrowUp, alt: true):
+                _StepHunkIntent(-1),
+            SingleActivator(LogicalKeyboardKey.arrowDown, alt: true):
+                _StepHunkIntent(1),
+            SingleActivator(LogicalKeyboardKey.arrowUp, meta: true):
+                _StepCommitIntent(-1),
+            SingleActivator(LogicalKeyboardKey.arrowDown, meta: true):
+                _StepCommitIntent(1),
+            SingleActivator(LogicalKeyboardKey.arrowUp): _StepFileIntent(-1),
+            SingleActivator(LogicalKeyboardKey.arrowDown): _StepFileIntent(1),
+          },
+          child: Actions(
+            actions: <Type, Action<Intent>>{
+              _ReturnToTimelineIntent: CallbackAction<_ReturnToTimelineIntent>(
+                onInvoke: (_) {
+                  Navigator.of(context).maybePop();
+                  return null;
+                },
+              ),
+              _ToggleFocusModeIntent: CallbackAction<_ToggleFocusModeIntent>(
+                onInvoke: (_) {
+                  _controller.setFocusMode(!_controller.state.focusMode);
+                  return null;
+                },
+              ),
+              _StepHunkIntent: CallbackAction<_StepHunkIntent>(
+                onInvoke: (intent) {
+                  _stepHunk(intent.delta);
+                  return null;
+                },
+              ),
+              _StepCommitIntent: CallbackAction<_StepCommitIntent>(
+                onInvoke: (intent) {
+                  _stepCommit(intent.delta);
+                  return null;
+                },
+              ),
+              _StepFileIntent: CallbackAction<_StepFileIntent>(
+                onInvoke: (intent) {
+                  _stepFile(intent.delta);
+                  return null;
+                },
+              ),
+              PageScrollIntent: CallbackAction<PageScrollIntent>(
+                onInvoke: (intent) {
+                  final animate =
+                      !_diffScroll.hasClients ||
+                      !_diffScroll.position.isScrollingNotifier.value;
+                  applyPageScroll(
+                    _diffScroll,
+                    direction: intent.direction,
+                    animate: animate,
+                  );
+                  return null;
+                },
+              ),
             },
+            child: Focus(
+              autofocus: true,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final panes = state.focusMode
+                      ? (showCommits: false, showFiles: false)
+                      : _visiblePanes(constraints.maxWidth);
+                  final bothWidths = panes.showCommits
+                      ? _effectiveColumnWidths(constraints.maxWidth)
+                      : null;
+                  final filesWidth = panes.showFiles
+                      ? bothWidths?.files ??
+                            _effectiveFilesWidth(constraints.maxWidth)
+                      : 0.0;
+                  return Row(
+                    children: [
+                      if (panes.showCommits)
+                        _resizableColumn(
+                          columnKey: 'nearby',
+                          width: bothWidths!.commits,
+                          child: _nearbyCommits(state),
+                          onStart: () => _commitsWidth = bothWidths.commits,
+                          onUpdate: (delta) => _resizeCommits(
+                            delta,
+                            viewportWidth: constraints.maxWidth,
+                            filesWidth: filesWidth,
+                          ),
+                        ),
+                      if (panes.showFiles)
+                        _resizableColumn(
+                          columnKey: 'details-files',
+                          width: filesWidth,
+                          child: _detailsAndFiles(state),
+                          onStart: () => _filesWidth = filesWidth,
+                          onUpdate: (delta) => _resizeFiles(
+                            delta,
+                            viewportWidth: constraints.maxWidth,
+                            commitsWidth: bothWidths?.commits ?? 0,
+                          ),
+                        ),
+                      Expanded(
+                        key: const Key('diff-column'),
+                        child: _diff(state),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
           ),
         ),
       );
     },
   );
+
+  ({bool showCommits, bool showFiles}) _visiblePanes(double width) {
+    if (width < _minDiffWidth + FullDiffColumnWidths.minFiles) {
+      return (showCommits: false, showFiles: false);
+    }
+    if (width <
+        _minDiffWidth +
+            FullDiffColumnWidths.minFiles +
+            FullDiffColumnWidths.minCommits) {
+      return (showCommits: false, showFiles: true);
+    }
+    return (showCommits: true, showFiles: true);
+  }
+
+  double _effectiveFilesWidth(double viewport) {
+    final files = _filesWidth.clamp(
+      FullDiffColumnWidths.minFiles,
+      FullDiffColumnWidths.maxFiles,
+    );
+    final budget = math.max(
+      FullDiffColumnWidths.minFiles,
+      viewport - _minDiffWidth,
+    );
+    return math.min(files, budget);
+  }
 
   ({double commits, double files}) _effectiveColumnWidths(double viewport) {
     var commits = _commitsWidth.clamp(
@@ -590,8 +721,8 @@ class _DiffScreenState extends State<DiffScreen> {
               wrapLines: state.wrapLines,
               focusMode: state.focusMode,
               loading: state.loadingDiff,
-              onPreviousHunk: () => _controller.stepHunk(-1),
-              onNextHunk: () => _controller.stepHunk(1),
+              onPreviousHunk: () => _stepHunk(-1),
+              onNextHunk: () => _stepHunk(1),
               onAlgorithmSelected: (algorithm) {
                 if (algorithm != state.algorithm) {
                   _controller.selectAlgorithm(algorithm);

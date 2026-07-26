@@ -3027,6 +3027,50 @@ void main() {
     );
   });
 
+  testWidgets('focus mode hides navigation and restores saved widths', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('1', 'commit')],
+      files: (_, _) async => const [],
+    );
+    FullDiffColumnWidths? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: repository,
+          commits: [commit('1', 'commit')],
+          initialIndex: 0,
+          columnWidths: const FullDiffColumnWidths(commits: 240, files: 330),
+          onColumnWidthsChanged: (value) => saved = value,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('focus-mode')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('nearby-column')), findsNothing);
+    expect(find.byKey(const Key('details-files-column')), findsNothing);
+    expect(tester.getSize(find.byKey(const Key('diff-column'))).width, 1200);
+    expect(saved, isNull);
+
+    await tester.tap(find.byKey(const Key('focus-mode')));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byKey(const Key('nearby-column'))).width, 240);
+    expect(
+      tester.getSize(find.byKey(const Key('details-files-column'))).width,
+      330,
+    );
+    expect(saved, isNull);
+  });
+
   testWidgets('full diff resizes and saves both navigation columns', (
     tester,
   ) async {
@@ -3073,11 +3117,11 @@ void main() {
     expect(saved, const FullDiffColumnWidths(commits: 240, files: 330));
   });
 
-  testWidgets('narrow full diff compresses columns without saving them', (
+  testWidgets('narrow full diff uses exact pane thresholds without saving', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(800, 800);
+    tester.view.physicalSize = const Size(1200, 800);
     addTearDown(() {
       tester.view.resetDevicePixelRatio();
       tester.view.resetPhysicalSize();
@@ -3100,13 +3144,51 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(tester.getSize(find.byKey(const Key('nearby-column'))).width, 240);
+    tester.view.physicalSize = const Size(760, 800);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('nearby-column')), findsNothing);
+    expect(
+      tester.getSize(find.byKey(const Key('details-files-column'))).width,
+      240,
+    );
+    expect(tester.getSize(find.byKey(const Key('diff-column'))).width, 520);
+    expect(saved, isNull);
+
+    tester.view.physicalSize = const Size(520, 800);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('nearby-column')), findsNothing);
+    expect(find.byKey(const Key('details-files-column')), findsNothing);
+    expect(tester.getSize(find.byKey(const Key('diff-column'))).width, 520);
+    expect(saved, isNull);
+
+    tester.view.physicalSize = const Size(719, 800);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('nearby-column')), findsNothing);
+    expect(find.byKey(const Key('details-files-column')), findsNothing);
+
+    tester.view.physicalSize = const Size(720, 800);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('nearby-column')), findsNothing);
     expect(
       tester.getSize(find.byKey(const Key('details-files-column'))).width,
       200,
     );
-    expect(tester.getSize(find.byKey(const Key('diff-column'))).width, 360);
-    expect(saved, isNull);
+
+    tester.view.physicalSize = const Size(859, 800);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('nearby-column')), findsNothing);
+    expect(
+      tester.getSize(find.byKey(const Key('details-files-column'))).width,
+      330,
+    );
+
+    tester.view.physicalSize = const Size(860, 800);
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byKey(const Key('nearby-column'))).width, 140);
+    expect(
+      tester.getSize(find.byKey(const Key('details-files-column'))).width,
+      200,
+    );
 
     tester.view.physicalSize = const Size(1200, 800);
     await tester.pumpAndSettle();
@@ -6106,6 +6188,276 @@ void main() {
     );
   });
   // ------------------------------------------------------------------ F3
+  testWidgets('full diff steps hunks and toggles focus from the keyboard', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final commits = [
+      commit('1', 'commit', parents: const ['0']),
+    ];
+    final repository = FakeGitRepository(
+      (_, _) async => commits,
+      files: (_, _) async => const [
+        GitFileChange(
+          path: 'lib/a.dart',
+          status: 'M',
+          additions: 3,
+          deletions: 3,
+        ),
+      ],
+      diff: (_, _, _, _, _) async => const [
+        DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+        DiffLine(kind: DiffLineKind.delete, text: 'old one', oldNumber: 1),
+        DiffLine(kind: DiffLineKind.add, text: 'new one', newNumber: 1),
+        DiffLine(kind: DiffLineKind.hunk, text: '@@ -10 +10 @@'),
+        DiffLine(kind: DiffLineKind.delete, text: 'old two', oldNumber: 10),
+        DiffLine(kind: DiffLineKind.add, text: 'new two', newNumber: 10),
+        DiffLine(kind: DiffLineKind.hunk, text: '@@ -20 +20 @@'),
+        DiffLine(kind: DiffLineKind.delete, text: 'old three', oldNumber: 20),
+        DiffLine(kind: DiffLineKind.add, text: 'new three', newNumber: 20),
+      ],
+    );
+    final session = FullDiffSessionController(
+      repository: repository,
+      commits: commits,
+      initialIndex: 0,
+    );
+    addTearDown(session.dispose);
+    await session.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: repository,
+          commits: commits,
+          initialIndex: 0,
+          controller: session,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+    await tester.pumpAndSettle();
+    expect(session.state.activeHunkIndex, 1);
+    final target = find.byKey(const Key('hunk-card-surface-hunk-1-10-10'));
+    final viewport = tester.getRect(find.byKey(const Key('hunk-list')));
+    final targetRect = tester.getRect(target);
+    expect(targetRect.top, greaterThanOrEqualTo(viewport.top));
+    expect(targetRect.bottom, lessThanOrEqualTo(viewport.bottom));
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+    await tester.pumpAndSettle();
+    expect(session.state.activeHunkIndex, 0);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(session.state.focusMode, isTrue);
+    expect(find.byKey(const Key('nearby-column')), findsNothing);
+    expect(find.byKey(const Key('details-files-column')), findsNothing);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(session.state.focusMode, isFalse);
+  });
+
+  testWidgets('full diff shares preview page scrolling', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 700);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final commits = [
+      commit('newer', 'newer commit', parents: const ['older']),
+      commit('older', 'older commit', parents: const ['root']),
+    ];
+    final repository = FakeGitRepository(
+      (_, _) async => commits,
+      files: (commit, _) async => [
+        for (final name in ['one', 'two'])
+          GitFileChange(
+            path: '${commit.sha}/$name.dart',
+            status: 'M',
+            additions: 0,
+            deletions: 0,
+          ),
+      ],
+      diff: (_, _, path, _, _) async => [
+        const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,80 +1,80 @@'),
+        for (var index = 1; index <= 80; index++)
+          DiffLine(
+            kind: DiffLineKind.context,
+            text: '$path line $index',
+            oldNumber: index,
+            newNumber: index,
+          ),
+      ],
+    );
+    final session = FullDiffSessionController(
+      repository: repository,
+      commits: commits,
+      initialIndex: 0,
+    );
+    addTearDown(session.dispose);
+    await session.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: repository,
+          commits: commits,
+          initialIndex: 0,
+          controller: session,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final scroll = tester
+        .widget<ListView>(find.byKey(const Key('hunk-list')))
+        .controller!;
+    final selectedCommit = session.state.commitIndex;
+    final selectedPath = session.state.selectedPath;
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(scroll.offset, 48);
+    expect(session.state.commitIndex, selectedCommit);
+    expect(session.state.selectedPath, selectedPath);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 40));
+    final duringAnimation = scroll.offset;
+    expect(duringAnimation, greaterThan(48));
+    expect(duringAnimation, lessThan(96));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    expect(scroll.offset, closeTo(duringAnimation + 48, 0.001));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+    expect(session.state.commitIndex, selectedCommit);
+    expect(session.state.selectedPath, selectedPath);
+
+    scroll.jumpTo(0);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(scroll.offset, 0);
+
+    scroll.jumpTo(scroll.position.maxScrollExtent);
+    final maximum = scroll.position.maxScrollExtent;
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(scroll.offset, maximum);
+  });
+
+  testWidgets('full diff popup handles arrows before screen shortcuts', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 700);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final commits = [
+      commit('1', 'commit', parents: const ['0']),
+    ];
+    final repository = FakeGitRepository(
+      (_, _) async => commits,
+      files: (_, _) async => const [
+        GitFileChange(
+          path: 'one.dart',
+          status: 'M',
+          additions: 0,
+          deletions: 0,
+        ),
+        GitFileChange(
+          path: 'two.dart',
+          status: 'M',
+          additions: 0,
+          deletions: 0,
+        ),
+      ],
+      diff: (_, _, path, _, _) async => [
+        const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,40 +1,40 @@'),
+        for (var index = 1; index <= 40; index++)
+          DiffLine(
+            kind: DiffLineKind.context,
+            text: '$path line $index',
+            oldNumber: index,
+            newNumber: index,
+          ),
+      ],
+    );
+    final session = FullDiffSessionController(
+      repository: repository,
+      commits: commits,
+      initialIndex: 0,
+    );
+    addTearDown(session.dispose);
+    await session.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: repository,
+          commits: commits,
+          initialIndex: 0,
+          controller: session,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final scroll = tester
+        .widget<ListView>(find.byKey(const Key('hunk-list')))
+        .controller!;
+    final selectedCommit = session.state.commitIndex;
+    final selectedPath = session.state.selectedPath;
+    final activeHunk = session.state.activeHunkIndex;
+    final offset = scroll.offset;
+
+    await tester.tap(find.byKey(const Key('diff-algorithm')));
+    await tester.pumpAndSettle();
+    expect(find.text('Minimal'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+
+    expect(session.state.commitIndex, selectedCommit);
+    expect(session.state.selectedPath, selectedPath);
+    expect(session.state.activeHunkIndex, activeHunk);
+    expect(scroll.offset, offset);
+    expect(find.text('Minimal'), findsOneWidget);
+  });
+
   testWidgets('the diff screen walks files and commits from the keyboard', (
     tester,
   ) async {
