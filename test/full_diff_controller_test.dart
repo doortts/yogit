@@ -239,6 +239,54 @@ void main() {
     expect(controller.state.blame.error, same(failure));
   });
 
+  test(
+    'successful file load resumes blame after leaving the blame view',
+    () async {
+      final patch = Completer<List<DiffLine>>();
+      final content = Completer<Uint8List>();
+      final repository = FakeFullDiffRepository()
+        ..files = ((_, _) async => const [fileA])
+        ..diff = ((_, _, _, _, _) => patch.future)
+        ..content = ((_, _, _) => content.future)
+        ..blame = ((_, _, _, _) async => const [
+          GitBlameLine(
+            lineNumber: 1,
+            sha: '40aff6d',
+            author: 'First',
+            uncommitted: false,
+          ),
+          GitBlameLine(
+            lineNumber: 2,
+            sha: '40aff6d',
+            author: 'Second',
+            uncommitted: false,
+          ),
+        ]);
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [commitA],
+        initialIndex: 0,
+        initialView: FullDiffInitialView.hunk,
+      );
+
+      final loading = controller.initialize();
+      await Future<void>.delayed(Duration.zero);
+      controller
+        ..setView(FullDiffView.blame)
+        ..setView(FullDiffView.diff);
+      expect(controller.state.blame.loading, isTrue);
+
+      patch.complete(twoHunkLines);
+      content.complete(Uint8List.fromList(utf8.encode('one\ntwo\n')));
+      await loading;
+
+      expect(controller.state.file.data?.kind, FileContentKind.utf8);
+      expect(controller.state.blame.loading, isFalse);
+      expect(controller.state.blame.data?.lines, hasLength(2));
+      expect(repository.blameRequests, hasLength(1));
+    },
+  );
+
   test('committed caches stay within count and byte limits', () async {
     final commits = List.generate(
       40,

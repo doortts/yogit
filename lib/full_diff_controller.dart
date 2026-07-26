@@ -755,8 +755,10 @@ class FullDiffSessionController extends ChangeNotifier {
       )) {
         return;
       }
+      final shouldEnsureBlame =
+          state.blame.loading || state.view == FullDiffView.blame;
       _replace(state.copyWith(file: AsyncResource(data: document)));
-      if (state.view == FullDiffView.blame) await _ensureBlame();
+      if (shouldEnsureBlame) await _ensureBlame();
     } catch (error) {
       if (_accepts(
         generation: generation,
