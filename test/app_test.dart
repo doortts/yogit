@@ -379,7 +379,7 @@ void main() {
           ),
         ];
       },
-      diff: (_, _, path, _) async {
+      diff: (_, _, path, _, _) async {
         diffLoads++;
         return [
           DiffLine(kind: DiffLineKind.add, text: '$path changed', newNumber: 1),
@@ -2054,7 +2054,7 @@ void main() {
               deletions: 1,
             ),
           ],
-          diff: (_, _, _, _) async => const [
+          diff: (_, _, _, _, _) async => const [
             DiffLine(kind: DiffLineKind.header, text: 'diff --git a/x b/x'),
             DiffLine(kind: DiffLineKind.header, text: 'index 1234567..89abcde'),
             DiffLine(kind: DiffLineKind.header, text: '--- a/lib/a.dart'),
@@ -2894,7 +2894,7 @@ void main() {
           deletions: 0,
         ),
       ],
-      diff: (commit, parent, path, algorithm) {
+      diff: (commit, parent, path, algorithm, _) {
         calls.add((
           sha: commit.sha,
           parent: parent,
@@ -3172,7 +3172,7 @@ void main() {
           deletions: 1,
         ),
       ],
-      diff: (_, _, _, algorithm) => algorithm == DiffAlgorithm.minimal
+      diff: (_, _, _, algorithm, _) => algorithm == DiffAlgorithm.minimal
           ? Future.error(StateError('minimal failed'))
           : Future.value([
               const DiffLine(
@@ -3253,7 +3253,7 @@ void main() {
           deletions: 1,
         ),
       ],
-      diff: (_, _, _, _) async => [
+      diff: (_, _, _, _, _) async => [
         const DiffLine(kind: DiffLineKind.delete, text: 'old', oldNumber: 1),
         const DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
       ],
@@ -5272,7 +5272,7 @@ void main() {
               deletions: 0,
             ),
           ],
-          diff: (_, _, path, _) async => [
+          diff: (_, _, path, _, _) async => [
             DiffLine(kind: DiffLineKind.add, text: '$path body', newNumber: 1),
           ],
         ),
@@ -5462,7 +5462,7 @@ void main() {
                 deletions: 1,
               ),
           ],
-          diff: (_, _, _, _) async => [
+          diff: (_, _, _, _, _) async => [
             for (var index = 0; index < 40; index++)
               DiffLine(
                 kind: DiffLineKind.add,
@@ -6005,7 +6005,7 @@ void main() {
             deletions: 1,
           ),
       ],
-      diff: (commit, _, path, _) async => [
+      diff: (commit, _, path, _, _) async => [
         DiffLine(kind: DiffLineKind.add, text: 'body of $path', newNumber: 1),
       ],
     );
@@ -6102,7 +6102,7 @@ void main() {
                 deletions: 1,
               ),
             ],
-            diff: (_, _, _, _) async => const [
+            diff: (_, _, _, _, _) async => const [
               DiffLine(kind: DiffLineKind.header, text: 'diff --git a/x b/x'),
               DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
               DiffLine(kind: DiffLineKind.delete, text: 'old', oldNumber: 1),
@@ -6179,7 +6179,7 @@ void main() {
                   deletions: 0,
                 ),
             ],
-            diff: (_, _, path, _) async => [
+            diff: (_, _, path, _, _) async => [
               DiffLine(
                 kind: DiffLineKind.add,
                 text: 'alpha $path',
@@ -6268,7 +6268,7 @@ void main() {
                 deletions: 0,
               ),
           ],
-          diff: (_, _, path, _) async => [
+          diff: (_, _, path, _, _) async => [
             for (var index = 0; index < 60; index++)
               DiffLine(
                 kind: DiffLineKind.add,
@@ -6394,7 +6394,7 @@ void main() {
                 deletions: 0,
               ),
           ],
-          diff: (_, _, path, _) async => [
+          diff: (_, _, path, _, _) async => [
             DiffLine(
               kind: DiffLineKind.add,
               text: 'body of $path',
@@ -6762,6 +6762,7 @@ class FakeGitRepository extends GitRepository {
     String? parent,
     String path,
     DiffAlgorithm algorithm,
+    bool ignoreWhitespace,
   )?
   diff;
 
@@ -6786,7 +6787,10 @@ class FakeGitRepository extends GitRepository {
     String path, {
     String? parent,
     DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
-  }) => diff?.call(commit, parent, path, algorithm) ?? Future.value(const []);
+    bool ignoreWhitespace = false,
+  }) =>
+      diff?.call(commit, parent, path, algorithm, ignoreWhitespace) ??
+      Future.value(const []);
 }
 
 class DelayedSettingsStore extends SettingsStore {

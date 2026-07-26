@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 typedef CommandRunner =
     Future<ProcessResult> Function(
@@ -13,6 +15,25 @@ Future<ProcessResult> runProcess(
   List<String> arguments, {
   String? workingDirectory,
 }) => Process.run(executable, arguments, workingDirectory: workingDirectory);
+
+typedef RawCommandRunner =
+    Future<ProcessResult> Function(
+      String executable,
+      List<String> arguments, {
+      String? workingDirectory,
+    });
+
+Future<ProcessResult> runRawProcess(
+  String executable,
+  List<String> arguments, {
+  String? workingDirectory,
+}) => Process.run(
+  executable,
+  arguments,
+  workingDirectory: workingDirectory,
+  stdoutEncoding: null,
+  stderrEncoding: utf8,
+);
 
 String resolveExecutable(
   String name, {
@@ -574,16 +595,30 @@ class RepoRefs {
   final Map<String, String> tips;
 }
 
-class GitRepository {
+abstract interface class FullDiffRepository {
+  Future<List<GitFileChange>> loadFiles(GitCommit commit, {String? parent});
+
+  Future<List<DiffLine>> loadDiff(
+    GitCommit commit,
+    String path, {
+    String? parent,
+    DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
+    bool ignoreWhitespace = false,
+  });
+}
+
+class GitRepository implements FullDiffRepository {
   GitRepository(
     this.root, {
     this.gitExecutable = 'git',
     this.runner = runProcess,
+    this.rawRunner = runRawProcess,
   });
 
   final String root;
   final String gitExecutable;
   final CommandRunner runner;
+  final RawCommandRunner rawRunner;
   Future<String>? _emptyTree;
   Future<List<String>>? _startingRevisions;
 
@@ -655,6 +690,7 @@ class GitRepository {
     String path, {
     String? parent,
     DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
+    bool ignoreWhitespace = false,
   }) async {
     return parseUnifiedDiff(
       await _run([
@@ -662,12 +698,30 @@ class GitRepository {
         '--no-ext-diff',
         '--no-textconv',
         '--no-color',
+        '--unified=3',
+        if (ignoreWhitespace) '--ignore-all-space',
         ...algorithm.gitArguments,
         ...await _revisionsFor(commit, parent),
         '--',
         path,
       ]),
     );
+  }
+
+  Future<Uint8List> loadBlobBytes(String revision, String path) async {
+    final result = await rawRunner(gitExecutable, [
+      'show',
+      '$revision:$path',
+    ], workingDirectory: root);
+    if (result.exitCode != 0) {
+      throw ProcessException(
+        gitExecutable,
+        ['show', '$revision:$path'],
+        result.stderr.toString(),
+        result.exitCode,
+      );
+    }
+    return Uint8List.fromList((result.stdout as List<int>));
   }
 
   /// Sidebar data: local branches, remote branches, and tags, plus the

@@ -474,6 +474,37 @@ void main() {
     ]);
   });
 
+  test(
+    'requests three context lines and optionally ignores whitespace',
+    () async {
+      final calls = <List<String>>[];
+      final repository = GitRepository(
+        '.',
+        runner: (executable, arguments, {workingDirectory}) async {
+          calls.add(arguments);
+          return ProcessResult(1, 0, '', '');
+        },
+      );
+      final item = _commit('a', ['b']);
+
+      await repository.loadDiff(
+        item,
+        'lib/a.dart',
+        algorithm: DiffAlgorithm.histogram,
+        ignoreWhitespace: true,
+      );
+
+      expect(
+        calls.single,
+        containsAllInOrder([
+          '--unified=3',
+          '--ignore-all-space',
+          '--diff-algorithm=histogram',
+        ]),
+      );
+    },
+  );
+
   test('loads root files and a numbered patch', () async {
     final root = await Directory.systemTemp.createTemp('yogit_root_diff_');
     addTearDown(() => root.delete(recursive: true));
@@ -498,6 +529,23 @@ void main() {
       lines.where((line) => line.kind == DiffLineKind.add).single.newNumber,
       1,
     );
+  });
+
+  test('loads committed blob bytes without decoding them', () async {
+    final root = await Directory.systemTemp.createTemp('yogit_raw_blob_');
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    const bytes = [0xff, 0xfe, 0x00, 0x41];
+    await File('${root.path}/raw.bin').writeAsBytes(bytes);
+    await _git(root, ['add', 'raw.bin']);
+    await _git(root, ['commit', '-m', 'raw bytes']);
+    final commit = (await GitRepository(root.path).loadHistory()).single;
+
+    final loaded = await GitRepository(
+      root.path,
+    ).loadBlobBytes(commit.sha, 'raw.bin');
+
+    expect(loaded, bytes);
   });
 
   test(
