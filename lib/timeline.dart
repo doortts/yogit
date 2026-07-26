@@ -249,6 +249,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   final _focusNode = FocusNode();
   final _timelineKey = GlobalKey();
   final _scrollController = ScrollController();
+  final _previewScrollController = ScrollController();
   final _commits = <GitCommit>[];
   final _committersBySha = <String, GitIdentity>{};
   var _rows = <GraphRow>[];
@@ -351,6 +352,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     _scrollController
       ..removeListener(_maybeLoadNextPage)
       ..dispose();
+    _previewScrollController.dispose();
     for (final node in _resizerFocus.values) {
       node.dispose();
     }
@@ -514,11 +516,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
         LogicalKeyboardKey.arrowUp => -1,
         _ => 0,
       };
-      // With the panel open, meta walks the files it is showing; with the panel
-      // closed the combination has nothing to walk and stays inert.
+      // Meta walks preview files; adding Shift scrolls the preview body.
       if (step != 0 && HardwareKeyboard.instance.isMetaPressed) {
         if (_previewController.previewPlacement != PreviewPlacement.closed) {
-          _stepPreviewFile(step);
+          if (HardwareKeyboard.instance.isShiftPressed) {
+            _scrollPreview(step, animate: event is KeyDownEvent);
+          } else {
+            _stepPreviewFile(step);
+          }
         }
         return KeyEventResult.handled;
       }
@@ -2052,35 +2057,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
     );
   }
 
-  Widget _committerAvatar(
-    GitCommit commit,
-    double size, {
-    Color? discColor,
-    Key? key,
-  }) {
-    final service = widget.showRemoteAvatars ? widget.avatarService : null;
-    return SizedBox(
-      key: key,
-      width: size,
-      height: size,
-      child: service == null
-          ? IdentityAvatar(
-              identity: commit.committer,
-              size: size,
-              discColor: discColor,
-            )
-          : FutureBuilder<CommitAvatars>(
-              future: service.resolve(commit.sha),
-              builder: (context, snapshot) => IdentityAvatar(
-                identity: commit.committer,
-                remoteAvatar: snapshot.data?.committer,
-                size: size,
-                discColor: discColor,
-              ),
-            ),
-    );
-  }
-
   /// Wraps [child] only when there is something to say about it.
   Widget _tooltip(String? message, Widget child) => message == null
       ? child
@@ -2240,6 +2216,23 @@ class _TimelineScreenState extends State<TimelineScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _previewHeader(commit),
+                Container(
+                  key: const Key('preview-shortcut-hint'),
+                  height: 24,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  alignment: Alignment.centerLeft,
+                  child: const Text(
+                    '파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: _muted,
+                      fontSize: 10,
+                      fontFamily: cellFont,
+                      fontFamilyFallback: cellFontFallback,
+                    ),
+                  ),
+                ),
                 Expanded(
                   child: commit == null
                       ? const Center(
@@ -2297,6 +2290,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 64),
           child: Text(
+            key: const Key('preview-hash'),
             commit == null
                 ? '—'
                 : commit.isWorkingTree
@@ -2307,7 +2301,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
             style: const TextStyle(
               color: _muted,
               fontSize: 11,
-              fontFamily: 'monospace',
+              fontFamily: cellFont,
+              fontFamilyFallback: cellFontFallback,
             ),
           ),
         ),
@@ -2338,6 +2333,27 @@ class _TimelineScreenState extends State<TimelineScreen> {
     final index = files.indexWhere((file) => file.path == current);
     final next = (index + delta).clamp(0, files.length - 1);
     setState(() => _previewPaths[commit.sha] = files[next].path);
+  }
+
+  void _scrollPreview(int delta, {required bool animate}) {
+    if (!_previewScrollController.hasClients) return;
+    final position = _previewScrollController.position;
+    final target = (position.pixels + delta * 48).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if (target == position.pixels) return;
+    if (!animate) {
+      _previewScrollController.jumpTo(target);
+      return;
+    }
+    unawaited(
+      _previewScrollController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 100),
+        curve: Curves.easeOut,
+      ),
+    );
   }
 
   Widget _previewBody(GitCommit commit, bool bottom) {
@@ -2399,6 +2415,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         // drag, which is what lets a mouse drag select text across it.
         return SingleChildScrollView(
           key: const Key('preview-scroll'),
+          controller: _previewScrollController,
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           child: bottom
               ? Row(
@@ -2418,71 +2435,85 @@ class _TimelineScreenState extends State<TimelineScreen> {
     );
   }
 
-  Widget _previewPerson(GitCommit commit) => Container(
-    margin: const EdgeInsets.symmetric(vertical: 12),
-    padding: const EdgeInsets.symmetric(vertical: 10),
-    decoration: const BoxDecoration(
-      border: Border(
-        top: BorderSide(color: _border),
-        bottom: BorderSide(color: _border),
+  Widget _previewPerson(GitCommit commit) {
+    final separateCommitter =
+        commit.author.name != commit.committer.name ||
+        commit.author.email != commit.committer.email;
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: const BoxDecoration(
+        border: Border(
+          top: BorderSide(color: _border),
+          bottom: BorderSide(color: _border),
+        ),
       ),
-    ),
-    child: Row(
-      children: [
-        commit.isWorkingTree
-            ? Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: _border),
+      child: Row(
+        children: [
+          commit.isWorkingTree
+              ? Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: _border),
+                  ),
+                )
+              : CommitAvatarStack(
+                  commit: commit,
+                  avatarService: widget.avatarService,
+                  showRemoteAvatars: widget.showRemoteAvatars,
+                  size: 42,
+                  discColor: AvatarService.branchColor(_branchOf(commit)),
                 ),
-              )
-            : _committerAvatar(
-                commit,
-                42,
-                discColor: AvatarService.branchColor(_branchOf(commit)),
-              ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                commit.isWorkingTree ? 'Not committed' : commit.committer.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: _text,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              Text(
-                commit.isWorkingTree
-                    ? 'No commit object or committer'
-                    : 'Committer · ${_socialTime(commit.committerTimestamp)}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: _muted, fontSize: 12),
-              ),
-              // The working tree has no commit, so it has no exact moment.
-              if (!commit.isWorkingTree)
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 Text(
-                  exactCommitTime(commit.committerTimestamp),
+                  commit.isWorkingTree ? 'Not committed' : commit.author.name,
                   maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: _muted,
-                    fontSize: 13,
-                    fontFamily: 'monospace',
+                    color: _text,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-            ],
+                Text(
+                  commit.isWorkingTree
+                      ? 'No commit object or committer'
+                      : 'Author',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: _muted, fontSize: 12),
+                ),
+                if (!commit.isWorkingTree && separateCommitter)
+                  Text(
+                    'Committer · ${commit.committer.name}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: _muted, fontSize: 12),
+                  ),
+                // The working tree has no commit, so it has no exact moment.
+                if (!commit.isWorkingTree)
+                  Text(
+                    exactCommitTime(commit.committerTimestamp),
+                    maxLines: 1,
+                    style: const TextStyle(
+                      color: _muted,
+                      fontSize: 13,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+              ],
+            ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 
   Widget _previewStats(List<GitFileChange>? changes) {
     int total(int? Function(GitFileChange file) value) =>

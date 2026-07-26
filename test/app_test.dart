@@ -4768,7 +4768,8 @@ void main() {
     expect(sizeOf('Commit & Diff'), 12);
     expect(sizeOf('first commit'), 14);
     expect(sizeOf('commit 1'), 12);
-    expect(sizeOf('Cam Committer'), 14);
+    expect(sizeOf('Ada Author'), 14);
+    expect(sizeOf('Committer · Cam Committer'), 12);
     expect(sizeOf('2 files changed'), 12);
     expect(sizeOf('lib/a.dart'), 12);
     expect(sizeOf('+lib/a.dart body'), 11);
@@ -5698,6 +5699,109 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.pumpAndSettle();
     expect(find.text('alpha lib/one.dart'), findsOneWidget);
+  });
+
+  testWidgets('preview shortcuts scroll and distinguish identities', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [
+            commit('1', 'different identities'),
+            commit(
+              '2',
+              'same identity',
+              committer: const GitIdentity(
+                name: 'Ada Author',
+                email: 'ada@example.com',
+              ),
+            ),
+          ],
+          files: (_, _) async => [
+            for (final name in ['one', 'two'])
+              GitFileChange(
+                path: 'lib/$name.dart',
+                status: 'M',
+                additions: 1,
+                deletions: 0,
+              ),
+          ],
+          diff: (_, _, path, _) async => [
+            for (var index = 0; index < 60; index++)
+              DiffLine(
+                kind: DiffLineKind.add,
+                text: '$path line $index',
+                newNumber: index + 1,
+              ),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    final preview = find.byKey(const Key('preview-panel'));
+    expect(
+      find.descendant(
+        of: preview,
+        matching: find.text('파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓'),
+      ),
+      findsOneWidget,
+    );
+    final hash = tester.widget<Text>(find.byKey(const Key('preview-hash')));
+    expect(hash.style?.fontFamily, cellFont);
+    expect(hash.style?.fontFamilyFallback, cellFontFallback);
+    expect(
+      find.descendant(of: preview, matching: find.text('Ada Author')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: preview,
+        matching: find.text('Committer · Cam Committer'),
+      ),
+      findsOneWidget,
+    );
+
+    final scrollable = tester.state<ScrollableState>(
+      find.descendant(of: preview, matching: find.byType(Scrollable)),
+    );
+    expect(scrollable.position.pixels, 0);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(scrollable.position.pixels, greaterThan(0));
+    expect(find.byKey(const Key('preview-state-lib/one.dart')), findsOneWidget);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(scrollable.position.pixels, 0);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: preview,
+        matching: find.textContaining('Committer ·'),
+      ),
+      findsNothing,
+    );
   });
 
   // ------------------------------------------------------------------ H3
