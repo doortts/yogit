@@ -1,460 +1,486 @@
-# Full Diff Workspace Design
+# Full Diff 작업 화면 설계
 
-## Goal
+## 목표
 
-Turn Yogit's Full Diff screen into a code-review workspace without losing its
-fast commit and file navigation.
+Yogit의 빠른 커밋·파일 탐색은 유지하면서 Full Diff 화면을 코드 리뷰
+작업 공간으로 확장합니다.
 
-The default experience is a list of focused Hunk blocks. A user can open any
-Hunk in the complete file without adding a separate Inline mode. Settings decide
-whether a new Full Diff screen starts with Hunk blocks or with the complete file
-focused on its first change.
+기본 화면에는 변경된 Hunk를 블록 단위로 모아 보여줍니다. 각 Hunk에서는
+파일 전체를 열 수 있으므로 Inline 모드를 따로 두지 않습니다. Settings에서는
+Full Diff 화면을 열 때 Hunk 목록부터 보여줄지, 전체 파일을 열고 첫 번째
+변경 위치에 초점을 맞출지 선택할 수 있습니다.
 
-## Approved Content Modes
+## 확정된 콘텐츠 모드
 
-The file header exposes four primary modes:
+파일 머리글에는 다음 네 가지 주요 모드를 표시합니다.
 
 - `Hunk`
 - `File`
 - `Blame`
 - `History`
 
-There is no separately labeled Inline mode.
+Inline이라는 이름의 모드는 따로 두지 않습니다.
 
 ### Hunk
 
-Hunk is the default mode and the primary review surface. Each parsed Git hunk is
-one selectable block containing:
+Hunk는 기본 모드이자 코드 리뷰의 중심 화면입니다. Git에서 읽은 Hunk
+하나를 선택 가능한 블록 하나로 표시하며 각 블록에는 다음 내용을
+담습니다.
 
-- a friendly old/new line-range heading;
-- three context lines from Git on either side of a change;
-- addition and deletion rows;
-- a change count such as `2 / 7`;
-- a `View in full file` action.
+- 이전 파일과 새 파일의 줄 범위를 읽기 쉽게 정리한 제목
+- Git이 제공하는 변경 앞뒤 문맥 3줄
+- 추가·삭제된 행
+- `2 / 7`과 같은 현재 변경 위치
+- `View in full file` 동작
 
-Raw `diff --git`, `index`, `---`, `+++`, and `@@` patch lines remain in the
-model but are not rendered as source rows. The Hunk heading presents the parsed
-range and function context instead.
+`diff --git`, `index`, `---`, `+++`, `@@` 같은 원본 patch 정보는 모델에
+보관하지만 소스 행으로 그리지 않습니다. Hunk 제목에는 원본 정보에서
+읽어 낸 줄 범위와 함수 문맥을 대신 표시합니다.
 
-Selecting `View in full file` switches to File mode and focuses the complete
-file on that Hunk's first changed line. Returning to Hunk mode restores the same
-Hunk as the active block.
+`View in full file`을 선택하면 File 모드로 바뀌고 전체 파일에서 해당
+Hunk의 첫 번째 변경 행에 초점을 맞춥니다. 다시 Hunk 모드로 돌아오면
+이전에 보던 Hunk 블록이 그대로 선택됩니다.
 
-Hunk rows use a normal one-column presentation by default. A `Split` toggle
-pairs deletions and additions in two columns. Split is a Hunk presentation
-option, not a separate content mode.
+Hunk의 기본 표시는 한 줄 흐름으로 구성합니다. `Split`을 켜면 삭제와
+추가 내용을 양쪽 열에 짝지어 보여줍니다. Split은 Hunk를 보여주는
+방식이며 별도의 콘텐츠 모드는 아닙니다.
 
 ### File
 
-File shows the complete file on the result side of the selected comparison.
-Added and replaced result lines retain subdued backgrounds. A pure deletion has
-no result line, so File shows a deletion marker between the adjacent surviving
-lines and anchors focus to that marker. A deleted file uses its parent content
-and marks the removed lines. The currently focused Hunk receives a stronger
-focus marker.
+File은 현재 비교 결과에 해당하는 파일 전체를 보여줍니다. 추가되거나
+대체된 결과 행에는 옅은 배경색을 유지합니다. 완전히 삭제된 부분은 결과
+파일에 대응하는 행이 없으므로 앞뒤에 남아 있는 행 사이에 삭제 표시를
+넣고 그 위치에 초점을 맞춥니다. 파일 자체가 삭제된 커밋이라면 부모
+커밋의 파일을 보여주고 삭제된 행을 표시합니다. 현재 선택한 Hunk에는
+별도의 테두리나 줄 번호 영역 표시를 더합니다.
 
-Previous/next change controls move between Hunk anchors while staying in File
-mode. They scroll by semantic line anchor rather than by a stored pixel offset,
-so line wrap and syntax highlighting do not change the target.
+이전·다음 변경 버튼을 누르면 File 모드를 유지한 채 Hunk 앵커 사이를
+이동합니다. 화면의 픽셀 위치를 저장하지 않고 소스 행을 가리키는 앵커로
+이동하므로 줄바꿈이나 구문 강조 때문에 행 높이가 달라져도 같은 변경
+위치를 찾을 수 있습니다.
 
-When File mode was opened from a Hunk block, it focuses that Hunk. When File is
-the configured initial mode, it focuses the first textual Hunk. A file with no
-textual Hunk starts at the top and shows its applicable empty, binary, or
-unsupported-encoding state.
+Hunk 블록에서 File을 열었다면 해당 Hunk로 이동합니다. Settings에서
+File을 초기 모드로 정했다면 첫 번째 텍스트 Hunk로 이동합니다. 텍스트
+Hunk가 없는 파일은 맨 위에서 시작하며 파일 상태에 따라 빈 diff,
+바이너리 또는 지원하지 않는 인코딩 안내를 표시합니다.
 
 ### Blame
 
-Blame uses the same complete-file rows as File and adds commit and author
-information. Entering Blame preserves the active Hunk anchor.
+Blame은 File과 같은 전체 파일 행에 커밋과 작성자 정보를 덧붙입니다.
+File에서 선택한 Hunk 앵커는 Blame으로 바꿔도 유지합니다.
 
 ### History
 
-History lists the commits that changed the selected path. A history selection
-may change the inspected commit only after the user explicitly activates it;
-moving keyboard focus through the list does not replace the current diff.
+History에는 선택한 경로를 변경한 커밋을 나열합니다. 목록에서 키보드
+포커스만 옮겼을 때는 현재 diff를 바꾸지 않습니다. 사용자가 커밋을
+명시적으로 선택했을 때만 해당 커밋으로 이동합니다.
 
-## Initial View Setting
+## 초기 보기 설정
 
-`AppSettings` gains:
+`AppSettings`에 다음 값을 추가합니다.
 
 ```dart
 enum FullDiffInitialView { hunk, fullFile }
 ```
 
-`FullDiffInitialView.hunk` is the default. The JSON key is
-`fullDiffInitialView`, with values `hunk` and `fullFile`. Missing or damaged
-values fall back to `hunk`.
+기본값은 `FullDiffInitialView.hunk`입니다. JSON에는
+`fullDiffInitialView`라는 키로 저장하며 값은 `hunk` 또는 `fullFile`입니다.
+값이 없거나 올바르지 않으면 `hunk`를 사용합니다.
 
-The Settings screen adds a `Full Diff` section with one radio group:
+Settings 화면에 `Full Diff` 영역과 다음 라디오 버튼을 추가합니다.
 
-- `Hunk blocks` — open the diff as focused Hunk blocks.
-- `Full file focused on first change` — open the complete file and focus its
-  first changed line.
+- `Hunk blocks`: Full Diff를 Hunk 블록 목록으로 엽니다.
+- `Full file focused on first change`: 전체 파일을 열고 첫 번째 변경 행에
+  초점을 맞춥니다.
 
-The setting seeds a Full Diff session when the screen opens. Manual mode changes
-inside that screen remain in effect while the user moves between commits and
-files. A new file resets the active anchor to its first Hunk but does not
-override a manual Hunk/File choice. A settings change affects the next Full Diff
-screen and does not replace the mode of an already open screen.
+이 설정은 Full Diff 화면을 새로 열 때 초기 모드를 정합니다. 화면을 연
+뒤 사용자가 직접 모드를 바꾸면 같은 화면에서 커밋과 파일을 이동하는
+동안 그 선택을 유지합니다. 새 파일을 선택하면 활성 앵커만 첫 번째
+Hunk로 바꾸고 Hunk/File 모드는 유지합니다. Settings에서 값을 바꿔도
+이미 열린 Full Diff 화면은 바꾸지 않으며 다음에 여는 화면부터
+적용합니다.
 
-## Screen Layout
+## 화면 구성
 
-The screen has two fixed header rows above the existing three-pane body.
+기존의 세 열 본문 위에 고정 머리글 두 줄을 둡니다.
 
-### File Header
+### 파일 머리글
 
-The first row contains:
+첫 번째 줄에는 다음 내용을 배치합니다.
 
-- selected path;
-- file status and addition/deletion counts;
-- `Open in editor`;
-- `Hunk`, `File`, `Blame`, and `History`;
-- detected content status: `UTF-8`, `Binary`, or `Unsupported encoding`.
+- 선택한 파일 경로
+- 파일 상태와 추가·삭제 행 수
+- `Open in editor`
+- `Hunk`, `File`, `Blame`, `History`
+- 파일 내용 상태: `UTF-8`, `Binary`, `Unsupported encoding`
 
-The path and file statistics remain visible while content scrolls.
+콘텐츠를 스크롤해도 파일 경로와 변경량은 화면에 남습니다.
 
-### Diff Toolbar
+### Diff 도구 모음
 
-The second row contains:
+두 번째 줄에는 다음 기능을 배치합니다.
 
-- focus mode;
-- previous and next change controls with the current change number;
-- a `Split` toggle, enabled only in Hunk mode;
-- a fixed dropdown trigger named `diff 알고리즘`;
-- the selected algorithm in an adjacent always-visible value such as
-  `Git setting` or `Histogram`;
-- ignore-whitespace toggle;
-- line-wrap toggle.
+- 집중 모드
+- 현재 변경 번호를 포함한 이전·다음 변경 버튼
+- Hunk 모드에서만 사용할 수 있는 `Split`
+- 이름이 항상 `diff 알고리즘`으로 보이는 드롭다운
+- `Git setting`, `Histogram`처럼 현재 선택한 알고리즘을 항상 보여주는
+  인접 표시
+- 공백 변경 무시
+- 줄바꿈
 
-The algorithm menu contains `Git setting`, `Myers`, `Minimal`, `Patience`, and
-`Histogram`. Choosing an item changes the adjacent value but never replaces the
-trigger name `diff 알고리즘`.
+알고리즘 메뉴에는 `Git setting`, `Myers`, `Minimal`, `Patience`,
+`Histogram`을 넣습니다. 항목을 고르면 옆의 선택값만 바뀌고
+`diff 알고리즘`이라는 드롭다운 이름은 그대로 둡니다.
 
-### Three-Pane Body
+### 세 열 본문
 
-The body keeps Yogit's current structure:
+본문은 Yogit의 현재 구조를 유지합니다.
 
-1. nearby commits;
-2. selected commit details and changed files;
-3. the selected content mode.
+1. 주변 커밋
+2. 선택한 커밋 정보와 변경 파일
+3. 선택한 콘텐츠 모드
 
-Focus mode hides both navigation panes and gives the body width to the content
-pane. Leaving focus mode restores the saved widths and the previous commit and
-file selections.
+집중 모드를 켜면 두 탐색 열을 숨기고 콘텐츠 영역이 본문 너비를 모두
+사용합니다. 집중 모드를 끄면 저장해 둔 열 너비와 기존 커밋·파일 선택을
+복원합니다.
 
-At narrow widths, the nearby-commits pane collapses first and the changed-files
-pane collapses second. The content pane never shrinks below its current minimum
-width.
+화면이 좁아지면 주변 커밋 열을 먼저 접고 변경 파일 열을 다음으로
+접습니다. 콘텐츠 열은 현재 정해 둔 최소 너비보다 좁아지지 않습니다.
 
-## Delivery Phases
+## 개발 단계
 
-The phases follow their actual data dependencies. Every phase leaves the screen
-usable and can ship independently.
+단계 사이의 실제 의존 관계에 맞춰 순서를 정합니다. 각 단계가 끝날
+때마다 화면을 사용할 수 있어야 하며 다음 단계를 기다리지 않고 배포할
+수 있어야 합니다.
 
-### Phase 1: Diff Foundation and Hunk Reader
+### 1차: Diff 기반과 Hunk 화면
 
-- Introduce the shared document, Hunk, row, and anchor models.
-- Move Full Diff session state and request ordering out of `DiffScreen`.
-- Preserve raw Git metadata while rendering friendly Hunk headings.
-- Add the two-level file header and toolbar.
-- Make Hunk blocks the default surface.
-- Add focus mode and previous/next Hunk navigation.
-- Add line wrap and ignore-whitespace support.
-- Add the fixed `diff 알고리즘` trigger and visible selected value.
-- Preserve merge-parent selection, resizable columns, loading behavior, cache
-  behavior, text selection, and existing keyboard navigation.
-- Add the byte-preserving Git command boundary needed by later file modes.
+- 문서·Hunk·행·앵커를 함께 사용하는 공통 모델을 도입합니다.
+- Full Diff의 화면 상태와 요청 순서 관리를 `DiffScreen` 밖으로
+  분리합니다.
+- Git의 원본 정보를 유지하면서 읽기 쉬운 Hunk 제목을 표시합니다.
+- 파일 머리글과 도구 모음을 두 줄로 나눕니다.
+- Hunk 블록을 기본 화면으로 만듭니다.
+- 집중 모드와 이전·다음 Hunk 이동을 추가합니다.
+- 줄바꿈과 공백 변경 무시 기능을 추가합니다.
+- `diff 알고리즘`이라는 고정 이름과 현재 선택값을 함께 표시합니다.
+- 머지 부모 선택, 열 너비 조절, 로딩 상태, 캐시, 텍스트 선택, 기존
+  키보드 탐색을 유지합니다.
+- 이후 File 모드에서 쓸 수 있도록 Git 출력 바이트를 보존하는 경계를
+  추가합니다.
 
-Phase 1 does not expose the Full File setting because File mode is delivered in
-Phase 2.
+File 모드는 2차에서 추가하므로 1차에서는 Full File 초기 보기 설정을
+노출하지 않습니다.
 
-### Phase 2: Full File and Rich Diff Rendering
+### 2차: Full File과 상세 Diff 표시
 
-- Add File mode and `View in full file` on every Hunk block.
-- Add the Full Diff initial-view setting.
-- Classify and expose UTF-8, binary, and unsupported-encoding content states.
-- Add syntax highlighting.
-- Add word-level highlighting inside paired deletion/addition rows.
-- Add the Hunk-only Split toggle.
-- Keep line-number gutters continuous through context and change rows.
-- Render a striped placeholder where one Split side has no corresponding line.
-- Add a minimap with Hunk marks and a visible viewport indicator.
-- Add large-file fallbacks and semantic scroll anchors.
+- File 모드와 각 Hunk의 `View in full file`을 추가합니다.
+- Full Diff 초기 보기 설정을 추가합니다.
+- UTF-8, 바이너리, 지원하지 않는 인코딩을 구분하고 화면에 표시합니다.
+- 구문 강조를 추가합니다.
+- 서로 짝지은 삭제·추가 행 안에서 단어 단위 변경을 강조합니다.
+- Hunk에서만 동작하는 Split을 추가합니다.
+- 문맥 행과 변경 행에서 줄 번호 영역이 끊어지지 않게 표시합니다.
+- Split의 한쪽에 대응하는 행이 없으면 빗금 영역을 표시합니다.
+- Hunk 위치와 현재 화면 범위를 보여주는 미니맵을 추가합니다.
+- 큰 파일을 단순하게 표시하는 방식과 의미 기반 스크롤 앵커를
+  추가합니다.
 
-### Phase 3: Investigation and External Workflow
+### 3차: 변경 이력 조사와 외부 편집기 연결
 
-- Add Blame mode.
-- Add History mode with rename following.
-- Add `Open in editor`.
+- Blame 모드를 추가합니다.
+- 파일 이름 변경을 따라가는 History 모드를 추가합니다.
+- `Open in editor`를 추가합니다.
 
-## Component Boundaries
+## 구성 요소의 책임
 
-No state-management framework is added. Full Diff uses one dedicated controller
-and focused widgets.
+별도의 상태 관리 프레임워크는 도입하지 않습니다. Full Diff 전용
+컨트롤러 하나와 역할이 분명한 위젯으로 나눕니다.
 
 ### `FullDiffSessionController`
 
-The controller owns:
+컨트롤러는 다음 상태와 동작을 관리합니다.
 
-- selected commit, parent, and path;
-- selected content mode;
-- selected Hunk anchor;
-- Split, wrap, ignore-whitespace, and algorithm choices;
-- per-resource loading and errors;
-- stale-request generation counters;
-- caches for committed content.
+- 선택한 커밋·부모·경로
+- 선택한 콘텐츠 모드
+- 선택한 Hunk 앵커
+- Split·줄바꿈·공백 변경 무시·알고리즘 설정
+- 각 데이터의 로딩과 오류
+- 이전 요청의 결과를 구분하기 위한 요청 세대 번호
+- 커밋된 파일 데이터의 캐시
 
-It exposes immutable session snapshots and commands. `DiffScreen` listens to the
-controller and arranges the screen but does not coordinate Git requests itself.
+컨트롤러는 바꿀 수 없는 세션 상태 사본과 명령을 외부에 제공합니다.
+`DiffScreen`은 컨트롤러를 구독해서 화면만 배치하며 Git 요청을 직접
+조율하지 않습니다.
 
-### Data Models
+### 데이터 모델
 
-`DiffDocument` retains:
+`DiffDocument`에는 다음 내용을 보관합니다.
 
-- patch metadata;
-- source and result paths;
-- file status;
-- content status;
-- ordered `DiffHunk` objects;
-- flat rows for rendering and navigation.
+- Git diff 메타데이터
+- 이전 경로와 결과 경로
+- 파일 상태
+- 파일 내용 상태
+- 순서가 있는 `DiffHunk` 목록
+- 화면 표시와 이동에 함께 쓰는 전체 행
 
-`DiffHunk` retains:
+`DiffHunk`에는 다음 내용을 보관합니다.
 
-- stable Hunk index;
-- old and new ranges;
-- optional function context;
-- context and change rows;
-- first old and new changed lines.
+- 바뀌지 않는 Hunk 번호
+- 이전 파일과 새 파일의 줄 범위
+- 함수 문맥
+- 문맥 행과 변경 행
+- 이전 파일과 새 파일에서 처음 바뀐 행
 
-`DiffAnchor` identifies a Hunk and its old/new source line. It is the common
-currency for previous/next navigation, File focus, Blame focus, minimap
-selection, and restoring the active Hunk.
+`DiffAnchor`는 Hunk와 이전·새 파일의 소스 행을 가리킵니다. 이전·다음
+변경 이동, File과 Blame의 초점, 미니맵 선택, 기존 Hunk 복원에서 같은
+앵커를 사용합니다.
 
-### Widgets
+### 위젯
 
-- `DiffFileHeader` renders file identity and primary content modes.
-- `DiffToolbar` renders Hunk navigation and display controls.
-- `DiffNavigationPanes` owns the two resizable navigation columns.
-- `HunkListView` renders lazy Hunk blocks.
-- `FullFileView` renders complete-file rows and changed-line overlays.
-- `DiffMinimap` renders Hunk positions and the viewport.
-- `FileHistoryView` renders path history.
+- `DiffFileHeader`: 파일 정보와 주요 콘텐츠 모드를 표시합니다.
+- `DiffToolbar`: Hunk 이동과 화면 표시 기능을 제공합니다.
+- `DiffNavigationPanes`: 너비를 조절할 수 있는 두 탐색 열을 관리합니다.
+- `HunkListView`: 필요한 Hunk 블록만 만들어 표시합니다.
+- `FullFileView`: 전체 파일 행과 변경 위치 표시를 그립니다.
+- `DiffMinimap`: Hunk 위치와 현재 화면 범위를 표시합니다.
+- `FileHistoryView`: 파일 경로의 변경 이력을 표시합니다.
 
-Widgets receive state and callbacks. They do not run Git commands or maintain
-duplicate selections.
+위젯은 상태와 콜백을 받아서 표시만 합니다. Git 명령을 실행하거나
+같은 선택 상태를 따로 보관하지 않습니다.
 
-## Git and Content Boundary
+## Git 출력과 파일 내용 처리
 
-The current string-only process boundary is split into two explicit paths:
+현재 문자열만 반환하는 Git 실행 경계를 두 가지로 나눕니다.
 
-- text Git commands decode stdout as UTF-8 and return structured failures;
-- file-content commands retain stdout bytes until content classification and
-  decoding finish.
+- 일반 Git 명령은 표준 출력을 UTF-8로 해석하고 구조화된 오류를
+  반환합니다.
+- 파일 내용을 읽는 명령은 파일 종류를 판별하고 문자열로 바꿀 때까지
+  표준 출력의 원본 바이트를 유지합니다.
 
-The first release recognizes:
+첫 버전에서는 파일 내용을 다음과 같이 구분합니다.
 
-- valid UTF-8 text;
-- Git-reported binary content;
-- non-binary content that is not valid UTF-8, shown as
-  `Unsupported encoding`.
+- 올바른 UTF-8 텍스트
+- Git이 바이너리로 판별한 내용
+- 바이너리는 아니지만 UTF-8로 해석할 수 없는 내용:
+  `Unsupported encoding`
 
-Unsupported text is not mislabeled as binary. Converting arbitrary encodings is
-out of scope.
+지원하지 않는 텍스트를 바이너리로 잘못 표시하지 않습니다. 다른
+인코딩으로 변환하는 기능은 이번 범위에 포함하지 않습니다.
 
-Repository operations cover:
+저장소 계층은 다음 작업을 담당합니다.
 
-- `git diff --unified=3` with the selected algorithm and optional
-  ignore-whitespace argument;
-- complete committed content through Git object lookup;
-- working-tree content through direct file bytes;
-- `git blame --line-porcelain`;
-- working-tree blame through `git blame --contents` against HEAD;
-- path history through `git log --follow`.
+- 선택한 알고리즘과 공백 변경 무시 옵션을 적용한
+  `git diff --unified=3`
+- Git 객체에서 커밋된 파일 전체 읽기
+- 디스크에서 작업 트리 파일의 원본 바이트 읽기
+- `git blame --line-porcelain`
+- HEAD와 현재 작업 트리를 비교하는 `git blame --contents`
+- `git log --follow`로 파일 경로의 변경 이력 읽기
 
-Each resource has its own cache key. Patch keys contain commit, parent, path,
-algorithm, and ignore-whitespace state. File keys contain commit, path, and
-source side. Blame keys contain commit and path. History keys contain the
-rename-following path. Working-tree diff and file results bypass the long-lived
-cache so changing a file cannot leave stale content on screen.
+데이터 종류마다 캐시 키를 따로 둡니다. Patch 키에는 커밋·부모·경로·
+알고리즘·공백 변경 무시 값을 넣습니다. 파일 키에는 커밋·경로·어느
+쪽의 파일인지 나타내는 값을 넣습니다. Blame 키에는 커밋과 경로를,
+History 키에는 이름 변경을 따라갈 경로를 넣습니다. 작업 트리의 diff와
+파일 내용은 오래 유지하는 캐시에 넣지 않습니다. 사용자가 디스크의
+파일을 바꿨을 때 화면에 예전 내용이 남는 일을 막기 위해서입니다.
 
-## File-State Behavior
+## 파일 상태별 동작
 
-| Selected state | Hunk comparison | File and focus source | Open in editor |
+| 선택한 상태 | Hunk 비교 기준 | File에서 보여줄 내용과 초점 | Open in editor |
 | --- | --- | --- | --- |
-| Modified commit file | Parent to commit | Commit result path | Working-tree result path when present |
-| Added commit file | Empty file to commit | Added commit content | Working-tree result path when present |
-| Renamed or copied file | Old path to result path | Result path, with history following the old path | Working-tree result path when present |
-| Deleted commit file | Parent to empty file | Parent content, labeled `Deleted in selected commit` | Disabled |
-| Merge commit file | Chosen parent to merge result | Merge result; changing parent rebuilds anchors | Working-tree result path when present |
-| Working-tree file | HEAD to working tree | Current disk content | Current disk path |
-| Binary file | Metadata-only Hunk state | No text renderer | Enabled when a working-tree path exists |
-| Unsupported encoding | Metadata and changed-byte state | No decoded text renderer | Enabled when a working-tree path exists |
+| 커밋에서 수정된 파일 | 부모와 커밋 비교 | 커밋 결과 경로 | 작업 트리에 결과 경로가 있으면 사용 |
+| 커밋에 추가된 파일 | 빈 파일과 커밋 비교 | 커밋에 추가된 내용 | 작업 트리에 결과 경로가 있으면 사용 |
+| 이름이 바뀌거나 복사된 파일 | 이전 경로와 결과 경로 비교 | 결과 경로를 보여주고 History는 이전 경로까지 추적 | 작업 트리에 결과 경로가 있으면 사용 |
+| 커밋에서 삭제된 파일 | 부모와 빈 파일 비교 | 부모 내용을 보여주고 `Deleted in selected commit` 표시 | 사용 안 함 |
+| 머지 커밋의 파일 | 선택한 부모와 머지 결과 비교 | 머지 결과를 보여주고 부모 변경 시 앵커 다시 생성 | 작업 트리에 결과 경로가 있으면 사용 |
+| 작업 트리 파일 | HEAD와 작업 트리 비교 | 현재 디스크 내용 | 현재 디스크 경로 |
+| 바이너리 파일 | 파일 정보만 보여주는 Hunk 상태 | 텍스트 표시 안 함 | 작업 트리 경로가 있으면 사용 |
+| 지원하지 않는 인코딩 | 파일 정보와 바뀐 바이트 상태 | 해석한 텍스트 표시 안 함 | 작업 트리 경로가 있으면 사용 |
 
-Changing a merge parent resets the active anchor to the first Hunk. The File
-content of the merge result may remain the same, but its highlights and Hunk
-anchors reload for the new comparison.
+머지 부모를 바꾸면 활성 앵커를 첫 번째 Hunk로 되돌립니다. 머지 결과의
+파일 내용은 같을 수 있지만 비교 기준이 바뀌므로 변경 행 표시와 Hunk
+앵커를 다시 읽습니다.
 
-Blame uses the result commit for modified, added, renamed, copied, and merge
-files. A deleted file uses its parent content and parent blame. Working-tree
-Blame compares the current disk content against HEAD so uncommitted lines remain
-visible as working-tree lines. Binary and unsupported-encoding files do not
-offer Blame. History remains available for deleted files and follows renames
-across the old and result paths.
+수정·추가·이름 변경·복사·머지 파일의 Blame은 결과 커밋을 기준으로
+읽습니다. 삭제된 파일은 부모 커밋의 내용과 Blame을 사용합니다. 작업
+트리의 Blame은 현재 디스크 내용과 HEAD를 함께 사용하므로 커밋하지 않은
+행도 작업 트리 행으로 표시할 수 있습니다. 바이너리 파일과 지원하지
+않는 인코딩에는 Blame을 제공하지 않습니다. 삭제된 파일에서도 History는
+사용할 수 있으며 파일 이름이 바뀐 경우 이전 경로까지 따라갑니다.
 
-## Rendering Rules
+## 화면 표시 규칙
 
-### Typography and Color
+### 글꼴과 색상
 
-- Use the normal UI font for navigation and controls.
-- Use D2Coding for source, paths, hashes, and line numbers.
-- Remove the current screen-wide monospace theme.
-- Preserve syntax colors on text.
-- Encode additions and deletions with subdued backgrounds, gutters, and
-  explicit `+`/`−` markers.
-- Give the focused Hunk a separate border or gutter marker instead of replacing
-  its diff colors.
+- 탐색 영역과 조작 기능에는 일반 UI 글꼴을 사용합니다.
+- 소스·경로·hash·줄 번호에는 D2Coding을 사용합니다.
+- 현재 Full Diff 화면 전체에 적용된 고정폭 글꼴 설정을 제거합니다.
+- 소스의 구문 색상을 유지합니다.
+- 추가·삭제는 옅은 배경색, 줄 번호 영역, `+`·`−` 기호로 구분합니다.
+- 선택한 Hunk에는 diff 색상을 덮지 않는 별도 테두리나 줄 번호 영역
+  표시를 사용합니다.
 
-### Syntax and Word Highlighting
+### 구문 강조와 단어 단위 변경
 
-Language selection comes from the result path. The first release must support
-Pascal/Delphi because the DRL acceptance fixture uses `.pas` files. Dart, Swift,
-Kotlin/Java, JavaScript/TypeScript, Python, C/C++, Rust, Go, shell, JSON, YAML,
-and XML are supported when the chosen highlighting engine recognizes them.
-Unknown extensions fall back to plain text.
+결과 파일의 경로를 보고 언어를 정합니다. DRL 검증 대상에 `.pas` 파일이
+있으므로 첫 버전부터 Pascal/Delphi를 지원해야 합니다. 사용하는 구문
+강조 도구가 지원한다면 Dart, Swift, Kotlin/Java, JavaScript/TypeScript,
+Python, C/C++, Rust, Go, shell, JSON, YAML, XML도 지원합니다. 알 수 없는
+확장자는 일반 텍스트로 표시합니다.
 
-Syntax highlighting runs after Git row matching and cannot change line pairing.
-Word highlighting runs only on paired deletion/addition rows and applies a
-background over the syntax-colored text.
+구문 강조는 Git이 diff 행의 짝을 정한 뒤 적용하며 행의 짝을 바꾸지
+않습니다. 단어 단위 강조는 서로 짝지은 삭제·추가 행에만 적용합니다.
+구문 색상을 유지하고 단어가 바뀐 영역의 배경만 따로 표시합니다.
 
-Word matching tokenizes whitespace and punctuation boundaries. A line with more
-than 512 tokens or 20,000 characters falls back to row-level highlighting.
+단어를 비교할 때는 공백과 구두점을 경계로 나눕니다. 토큰이 512개를
+넘거나 길이가 20,000자를 넘는 행은 단어 비교를 생략하고 행 전체만
+강조합니다.
 
-### Scroll and Minimap
+### 스크롤과 미니맵
 
-Every changed range has a widget key derived from `DiffAnchor`. Navigation and
-minimap actions scroll the anchor into view instead of guessing a pixel offset.
-This remains correct when wrapped rows change height.
+모든 변경 범위에는 `DiffAnchor`에서 만든 위젯 키를 붙입니다. 이전·
+다음 변경 버튼과 미니맵은 픽셀 위치를 추정하지 않고 해당 앵커가
+보이도록 스크롤합니다. 줄바꿈으로 행 높이가 달라져도 같은 변경
+위치로 이동할 수 있습니다.
 
-Minimap marks use source-line ratios. The viewport indicator uses the current
-scroll extent. Selecting a mark targets the nearest Hunk anchor.
+미니맵의 변경 표시는 소스 행 비율로 배치합니다. 현재 화면 범위는 전체
+스크롤 길이에 대한 비율로 표시합니다. 미니맵의 변경 표시를 선택하면
+가장 가까운 Hunk 앵커로 이동합니다.
 
-## Performance and Large Files
+## 성능과 큰 파일 처리
 
-Hunk blocks and complete-file rows are built lazily. The UI does not construct
-an entire large file as one eager `Column`.
+Hunk 블록과 전체 파일 행은 화면에 필요한 만큼만 만듭니다. 큰 파일
+전체를 하나의 `Column`으로 한꺼번에 만들지 않습니다.
 
-Normal rich rendering applies while the decoded file is at most 2 MiB and
-50,000 lines.
+해석한 파일이 2 MiB 이하이면서 50,000행 이하일 때 일반 상세 표시를
+사용합니다.
 
-Large-file mode applies above either limit:
+둘 중 하나라도 기준을 넘으면 큰 파일 모드로 바꿉니다.
 
-- syntax and word highlighting are disabled;
-- wrap defaults off;
-- Hunk navigation and the minimap remain available;
-- rows remain virtualized.
+- 구문 강조와 단어 단위 강조를 끕니다.
+- 줄바꿈의 기본값을 끕니다.
+- Hunk 이동과 미니맵은 유지합니다.
+- 화면에 필요한 행만 계속 만듭니다.
 
-Files above 10 MiB or 200,000 lines do not render complete text inside Yogit.
-The screen explains the limit and keeps metadata, Hunk summary, History, and
-Open in editor available where applicable.
+10 MiB 또는 200,000행을 넘는 파일은 Yogit 안에서 전체 텍스트를
+표시하지 않습니다. 제한 안내와 파일 정보, Hunk 요약, History,
+Open in editor는 가능한 범위에서 유지합니다.
 
-Hunk blocks remain individually selectable. Large-file mode does not promise a
-single selection spanning unloaded blocks.
+각 Hunk 블록 안에서는 여러 행을 선택할 수 있습니다. 큰 파일 모드에서는
+아직 화면에 만들지 않은 블록을 가로질러 한 번에 선택하는 기능을
+보장하지 않습니다.
 
-## Keyboard and Accessibility
+## 키보드와 접근성
 
-Keyboard commands use focus-aware `Shortcuts` and `Actions` rather than a
-single screen-wide arrow handler.
+화면 전체에서 방향키를 먼저 가져가는 방식은 사용하지 않습니다. 포커스
+상태를 확인하는 `Shortcuts`와 `Actions`로 키보드 명령을 처리합니다.
 
-When a menu, radio group, or selectable text control owns focus, it receives its
-native keys. Otherwise:
+메뉴, 라디오 버튼, 선택 가능한 텍스트에 포커스가 있으면 해당 조작
+요소가 원래 키 동작을 처리합니다. 그 밖의 경우에는 다음 단축키를
+사용합니다.
 
-- Up/Down selects files.
-- Command-Up/Command-Down selects nearby commits.
-- Option-Up/Option-Down moves between Hunk anchors.
-- Command-Shift-F toggles focus mode.
-- Escape returns to the timeline.
+- Up/Down: 파일 이동
+- Command-Up/Command-Down: 주변 커밋 이동
+- Option-Up/Option-Down: Hunk 앵커 이동
+- Command-Shift-F: 집중 모드 전환
+- Escape: 타임라인으로 돌아가기
 
-All actions expose semantic labels and selected states. The algorithm trigger
-and its adjacent value are read as one control. Focus mode, Split, wrap, and
-ignore-whitespace expose pressed state.
+모든 기능에는 접근성 이름과 선택 상태를 제공합니다. 알고리즘
+드롭다운과 옆의 선택값은 하나의 조작 요소로 읽히게 합니다. 집중 모드,
+Split, 줄바꿈, 공백 변경 무시는 켜짐·꺼짐 상태를 전달합니다.
 
-## Loading and Errors
+## 로딩과 오류
 
-- Changing algorithm or ignore-whitespace keeps the last successful Hunk
-  document visible with a loading indicator.
-- A failed option change restores the last successfully displayed options.
-- File, Blame, and History have separate loading and error states.
-- A failure in one mode does not clear successful content in another mode.
-- Stale results from an earlier commit, parent, or path cannot replace the
-  current session snapshot.
-- Empty diffs show a no-changes state.
-- Deleted, binary, unsupported, and oversized files use the behavior in the
-  file-state and performance sections.
-- `Open in editor` first uses a resolvable `VISUAL` or `EDITOR` executable and
-  otherwise asks macOS to open the working-tree path with its associated
-  application. Launch failures appear beside the action without replacing the
-  current content.
+- 알고리즘이나 공백 변경 무시 설정을 바꾸는 동안에는 마지막으로
+  성공한 Hunk 문서를 그대로 보여주고 로딩 표시를 얹습니다.
+- 새 설정으로 읽지 못하면 마지막으로 성공한 설정으로 되돌립니다.
+- File, Blame, History는 로딩과 오류 상태를 각각 관리합니다.
+- 한 모드에서 오류가 나도 다른 모드에서 정상적으로 읽은 내용은
+  지우지 않습니다.
+- 이전 커밋·부모·경로에서 늦게 도착한 결과가 현재 화면을 덮지 못하게
+  합니다.
+- 변경 내용이 없으면 변경 없음 상태를 보여줍니다.
+- 삭제·바이너리·지원하지 않는 인코딩·지나치게 큰 파일은 앞에서 정한
+  상태별 동작과 성능 기준을 따릅니다.
+- `Open in editor`는 실행할 수 있는 `VISUAL` 또는 `EDITOR` 프로그램을
+  먼저 사용합니다. 둘 다 없으면 macOS에 작업 트리 경로를 연결된
+  프로그램으로 열어 달라고 요청합니다. 실행하지 못한 경우 현재
+  콘텐츠를 지우지 않고 버튼 옆에 오류를 표시합니다.
 
-## Verification
+## 검증
 
-### Unit Tests
+### 단위 테스트
 
-- settings round-trip, missing values, and damaged-value fallback to Hunk;
-- Git arguments for every algorithm and ignore-whitespace combination;
-- patch metadata, Hunk ranges, function context, and Hunk anchors;
-- modified, added, renamed, deleted, merge, and working-tree source selection;
-- UTF-8, binary, and unsupported-encoding classification from bytes;
-- Split pairing and missing-side rows;
-- word spans and the 512-token/20,000-character fallback;
-- minimap source-line positions;
-- committed cache keys and working-tree cache bypass;
-- complete-file, blame, and rename-following history parsing.
+- Settings 저장·복원, 누락된 값, 손상된 값을 Hunk 기본값으로 되돌리는
+  동작
+- 모든 알고리즘과 공백 변경 무시 조합에서 사용하는 Git 인자
+- Git diff 메타데이터, Hunk 줄 범위, 함수 문맥, Hunk 앵커
+- 수정·추가·이름 변경·삭제·머지·작업 트리의 파일 선택 기준
+- 원본 바이트에서 UTF-8·바이너리·지원하지 않는 인코딩을 구분하는 동작
+- Split 행 짝짓기와 대응하는 행이 없는 영역
+- 단어 단위 변경과 512토큰·20,000자 제한
+- 미니맵의 소스 행 위치
+- 커밋 데이터의 캐시 키와 작업 트리의 캐시 우회
+- 전체 파일, Blame, 이름 변경을 따라가는 History 해석
 
-### Widget Tests
+### 위젯 테스트
 
-- Settings shows Hunk as the default and persists both initial-view choices.
-- A new Full Diff screen opens in the configured mode.
-- Manual Hunk/File changes survive file and commit navigation in one session.
-- Every Hunk block opens File at its own anchor and returns to the same Hunk.
-- The fixed `diff 알고리즘` trigger always shows the selected adjacent value.
-- Focus mode collapses and restores navigation widths.
-- Split changes Hunk presentation without running Git again.
-- Previous/next navigation works in Hunk, File, and Blame.
-- Wrap and minimap navigation keep the same semantic target.
-- Large and oversized files use their specified fallback.
-- Mode-specific loading, stale requests, binary states, and failures remain
-  isolated.
-- Menus and text selection retain their native keyboard behavior.
+- Settings에서 Hunk를 기본값으로 보여주고 두 초기 보기 값을 모두
+  저장하는지 확인합니다.
+- 새 Full Diff 화면이 Settings에서 정한 모드로 열리는지 확인합니다.
+- 한 화면 안에서 사용자가 바꾼 Hunk/File 모드가 파일과 커밋을 이동해도
+  유지되는지 확인합니다.
+- 모든 Hunk 블록에서 File을 열면 해당 앵커로 이동하고 다시 같은 Hunk로
+  돌아오는지 확인합니다.
+- `diff 알고리즘`이라는 이름은 유지하면서 현재 선택값을 항상 함께
+  표시하는지 확인합니다.
+- 집중 모드를 켜고 끌 때 탐색 열 너비를 복원하는지 확인합니다.
+- Split을 바꿔도 Git을 다시 실행하지 않고 Hunk 표시만 바꾸는지
+  확인합니다.
+- Hunk, File, Blame에서 이전·다음 변경 이동이 동작하는지 확인합니다.
+- 줄바꿈을 바꾸거나 미니맵을 사용해도 같은 의미의 변경 위치로
+  이동하는지 확인합니다.
+- 큰 파일과 지나치게 큰 파일에서 정해 둔 단순 표시를 사용하는지
+  확인합니다.
+- 모드별 로딩, 늦게 도착한 요청, 바이너리, 오류 상태가 서로 영향을
+  주지 않는지 확인합니다.
+- 메뉴와 텍스트 선택에서 원래 키보드 동작을 유지하는지 확인합니다.
 
-### Manual DRL Acceptance Fixture
+### DRL 수동 검증 대상
 
-Use repository `/Users/doortts/repos/drl` with:
+다음 저장소와 커밋을 사용합니다.
 
-- commit `40aff6d75bd16c5ccd9d45de615df8e9cbbb9fb0`;
-- path `src/drlgfxio.pas`;
-- default parent;
-- nine expected Hunk blocks from the current fixture.
+- 저장소: `/Users/doortts/repos/drl`
+- 커밋: `40aff6d75bd16c5ccd9d45de615df8e9cbbb9fb0`
+- 경로: `src/drlgfxio.pas`
+- 비교 기준: 기본 부모
+- 예상 Hunk: 현재 검증 대상 기준 9개
 
-Acceptance checks:
+확인할 내용은 다음과 같습니다.
 
-- Hunk headings correspond to the nine Git ranges.
-- `View in full file` focuses the matching Pascal source line.
-- Pascal syntax and word-level changes remain readable.
-- Previous/next and minimap navigation visit the same nine anchors.
-- Hunk and Full File initial settings open at the expected first anchor.
-- Split pairs deletion and addition rows without changing Hunk count.
+- Hunk 제목이 Git에서 읽은 9개 줄 범위와 일치해야 합니다.
+- `View in full file`을 누르면 Pascal 소스의 해당 행으로 이동해야 합니다.
+- Pascal 구문과 단어 단위 변경을 읽기 쉽게 표시해야 합니다.
+- 이전·다음 버튼과 미니맵이 같은 9개 앵커를 차례로 방문해야 합니다.
+- Hunk와 Full File 초기 설정 모두 예상한 첫 번째 앵커에서 열려야 합니다.
+- Split으로 바꿔도 Hunk 수는 그대로이며 삭제·추가 행의 짝이 맞아야
+  합니다.
 
-Rename, deletion, binary, unsupported-encoding, merge-parent, working-tree, and
-large-file behavior use deterministic test fixtures rather than mutable
-repository history.
+이름 변경, 삭제, 바이너리, 지원하지 않는 인코딩, 머지 부모, 작업 트리,
+큰 파일은 변할 수 있는 실제 저장소 이력 대신 고정된 테스트 데이터로
+검증합니다.
 
-## Non-Goals
+## 이번 범위에 포함하지 않는 기능
 
-- A separately labeled Inline mode
-- Editing, staging, discarding, or committing inside the reader
-- Merge-conflict resolution
-- Arbitrary character-set conversion
-- User-defined syntax themes
-- User-defined toolbar layouts
-- Persisting manual Hunk/File changes beyond the configured initial view
-- Selecting across unloaded blocks in oversized files
+- Inline이라는 이름의 별도 모드
+- 화면 안에서 파일 편집·stage·discard·커밋 수행
+- 머지 충돌 해결
+- 임의 문자 인코딩 변환
+- 사용자 정의 구문 색상
+- 사용자 정의 도구 모음 배치
+- Settings에서 정한 초기 보기와 별개로 사용자가 화면 안에서 바꾼
+  Hunk/File 모드를 다음 실행까지 저장
+- 지나치게 큰 파일에서 아직 화면에 만들지 않은 블록까지 가로지르는
+  텍스트 선택
