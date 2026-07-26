@@ -1555,11 +1555,11 @@ void main() {
     expect(saved?.time, 124);
     expect(tester.getSize(find.byKey(const Key('time-header'))).width, 124);
 
-    for (var press = 0; press < 9; press++) {
+    for (var press = 0; press < 13; press++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
       await tester.pump();
     }
-    expect(saved?.time, 56);
+    expect(saved?.time, 20);
     expect(saved?.name, 150);
   });
 
@@ -1587,8 +1587,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(timelineColumns['time']!.min, 56);
-    expect(timelineColumns['name']!.min, 50);
+    expect(timelineColumns['time']!.min, 20);
+    expect(timelineColumns['name']!.min, 20);
     expect(find.text('AUTHOR'), findsOneWidget);
     expect(find.text('Ada Author'), findsOneWidget);
 
@@ -1597,21 +1597,21 @@ void main() {
         .focusNode!
         .requestFocus();
     await tester.pump();
-    for (var press = 0; press < 3; press++) {
+    for (var press = 0; press < 8; press++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
       await tester.pump();
     }
-    expect(tester.getSize(find.byKey(const Key('time-header'))).width, 56);
+    expect(tester.getSize(find.byKey(const Key('time-header'))).width, 20);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('time-header')), findsNothing);
     expect(find.byKey(const Key('show-time-column')), findsOneWidget);
     expect(saved?.showTime, isFalse);
-    expect(saved?.time, 56);
+    expect(saved?.time, 20);
 
     await tester.tap(find.byKey(const Key('show-time-column')));
     await tester.pumpAndSettle();
-    expect(tester.getSize(find.byKey(const Key('time-header'))).width, 56);
+    expect(tester.getSize(find.byKey(const Key('time-header'))).width, 20);
     expect(saved?.showTime, isTrue);
 
     tester
@@ -1619,22 +1619,22 @@ void main() {
         .focusNode!
         .requestFocus();
     await tester.pump();
-    for (var press = 0; press < 3; press++) {
+    for (var press = 0; press < 7; press++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
       await tester.pump();
     }
-    expect(tester.getSize(find.byKey(const Key('name-header'))).width, 50);
+    expect(tester.getSize(find.byKey(const Key('name-header'))).width, 20);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('name-header')), findsNothing);
     expect(find.text('Ada Author'), findsNothing);
     expect(find.byKey(const Key('show-name-column')), findsOneWidget);
     expect(saved?.showName, isFalse);
-    expect(saved?.name, 50);
+    expect(saved?.name, 20);
 
     await tester.tap(find.byKey(const Key('show-name-column')));
     await tester.pumpAndSettle();
-    expect(tester.getSize(find.byKey(const Key('name-header'))).width, 50);
+    expect(tester.getSize(find.byKey(const Key('name-header'))).width, 20);
     expect(find.text('Ada Author'), findsOneWidget);
     expect(saved?.showName, isTrue);
   });
@@ -1676,6 +1676,50 @@ void main() {
     await tester.tap(find.byKey(const Key('show-name-column')));
     await tester.pumpAndSettle();
     expect(tester.getSize(find.byKey(const Key('name-header'))).width, 70);
+  });
+
+  testWidgets('hideable headers brighten and show immediate restore hints', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository((_, _) async => [commit('1', 'first commit')]),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    Color colorOf(String label) =>
+        tester.widget<Text>(find.text(label)).style!.color!;
+    Tooltip tooltipOf(String label) => tester.widget<Tooltip>(
+      find.ancestor(of: find.text(label), matching: find.byType(Tooltip)),
+    );
+    final initialDateColor = colorOf('DATE');
+    final initialAuthorColor = colorOf('AUTHOR');
+    final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(pointer.removePointer);
+    await pointer.addPointer(location: Offset.zero);
+
+    await pointer.moveTo(tester.getCenter(find.text('DATE')));
+    await tester.pump();
+    expect(
+      colorOf('DATE').computeLuminance(),
+      greaterThan(initialDateColor.computeLuminance()),
+    );
+    expect(tooltipOf('DATE').message, "Hide Date. Click 'D' to restore");
+    expect(tooltipOf('DATE').waitDuration, Duration.zero);
+    expect(find.text("Hide Date. Click 'D' to restore"), findsOneWidget);
+
+    await pointer.moveTo(tester.getCenter(find.text('AUTHOR')));
+    await tester.pump();
+    expect(colorOf('DATE'), initialDateColor);
+    expect(
+      colorOf('AUTHOR').computeLuminance(),
+      greaterThan(initialAuthorColor.computeLuminance()),
+    );
+    expect(tooltipOf('AUTHOR').message, "Hide Author. Click 'A' to restore");
+    expect(tooltipOf('AUTHOR').waitDuration, Duration.zero);
+    expect(find.text("Hide Author. Click 'A' to restore"), findsOneWidget);
   });
 
   testWidgets('column drags restore Date and Author to drag-start widths', (
@@ -4927,7 +4971,8 @@ void main() {
     expect(sizeOf('first commit'), 14);
     expect(sizeOf('commit 1'), 12);
     expect(sizeOf('Ada Author'), 14);
-    expect(sizeOf('Committer · Cam Committer'), 12);
+    expect(sizeOf('Cam Committer'), 14);
+    expect(sizeOf('Committer'), 12);
     expect(sizeOf('2 files changed'), 12);
     expect(sizeOf('lib/a.dart'), 12);
     expect(sizeOf('+lib/a.dart body'), 11);
@@ -5918,17 +5963,51 @@ void main() {
     final hash = tester.widget<Text>(find.byKey(const Key('preview-hash')));
     expect(hash.style?.fontFamily, cellFont);
     expect(hash.style?.fontFamilyFallback, cellFontFallback);
+    final author = find.byKey(const Key('preview-author'));
+    final committer = find.byKey(const Key('preview-committer'));
+    final authorAvatar = find.descendant(
+      of: author,
+      matching: find.byKey(const ValueKey('author-avatar-1')),
+    );
+    final committerAvatar = find.descendant(
+      of: committer,
+      matching: find.byKey(const ValueKey('committer-avatar-1')),
+    );
     expect(
-      find.descendant(of: preview, matching: find.text('Ada Author')),
+      find.descendant(of: author, matching: find.text('Ada Author')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: author, matching: find.text('Author')),
       findsOneWidget,
     );
     expect(
       find.descendant(
-        of: preview,
-        matching: find.text('Committer · Cam Committer'),
+        of: author,
+        matching: find.text(exactCommitTime(1700000000)),
       ),
       findsOneWidget,
     );
+    expect(
+      find.descendant(of: committer, matching: find.text('Cam Committer')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: committer, matching: find.text('Committer')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: committer,
+        matching: find.text(exactCommitTime(1700000120)),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester.getRect(authorAvatar).overlaps(tester.getRect(committerAvatar)),
+      isFalse,
+    );
+    expect(find.text('Committer · Cam Committer'), findsNothing);
 
     final scrollable = tester.state<ScrollableState>(
       find.descendant(of: preview, matching: find.byType(Scrollable)),
@@ -5953,13 +6032,8 @@ void main() {
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
-    expect(
-      find.descendant(
-        of: preview,
-        matching: find.textContaining('Committer ·'),
-      ),
-      findsNothing,
-    );
+    expect(find.byKey(const Key('preview-author')), findsOneWidget);
+    expect(find.byKey(const Key('preview-committer')), findsNothing);
   });
 
   // ------------------------------------------------------------------ H3

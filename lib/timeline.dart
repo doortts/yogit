@@ -179,8 +179,8 @@ const timelineColumns = <String, ColumnSpec>{
   'graph': (label: 'Graph', min: 40, max: 260),
   'hash': (label: 'Hash', min: 64, max: 120),
   'commit': (label: 'Commit Message', min: 100, max: 620),
-  'time': (label: 'Date', min: 56, max: 170),
-  'name': (label: 'Author', min: 50, max: 240),
+  'time': (label: 'Date', min: 20, max: 170),
+  'name': (label: 'Author', min: 20, max: 240),
 };
 
 class TimelineScreen extends StatefulWidget {
@@ -261,6 +261,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// rows that changed instead of every row on screen.
   final _selectedIndex = ValueNotifier(0);
   final _hoverIndex = ValueNotifier(-1);
+  final _hoveredHeader = ValueNotifier<String?>(null);
   var _loading = false;
   var _end = false;
   var _hasWorkingTree = false;
@@ -351,6 +352,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     if (_ownsPreviewController) _previewController.dispose();
     _selectedIndex.dispose();
     _hoverIndex.dispose();
+    _hoveredHeader.dispose();
     _scrollController
       ..removeListener(_maybeLoadNextPage)
       ..dispose();
@@ -1415,42 +1417,48 @@ class _TimelineScreenState extends State<TimelineScreen> {
     child: Stack(
       children: [
         Positioned.fill(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: column == 'time' || column == 'name'
-                ? () => _hideColumn(column)
-                : null,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9),
-              decoration: const BoxDecoration(
-                color: _panelSoft,
-                border: Border(
-                  bottom: BorderSide(color: _border),
-                  right: BorderSide(color: _border),
+          child: _headerHover(
+            column,
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: column == 'time' || column == 'name'
+                  ? () => _hideColumn(column)
+                  : null,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9),
+                decoration: const BoxDecoration(
+                  color: _panelSoft,
+                  border: Border(
+                    bottom: BorderSide(color: _border),
+                    right: BorderSide(color: _border),
+                  ),
                 ),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      timelineColumns[column]!.label.toUpperCase(),
-                      maxLines: 1,
-                      softWrap: false,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: _muted,
-                        fontSize: 12,
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: 0.66,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: ValueListenableBuilder(
+                        valueListenable: _hoveredHeader,
+                        builder: (context, hovered, _) => Text(
+                          timelineColumns[column]!.label.toUpperCase(),
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: hovered == column ? _text : _muted,
+                            fontSize: 12,
+                            fontFamily: 'monospace',
+                            fontWeight: FontWeight.w500,
+                            letterSpacing: 0.66,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                  if (column == 'commit' && !_showTime)
-                    _restoreColumnButton('time', 'D'),
-                  if (column == 'commit' && !_showName)
-                    _restoreColumnButton('name', 'A'),
-                ],
+                    if (column == 'commit' && !_showTime)
+                      _restoreColumnButton('time', 'D'),
+                    if (column == 'commit' && !_showName)
+                      _restoreColumnButton('name', 'A'),
+                  ],
+                ),
               ),
             ),
           ),
@@ -1459,6 +1467,24 @@ class _TimelineScreenState extends State<TimelineScreen> {
       ],
     ),
   );
+
+  Widget _headerHover(String column, Widget child) {
+    if (column != 'time' && column != 'name') return child;
+    final label = timelineColumns[column]!.label;
+    final initial = column == 'time' ? 'D' : 'A';
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => _hoveredHeader.value = column,
+      onExit: (_) {
+        if (_hoveredHeader.value == column) _hoveredHeader.value = null;
+      },
+      child: Tooltip(
+        message: "Hide $label. Click '$initial' to restore",
+        waitDuration: Duration.zero,
+        child: child,
+      ),
+    );
+  }
 
   Widget _restoreColumnButton(String column, String label) => Tooltip(
     message: 'Show ${timelineColumns[column]!.label} column',
@@ -1906,14 +1932,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
                         )
                       : Row(
                           children: [
-                            CommitAvatarStack(
-                              commit: commit,
-                              avatarService: widget.avatarService,
-                              showRemoteAvatars: widget.showRemoteAvatars,
-                              discColor: branchColor,
-                              stacked: _w('name') >= 57,
-                            ),
-                            const SizedBox(width: 7),
+                            if (_w('name') >= 47) ...[
+                              CommitAvatarStack(
+                                commit: commit,
+                                avatarService: widget.avatarService,
+                                showRemoteAvatars: widget.showRemoteAvatars,
+                                discColor: branchColor,
+                                stacked: _w('name') >= 57,
+                              ),
+                              const SizedBox(width: 7),
+                            ],
                             Expanded(
                               child: Text(
                                 commit.author.name,
@@ -2525,70 +2553,96 @@ class _TimelineScreenState extends State<TimelineScreen> {
           bottom: BorderSide(color: _border),
         ),
       ),
-      child: Row(
+      child: Column(
         children: [
-          commit.isWorkingTree
-              ? Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: _border),
-                  ),
-                )
-              : CommitAvatarStack(
-                  commit: commit,
-                  avatarService: widget.avatarService,
-                  showRemoteAvatars: widget.showRemoteAvatars,
-                  size: 42,
-                  discColor: AvatarService.branchColor(_branchOf(commit)),
-                ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  commit.isWorkingTree ? 'Not committed' : commit.author.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: _text,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                Text(
-                  commit.isWorkingTree
-                      ? 'No commit object or committer'
-                      : 'Author',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: _muted, fontSize: 12),
-                ),
-                if (!commit.isWorkingTree && separateCommitter)
-                  Text(
-                    'Committer · ${commit.committer.name}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: _muted, fontSize: 12),
-                  ),
-                // The working tree has no commit, so it has no exact moment.
-                if (!commit.isWorkingTree)
-                  Text(
-                    exactCommitTime(commit.committerTimestamp),
-                    maxLines: 1,
-                    style: const TextStyle(
-                      color: _muted,
-                      fontSize: 13,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-              ],
-            ),
+          _previewIdentity(
+            commit,
+            committer: false,
+            timestamp: commit.isWorkingTree
+                ? null
+                : separateCommitter
+                ? commit.authorTimestamp
+                : commit.committerTimestamp,
           ),
+          if (!commit.isWorkingTree && separateCommitter) ...[
+            const SizedBox(height: 10),
+            _previewIdentity(
+              commit,
+              committer: true,
+              timestamp: commit.committerTimestamp,
+            ),
+          ],
         ],
       ),
+    );
+  }
+
+  Widget _previewIdentity(
+    GitCommit commit, {
+    required bool committer,
+    required int? timestamp,
+  }) {
+    final identity = committer ? commit.committer : commit.author;
+    return Row(
+      key: Key(committer ? 'preview-committer' : 'preview-author'),
+      children: [
+        commit.isWorkingTree
+            ? Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: _border),
+                ),
+              )
+            : CommitAvatarStack(
+                commit: commit,
+                avatarService: widget.avatarService,
+                showRemoteAvatars: widget.showRemoteAvatars,
+                size: 42,
+                stacked: false,
+                committerOnly: committer,
+                discColor: AvatarService.branchColor(_branchOf(commit)),
+              ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                commit.isWorkingTree ? 'Not committed' : identity.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: _text,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                commit.isWorkingTree
+                    ? 'No commit object or committer'
+                    : committer
+                    ? 'Committer'
+                    : 'Author',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: _muted, fontSize: 12),
+              ),
+              if (timestamp != null)
+                Text(
+                  exactCommitTime(timestamp),
+                  maxLines: 1,
+                  style: const TextStyle(
+                    color: _muted,
+                    fontSize: 13,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
