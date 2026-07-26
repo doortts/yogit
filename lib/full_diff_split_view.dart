@@ -43,7 +43,7 @@ class SplitPresentationView extends StatelessWidget {
       );
     }
 
-    return ListView.builder(
+    final list = ListView.builder(
       controller: controller,
       primary: controller == null,
       itemCount: document.hunks.length,
@@ -79,6 +79,9 @@ class SplitPresentationView extends StatelessWidget {
         );
       },
     );
+    return showOldSide
+        ? KeyedSubtree(key: const Key('split-old-pane'), child: list)
+        : list;
   }
 
   GlobalKey _anchorKey(DiffAnchor anchor) =>

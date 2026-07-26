@@ -16,7 +16,12 @@ typedef PatchCacheKey = ({
   bool ignoreWhitespace,
 });
 
-typedef FileCacheKey = ({String revision, String path, FileDocumentSide side});
+typedef FileCacheKey = ({
+  String revision,
+  String path,
+  String? parent,
+  FileDocumentSide side,
+});
 
 typedef BlameCacheKey = ({String revision, String path});
 typedef HistoryCacheKey = ({String startRevision, String path});
@@ -918,6 +923,7 @@ class FullDiffSessionController extends ChangeNotifier {
     return _fileCache.getOrLoad((
       revision: revision,
       path: path,
+      parent: parent,
       side: side,
     ), load);
   }

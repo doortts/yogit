@@ -4,25 +4,23 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'external_editor.dart';
+import 'full_blame_view.dart';
 import 'full_diff_controller.dart';
 import 'full_diff_header.dart';
 import 'full_diff_hunk_view.dart';
+import 'full_diff_inline_view.dart';
+import 'full_diff_minimap.dart';
 import 'full_diff_model.dart';
+import 'full_diff_split_view.dart';
+import 'full_diff_syntax.dart';
+import 'full_diff_theme.dart';
+import 'full_file_view.dart';
+import 'full_history_view.dart';
 import 'git.dart';
 import 'page_scroll_shortcuts.dart';
 import 'settings.dart';
 import 'typography.dart';
-
-const _background = Color(0xFF15171E);
-const _surface = Color(0xFF1D2029);
-const _raised = Color(0xFF252936);
-const _border = Color(0xFF343946);
-const _accent = Color(0xFF263246);
-const _text = Color(0xFFE8EAF2);
-const _muted = Color(0xFF8D94A8);
-const _addedFill = Color(0xFF8AD6A1);
-const _deleted = Color(0xFFF29AB2);
-const _renamed = Color(0xFFB6A0EA);
 
 class _ReturnToTimelineIntent extends Intent {
   const _ReturnToTimelineIntent();
@@ -64,6 +62,7 @@ class DiffScreen extends StatefulWidget {
     this.controller,
     this.columnWidths = const FullDiffColumnWidths(),
     this.onColumnWidthsChanged,
+    this.editorService,
     super.key,
   });
 
@@ -74,50 +73,74 @@ class DiffScreen extends StatefulWidget {
   final FullDiffSessionController? controller;
   final FullDiffColumnWidths columnWidths;
   final ValueChanged<FullDiffColumnWidths>? onColumnWidthsChanged;
+  final ExternalEditorService? editorService;
 
   @override
   State<DiffScreen> createState() => _DiffScreenState();
 }
 
 class _DiffScreenState extends State<DiffScreen> {
-  static const _minDiffWidth = 520.0;
-
-  final _diffScroll = ScrollController();
+  final _contentScroll = ScrollController();
+  final _contentViewportKey = GlobalKey();
+  final _highlighter = HighlightJsSyntaxHighlighter();
   Map<String, GlobalKey> _anchorKeys = <String, GlobalKey>{};
 
   late FullDiffSessionController _controller;
+  late ExternalEditorService _editorService;
   late bool _ownsController;
   late FullDiffSessionState _observedState;
   late double _commitsWidth;
   late double _filesWidth;
+
   bool _effectScheduled = false;
+  bool _scrollSyncScheduled = false;
   bool _pendingScrollToTop = false;
-  int? _pendingAnchorIndex;
+  String? _pendingAnchorId;
   int _pendingAnchorDirection = 0;
+  String? _editorError;
+  bool _openingEditor = false;
 
   @override
   void initState() {
     super.initState();
     _commitsWidth = widget.columnWidths.commits;
     _filesWidth = widget.columnWidths.files;
+    _editorService =
+        widget.editorService ??
+        ExternalEditorService(repositoryRoot: widget.repository.root);
+    _attachController(_newController());
+    _contentScroll.addListener(_handleContentScrolled);
+    if (_ownsController) unawaited(_controller.initialize());
+  }
+
+  FullDiffSessionController _newController() {
     _ownsController = widget.controller == null;
-    _controller =
-        widget.controller ??
+    return widget.controller ??
         FullDiffSessionController(
           repository: widget.repository,
           commits: widget.commits,
           initialIndex: widget.initialIndex,
           initialView: widget.initialView,
         );
-    _observedState = _controller.state;
+  }
+
+  void _attachController(FullDiffSessionController controller) {
+    _controller = controller;
+    _observedState = controller.state;
     _reconcileAnchorKeys(_observedState.patch.data);
-    _controller.addListener(_handleControllerChanged);
-    if (_ownsController) _controller.initialize();
+    controller.addListener(_handleControllerChanged);
   }
 
   @override
   void didUpdateWidget(covariant DiffScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.editorService != oldWidget.editorService ||
+        widget.repository.root != oldWidget.repository.root) {
+      _editorService =
+          widget.editorService ??
+          ExternalEditorService(repositoryRoot: widget.repository.root);
+    }
+
     final controllerChanged = !identical(
       widget.controller,
       oldWidget.controller,
@@ -127,33 +150,26 @@ class _DiffScreenState extends State<DiffScreen> {
         oldWidget.controller == null &&
         (!identical(widget.repository, oldWidget.repository) ||
             !identical(widget.commits, oldWidget.commits) ||
-            widget.initialIndex != oldWidget.initialIndex);
+            widget.initialIndex != oldWidget.initialIndex ||
+            widget.initialView != oldWidget.initialView);
     if (!controllerChanged && !ownedInputsChanged) return;
 
     _controller.removeListener(_handleControllerChanged);
     if (_ownsController) _controller.dispose();
-    _ownsController = widget.controller == null;
-    _controller =
-        widget.controller ??
-        FullDiffSessionController(
-          repository: widget.repository,
-          commits: widget.commits,
-          initialIndex: widget.initialIndex,
-          initialView: widget.initialView,
-        );
-    _observedState = _controller.state;
-    _reconcileAnchorKeys(_observedState.patch.data);
+    _attachController(_newController());
     _pendingScrollToTop = true;
-    _pendingAnchorIndex = null;
-    _controller.addListener(_handleControllerChanged);
+    _pendingAnchorId = null;
+    _editorError = null;
     _scheduleScrollEffect();
-    if (_ownsController) _controller.initialize();
+    if (_ownsController) unawaited(_controller.initialize());
   }
 
   @override
   void dispose() {
     _controller.removeListener(_handleControllerChanged);
-    _diffScroll.dispose();
+    _contentScroll
+      ..removeListener(_handleContentScrolled)
+      ..dispose();
     if (_ownsController) _controller.dispose();
     super.dispose();
   }
@@ -171,19 +187,19 @@ class _DiffScreenState extends State<DiffScreen> {
     final nextIndex = next.activeAnchor?.hunkIndex ?? 0;
     final navigationRequested =
         previous.navigationSerial != next.navigationSerial;
+    final nextAnchor = next.activeAnchor;
 
     if (changedDocument) _reconcileAnchorKeys(next.patch.data);
     if (movedContext) {
       _pendingScrollToTop = true;
-      if (nextIndex == 0) _pendingAnchorIndex = null;
+      _pendingAnchorId = null;
+      _editorError = null;
     }
-    if (!_pendingScrollToTop &&
-        navigationRequested &&
-        !(movedContext && nextIndex == 0)) {
-      _pendingAnchorIndex = nextIndex;
+    if (!_pendingScrollToTop && navigationRequested && nextAnchor != null) {
+      _pendingAnchorId = nextAnchor.id;
       _pendingAnchorDirection = nextIndex.compareTo(previousIndex);
     }
-    if (_pendingScrollToTop || _pendingAnchorIndex != null) {
+    if (_pendingScrollToTop || _pendingAnchorId != null) {
       _scheduleScrollEffect();
     }
   }
@@ -203,69 +219,110 @@ class _DiffScreenState extends State<DiffScreen> {
       _effectScheduled = false;
       if (!mounted) return;
 
-      if (_pendingScrollToTop) {
-        if (_diffScroll.hasClients) {
-          _diffScroll.jumpTo(0);
-          _pendingScrollToTop = false;
-        }
+      if (_pendingScrollToTop && _contentScroll.hasClients) {
+        _contentScroll.jumpTo(_contentScroll.position.minScrollExtent);
+        _pendingScrollToTop = false;
       }
-      final pendingIndex = _pendingAnchorIndex;
-      if (pendingIndex == null) return;
-      final state = _controller.state;
-      final document = state.patch.data;
-      if (document == null ||
-          pendingIndex != (state.activeAnchor?.hunkIndex ?? 0) ||
-          pendingIndex < 0 ||
-          pendingIndex >= document.hunks.length) {
-        _pendingAnchorIndex = null;
+
+      final anchorId = _pendingAnchorId;
+      if (anchorId == null) return;
+      final activeAnchor = _controller.state.activeAnchor;
+      if (activeAnchor == null || activeAnchor.id != anchorId) {
+        _pendingAnchorId = null;
         return;
       }
-      final context =
-          _anchorKeys[document.hunks[pendingIndex].anchor.id]?.currentContext;
-      if (context != null) {
-        _pendingAnchorIndex = null;
-        Scrollable.ensureVisible(
-          context,
-          alignment: 0.1,
-          duration: const Duration(milliseconds: 100),
+      final anchorContext = _anchorKeys[anchorId]?.currentContext;
+      if (anchorContext != null) {
+        _pendingAnchorId = null;
+        unawaited(
+          Scrollable.ensureVisible(
+            anchorContext,
+            alignment: 0.1,
+            duration: const Duration(milliseconds: 100),
+          ),
         );
         return;
       }
-      if (!_diffScroll.hasClients) {
-        _pendingAnchorIndex = null;
+      if (!_contentScroll.hasClients) {
+        _pendingAnchorId = null;
         return;
       }
 
-      final position = _diffScroll.position;
-      final direction = _pendingAnchorDirection == 0
-          ? _directionToUnmountedHunk(document, pendingIndex)
-          : _pendingAnchorDirection;
-      final nextOffset =
-          (position.pixels + direction * position.viewportDimension).clamp(
-            position.minScrollExtent,
-            position.maxScrollExtent,
-          );
+      final position = _contentScroll.position;
+      final nextOffset = _nextAnchorSearchOffset(
+        position,
+        activeAnchor,
+        _controller.state,
+      );
       if ((nextOffset - position.pixels).abs() < 0.5) {
-        _pendingAnchorIndex = null;
+        _pendingAnchorId = null;
         return;
       }
-      _diffScroll.jumpTo(nextOffset);
+      position.jumpTo(nextOffset);
       _scheduleScrollEffect();
     });
     WidgetsBinding.instance.scheduleFrame();
   }
 
-  int _directionToUnmountedHunk(DiffDocument document, int targetIndex) {
-    for (final hunk in document.hunks) {
-      if (_anchorKeys[hunk.anchor.id]?.currentContext == null) continue;
-      if (targetIndex < hunk.index) return -1;
-      if (targetIndex > hunk.index) return 1;
+  double _nextAnchorSearchOffset(
+    ScrollPosition position,
+    DiffAnchor anchor,
+    FullDiffSessionState state,
+  ) {
+    if (state.view == FullDiffView.file || state.view == FullDiffView.blame) {
+      final deleted = state.selectedFile?.status.startsWith('D') ?? false;
+      final line = deleted ? anchor.oldLine : anchor.newLine;
+      final lineCount =
+          state.file.data?.lines.length ??
+          state.patch.data?.sourceLineCount ??
+          0;
+      if (line != null && lineCount > 1) {
+        return (position.maxScrollExtent * (line - 1) / (lineCount - 1)).clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        );
+      }
     }
-    return targetIndex == 0 ? -1 : 1;
+    final direction = _pendingAnchorDirection == 0
+        ? (anchor.hunkIndex == 0 ? -1 : 1)
+        : _pendingAnchorDirection;
+    return (position.pixels + direction * position.viewportDimension).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
   }
 
-  void _stepHunk(int delta) {
-    _controller.stepAnchor(delta);
+  void _handleContentScrolled() {
+    if (_scrollSyncScheduled || _pendingAnchorId != null) return;
+    _scrollSyncScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollSyncScheduled = false;
+      if (mounted) _syncAnchorFromViewport();
+    });
+  }
+
+  void _syncAnchorFromViewport() {
+    final document = _controller.state.patch.data;
+    final viewportContext = _contentViewportKey.currentContext;
+    if (document == null || viewportContext == null) return;
+    final viewport = viewportContext.findRenderObject();
+    if (viewport is! RenderBox || !viewport.attached) return;
+    final centerY =
+        viewport.localToGlobal(Offset.zero).dy + viewport.size.height / 2;
+    DiffAnchor? nearest;
+    var nearestDistance = double.infinity;
+    for (final hunk in document.hunks) {
+      final context = _anchorKeys[hunk.anchor.id]?.currentContext;
+      final renderObject = context?.findRenderObject();
+      if (renderObject is! RenderBox || !renderObject.attached) continue;
+      final top = renderObject.localToGlobal(Offset.zero).dy;
+      final distance = (top + renderObject.size.height / 2 - centerY).abs();
+      if (distance < nearestDistance) {
+        nearest = hunk.anchor;
+        nearestDistance = distance;
+      }
+    }
+    if (nearest != null) _controller.syncAnchorFromScroll(nearest);
   }
 
   void _stepFile(int delta) {
@@ -276,15 +333,57 @@ class _DiffScreenState extends State<DiffScreen> {
     );
     final next = (index + delta).clamp(0, state.files.length - 1);
     final file = state.files[next];
-    if (file.path != state.selectedFile?.path) _controller.selectFile(file);
+    if (file.path != state.selectedFile?.path) {
+      unawaited(_controller.selectFile(file));
+    }
   }
 
   void _stepCommit(int delta) {
-    final commits = _controller.state.nearbyCommits;
-    final selectedSha = _controller.state.selectedCommit.sha;
-    final index = commits.indexWhere((commit) => commit.sha == selectedSha);
-    final next = (index + delta).clamp(0, commits.length - 1);
-    if (next != index) _controller.selectCommit(commits[next]);
+    final state = _controller.state;
+    final index = state.nearbyCommits.indexWhere(
+      (commit) => commit.sha == state.selectedCommit.sha,
+    );
+    final next = (index + delta).clamp(0, state.nearbyCommits.length - 1);
+    if (next != index) {
+      unawaited(_controller.selectCommit(state.nearbyCommits[next]));
+    }
+  }
+
+  void _handleEscape() {
+    if (_controller.state.focusMode) {
+      _controller.setFocusMode(false);
+    } else {
+      Navigator.of(context).maybePop();
+    }
+  }
+
+  bool _canOpenEditor(FullDiffSessionState state) {
+    final file = state.selectedFile;
+    return !_openingEditor &&
+        state.selectedCommit.isWorkingTree &&
+        file != null &&
+        !file.status.startsWith('D') &&
+        state.file.data != null;
+  }
+
+  Future<void> _openEditor() async {
+    final state = _controller.state;
+    final file = state.selectedFile;
+    if (file == null || !_canOpenEditor(state)) return;
+    setState(() {
+      _openingEditor = true;
+      _editorError = null;
+    });
+    try {
+      await _editorService.open(
+        relativePath: file.path,
+        line: state.activeAnchor?.newLine,
+      );
+    } catch (error) {
+      if (mounted) setState(() => _editorError = error.toString());
+    } finally {
+      if (mounted) setState(() => _openingEditor = false);
+    }
   }
 
   @override
@@ -293,7 +392,7 @@ class _DiffScreenState extends State<DiffScreen> {
     builder: (context, _) {
       final state = _controller.state;
       return Scaffold(
-        backgroundColor: _background,
+        backgroundColor: fullDiffCanvas,
         body: Shortcuts(
           shortcuts: const <ShortcutActivator, Intent>{
             SingleActivator(LogicalKeyboardKey.escape):
@@ -329,7 +428,7 @@ class _DiffScreenState extends State<DiffScreen> {
             actions: <Type, Action<Intent>>{
               _ReturnToTimelineIntent: CallbackAction<_ReturnToTimelineIntent>(
                 onInvoke: (_) {
-                  Navigator.of(context).maybePop();
+                  _handleEscape();
                   return null;
                 },
               ),
@@ -341,7 +440,7 @@ class _DiffScreenState extends State<DiffScreen> {
               ),
               _StepHunkIntent: CallbackAction<_StepHunkIntent>(
                 onInvoke: (intent) {
-                  _stepHunk(intent.delta);
+                  _controller.stepAnchor(intent.delta);
                   return null;
                 },
               ),
@@ -360,10 +459,10 @@ class _DiffScreenState extends State<DiffScreen> {
               PageScrollIntent: CallbackAction<PageScrollIntent>(
                 onInvoke: (intent) {
                   final animate =
-                      !_diffScroll.hasClients ||
-                      !_diffScroll.position.isScrollingNotifier.value;
+                      !_contentScroll.hasClients ||
+                      !_contentScroll.position.isScrollingNotifier.value;
                   applyPageScroll(
-                    _diffScroll,
+                    _contentScroll,
                     direction: intent.direction,
                     animate: animate,
                   );
@@ -373,51 +472,83 @@ class _DiffScreenState extends State<DiffScreen> {
             },
             child: Focus(
               autofocus: true,
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final panes = state.focusMode
-                      ? (showCommits: false, showFiles: false)
-                      : _visiblePanes(constraints.maxWidth);
-                  final bothWidths = panes.showCommits
-                      ? _effectiveColumnWidths(constraints.maxWidth)
-                      : null;
-                  final filesWidth = panes.showFiles
-                      ? bothWidths?.files ??
-                            _effectiveFilesWidth(constraints.maxWidth)
-                      : 0.0;
-                  return Row(
-                    children: [
-                      if (panes.showCommits)
-                        _resizableColumn(
-                          columnKey: 'nearby',
-                          width: bothWidths!.commits,
-                          child: _nearbyCommits(state),
-                          onStart: () => _commitsWidth = bothWidths.commits,
-                          onUpdate: (delta) => _resizeCommits(
-                            delta,
-                            viewportWidth: constraints.maxWidth,
-                            filesWidth: filesWidth,
+              child: Padding(
+                padding: const EdgeInsets.all(fullDiffOuterPadding),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(fullDiffOuterRadius),
+                  child: ColoredBox(
+                    color: fullDiffHeader,
+                    child: Column(
+                      children: [
+                        GlobalFileBar(
+                          file: state.selectedFile,
+                          path: state.selectedFile?.path,
+                          view: state.view,
+                          encodingLabel: state.encodingLabel,
+                          canOpenEditor: _canOpenEditor(state),
+                          editorError: _editorError,
+                          onOpenEditor: _openEditor,
+                          onViewSelected: _controller.setView,
+                        ),
+                        GlobalDiffToolbar(
+                          view: state.view,
+                          presentation: state.presentation,
+                          activeIndex: state.activeAnchor?.hunkIndex ?? 0,
+                          anchorCount: state.patch.data?.hunks.length ?? 0,
+                          algorithm: state.requestedAlgorithm,
+                          ignoreWhitespace: state.requestedIgnoreWhitespace,
+                          wrapLines: state.wrapLines,
+                          focusMode: state.focusMode,
+                          loadingPatch: state.patch.loading,
+                          onPresentationSelected: _controller.setPresentation,
+                          onPrevious: () => _controller.stepAnchor(-1),
+                          onNext: () => _controller.stepAnchor(1),
+                          onAlgorithmSelected: (algorithm) {
+                            unawaited(
+                              _controller
+                                  .selectAlgorithm(algorithm)
+                                  .catchError((_) {}),
+                            );
+                          },
+                          onIgnoreWhitespaceChanged: (value) {
+                            unawaited(
+                              _controller
+                                  .setIgnoreWhitespace(value)
+                                  .catchError((_) {}),
+                            );
+                          },
+                          onWrapLinesChanged: _controller.setWrapLines,
+                          onFocusModeChanged: _controller.setFocusMode,
+                        ),
+                        Expanded(
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final viewportWidth =
+                                  constraints.maxWidth +
+                                  fullDiffOuterPadding * 2;
+                              return _ResponsiveDiffBody(
+                                showCommits:
+                                    !state.focusMode && viewportWidth > 650,
+                                showFiles:
+                                    !state.focusMode && viewportWidth > 480,
+                                commitsWidth: _commitsWidth,
+                                filesWidth: _filesWidth,
+                                nearbyCommits: _nearbyCommits(state),
+                                commitFiles: _commitFiles(state),
+                                content: _content(state, viewportWidth),
+                                onCommitsResized: (delta) =>
+                                    _resizeCommits(delta, constraints.maxWidth),
+                                onFilesResized: (delta) =>
+                                    _resizeFiles(delta, constraints.maxWidth),
+                                onResizeEnd: _saveColumnWidths,
+                              );
+                            },
                           ),
                         ),
-                      if (panes.showFiles)
-                        _resizableColumn(
-                          columnKey: 'details-files',
-                          width: filesWidth,
-                          child: _detailsAndFiles(state),
-                          onStart: () => _filesWidth = filesWidth,
-                          onUpdate: (delta) => _resizeFiles(
-                            delta,
-                            viewportWidth: constraints.maxWidth,
-                            commitsWidth: bothWidths?.commits ?? 0,
-                          ),
-                        ),
-                      Expanded(
-                        key: const Key('diff-column'),
-                        child: _diff(state),
-                      ),
-                    ],
-                  );
-                },
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
@@ -426,149 +557,8 @@ class _DiffScreenState extends State<DiffScreen> {
     },
   );
 
-  ({bool showCommits, bool showFiles}) _visiblePanes(double width) {
-    if (width < _minDiffWidth + FullDiffColumnWidths.minFiles) {
-      return (showCommits: false, showFiles: false);
-    }
-    if (width <
-        _minDiffWidth +
-            FullDiffColumnWidths.minFiles +
-            FullDiffColumnWidths.minCommits) {
-      return (showCommits: false, showFiles: true);
-    }
-    return (showCommits: true, showFiles: true);
-  }
-
-  double _effectiveFilesWidth(double viewport) {
-    final files = _filesWidth.clamp(
-      FullDiffColumnWidths.minFiles,
-      FullDiffColumnWidths.maxFiles,
-    );
-    final budget = math.max(
-      FullDiffColumnWidths.minFiles,
-      viewport - _minDiffWidth,
-    );
-    return math.min(files, budget);
-  }
-
-  ({double commits, double files}) _effectiveColumnWidths(double viewport) {
-    var commits = _commitsWidth.clamp(
-      FullDiffColumnWidths.minCommits,
-      FullDiffColumnWidths.maxCommits,
-    );
-    var files = _filesWidth.clamp(
-      FullDiffColumnWidths.minFiles,
-      FullDiffColumnWidths.maxFiles,
-    );
-    final minimumPanels =
-        FullDiffColumnWidths.minCommits + FullDiffColumnWidths.minFiles;
-    final panelBudget = math.max(minimumPanels, viewport - _minDiffWidth);
-    var overflow = math.max(0, commits + files - panelBudget);
-    final fileShrink = math.min(
-      overflow,
-      files - FullDiffColumnWidths.minFiles,
-    );
-    files -= fileShrink;
-    overflow -= fileShrink;
-    commits -= math.min(overflow, commits - FullDiffColumnWidths.minCommits);
-    return (commits: commits, files: files);
-  }
-
-  void _resizeCommits(
-    double delta, {
-    required double viewportWidth,
-    required double filesWidth,
-  }) {
-    final max = math.min(
-      FullDiffColumnWidths.maxCommits,
-      math.max(
-        FullDiffColumnWidths.minCommits,
-        viewportWidth - filesWidth - _minDiffWidth,
-      ),
-    );
-    setState(() {
-      _commitsWidth = (_commitsWidth + delta).clamp(
-        FullDiffColumnWidths.minCommits,
-        max,
-      );
-    });
-  }
-
-  void _resizeFiles(
-    double delta, {
-    required double viewportWidth,
-    required double commitsWidth,
-  }) {
-    final max = math.min(
-      FullDiffColumnWidths.maxFiles,
-      math.max(
-        FullDiffColumnWidths.minFiles,
-        viewportWidth - commitsWidth - _minDiffWidth,
-      ),
-    );
-    setState(() {
-      _filesWidth = (_filesWidth + delta).clamp(
-        FullDiffColumnWidths.minFiles,
-        max,
-      );
-    });
-  }
-
-  Widget _resizableColumn({
-    required String columnKey,
-    required double width,
-    required Widget child,
-    required VoidCallback onStart,
-    required ValueChanged<double> onUpdate,
-  }) => SizedBox(
-    key: Key('$columnKey-column'),
-    width: width,
-    child: Stack(
-      children: [
-        Positioned.fill(child: child),
-        Positioned(
-          right: 0,
-          top: 0,
-          bottom: 0,
-          width: 8,
-          child: Focus(
-            onKeyEvent: (_, event) {
-              if (event is KeyUpEvent) return KeyEventResult.ignored;
-              final delta = switch (event.logicalKey) {
-                LogicalKeyboardKey.arrowLeft => -8.0,
-                LogicalKeyboardKey.arrowRight => 8.0,
-                _ => null,
-              };
-              if (delta == null) return KeyEventResult.ignored;
-              onStart();
-              onUpdate(delta);
-              _saveColumnWidths();
-              return KeyEventResult.handled;
-            },
-            child: MouseRegion(
-              cursor: SystemMouseCursors.resizeColumn,
-              child: GestureDetector(
-                key: Key('$columnKey-column-resizer'),
-                behavior: HitTestBehavior.opaque,
-                onHorizontalDragStart: (_) => onStart(),
-                onHorizontalDragUpdate: (details) => onUpdate(details.delta.dx),
-                onHorizontalDragEnd: (_) => _saveColumnWidths(),
-                onHorizontalDragCancel: _saveColumnWidths,
-              ),
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
-
-  void _saveColumnWidths() => widget.onColumnWidthsChanged?.call(
-    FullDiffColumnWidths(commits: _commitsWidth, files: _filesWidth),
-  );
-
-  Widget _nearbyCommits(FullDiffSessionState state) => Material(
-    color: _surface,
-    shape: const Border(right: BorderSide(color: _border)),
+  Widget _nearbyCommits(FullDiffSessionState state) => ColoredBox(
+    color: fullDiffCanvas,
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -597,34 +587,54 @@ class _DiffScreenState extends State<DiffScreen> {
           ),
         ),
         Expanded(
-          child: _selectable(
-            ListView.builder(
+          child: SelectionArea(
+            child: ListView.builder(
               key: const Key('nearby-commits-list'),
               itemCount: state.nearbyCommits.length,
               itemBuilder: (context, index) {
                 final commit = state.nearbyCommits[index];
                 final selected = commit.sha == state.selectedCommit.sha;
-                return ListTile(
-                  key: selected ? Key('selected-nearby-${commit.sha}') : null,
+                return Semantics(
                   selected: selected,
-                  dense: true,
-                  title: Text(
-                    commit.subject,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Text(
-                    commit.shortSha,
-                    style: const TextStyle(
-                      fontFamily: technicalFontFamily,
-                      fontFamilyFallback: technicalFontFallback,
+                  button: true,
+                  child: InkWell(
+                    onTap: selected
+                        ? null
+                        : () => unawaited(_controller.selectCommit(commit)),
+                    child: Container(
+                      key: selected
+                          ? Key('selected-nearby-${commit.sha}')
+                          : null,
+                      color: selected ? fullDiffSelection : Colors.transparent,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 9,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            commit.subject,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            commit.isWorkingTree
+                                ? 'working tree'
+                                : commit.shortSha,
+                            maxLines: 1,
+                            overflow: TextOverflow.clip,
+                            style: technicalTextStyle.copyWith(
+                              color: fullDiffMuted,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  onTap: () {
-                    if (!selected) {
-                      _controller.selectCommit(commit);
-                    }
-                  },
                 );
               },
             ),
@@ -634,16 +644,15 @@ class _DiffScreenState extends State<DiffScreen> {
     ),
   );
 
-  Widget _detailsAndFiles(FullDiffSessionState state) {
+  Widget _commitFiles(FullDiffSessionState state) {
     final commit = state.selectedCommit;
-    return Material(
-      color: _surface,
-      shape: const Border(right: BorderSide(color: _border)),
+    return ColoredBox(
+      color: fullDiffCanvas,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -652,31 +661,22 @@ class _DiffScreenState extends State<DiffScreen> {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: _text,
+                    color: Colors.white,
+                    fontSize: 14,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 5),
-                Row(
-                  children: [
-                    Text(
-                      commit.shortSha,
-                      style: const TextStyle(
-                        color: _muted,
-                        fontFamily: technicalFontFamily,
-                        fontFamilyFallback: technicalFontFallback,
-                        fontSize: 11,
-                      ),
-                    ),
-                    Flexible(
-                      child: Text(
-                        ' · ${commit.author.name}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: _muted, fontSize: 11),
-                      ),
-                    ),
-                  ],
+                const SizedBox(height: 4),
+                Text(
+                  commit.isWorkingTree
+                      ? 'working tree'
+                      : '${commit.shortSha} · ${commit.author.name}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: technicalTextStyle.copyWith(
+                    color: fullDiffMuted,
+                    fontSize: 11,
+                  ),
                 ),
                 if (commit.parents.length > 1) ...[
                   const SizedBox(height: 8),
@@ -706,8 +706,9 @@ class _DiffScreenState extends State<DiffScreen> {
                         ),
                     ],
                     onChanged: (parent) {
-                      if (parent == null || parent == state.parent) return;
-                      _controller.selectParent(parent);
+                      if (parent != null && parent != state.parent) {
+                        unawaited(_controller.selectParent(parent));
+                      }
                     },
                   ),
                 ],
@@ -718,53 +719,87 @@ class _DiffScreenState extends State<DiffScreen> {
           Expanded(
             child: Stack(
               children: [
-                _selectable(
-                  ListView.builder(
-                    key: const Key('changed-files-list'),
-                    itemCount: state.files.length,
-                    itemBuilder: (context, index) {
-                      final file = state.files[index];
-                      final selected = file.path == state.selectedFile?.path;
-                      return ListTile(
-                        key: selected
-                            ? Key('selected-file-${file.path}')
-                            : null,
-                        dense: true,
-                        selected: selected,
-                        minLeadingWidth: 18,
-                        horizontalTitleGap: 7,
-                        leading: _statusChip(file.status),
-                        title: Text(
-                          file.path,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontFamily: technicalFontFamily,
-                            fontFamilyFallback: technicalFontFallback,
-                            fontSize: 12,
+                Positioned.fill(
+                  child: SelectionArea(
+                    child: ListView.builder(
+                      key: const Key('changed-files-list'),
+                      itemCount: state.files.length,
+                      itemBuilder: (context, index) {
+                        final file = state.files[index];
+                        final selected = file.path == state.selectedFile?.path;
+                        return Semantics(
+                          selected: selected,
+                          button: true,
+                          child: InkWell(
+                            onTap: selected
+                                ? null
+                                : () => unawaited(_controller.selectFile(file)),
+                            child: Container(
+                              key: selected
+                                  ? Key('selected-file-${file.path}')
+                                  : null,
+                              color: selected
+                                  ? fullDiffSelection
+                                  : Colors.transparent,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 9,
+                              ),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 24,
+                                    child: Text(_statusLetter(file.status)),
+                                  ),
+                                  Expanded(
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 3,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: selected
+                                            ? fullDiffSelectedChip
+                                            : fullDiffChip,
+                                        borderRadius: BorderRadius.circular(
+                                          fullDiffChipRadius,
+                                        ),
+                                      ),
+                                      child: Text(
+                                        file.path,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontFamily: technicalFontFamily,
+                                          fontFamilyFallback:
+                                              technicalFontFallback,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '+${file.additions ?? '—'} '
+                                    '−${file.deletions ?? '—'}',
+                                    style: technicalTextStyle.copyWith(
+                                      color: fullDiffMuted,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
-                        ),
-                        trailing: Text(
-                          '+${file.additions ?? '-'} −${file.deletions ?? '-'}',
-                          style: const TextStyle(
-                            color: _muted,
-                            fontSize: 10,
-                            fontFamily: technicalFontFamily,
-                            fontFamilyFallback: technicalFontFallback,
-                          ),
-                        ),
-                        onTap: () {
-                          if (!selected) {
-                            _controller.selectFile(file);
-                          }
-                        },
-                      );
-                    },
+                        );
+                      },
+                    ),
                   ),
                 ),
                 if (state.filesResource.loading)
                   const Center(
                     child: SizedBox.square(
+                      key: Key('diff-pending-files'),
                       dimension: 16,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
@@ -777,196 +812,380 @@ class _DiffScreenState extends State<DiffScreen> {
     );
   }
 
-  /// `git` reports statuses like `M`, `A`, `D`, and `R100`, so the family comes
-  /// from the first letter and only that letter fits the 18px chip.
-  Widget _statusChip(String status) {
-    final letter = status.isEmpty ? '' : status[0];
-    final tint = switch (letter) {
-      'A' => _addedFill,
-      'D' => _deleted,
-      'R' || 'C' => _renamed,
-      _ => null,
-    };
-    return Container(
-      width: 18,
-      height: 18,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: tint?.withValues(alpha: 0.2) ?? _accent,
-        borderRadius: const BorderRadius.all(Radius.circular(4)),
-      ),
-      child: Text(
-        letter,
-        maxLines: 1,
-        style: TextStyle(
-          color: tint ?? _text,
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-        ),
-      ),
-    );
-  }
-
-  Widget _diff(FullDiffSessionState state) {
-    final selectedFile = state.selectedFile;
-    final activeHunkIndex = state.activeAnchor?.hunkIndex ?? 0;
-    final error = state.patch.error ?? state.filesResource.error;
-
-    return ColoredBox(
-      color: _background,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          ColoredBox(
-            color: _surface,
-            child: DiffFileHeader(
-              file: selectedFile,
-              path: selectedFile?.path,
-              hunkSelected: true,
-            ),
-          ),
-          ColoredBox(
-            color: _surface,
-            child: DiffToolbar(
-              activeHunkIndex: activeHunkIndex,
-              hunkCount: state.patch.data?.hunks.length ?? 0,
-              algorithm: state.requestedAlgorithm,
-              ignoreWhitespace: state.requestedIgnoreWhitespace,
-              wrapLines: state.wrapLines,
-              focusMode: state.focusMode,
-              loading: state.patch.loading,
-              onPreviousHunk: () => _stepHunk(-1),
-              onNextHunk: () => _stepHunk(1),
-              onAlgorithmSelected: (algorithm) {
-                if (algorithm != state.requestedAlgorithm) {
-                  unawaited(
-                    _controller.selectAlgorithm(algorithm).catchError((_) {}),
-                  );
-                }
-              },
-              onIgnoreWhitespaceChanged: (value) {
-                if (value != state.requestedIgnoreWhitespace) {
-                  unawaited(
-                    _controller.setIgnoreWhitespace(value).catchError((_) {}),
-                  );
-                }
-              },
-              onWrapLinesChanged: (value) {
-                if (value != state.wrapLines) {
-                  _controller.setWrapLines(value);
-                }
-              },
-              onFocusModeChanged: (value) {
-                if (value != state.focusMode) {
-                  _controller.setFocusMode(value);
-                }
-              },
-            ),
-          ),
-          if (error != null)
-            Container(
-              color: const Color(0xFF492B37),
-              padding: const EdgeInsets.all(8),
-              child: Text(
-                error.toString(),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: _deleted, fontSize: 11),
+  Widget _content(FullDiffSessionState state, double viewportWidth) =>
+      ColoredBox(
+        color: fullDiffCanvas,
+        child: Row(
+          children: [
+            Expanded(
+              child: KeyedSubtree(
+                key: _contentViewportKey,
+                child: PrimaryScrollController(
+                  controller: _contentScroll,
+                  child: KeyedSubtree(
+                    key: const Key('content-scrollable'),
+                    child: _contentFor(state, viewportWidth),
+                  ),
+                ),
               ),
             ),
-          Expanded(child: _diffBody(state)),
-        ],
-      ),
-    );
-  }
-
-  Widget _diffBody(FullDiffSessionState state) {
-    final document = state.patch.data;
-    final activeHunkIndex = state.activeAnchor?.hunkIndex ?? 0;
-    final error = state.patch.error ?? state.filesResource.error;
-    if (document != null) {
-      return HunkListView(
-        document: document,
-        activeHunkIndex: activeHunkIndex,
-        wrapLines: state.wrapLines,
-        controller: _diffScroll,
-        anchorKeys: _anchorKeys,
-        onHunkSelected: (index) {
-          if (index != activeHunkIndex) {
-            _controller.selectAnchor(document.hunks[index].anchor);
-          }
-        },
-      );
-    }
-    if (error != null) {
-      return _diffStatus(
-        key: const Key('diff-error-without-document'),
-        message: 'Unable to load diff',
-      );
-    }
-    if (state.filesResource.loading) {
-      return _diffStatus(
-        key: const Key('diff-pending-files'),
-        message: 'Loading changed files…',
-        loading: true,
-      );
-    }
-    if (state.patch.loading) {
-      return _diffStatus(
-        key: const Key('diff-pending-first-diff'),
-        message: 'Loading diff…',
-        loading: true,
-      );
-    }
-    return _diffStatus(
-      key: const Key('diff-no-file-selected'),
-      message: 'No file selected',
-    );
-  }
-
-  Widget _diffStatus({
-    required Key key,
-    required String message,
-    bool loading = false,
-  }) => ColoredBox(
-    key: key,
-    color: _background,
-    child: Center(
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (loading) ...[
-            const SizedBox.square(
-              dimension: 14,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            const SizedBox(width: 8),
+            if (state.view != FullDiffView.history)
+              SizedBox(
+                width: fullDiffMinimapWidth,
+                child: FullDiffMinimap(
+                  document: state.patch.data ?? DiffDocument.empty,
+                  activeAnchor: state.activeAnchor,
+                  sourceLineCount:
+                      state.file.data?.lines.length ??
+                      state.patch.data?.sourceLineCount ??
+                      0,
+                  deletedFile:
+                      state.selectedFile?.status.startsWith('D') ?? false,
+                  view: state.view,
+                  presentation: state.presentation,
+                  scrollController: _contentScroll,
+                  onAnchorSelected: _controller.selectAnchor,
+                  onScrollFractionChanged: _scrollContentToFraction,
+                ),
+              ),
           ],
-          Text(message, style: const TextStyle(color: _muted, fontSize: 12)),
-        ],
+        ),
+      );
+
+  Widget _contentFor(FullDiffSessionState state, double viewportWidth) =>
+      switch (state.view) {
+        FullDiffView.file => _fileContent(state),
+        FullDiffView.diff => _diffContent(state, viewportWidth),
+        FullDiffView.blame => _blameContent(state),
+        FullDiffView.history => _historyContent(state),
+      };
+
+  Widget _fileContent(FullDiffSessionState state) {
+    final file = state.file.data;
+    if (file == null) return _resourceStatus(state.file, '파일을 읽는 중입니다');
+    return FullFileView(
+      document: file,
+      path: file.path,
+      activeAnchor: state.activeAnchor,
+      wrapLines: state.wrapLines,
+      highlighter: _highlighter,
+      anchorKeys: _anchorKeys,
+      controller: _contentScroll,
+    );
+  }
+
+  Widget _diffContent(FullDiffSessionState state, double viewportWidth) {
+    final patch = state.patch.data;
+    final file = state.selectedFile;
+    if (patch == null || file == null) {
+      return _resourceStatus(
+        state.patch,
+        'Diff를 읽는 중입니다',
+        loadingKey: const Key('diff-pending-first-diff'),
+        errorKey: const Key('diff-error-without-document'),
+      );
+    }
+    final presentation = switch (state.presentation) {
+      DiffPresentation.hunk => HunkPresentationView(
+        document: patch,
+        activeAnchor: state.activeAnchor,
+        path: file.path,
+        wrapLines: state.wrapLines,
+        highlighter: _highlighter,
+        anchorKeys: _anchorKeys,
+        controller: _contentScroll,
       ),
+      DiffPresentation.inline => InlinePresentationView(
+        document: patch,
+        activeAnchor: state.activeAnchor,
+        path: file.path,
+        wrapLines: state.wrapLines,
+        highlighter: _highlighter,
+        anchorKeys: _anchorKeys,
+        controller: _contentScroll,
+      ),
+      DiffPresentation.split => SplitPresentationView(
+        document: patch,
+        activeAnchor: state.activeAnchor,
+        oldPath: file.oldPath ?? file.path,
+        newPath: file.path,
+        wrapLines: state.wrapLines,
+        showOldSide: viewportWidth > 480,
+        highlighter: _highlighter,
+        anchorKeys: _anchorKeys,
+        controller: _contentScroll,
+      ),
+    };
+    final error = state.patch.error;
+    if (error == null) return presentation;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        presentation,
+        Align(
+          alignment: Alignment.topCenter,
+          child: Container(
+            key: const Key('diff-refresh-error'),
+            color: fullDiffCanvas.withValues(alpha: 0.92),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            child: Text(
+              error.toString(),
+              style: const TextStyle(color: fullDiffDeletedMark, fontSize: 12),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _blameContent(FullDiffSessionState state) {
+    final blame = state.blame.data;
+    if (blame == null) {
+      return _resourceStatus(state.blame, 'Blame을 읽는 중입니다');
+    }
+    return FullBlameView(
+      document: blame,
+      activeAnchor: state.activeAnchor,
+      wrapLines: state.wrapLines,
+      highlighter: _highlighter,
+      anchorKeys: _anchorKeys,
+      controller: _contentScroll,
+    );
+  }
+
+  Widget _historyContent(FullDiffSessionState state) {
+    final history = state.history.data;
+    if (history == null) {
+      return _resourceStatus(state.history, 'History를 읽는 중입니다');
+    }
+    return FullHistoryView(
+      entries: history,
+      onSelected: (entry) => unawaited(_controller.selectHistoryEntry(entry)),
+      controller: _contentScroll,
+    );
+  }
+
+  Widget _resourceStatus<T>(
+    AsyncResource<T> resource,
+    String loadingLabel, {
+    Key? loadingKey,
+    Key? errorKey,
+  }) => Center(
+    key: resource.error != null ? errorKey : loadingKey,
+    child: Text(
+      resource.error?.toString() ??
+          (resource.loading ? loadingLabel : '표시할 데이터가 없습니다'),
+      style: const TextStyle(color: fullDiffMuted, fontSize: 14),
     ),
   );
 
-  Widget _selectable(Widget child) => SelectionArea(child: child);
+  void _scrollContentToFraction(double fraction) {
+    if (!_contentScroll.hasClients) return;
+    final position = _contentScroll.position;
+    position.jumpTo(
+      (position.maxScrollExtent * fraction).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      ),
+    );
+  }
+
+  void _resizeCommits(double delta, double bodyWidth) {
+    final max = math.max(126.0, bodyWidth - _filesWidth - 80);
+    setState(() {
+      _commitsWidth = (_commitsWidth + delta).clamp(126.0, max);
+    });
+  }
+
+  void _resizeFiles(double delta, double bodyWidth) {
+    final max = math.max(158.0, bodyWidth - _commitsWidth - 80);
+    setState(() {
+      _filesWidth = (_filesWidth + delta).clamp(158.0, max);
+    });
+  }
+
+  void _saveColumnWidths() => widget.onColumnWidthsChanged?.call(
+    FullDiffColumnWidths(commits: _commitsWidth, files: _filesWidth),
+  );
 
   Widget _sectionHeader(Widget child) => Container(
     height: 42,
     padding: const EdgeInsets.symmetric(horizontal: 10),
     alignment: Alignment.centerLeft,
     decoration: const BoxDecoration(
-      color: _raised,
-      border: Border(bottom: BorderSide(color: _border)),
+      color: fullDiffHeader,
+      border: Border(bottom: BorderSide(color: fullDiffDivider)),
     ),
     child: DefaultTextStyle(
       style: const TextStyle(
-        color: _text,
+        color: Colors.white,
         fontSize: 11,
         fontWeight: FontWeight.w600,
       ),
       child: child,
     ),
   );
-
-  String _shortSha(String sha) => sha.length <= 7 ? sha : sha.substring(0, 7);
 }
+
+class _ResponsiveDiffBody extends StatelessWidget {
+  const _ResponsiveDiffBody({
+    required this.showCommits,
+    required this.showFiles,
+    required this.commitsWidth,
+    required this.filesWidth,
+    required this.nearbyCommits,
+    required this.commitFiles,
+    required this.content,
+    required this.onCommitsResized,
+    required this.onFilesResized,
+    required this.onResizeEnd,
+  });
+
+  final bool showCommits;
+  final bool showFiles;
+  final double commitsWidth;
+  final double filesWidth;
+  final Widget nearbyCommits;
+  final Widget commitFiles;
+  final Widget content;
+  final ValueChanged<double> onCommitsResized;
+  final ValueChanged<double> onFilesResized;
+  final VoidCallback onResizeEnd;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      if (!showCommits) {
+        final fileWidth = showFiles
+            ? math.max(138.0, constraints.maxWidth * 80 / 360)
+            : 0.0;
+        return Row(
+          children: [
+            if (showFiles)
+              SizedBox(
+                key: const Key('commit-files-pane'),
+                width: fileWidth,
+                child: KeyedSubtree(
+                  key: const Key('details-files-column'),
+                  child: commitFiles,
+                ),
+              ),
+            Expanded(key: const Key('diff-column'), child: content),
+          ],
+        );
+      }
+
+      const minCommits = 126.0;
+      const minFiles = 158.0;
+      const minContent = 280.0;
+      final navigationBudget = math.max(
+        minCommits + minFiles,
+        constraints.maxWidth - minContent,
+      );
+      var effectiveCommits = math.max(minCommits, commitsWidth);
+      var effectiveFiles = math.max(minFiles, filesWidth);
+      final desiredNavigation = effectiveCommits + effectiveFiles;
+      if (desiredNavigation > navigationBudget) {
+        final commitExtra = effectiveCommits - minCommits;
+        final fileExtra = effectiveFiles - minFiles;
+        final desiredExtra = commitExtra + fileExtra;
+        final extraBudget = navigationBudget - minCommits - minFiles;
+        if (desiredExtra > 0) {
+          effectiveCommits =
+              minCommits + extraBudget * commitExtra / desiredExtra;
+          effectiveFiles = minFiles + extraBudget * fileExtra / desiredExtra;
+        } else {
+          effectiveCommits = minCommits;
+          effectiveFiles = minFiles;
+        }
+      }
+      return Row(
+        children: [
+          SizedBox(
+            key: const Key('nearby-commits-pane'),
+            width: effectiveCommits,
+            child: KeyedSubtree(
+              key: const Key('nearby-column'),
+              child: _ResizablePane(
+                resizerKey: const Key('nearby-column-resizer'),
+                onUpdate: onCommitsResized,
+                onEnd: onResizeEnd,
+                child: nearbyCommits,
+              ),
+            ),
+          ),
+          SizedBox(
+            key: const Key('commit-files-pane'),
+            width: effectiveFiles,
+            child: KeyedSubtree(
+              key: const Key('details-files-column'),
+              child: _ResizablePane(
+                resizerKey: const Key('details-files-column-resizer'),
+                onUpdate: onFilesResized,
+                onEnd: onResizeEnd,
+                child: commitFiles,
+              ),
+            ),
+          ),
+          Expanded(key: const Key('diff-column'), child: content),
+        ],
+      );
+    },
+  );
+}
+
+class _ResizablePane extends StatelessWidget {
+  const _ResizablePane({
+    required this.resizerKey,
+    required this.onUpdate,
+    required this.onEnd,
+    required this.child,
+  });
+
+  final Key resizerKey;
+  final ValueChanged<double> onUpdate;
+  final VoidCallback onEnd;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    children: [
+      Positioned.fill(child: child),
+      Positioned(
+        right: 0,
+        top: 0,
+        bottom: 0,
+        width: 8,
+        child: Focus(
+          onKeyEvent: (_, event) {
+            if (event is KeyUpEvent) return KeyEventResult.ignored;
+            final delta = switch (event.logicalKey) {
+              LogicalKeyboardKey.arrowLeft => -8.0,
+              LogicalKeyboardKey.arrowRight => 8.0,
+              _ => null,
+            };
+            if (delta == null) return KeyEventResult.ignored;
+            onUpdate(delta);
+            onEnd();
+            return KeyEventResult.handled;
+          },
+          child: MouseRegion(
+            cursor: SystemMouseCursors.resizeColumn,
+            child: GestureDetector(
+              key: resizerKey,
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragUpdate: (details) => onUpdate(details.delta.dx),
+              onHorizontalDragEnd: (_) => onEnd(),
+              onHorizontalDragCancel: onEnd,
+            ),
+          ),
+        ),
+      ),
+    ],
+  );
+}
+
+String _statusLetter(String status) =>
+    status.characters.isEmpty ? '' : status.characters.first;
+
+String _shortSha(String sha) => sha.length <= 7 ? sha : sha.substring(0, 7);

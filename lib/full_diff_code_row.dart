@@ -31,6 +31,7 @@ class FullDiffCodeRow extends StatelessWidget {
     this.current = false,
     this.wordRanges = const [],
     this.compactGutter = false,
+    this.horizontalScroll = true,
     super.key,
   });
 
@@ -41,6 +42,7 @@ class FullDiffCodeRow extends StatelessWidget {
   final bool current;
   final List<WordRange> wordRanges;
   final bool compactGutter;
+  final bool horizontalScroll;
 
   @override
   Widget build(BuildContext context) {
@@ -64,7 +66,7 @@ class FullDiffCodeRow extends StatelessWidget {
         ),
       ),
     );
-    final source = wrapLines
+    final source = wrapLines || !horizontalScroll
         ? richText
         : SingleChildScrollView(
             key: const Key('code-row-horizontal-scroll'),
@@ -75,56 +77,71 @@ class FullDiffCodeRow extends StatelessWidget {
 
     return ColoredBox(
       color: sourceColor,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Stack(
         children: [
-          if (compactGutter)
-            _GutterCell(
-              number: line.newNumber ?? line.oldNumber,
-              width: fullDiffLineNumberWidth - 18,
-              color: gutterColor,
-            )
-          else ...[
-            _GutterCell(
-              number: line.oldNumber,
-              width: (fullDiffLineNumberWidth - 18) / 2,
-              color: gutterColor,
-            ),
-            _GutterCell(
-              number: line.newNumber,
-              width: (fullDiffLineNumberWidth - 18) / 2,
-              color: gutterColor,
-            ),
-          ],
-          Container(
-            width: 18,
-            constraints: const BoxConstraints(minHeight: 27),
-            alignment: Alignment.topCenter,
-            color: gutterColor,
-            padding: const EdgeInsets.symmetric(vertical: 3),
-            child: Text(marker, style: _gutterStyle),
-          ),
-          Expanded(
-            child: Stack(
-              children: [
-                ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 27),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(10, 3, 10, 3),
-                    child: source,
-                  ),
-                ),
-                if (current)
-                  const Positioned(
-                    key: Key('code-row-current-marker'),
-                    left: 0,
-                    top: 0,
-                    bottom: 0,
-                    child: ColoredBox(
-                      color: fullDiffAccent,
-                      child: SizedBox(width: 3),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(width: fullDiffLineNumberWidth),
+              Expanded(
+                child: Stack(
+                  children: [
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 27),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(10, 3, 10, 3),
+                        child: source,
+                      ),
                     ),
+                    if (current)
+                      const Positioned(
+                        key: Key('code-row-current-marker'),
+                        left: 0,
+                        top: 0,
+                        bottom: 0,
+                        child: ColoredBox(
+                          color: fullDiffAccent,
+                          child: SizedBox(width: 3),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          Positioned(
+            left: 0,
+            top: 0,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (compactGutter)
+                  _GutterCell(
+                    number: line.newNumber ?? line.oldNumber,
+                    width: fullDiffLineNumberWidth - 18,
+                    color: gutterColor,
+                  )
+                else ...[
+                  _GutterCell(
+                    number: line.oldNumber,
+                    width: (fullDiffLineNumberWidth - 18) / 2,
+                    color: gutterColor,
                   ),
+                  _GutterCell(
+                    number: line.newNumber,
+                    width: (fullDiffLineNumberWidth - 18) / 2,
+                    color: gutterColor,
+                  ),
+                ],
+                Container(
+                  width: 18,
+                  constraints: const BoxConstraints(minHeight: 27),
+                  alignment: Alignment.topCenter,
+                  color: gutterColor,
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Text(marker, style: _gutterStyle),
+                ),
               ],
             ),
           ),
@@ -149,6 +166,8 @@ class _SourceText extends Text {
   Widget build(BuildContext context) => RichText(
     key: const Key('code-row-source-text'),
     text: textSpan!,
+    selectionRegistrar: SelectionContainer.maybeOf(context),
+    selectionColor: DefaultSelectionStyle.of(context).selectionColor,
     textDirection: Directionality.maybeOf(context),
     softWrap: wrapLines,
     overflow: TextOverflow.visible,

@@ -3017,12 +3017,12 @@ void main() {
     expect(find.byKey(const Key('nearby-commits-list')), findsOneWidget);
     expect(find.byKey(const Key('changed-files-list')), findsOneWidget);
     expect(find.byKey(const Key('hunk-list')), findsOneWidget);
-    expect(find.text('−1  +1'), findsOneWidget);
+    expect(find.textContaining('change 1 of 1'), findsOneWidget);
     expect(find.text('1 / 1'), findsWidgets);
     expect(find.text('Unified'), findsNothing);
     expect(find.text('Side-by-side'), findsNothing);
     expect(find.text('diff 알고리즘'), findsOneWidget);
-    expect(find.text('Git setting'), findsOneWidget);
+    expect(find.text('Git setting'), findsNothing);
     expect(
       tester.getTopLeft(find.byKey(const Key('changed-files-list'))).dx,
       lessThan(tester.getTopLeft(find.byKey(const Key('hunk-list'))).dx),
@@ -3048,14 +3048,18 @@ void main() {
 
     await tester.tap(find.byKey(const Key('diff-algorithm')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Histogram').last);
+    final histogramItem = find.ancestor(
+      of: find.text('Histogram').last,
+      matching: find.byType(CheckedPopupMenuItem<DiffAlgorithm>),
+    );
+    await tester.ensureVisible(histogramItem);
+    await tester.pump();
+    await tester.tap(histogramItem);
     await tester.pump();
     expect(find.text('old line'), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
-    expect(
-      tester.widget<Text>(find.byKey(const Key('diff-algorithm-value'))).data,
-      'Histogram',
-    );
+    expect(calls.last.algorithm, DiffAlgorithm.histogram);
+    expect(find.byKey(const Key('diff-algorithm-value')), findsNothing);
     expect(find.byKey(const Key('selected-file-lib/b.dart')), findsOneWidget);
 
     histogram.complete([
@@ -3068,10 +3072,8 @@ void main() {
     ]);
     await tester.pumpAndSettle();
     expect(find.text('histogram line'), findsOneWidget);
-    expect(
-      tester.widget<Text>(find.byKey(const Key('diff-algorithm-value'))).data,
-      'Histogram',
-    );
+    expect(calls.last.algorithm, DiffAlgorithm.histogram);
+    expect(find.byKey(const Key('diff-algorithm-value')), findsNothing);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
@@ -3140,7 +3142,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('nearby-column')), findsNothing);
     expect(find.byKey(const Key('details-files-column')), findsNothing);
-    expect(tester.getSize(find.byKey(const Key('diff-column'))).width, 1200);
+    expect(tester.getSize(find.byKey(const Key('diff-column'))).width, 1176);
     expect(saved, isNull);
 
     await tester.tap(find.byKey(const Key('focus-mode')));
@@ -3226,51 +3228,29 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    tester.view.physicalSize = const Size(760, 800);
+    tester.view.physicalSize = const Size(651, 800);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-column')), findsNothing);
-    expect(
-      tester.getSize(find.byKey(const Key('details-files-column'))).width,
-      240,
-    );
-    expect(tester.getSize(find.byKey(const Key('diff-column'))).width, 520);
+    expect(find.byKey(const Key('nearby-commits-pane')), findsOneWidget);
+    expect(find.byKey(const Key('commit-files-pane')), findsOneWidget);
     expect(saved, isNull);
 
-    tester.view.physicalSize = const Size(520, 800);
+    tester.view.physicalSize = const Size(650, 800);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-column')), findsNothing);
-    expect(find.byKey(const Key('details-files-column')), findsNothing);
-    expect(tester.getSize(find.byKey(const Key('diff-column'))).width, 520);
+    expect(find.byKey(const Key('nearby-commits-pane')), findsNothing);
+    expect(find.byKey(const Key('commit-files-pane')), findsOneWidget);
     expect(saved, isNull);
 
-    tester.view.physicalSize = const Size(719, 800);
+    tester.view.physicalSize = const Size(481, 800);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-column')), findsNothing);
-    expect(find.byKey(const Key('details-files-column')), findsNothing);
+    expect(find.byKey(const Key('nearby-commits-pane')), findsNothing);
+    expect(find.byKey(const Key('commit-files-pane')), findsOneWidget);
+    expect(saved, isNull);
 
-    tester.view.physicalSize = const Size(720, 800);
+    tester.view.physicalSize = const Size(480, 800);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-column')), findsNothing);
-    expect(
-      tester.getSize(find.byKey(const Key('details-files-column'))).width,
-      200,
-    );
-
-    tester.view.physicalSize = const Size(859, 800);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-column')), findsNothing);
-    expect(
-      tester.getSize(find.byKey(const Key('details-files-column'))).width,
-      330,
-    );
-
-    tester.view.physicalSize = const Size(860, 800);
-    await tester.pumpAndSettle();
-    expect(tester.getSize(find.byKey(const Key('nearby-column'))).width, 140);
-    expect(
-      tester.getSize(find.byKey(const Key('details-files-column'))).width,
-      200,
-    );
+    expect(find.byKey(const Key('nearby-commits-pane')), findsNothing);
+    expect(find.byKey(const Key('commit-files-pane')), findsNothing);
+    expect(saved, isNull);
 
     tester.view.physicalSize = const Size(1200, 800);
     await tester.pumpAndSettle();
@@ -3367,16 +3347,20 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await tester.tap(find.text('Inline'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('diff-algorithm')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Minimal').last);
+    final minimalItem = find.ancestor(
+      of: find.text('Minimal').last,
+      matching: find.byType(CheckedPopupMenuItem<DiffAlgorithm>),
+    );
+    await tester.ensureVisible(minimalItem);
+    await tester.tap(minimalItem);
     await tester.pumpAndSettle();
 
     expect(find.text('displayed line'), findsOneWidget);
-    expect(
-      tester.widget<Text>(find.byKey(const Key('diff-algorithm-value'))).data,
-      'Git setting',
-    );
+    expect(find.byKey(const Key('diff-algorithm-value')), findsNothing);
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(find.textContaining('minimal failed'), findsOneWidget);
   });
@@ -3402,7 +3386,7 @@ void main() {
     await tester.pump();
 
     expect(find.byKey(const Key('diff-pending-files')), findsOneWidget);
-    expect(find.text('No changes'), findsNothing);
+    expect(find.text('현재 옵션으로 표시할 변경이 없습니다'), findsNothing);
 
     files.complete(const []);
     await tester.pumpAndSettle();
@@ -3438,7 +3422,7 @@ void main() {
     await tester.pump();
 
     expect(find.byKey(const Key('diff-pending-first-diff')), findsOneWidget);
-    expect(find.text('No changes'), findsNothing);
+    expect(find.text('현재 옵션으로 표시할 변경이 없습니다'), findsNothing);
 
     diff.complete(const []);
     await tester.pumpAndSettle();
@@ -3475,7 +3459,7 @@ void main() {
       find.byKey(const Key('diff-error-without-document')),
       findsOneWidget,
     );
-    expect(find.text('No changes'), findsNothing);
+    expect(find.text('현재 옵션으로 표시할 변경이 없습니다'), findsNothing);
     expect(find.textContaining('initial failed'), findsWidgets);
   });
 
@@ -3506,7 +3490,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('No changes'), findsOneWidget);
+    expect(find.text('현재 옵션으로 표시할 변경이 없습니다'), findsOneWidget);
     expect(find.byKey(const Key('diff-pending-files')), findsNothing);
     expect(find.byKey(const Key('diff-pending-first-diff')), findsNothing);
     expect(find.byKey(const Key('diff-error-without-document')), findsNothing);
@@ -3551,12 +3535,24 @@ void main() {
       findsOneWidget,
     );
     expect(
-      tester.widget<ColoredBox>(deletion).color,
-      const Color(0xFFF29AB2).withValues(alpha: 0.15),
+      tester
+          .widget<ColoredBox>(
+            find
+                .descendant(of: deletion, matching: find.byType(ColoredBox))
+                .first,
+          )
+          .color,
+      const Color(0xFF34251F),
     );
     expect(
-      tester.widget<ColoredBox>(addition).color,
-      const Color(0xFF8AD6A1).withValues(alpha: 0.15),
+      tester
+          .widget<ColoredBox>(
+            find
+                .descendant(of: addition, matching: find.byType(ColoredBox))
+                .first,
+          )
+          .color,
+      const Color(0xFF262E36),
     );
   });
 
@@ -3741,44 +3737,45 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await tester.tap(find.text('Inline'));
+    await tester.pumpAndSettle();
+
+    ScrollPosition contentPosition() => tester
+        .state<ScrollableState>(
+          find
+              .descendant(
+                of: find.byKey(const Key('content-scrollable')),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        )
+        .position;
+
     Future<void> scrollDown() async {
       await tester.drag(
-        find.byKey(const Key('hunk-list')),
+        find
+            .descendant(
+              of: find.byKey(const Key('content-scrollable')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
         const Offset(0, -500),
       );
       await tester.pumpAndSettle();
-      expect(
-        tester
-            .widget<ListView>(find.byKey(const Key('hunk-list')))
-            .controller!
-            .offset,
-        greaterThan(0),
-      );
+      expect(contentPosition().pixels, greaterThan(0));
     }
 
     await scrollDown();
     await tester.tap(find.text('two.txt'));
     await tester.pumpAndSettle();
-    expect(
-      tester
-          .widget<ListView>(find.byKey(const Key('hunk-list')))
-          .controller!
-          .offset,
-      0,
-    );
+    expect(contentPosition().pixels, 0);
 
     await scrollDown();
     await tester.tap(find.byKey(const Key('merge-parent-chooser')));
     await tester.pumpAndSettle();
     await tester.tap(find.textContaining('Parent 2').last);
     await tester.pumpAndSettle();
-    expect(
-      tester
-          .widget<ListView>(find.byKey(const Key('hunk-list')))
-          .controller!
-          .offset,
-      0,
-    );
+    expect(contentPosition().pixels, 0);
   });
 
   test(
@@ -6658,7 +6655,14 @@ void main() {
     expect(targetRect.bottom, lessThanOrEqualTo(viewport.bottom));
 
     final scroll = tester
-        .widget<ListView>(find.byKey(const Key('hunk-list')))
+        .widget<ListView>(
+          find
+              .descendant(
+                of: find.byKey(const Key('content-scrollable')),
+                matching: find.byType(ListView),
+              )
+              .first,
+        )
         .controller!;
     final offset = scroll.offset;
     final serial = session.state.navigationSerial;
@@ -6710,6 +6714,7 @@ void main() {
     );
     addTearDown(session.dispose);
     await session.initialize();
+    session.setPresentation(DiffPresentation.inline);
     await tester.pumpWidget(
       MaterialApp(
         home: DiffScreen(
@@ -6722,7 +6727,14 @@ void main() {
     );
     await tester.pumpAndSettle();
     final scroll = tester
-        .widget<ListView>(find.byKey(const Key('hunk-list')))
+        .widget<ListView>(
+          find
+              .descendant(
+                of: find.byKey(const Key('content-scrollable')),
+                matching: find.byType(ListView),
+              )
+              .first,
+        )
         .controller!;
     final selectedCommit = session.state.selectedCommit;
     final selectedFile = session.state.selectedFile;
@@ -6939,8 +6951,8 @@ void main() {
     final source = tester.widget<Text>(
       find.text('body of newer/one.dart').first,
     );
-    expect(source.style?.fontFamily, technicalFontFamily);
-    expect(source.style?.fontFamilyFallback, technicalFontFallback);
+    expect(source.textSpan?.style?.fontFamily, technicalFontFamily);
+    expect(source.textSpan?.style?.fontFamilyFallback, technicalFontFallback);
 
     final path = tester.widget<Text>(find.text('newer/one.dart').first);
     expect(path.style?.fontFamily, technicalFontFamily);
@@ -6958,7 +6970,7 @@ void main() {
     final detailsHash = tester.widget<Text>(
       find.descendant(
         of: find.byKey(const Key('details-files-column')),
-        matching: find.text('newer'),
+        matching: find.textContaining('newer ·'),
       ),
     );
     expect(detailsHash.style?.fontFamily, technicalFontFamily);
@@ -7008,7 +7020,7 @@ void main() {
     expect(find.text('lib/a.dart'), findsWidgets);
     expect(find.text('diff 알고리즘'), findsOneWidget);
     expect(find.byKey(const Key('hunk-list')), findsOneWidget);
-    expect(find.text('−1  +1'), findsOneWidget);
+    expect(find.textContaining('change 1 of 1'), findsOneWidget);
     expect(find.text('diff --git a/x b/x'), findsNothing);
     expect(tester.takeException(), isNull);
   });

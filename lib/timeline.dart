@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import 'avatars.dart';
 import 'diff_screen.dart';
+import 'external_editor.dart';
 import 'full_diff_model.dart';
 import 'git.dart';
 import 'page_scroll_shortcuts.dart';
@@ -2987,6 +2988,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
           initialView: widget.fullDiffInitialView,
           columnWidths: widget.fullDiffColumnWidths,
           onColumnWidthsChanged: widget.onFullDiffColumnWidthsChanged,
+          editorService: ExternalEditorService(
+            repositoryRoot: widget.repository.root,
+          ),
         ),
       ),
     );
