@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:highlighting/highlighting.dart';
 import 'package:highlighting/languages/apache.dart' as lang_apache;
 import 'package:highlighting/languages/armasm.dart' as lang_armasm;
 import 'package:highlighting/languages/bash.dart' as lang_bash;
@@ -61,6 +60,7 @@ import 'package:highlighting/languages/x86asm.dart' as lang_x86asm;
 import 'package:highlighting/languages/xml.dart' as lang_xml;
 import 'package:highlighting/languages/yaml.dart' as lang_yaml;
 
+import 'full_diff_highlight_engine.dart';
 import 'full_diff_syntax_contract.dart';
 
 const _fileNames = <String, String>{
@@ -276,16 +276,17 @@ List<dynamic> get _extendedLanguages => [
 ];
 
 var _languagesRegistered = false;
+final _highlight = RegisteredHighlightEngine();
 
 void registerFullDiffLanguages() {
   if (_languagesRegistered) return;
   _languagesRegistered = true;
   for (final language in _baseLanguages) {
-    highlight.registerLanguage(language);
+    _highlight.registerLanguage(language);
   }
   if (extendedSyntaxEnabled) {
     for (final language in _extendedLanguages) {
-      highlight.registerLanguage(language);
+      _highlight.registerLanguage(language);
     }
   }
 }
@@ -306,7 +307,7 @@ class HighlightJsSyntaxHighlighter implements FullDiffSyntaxHighlighter {
       return const [];
     }
 
-    final result = highlight.parse(source, languageId: language);
+    final result = _highlight.parse(source, languageId: language);
     final spans = <CodeTokenSpan>[];
     var offset = 0;
 

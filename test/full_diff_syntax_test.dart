@@ -103,4 +103,17 @@ void main() {
       expect(highlighter.highlightLine('data/unknown.data', source), isEmpty);
     },
   );
+
+  test('includes extended syntax only when the build flag enables it', () {
+    const shouldHighlight = bool.fromEnvironment(
+      'YOGIT_EXTENDED_SYNTAX',
+      defaultValue: true,
+    );
+    final spans = HighlightJsSyntaxHighlighter().highlightLine(
+      'script.pl',
+      r'my $answer = 42;',
+    );
+
+    expect(spans.isNotEmpty, shouldHighlight);
+  });
 }
