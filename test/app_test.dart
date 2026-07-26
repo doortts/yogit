@@ -3739,6 +3739,75 @@ void main() {
     );
   });
 
+  test('a parent-side join bends at its parent after a date heading', () {
+    const size = Size(168, 36);
+    final now = DateTime(2026, 7, 26, 12);
+    int at(int day) =>
+        DateTime(2026, 7, day, 12).millisecondsSinceEpoch ~/ 1000;
+    final rows = layoutGraph([
+      commit('M', 'merge', parents: const ['P', 'B'], timestamp: at(26)),
+      commit('B', 'branch tail', parents: const ['P'], timestamp: at(26)),
+      commit('P', 'parent', timestamp: at(25)),
+    ]);
+    final originalJoin = rows[1].transitions.single;
+    expect(originalJoin, (from: 1, to: 0, sha: 'P'));
+
+    final entries = timelineEntries(rows, now);
+    final headingIndex = entries.indexWhere(
+      (entry) => entry.label == 'Yesterday',
+    );
+    final above = entries[headingIndex - 1];
+    final heading = entries[headingIndex];
+    final parent = entries[headingIndex + 1];
+
+    expect(above.row.commit.sha, 'B');
+    expect(above.row.transitions, isEmpty);
+    expect(above.row.nextLaneShas[1], 'P');
+    expect(heading.row.transitions, [originalJoin]);
+    expect(heading.row.activeLaneShas[1], 'P');
+    expect(heading.row.nextLaneShas, rows[1].nextLaneShas);
+    expect(parent.row.commit.sha, 'P');
+
+    final headingPainter = CommitGraphPainter(
+      row: heading.row,
+      previous: above.row,
+      selected: false,
+      committerColor: AvatarService.branchColor(0),
+    );
+    final headingPath = headingPainter.transitionPath(
+      originalJoin.from,
+      originalJoin.to,
+      size.height / 2,
+      size,
+    );
+    expect(
+      _samples(
+        headingPath,
+      ).where((point) => point.dy <= size.height).map((point) => point.dx),
+      everyElement(58),
+    );
+
+    final parentPainter = CommitGraphPainter(
+      row: parent.row,
+      previous: heading.row,
+      selected: false,
+      committerColor: AvatarService.branchColor(0),
+    );
+    final arrivalPath = parentPainter.transitionPath(
+      originalJoin.from,
+      originalJoin.to,
+      size.height / 2 - size.height,
+      size,
+    );
+    expect(arrivalPath.getBounds(), const Rect.fromLTRB(28, -18, 58, 18));
+    expect(_touches(arrivalPath, const Offset(28, 18)), isTrue);
+    final metric = arrivalPath.computeMetrics().single;
+    expect(
+      metric.getTangentForOffset(metric.length)!.vector.dx,
+      lessThan(-0.99),
+    );
+  });
+
   testWidgets('date rows head their group, boxed at the hash column', (
     tester,
   ) async {

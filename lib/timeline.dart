@@ -68,6 +68,104 @@ String dateGroupLabel(DateTime day, DateTime now) {
 /// which instead carries a synthetic pass-through row.
 typedef TimelineEntry = ({int rowIndex, String? label, GraphRow row});
 
+/// A line born from a merge commit bends beside its source. All other
+/// transitions keep their lane until they reach the parent row.
+bool transitionBendsAtSource(GraphRow row, LaneTransition transition) =>
+    transition.from == row.lane &&
+    !(row.parentLanes.isNotEmpty && transition.to == row.parentLanes.first);
+
+GraphRow _copyGraphRow(
+  GraphRow row, {
+  List<int>? activeLanes,
+  List<int>? nextLanes,
+  Map<int, String>? activeLaneShas,
+  Map<int, String>? nextLaneShas,
+  List<LaneTransition>? transitions,
+  Map<int, int>? activeLaneBranches,
+  Map<int, int>? nextLaneBranches,
+}) => GraphRow(
+  commit: row.commit,
+  lane: row.lane,
+  parentLanes: row.parentLanes,
+  activeLanes: activeLanes ?? row.activeLanes,
+  nextLanes: nextLanes ?? row.nextLanes,
+  activeLaneShas: activeLaneShas ?? row.activeLaneShas,
+  nextLaneShas: nextLaneShas ?? row.nextLaneShas,
+  transitions: transitions ?? row.transitions,
+  branch: row.branch,
+  activeLaneBranches: activeLaneBranches ?? row.activeLaneBranches,
+  nextLaneBranches: nextLaneBranches ?? row.nextLaneBranches,
+);
+
+/// Splits parent-side transitions around a date heading. [above] finishes in
+/// the state before those joins, and the synthetic heading completes them into
+/// the original state handed to the commit below.
+({GraphRow above, GraphRow heading}) _dateHeadingRows({
+  required GraphRow above,
+  required GitCommit below,
+}) {
+  final deferred = above.transitions
+      .where((transition) => !transitionBendsAtSource(above, transition))
+      .toList();
+  if (deferred.isEmpty) {
+    return (above: above, heading: passThroughRow(commit: below, above: above));
+  }
+
+  final middleShas = Map<int, String>.of(above.nextLaneShas);
+  final middleBranches = Map<int, int>.of(above.nextLaneBranches);
+  for (final transition in deferred.reversed) {
+    final previousSha = above.activeLaneShas[transition.to];
+    final previousBranch = above.activeLaneBranches[transition.to];
+    if (previousSha == null) {
+      middleShas.remove(transition.to);
+      middleBranches.remove(transition.to);
+    } else {
+      middleShas[transition.to] = previousSha;
+      if (previousBranch == null) {
+        middleBranches.remove(transition.to);
+      } else {
+        middleBranches[transition.to] = previousBranch;
+      }
+    }
+
+    middleShas[transition.from] = transition.sha;
+    final sourceBranch =
+        above.activeLaneBranches[transition.from] ??
+        (transition.from == above.lane ? above.branch : null);
+    if (sourceBranch == null) {
+      middleBranches.remove(transition.from);
+    } else {
+      middleBranches[transition.from] = sourceBranch;
+    }
+  }
+  final middleLanes = middleShas.keys.toList()..sort();
+  final kept = above.transitions
+      .where((transition) => transitionBendsAtSource(above, transition))
+      .toList();
+  final visualAbove = _copyGraphRow(
+    above,
+    nextLanes: middleLanes,
+    nextLaneShas: middleShas,
+    nextLaneBranches: middleBranches,
+    transitions: kept,
+  );
+  return (
+    above: visualAbove,
+    heading: GraphRow(
+      commit: below,
+      lane: -1,
+      parentLanes: const [],
+      activeLanes: middleLanes,
+      nextLanes: above.nextLanes,
+      activeLaneShas: middleShas,
+      nextLaneShas: above.nextLaneShas,
+      transitions: deferred,
+      activeLaneBranches: middleBranches,
+      nextLaneBranches: above.nextLaneBranches,
+    ),
+  );
+}
+
 /// The commit rows with a date heading wherever the local day changes, including
 /// above the first commit. The working tree row belongs to no day, so it leads
 /// the list above the first heading.
@@ -86,13 +184,27 @@ List<TimelineEntry> timelineEntries(List<GraphRow> rows, DateTime now) {
     final date = DateTime(time.year, time.month, time.day);
     if (group != date) {
       group = date;
+      var heading = passThroughRow(
+        commit: row.commit,
+        above: index == 0 ? null : rows[index - 1],
+      );
+      if (index > 0 && entries.isNotEmpty) {
+        final previousEntry = entries.removeLast();
+        final split = _dateHeadingRows(
+          above: previousEntry.row,
+          below: row.commit,
+        );
+        entries.add((
+          rowIndex: previousEntry.rowIndex,
+          label: previousEntry.label,
+          row: split.above,
+        ));
+        heading = split.heading;
+      }
       entries.add((
         rowIndex: -1,
         label: dateGroupLabel(date, now),
-        row: passThroughRow(
-          commit: row.commit,
-          above: index == 0 ? null : rows[index - 1],
-        ),
+        row: heading,
       ));
     }
     entries.add((rowIndex: index, label: null, row: row));
@@ -3353,8 +3465,7 @@ class CommitGraphPainter extends CustomPainter {
   /// converging on its parent, or this row's own first-parent tail. Color and
   /// geometry both hang off this one question.
   static bool isMergeEdge(GraphRow row, LaneTransition transition) =>
-      transition.from == row.lane &&
-      !(row.parentLanes.isNotEmpty && transition.to == row.parentLanes.first);
+      transitionBendsAtSource(row, transition);
 
   /// The branch line a sweep belongs to, so a whole line keeps one color:
   /// a foreign column converging on its parent stays its own line's color, a
