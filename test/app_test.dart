@@ -7590,12 +7590,12 @@ class FakeGitRepository extends GitRepository {
   @override
   Future<List<DiffLine>> loadDiff(
     GitCommit commit,
-    String path, {
+    GitFileChange file, {
     String? parent,
     DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
     bool ignoreWhitespace = false,
   }) =>
-      diff?.call(commit, parent, path, algorithm, ignoreWhitespace) ??
+      diff?.call(commit, parent, file.path, algorithm, ignoreWhitespace) ??
       Future.value(const []);
 }
 

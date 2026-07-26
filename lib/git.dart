@@ -577,6 +577,7 @@ class GitFileChange {
     required this.additions,
     required this.deletions,
     this.oldPath,
+    this.isBinary = false,
   });
 
   final String path;
@@ -584,6 +585,21 @@ class GitFileChange {
   final String status;
   final int? additions;
   final int? deletions;
+  final bool isBinary;
+}
+
+class GitFileHistoryRecord {
+  const GitFileHistoryRecord({
+    required this.commit,
+    required this.path,
+    required this.oldPath,
+    required this.status,
+  });
+
+  final GitCommit commit;
+  final String path;
+  final String? oldPath;
+  final String status;
 }
 
 class RepoRefs {
@@ -610,16 +626,45 @@ class RepoRefs {
 }
 
 abstract interface class FullDiffRepository {
+  String get root;
+
   Future<List<GitFileChange>> loadFiles(GitCommit commit, {String? parent});
 
   Future<List<DiffLine>> loadDiff(
     GitCommit commit,
-    String path, {
+    GitFileChange file, {
     String? parent,
     DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
     bool ignoreWhitespace = false,
   });
+
+  Future<Uint8List> loadFileBytes(
+    GitCommit commit,
+    GitFileChange file, {
+    String? parent,
+  });
+
+  Future<List<GitBlameLine>> loadBlame(
+    GitCommit commit,
+    GitFileChange file, {
+    String? parent,
+    Uint8List? workingTreeBytes,
+  });
+
+  Future<List<GitFileHistoryRecord>> loadFileHistory(
+    GitCommit commit,
+    GitFileChange file,
+  );
 }
+
+const safeDiffArguments = <String>[
+  '--no-ext-diff',
+  '--no-textconv',
+  '--no-color',
+  '--find-renames=50%',
+];
+
+List<String> pathspecsFor(GitFileChange file) => [?file.oldPath, file.path];
 
 class GitRepository implements FullDiffRepository {
   GitRepository(
@@ -629,12 +674,14 @@ class GitRepository implements FullDiffRepository {
     this.rawRunner = runRawProcess,
   });
 
+  @override
   final String root;
   final String gitExecutable;
   final CommandRunner runner;
   final RawCommandRunner rawRunner;
   Future<String>? _emptyTree;
   Future<List<String>>? _startingRevisions;
+  final _untrackedFiles = Expando<bool>();
 
   Future<List<GitCommit>> loadHistory({int limit = 500, int skip = 0}) async {
     final revisions = await (_startingRevisions ??= _loadStartingRevisions());
@@ -681,14 +728,27 @@ class GitRepository implements FullDiffRepository {
     String? parent,
   }) async {
     final revisions = await _revisionsFor(commit, parent);
-    const safe = ['--no-ext-diff', '--no-textconv', '--no-color'];
     final statuses = _parseNameStatus(
-      await _run(['diff', ...safe, '--name-status', '-z', ...revisions, '--']),
+      await _run([
+        'diff',
+        ...safeDiffArguments,
+        '--name-status',
+        '-z',
+        ...revisions,
+        '--',
+      ]),
     );
     final stats = _parseNumstat(
-      await _run(['diff', ...safe, '--numstat', '-z', ...revisions, '--']),
+      await _run([
+        'diff',
+        ...safeDiffArguments,
+        '--numstat',
+        '-z',
+        ...revisions,
+        '--',
+      ]),
     );
-    return [
+    final files = [
       for (final status in statuses)
         GitFileChange(
           path: status.path,
@@ -696,30 +756,136 @@ class GitRepository implements FullDiffRepository {
           status: status.status,
           additions: stats[status.path]?.additions,
           deletions: stats[status.path]?.deletions,
+          isBinary: stats[status.path]?.isBinary ?? false,
         ),
     ];
+    if (commit.isWorkingTree) {
+      final existing = {for (final file in files) file.path};
+      final untracked = (await _run([
+        'ls-files',
+        '--others',
+        '--exclude-standard',
+        '-z',
+      ])).split('\x00').where((path) => path.isNotEmpty);
+      for (final path in untracked) {
+        if (existing.add(path)) {
+          final file = GitFileChange(
+            path: path,
+            status: 'A',
+            additions: null,
+            deletions: null,
+          );
+          _untrackedFiles[file] = true;
+          files.add(file);
+        }
+      }
+    }
+    return files;
   }
 
   @override
   Future<List<DiffLine>> loadDiff(
     GitCommit commit,
-    String path, {
+    GitFileChange file, {
     String? parent,
     DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
     bool ignoreWhitespace = false,
   }) async {
+    if (commit.isWorkingTree && (_untrackedFiles[file] ?? false)) {
+      return _untrackedDiff(await File('$root/${file.path}').readAsBytes());
+    }
     return parseUnifiedDiff(
       await _run([
         'diff',
-        '--no-ext-diff',
-        '--no-textconv',
-        '--no-color',
+        ...safeDiffArguments,
         '--unified=3',
         if (ignoreWhitespace) '--ignore-all-space',
         ...algorithm.gitArguments,
         ...await _revisionsFor(commit, parent),
         '--',
-        path,
+        ...pathspecsFor(file),
+      ]),
+    );
+  }
+
+  @override
+  Future<Uint8List> loadFileBytes(
+    GitCommit commit,
+    GitFileChange file, {
+    String? parent,
+  }) async {
+    final deleted = file.status.startsWith('D');
+    if (commit.isWorkingTree && !deleted) {
+      return File('$root/${file.path}').readAsBytes();
+    }
+    final revision = deleted ? await _baseFor(commit, parent) : commit.sha;
+    final path = deleted ? file.oldPath ?? file.path : file.path;
+    return loadBlobBytes(revision, path);
+  }
+
+  @override
+  Future<List<GitBlameLine>> loadBlame(
+    GitCommit commit,
+    GitFileChange file, {
+    String? parent,
+    Uint8List? workingTreeBytes,
+  }) async {
+    if (commit.isWorkingTree && (_untrackedFiles[file] ?? false)) {
+      final bytes =
+          workingTreeBytes ?? await File('$root/${file.path}').readAsBytes();
+      return _uncommittedBlame(bytes);
+    }
+
+    final base = await _baseFor(commit, parent);
+    final absolutePath = '$root/${file.path}';
+    if (commit.isWorkingTree && !file.status.startsWith('D')) {
+      final expected =
+          workingTreeBytes ?? await File(absolutePath).readAsBytes();
+      final before = await File(absolutePath).readAsBytes();
+      final output = await _run(
+        blameArguments(
+          commit: commit,
+          file: file,
+          base: base,
+          absolutePath: absolutePath,
+        ),
+      );
+      final after = await File(absolutePath).readAsBytes();
+      if (!_sameBytes(before, expected) || !_sameBytes(after, expected)) {
+        throw StateError('Working tree file changed');
+      }
+      return _parseBlamePorcelain(output);
+    }
+
+    return _parseBlamePorcelain(
+      await _run(
+        blameArguments(
+          commit: commit,
+          file: file,
+          base: base,
+          absolutePath: absolutePath,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Future<List<GitFileHistoryRecord>> loadFileHistory(
+    GitCommit commit,
+    GitFileChange file,
+  ) async {
+    return _parseFileHistory(
+      await _run([
+        'log',
+        '--follow',
+        '--find-renames=50%',
+        '--date-order',
+        '--format=%x1e%H%x00%h%x00%P%x00%an%x00%ae%x00%at%x00%cn%x00%ce%x00%ct%x00%s%x00',
+        '--name-status',
+        '-z',
+        commit.isWorkingTree ? 'HEAD' : commit.sha,
+        '--',
+        file.status.startsWith('D') ? file.oldPath ?? file.path : file.path,
       ]),
     );
   }
@@ -846,7 +1012,7 @@ class GitRepository implements FullDiffRepository {
 }
 
 typedef _StatusEntry = ({String status, String path, String? oldPath});
-typedef _Stats = ({int? additions, int? deletions});
+typedef _Stats = ({int? additions, int? deletions, bool isBinary});
 
 List<_StatusEntry> _parseNameStatus(String output) {
   final fields = output.split('\x00');
@@ -882,7 +1048,181 @@ Map<String, _Stats> _parseNumstat(String output) {
     stats[path] = (
       additions: int.tryParse(parts[0]),
       deletions: int.tryParse(parts[1]),
+      isBinary: parts[0] == '-' && parts[1] == '-',
     );
   }
   return stats;
+}
+
+List<String> blameArguments({
+  required GitCommit commit,
+  required GitFileChange file,
+  required String base,
+  required String absolutePath,
+}) {
+  if (commit.isWorkingTree && !file.status.startsWith('D')) {
+    return [
+      'blame',
+      '--line-porcelain',
+      '--contents',
+      absolutePath,
+      'HEAD',
+      '--',
+      file.path,
+    ];
+  }
+  return [
+    'blame',
+    '--line-porcelain',
+    commit.isWorkingTree || file.status.startsWith('D') ? base : commit.sha,
+    '--',
+    file.status.startsWith('D') ? file.oldPath ?? file.path : file.path,
+  ];
+}
+
+List<DiffLine> _untrackedDiff(Uint8List bytes) {
+  var sourceLines = const <String>[];
+  if (!bytes.contains(0)) {
+    try {
+      sourceLines = _sourceLines(utf8.decode(bytes, allowMalformed: false));
+    } on FormatException {
+      // Unsupported encodings still get a valid empty hunk header.
+    }
+  }
+  return [
+    DiffLine(
+      kind: DiffLineKind.hunk,
+      text: '@@ -0,0 +1,${sourceLines.length} @@',
+    ),
+    for (var index = 0; index < sourceLines.length; index++)
+      DiffLine(
+        kind: DiffLineKind.add,
+        text: sourceLines[index],
+        newNumber: index + 1,
+      ),
+  ];
+}
+
+List<GitBlameLine> _uncommittedBlame(Uint8List bytes) {
+  late final List<String> sourceLines;
+  try {
+    sourceLines = _sourceLines(utf8.decode(bytes, allowMalformed: false));
+  } on FormatException {
+    return const [];
+  }
+  return [
+    for (var index = 0; index < sourceLines.length; index++)
+      GitBlameLine(
+        lineNumber: index + 1,
+        sha: '',
+        author: 'Uncommitted',
+        uncommitted: true,
+      ),
+  ];
+}
+
+List<String> _sourceLines(String text) {
+  if (text.isEmpty) return const [];
+  final lines = text.split('\n');
+  if (text.endsWith('\n')) lines.removeLast();
+  return lines;
+}
+
+bool _sameBytes(List<int> left, List<int> right) {
+  if (left.length != right.length) return false;
+  for (var index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) return false;
+  }
+  return true;
+}
+
+List<GitBlameLine> _parseBlamePorcelain(String output) {
+  final lines = <GitBlameLine>[];
+  final authors = <String, String>{};
+  String? sha;
+  String? author;
+  int? lineNumber;
+
+  for (final line in output.split('\n')) {
+    if (line.startsWith('\t')) {
+      if (sha != null && lineNumber != null) {
+        final normalizedSha = sha.startsWith('^') ? sha.substring(1) : sha;
+        lines.add(
+          GitBlameLine(
+            lineNumber: lineNumber,
+            sha: normalizedSha,
+            author: author ?? authors[normalizedSha] ?? '',
+            uncommitted:
+                normalizedSha.isNotEmpty &&
+                normalizedSha.codeUnits.every((unit) => unit == 0x30),
+          ),
+        );
+      }
+      sha = null;
+      author = null;
+      lineNumber = null;
+      continue;
+    }
+
+    final fields = line.split(' ');
+    final parsedLine = fields.length >= 3 ? int.tryParse(fields[2]) : null;
+    if (fields.length >= 3 &&
+        RegExp(r'^\^?[0-9a-f]+$').hasMatch(fields[0]) &&
+        int.tryParse(fields[1]) != null &&
+        parsedLine != null) {
+      sha = fields[0];
+      lineNumber = parsedLine;
+      final normalizedSha = sha.startsWith('^') ? sha.substring(1) : sha;
+      author = authors[normalizedSha];
+      continue;
+    }
+    if (line.startsWith('author ') && sha != null) {
+      author = line.substring('author '.length);
+      final normalizedSha = sha.startsWith('^') ? sha.substring(1) : sha;
+      authors[normalizedSha] = author;
+    }
+  }
+  return lines;
+}
+
+List<GitFileHistoryRecord> _parseFileHistory(String output) {
+  final history = <GitFileHistoryRecord>[];
+  for (final record in output.split('\x1e').skip(1)) {
+    final fields = record.split('\x00');
+    if (fields.length < 11) continue;
+    final commit = GitCommit(
+      sha: fields[0],
+      shortSha: fields[1],
+      parents: fields[2].isEmpty ? const [] : fields[2].split(' '),
+      author: GitIdentity(name: fields[3], email: fields[4]),
+      authorTimestamp: int.parse(fields[5]),
+      committer: GitIdentity(name: fields[6], email: fields[7]),
+      committerTimestamp: int.parse(fields[8]),
+      refs: const [],
+      subject: fields[9],
+    );
+    var index = 10;
+    while (index < fields.length) {
+      final status = fields[index++].replaceFirst(RegExp(r'^\n+'), '');
+      if (status.isEmpty || index >= fields.length) continue;
+      String? oldPath;
+      late final String path;
+      if (status.startsWith('R') || status.startsWith('C')) {
+        if (index + 1 >= fields.length) break;
+        oldPath = fields[index++];
+        path = fields[index++];
+      } else {
+        path = fields[index++];
+      }
+      history.add(
+        GitFileHistoryRecord(
+          commit: commit,
+          path: path,
+          oldPath: oldPath,
+          status: status,
+        ),
+      );
+    }
+  }
+  return history;
 }

@@ -2570,9 +2570,17 @@ class _TimelineScreenState extends State<TimelineScreen> {
       future: files,
       builder: (context, snapshot) {
         final changes = snapshot.data;
-        final selectedPath =
+        final requestedPath =
             _previewPaths[commit.sha] ??
             (changes == null || changes.isEmpty ? null : changes.first.path);
+        GitFileChange? selectedFile;
+        if (changes != null && changes.isNotEmpty) {
+          selectedFile = changes.firstWhere(
+            (file) => file.path == requestedPath,
+            orElse: () => changes.first,
+          );
+        }
+        final selectedPath = selectedFile?.path;
         final info = Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
@@ -2617,7 +2625,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     style: TextStyle(color: _muted, fontSize: 12),
                   ),
                 )
-              : _previewDiff(commit, selectedPath),
+              : _previewDiff(commit, selectedFile!),
         );
         // One scroll view for the whole body: nothing inside competes for the
         // drag, which is what lets a mouse drag select text across it.
@@ -2875,11 +2883,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
         ),
       );
 
-  Widget _previewDiff(GitCommit commit, String path) {
+  Widget _previewDiff(GitCommit commit, GitFileChange file) {
+    final path = file.path;
     final future = _previewDiffs.putIfAbsent((
       sha: commit.sha,
       path: path,
-    ), () => widget.repository.loadDiff(commit, path));
+    ), () => widget.repository.loadDiff(commit, file));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

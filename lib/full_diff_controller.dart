@@ -268,6 +268,7 @@ class FullDiffSessionController extends ChangeNotifier {
     if (_disposed) return;
     final path = state.selectedPath;
     if (path == null) return;
+    final file = state.files.firstWhere((file) => file.path == path);
 
     final generation = ++_diffGeneration;
     final commitIndex = state.commitIndex;
@@ -282,7 +283,7 @@ class FullDiffSessionController extends ChangeNotifier {
       document = await _loadDocument(
         commit,
         parent,
-        path,
+        file,
         algorithm,
         ignoreWhitespace,
       );
@@ -342,14 +343,15 @@ class FullDiffSessionController extends ChangeNotifier {
   Future<DiffDocument> _loadDocument(
     GitCommit commit,
     String? parent,
-    String path,
+    GitFileChange file,
     DiffAlgorithm algorithm,
     bool ignoreWhitespace,
   ) {
+    final path = file.path;
     Future<DiffDocument> read() async => DiffDocument.fromLines(
       await repository.loadDiff(
         commit,
-        path,
+        file,
         parent: parent,
         algorithm: algorithm,
         ignoreWhitespace: ignoreWhitespace,

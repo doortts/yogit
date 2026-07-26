@@ -487,10 +487,10 @@ void main() {
       );
       final item = _commit('a', ['b']);
 
-      await repository.loadDiff(item, 'lib/a.dart');
+      await repository.loadDiff(item, _file('lib/a.dart'));
       await repository.loadDiff(
         item,
-        'lib/a.dart',
+        _file('lib/a.dart'),
         algorithm: DiffAlgorithm.histogram,
         ignoreWhitespace: true,
       );
@@ -521,7 +521,7 @@ void main() {
     final files = await GitRepository(root.path).loadFiles(commit);
     final lines = await GitRepository(
       root.path,
-    ).loadDiff(commit, 'root.txt', algorithm: DiffAlgorithm.minimal);
+    ).loadDiff(commit, files.single, algorithm: DiffAlgorithm.minimal);
 
     expect(files, hasLength(1));
     expect(files.single.path, 'root.txt');
@@ -658,7 +658,7 @@ void main() {
       );
       final root = _commit('root', const []);
 
-      await repository.loadDiff(root, 'README.md');
+      await repository.loadDiff(root, _file('README.md'));
       await repository.loadFiles(root);
 
       expect(
@@ -703,7 +703,7 @@ void main() {
     expect(working.parents, ['head-sha']);
 
     await repository.loadFiles(working);
-    await repository.loadDiff(working, 'lib/timeline.dart');
+    await repository.loadDiff(working, _file('lib/timeline.dart'));
 
     final diffs = calls
         .where((arguments) => arguments.first == 'diff')
@@ -886,6 +886,9 @@ GitCommit _commit(
   refs: const [],
   subject: sha,
 );
+
+GitFileChange _file(String path) =>
+    GitFileChange(path: path, status: 'M', additions: null, deletions: null);
 
 /// Rails paint at [CommitGraphPainter.railOpacity] over this background, and a
 /// thin stroke only partly covers the pixel it is centred on, so a probe reads a

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/full_diff_controller.dart';
@@ -29,6 +30,9 @@ class FakeFullDiffRepository implements FullDiffRepository {
   final diffRequests = <DiffRequest>[];
 
   @override
+  final String root = '/repo';
+
+  @override
   Future<List<GitFileChange>> loadFiles(GitCommit commit, {String? parent}) {
     final request = (sha: commit.sha, parent: parent);
     fileRequests.add(request);
@@ -38,7 +42,7 @@ class FakeFullDiffRepository implements FullDiffRepository {
   @override
   Future<List<DiffLine>> loadDiff(
     GitCommit commit,
-    String path, {
+    GitFileChange file, {
     String? parent,
     DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
     bool ignoreWhitespace = false,
@@ -46,13 +50,34 @@ class FakeFullDiffRepository implements FullDiffRepository {
     final request = (
       sha: commit.sha,
       parent: parent,
-      path: path,
+      path: file.path,
       algorithm: algorithm,
       ignoreWhitespace: ignoreWhitespace,
     );
     diffRequests.add(request);
     return onLoadDiff?.call(request) ?? Future.value(lines);
   }
+
+  @override
+  Future<Uint8List> loadFileBytes(
+    GitCommit commit,
+    GitFileChange file, {
+    String? parent,
+  }) async => Uint8List(0);
+
+  @override
+  Future<List<GitBlameLine>> loadBlame(
+    GitCommit commit,
+    GitFileChange file, {
+    String? parent,
+    Uint8List? workingTreeBytes,
+  }) async => const [];
+
+  @override
+  Future<List<GitFileHistoryRecord>> loadFileHistory(
+    GitCommit commit,
+    GitFileChange file,
+  ) async => const [];
 }
 
 GitCommit commit(String sha, {List<String> parents = const <String>[]}) =>
