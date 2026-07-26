@@ -715,88 +715,184 @@ void main() {
     expect(editorButton(tester).onPressed, isNotNull);
   });
 
-  for (final presentation in [
-    DiffPresentation.inline,
-    DiffPresentation.split,
-  ]) {
-    testWidgets('${presentation.name} mounts and reveals a distant lazy hunk', (
-      tester,
-    ) async {
-      final lines = <DiffLine>[
-        for (var hunk = 0; hunk < 40; hunk++) ...[
-          DiffLine(
-            kind: DiffLineKind.hunk,
-            text: '@@ -${hunk * 12 + 1},12 +${hunk * 12 + 1},12 @@ hunk $hunk',
-          ),
-          for (var row = 0; row < 11; row++)
-            DiffLine(
-              kind: DiffLineKind.context,
-              text: 'hunk $hunk context $row',
-              oldNumber: hunk * 12 + row + 1,
-              newNumber: hunk * 12 + row + 1,
-            ),
-          DiffLine(
-            kind: DiffLineKind.add,
-            text: 'hunk $hunk changed',
-            newNumber: hunk * 12 + 12,
-          ),
-        ],
-      ];
+  testWidgets(
+    'a late editor failure cannot alter a new selection on the same controller',
+    (tester) async {
+      const workingTree = GitCommit(
+        sha: '',
+        shortSha: '',
+        parents: ['HEAD'],
+        author: fixtureIdentity,
+        authorTimestamp: 1720573300,
+        committer: fixtureIdentity,
+        committerTimestamp: 1720573300,
+        refs: [],
+        subject: 'working tree',
+      );
+      const secondFile = GitFileChange(
+        path: 'src/second.pas',
+        status: 'M',
+        additions: 1,
+        deletions: 1,
+      );
+      final secondPatch = Completer<List<DiffLine>>();
+      final secondContent = Completer<Uint8List>();
       final repository = FakeFullDiffRepository();
-      repository.files = (_, _) async => const [fileA];
-      repository.diff = (_, _, _, _, _) async => lines;
-      repository.content = (_, _, _) async => resultFile.bytes;
+      repository.files = (_, _) async => const [fileA, secondFile];
+      repository.diff = (_, file, _, _, _) => file.path == fileA.path
+          ? Future.value(twoHunkLines)
+          : secondPatch.future;
+      repository.content = (_, file, _) => file.path == fileA.path
+          ? Future.value(resultFile.bytes)
+          : secondContent.future;
       final controller = FullDiffSessionController(
         repository: repository,
-        commits: const [commitA],
+        commits: const [workingTree],
         initialIndex: 0,
         initialView: FullDiffInitialView.hunk,
       );
       addTearDown(controller.dispose);
       await controller.initialize();
-      controller.setPresentation(presentation);
+      final editorCompleter = Completer<void>();
+      final editorService = _CompletingEditorService(editorCompleter);
       await pumpWorkspace(
         tester,
         controller: controller,
-        size: const Size(1070, 650),
+        size: const Size(1070, 842),
+        editorService: editorService,
       );
-      final target = controller.state.patch.data!.hunks.last.anchor;
 
-      expect(
-        find.byKey(
-          Key(
-            presentation == DiffPresentation.inline
-                ? 'inline-hunk-39'
-                : 'split-hunk-39',
-          ),
+      await tester.tap(find.byKey(const Key('open-editor')));
+      await tester.pump();
+      expect(editorButton(tester).onPressed, isNull);
+
+      unawaited(controller.selectFile(secondFile));
+      await tester.pump();
+      expect(controller.state.selectedFile, secondFile);
+      expect(controller.state.patch.loading, isTrue);
+      expect(controller.state.file.loading, isTrue);
+      expect(find.byKey(const Key('diff-pending-first-diff')), findsOneWidget);
+
+      editorCompleter.completeError(StateError('late editor failed'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(controller.state.patch.error, isNull);
+      expect(controller.state.file.error, isNull);
+      expect(controller.state.patch.loading, isTrue);
+      expect(controller.state.file.loading, isTrue);
+      expect(find.byKey(const Key('diff-pending-first-diff')), findsOneWidget);
+      final tooltip = tester.widget<Tooltip>(
+        find.ancestor(
+          of: find.byKey(const Key('open-editor')),
+          matching: find.byType(Tooltip),
         ),
-        findsNothing,
       );
-      controller.selectAnchor(target);
+      expect(tooltip.message, isNot(contains('late editor failed')));
+      expect(editorButton(tester).onPressed, isNull);
+
+      secondPatch.complete(twoHunkLines);
+      secondContent.complete(resultFile.bytes);
       await tester.pumpAndSettle();
+    },
+  );
 
-      expect(controller.state.activeAnchor?.hunkIndex, 39);
-      expect(
-        find.byKey(
+  for (final presentation in [
+    DiffPresentation.inline,
+    DiffPresentation.split,
+  ]) {
+    testWidgets(
+      '${presentation.name} fully reveals a hunk beyond one long lazy item',
+      (tester) async {
+        final lines = <DiffLine>[
+          const DiffLine(
+            kind: DiffLineKind.hunk,
+            text: '@@ -1,161 +1,161 @@ long first hunk',
+          ),
+          for (var row = 0; row < 160; row++)
+            DiffLine(
+              kind: DiffLineKind.context,
+              text: 'long first hunk context $row',
+              oldNumber: row + 1,
+              newNumber: row + 1,
+            ),
+          const DiffLine(
+            kind: DiffLineKind.add,
+            text: 'long first hunk changed',
+            newNumber: 161,
+          ),
+          const DiffLine(
+            kind: DiffLineKind.hunk,
+            text: '@@ -200,2 +200,2 @@ distant target',
+          ),
+          const DiffLine(
+            kind: DiffLineKind.context,
+            text: 'distant context',
+            oldNumber: 200,
+            newNumber: 200,
+          ),
+          const DiffLine(
+            kind: DiffLineKind.delete,
+            text: 'distant old',
+            oldNumber: 201,
+          ),
+          const DiffLine(
+            kind: DiffLineKind.add,
+            text: 'distant new',
+            newNumber: 201,
+          ),
+        ];
+        final repository = FakeFullDiffRepository();
+        repository.files = (_, _) async => const [fileA];
+        repository.diff = (_, _, _, _, _) async => lines;
+        repository.content = (_, _, _) async => resultFile.bytes;
+        final controller = FullDiffSessionController(
+          repository: repository,
+          commits: const [commitA],
+          initialIndex: 0,
+          initialView: FullDiffInitialView.hunk,
+        );
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        controller.setPresentation(presentation);
+        await pumpWorkspace(
+          tester,
+          controller: controller,
+          size: const Size(1070, 650),
+        );
+        final target = controller.state.patch.data!.hunks.last.anchor;
+        final targetFinder = find.byKey(
           Key(
             presentation == DiffPresentation.inline
-                ? 'inline-hunk-39'
-                : 'split-hunk-39',
+                ? 'inline-hunk-1'
+                : 'split-hunk-1',
           ),
-        ),
-        findsOneWidget,
-      );
-      final scrollable = find
-          .descendant(
-            of: find.byKey(const Key('content-scrollable')),
-            matching: find.byType(Scrollable),
-          )
-          .first;
-      expect(
-        tester.state<ScrollableState>(scrollable).position.pixels,
-        greaterThan(0),
-      );
-    });
+        );
+        final viewportRect = tester.getRect(
+          find.byKey(const Key('content-scrollable')),
+        );
+        final firstHunkRect = tester.getRect(
+          find.byKey(
+            Key(
+              presentation == DiffPresentation.inline
+                  ? 'inline-hunk-0'
+                  : 'split-hunk-0',
+            ),
+          ),
+        );
+
+        expect(firstHunkRect.height, greaterThan(viewportRect.height * 3));
+        expect(targetFinder, findsNothing);
+        controller.selectAnchor(target);
+        await tester.pumpAndSettle();
+
+        expect(controller.state.activeAnchor?.hunkIndex, 1);
+        expect(targetFinder, findsOneWidget);
+        final targetRect = tester.getRect(targetFinder);
+        expect(targetRect.top, greaterThanOrEqualTo(viewportRect.top));
+        expect(targetRect.bottom, lessThanOrEqualTo(viewportRect.bottom));
+      },
+    );
   }
 
   testWidgets(

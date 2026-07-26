@@ -36,7 +36,7 @@ class FullBlameView extends StatelessWidget {
       lineCount,
     );
     final anchorHunks = _hunksByLine(hunks, document.file.side, lineCount);
-    return SelectionArea(
+    return FullDiffSelectionArea(
       child: ListView.builder(
         key: const Key('blame-list'),
         controller: controller,

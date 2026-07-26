@@ -7138,7 +7138,6 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Drag with a mouse from the first line into the second.
     final first = find.text('alpha lib/one.dart');
     final second = find.text('beta lib/one.dart');
     final firstParagraph = tester.renderObject<RenderParagraph>(
@@ -7147,35 +7146,64 @@ void main() {
     final secondParagraph = tester.renderObject<RenderParagraph>(
       find.descendant(of: second, matching: find.byType(RichText)),
     );
-    final start = firstParagraph.localToGlobal(
-      firstParagraph.getOffsetForCaret(
-            const TextPosition(offset: 0),
-            Rect.zero,
-          ) +
-          const Offset(1, 6),
-    );
-    final end = secondParagraph.localToGlobal(
-      secondParagraph.getOffsetForCaret(
-            const TextPosition(offset: 'beta lib/one.dart'.length),
-            Rect.zero,
-          ) +
-          const Offset(-1, 6),
-    );
-    final gesture = await tester.startGesture(
-      start,
-      kind: PointerDeviceKind.mouse,
-    );
-    addTearDown(gesture.removePointer);
+
+    Future<void> dragSelection(
+      RenderParagraph startParagraph,
+      int startOffset,
+      RenderParagraph endParagraph,
+      int endOffset,
+    ) async {
+      final start = startParagraph.localToGlobal(
+        startParagraph.getOffsetForCaret(
+              TextPosition(offset: startOffset),
+              Rect.zero,
+            ) +
+            const Offset(1, 6),
+      );
+      final end = endParagraph.localToGlobal(
+        endParagraph.getOffsetForCaret(
+              TextPosition(offset: endOffset),
+              Rect.zero,
+            ) +
+            const Offset(-1, 6),
+      );
+      final gesture = await tester.startGesture(
+        start,
+        kind: PointerDeviceKind.mouse,
+      );
+      addTearDown(gesture.removePointer);
+      await tester.pump();
+      await gesture.moveTo(end);
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+    }
+
+    await dragSelection(firstParagraph, 2, firstParagraph, 7);
+    Actions.invoke(tester.element(first), CopySelectionTextIntent.copy);
     await tester.pump();
-    await gesture.moveTo(end);
+    expect(copied, ['pha l']);
+
+    final selectionArea = find.ancestor(
+      of: first,
+      matching: find.byType(SelectionArea),
+    );
+    tester
+        .state<SelectionAreaState>(selectionArea)
+        .selectableRegion
+        .clearSelection();
     await tester.pump();
-    await gesture.up();
-    await tester.pumpAndSettle();
+
+    await dragSelection(
+      firstParagraph,
+      0,
+      secondParagraph,
+      'beta lib/one.dart'.length,
+    );
 
     Actions.invoke(tester.element(first), CopySelectionTextIntent.copy);
     await tester.pump();
-    expect(copied, hasLength(1));
-    expect(copied.single.trim(), 'alpha lib/one.dart\nbeta lib/one.dart');
+    expect(copied, ['pha l', 'alpha lib/one.dart\nbeta lib/one.dart']);
 
     // The Hunk card keeps selection local, and the keyboard still drives the
     // screen after copying the drag selection.

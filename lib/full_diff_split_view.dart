@@ -52,7 +52,7 @@ class SplitPresentationView extends StatelessWidget {
         final current = activeAnchor?.hunkIndex == hunk.index;
         return KeyedSubtree(
           key: _anchorKey(hunk.anchor),
-          child: SelectionArea(
+          child: FullDiffSelectionArea(
             child: Column(
               key: Key('split-hunk-$hunkIndex'),
               crossAxisAlignment: CrossAxisAlignment.stretch,

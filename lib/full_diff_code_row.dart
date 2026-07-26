@@ -23,6 +23,82 @@ const _gutterStyle = TextStyle(
   height: 21 / 12,
 );
 
+class FullDiffSelectionArea extends StatefulWidget {
+  const FullDiffSelectionArea({required this.child, super.key});
+
+  final Widget child;
+
+  @override
+  State<FullDiffSelectionArea> createState() => _FullDiffSelectionAreaState();
+}
+
+class _FullDiffSelectionAreaState extends State<FullDiffSelectionArea> {
+  final _sources = <_SourceSelectionContainerState>[];
+
+  void register(_SourceSelectionContainerState source) {
+    if (!_sources.contains(source)) _sources.add(source);
+  }
+
+  void unregister(_SourceSelectionContainerState source) {
+    _sources.remove(source);
+  }
+
+  bool needsLineBreakAfter(_SourceSelectionContainerState source) {
+    final selected = [
+      for (final candidate in _sources)
+        if (candidate.rawSelectedContent != null) candidate,
+    ]..sort(_compareSources);
+    final index = selected.indexOf(source);
+    if (index < 0 || index == selected.length - 1) return false;
+
+    final currentOrigin = _sourceOrigin(selected[index]);
+    final nextOrigin = _sourceOrigin(selected[index + 1]);
+    if (currentOrigin == null || nextOrigin == null) return true;
+    return nextOrigin.dy - currentOrigin.dy > 0.5;
+  }
+
+  int _compareSources(
+    _SourceSelectionContainerState left,
+    _SourceSelectionContainerState right,
+  ) {
+    final leftOrigin = _sourceOrigin(left);
+    final rightOrigin = _sourceOrigin(right);
+    if (leftOrigin == null || rightOrigin == null) {
+      return _sources.indexOf(left).compareTo(_sources.indexOf(right));
+    }
+    final verticalDelta = leftOrigin.dy - rightOrigin.dy;
+    return verticalDelta.abs() > 0.5
+        ? verticalDelta.sign.toInt()
+        : leftOrigin.dx.compareTo(rightOrigin.dx);
+  }
+
+  Offset? _sourceOrigin(_SourceSelectionContainerState source) {
+    final renderObject = source.context.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.attached) return null;
+    return renderObject.localToGlobal(Offset.zero);
+  }
+
+  @override
+  Widget build(BuildContext context) => _FullDiffSelectionGroup(
+    state: this,
+    child: SelectionArea(child: widget.child),
+  );
+}
+
+class _FullDiffSelectionGroup extends InheritedWidget {
+  const _FullDiffSelectionGroup({required this.state, required super.child});
+
+  final _FullDiffSelectionAreaState state;
+
+  static _FullDiffSelectionAreaState? maybeOf(BuildContext context) => context
+      .dependOnInheritedWidgetOfExactType<_FullDiffSelectionGroup>()
+      ?.state;
+
+  @override
+  bool updateShouldNotify(_FullDiffSelectionGroup oldWidget) =>
+      !identical(state, oldWidget.state);
+}
+
 class FullDiffCodeRow extends StatelessWidget {
   const FullDiffCodeRow({
     required this.line,
@@ -165,26 +241,51 @@ class _SourceSelectionContainer extends StatefulWidget {
 }
 
 class _SourceSelectionContainerState extends State<_SourceSelectionContainer> {
-  final _delegate = _LineTerminatedSelectionContainerDelegate();
+  late final _delegate = _SourceSelectionContainerDelegate(this);
+  _FullDiffSelectionAreaState? _selectionGroup;
+
+  SelectedContent? get rawSelectedContent => _delegate.rawSelectedContent;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final nextGroup = _FullDiffSelectionGroup.maybeOf(context);
+    if (identical(_selectionGroup, nextGroup)) return;
+    _selectionGroup?.unregister(this);
+    _selectionGroup = nextGroup;
+    _selectionGroup?.register(this);
+  }
 
   @override
   void dispose() {
+    _selectionGroup?.unregister(this);
     _delegate.dispose();
     super.dispose();
   }
+
+  bool get needsLineBreak =>
+      _selectionGroup?.needsLineBreakAfter(this) ?? false;
 
   @override
   Widget build(BuildContext context) =>
       SelectionContainer(delegate: _delegate, child: widget.child);
 }
 
-class _LineTerminatedSelectionContainerDelegate
+class _SourceSelectionContainerDelegate
     extends StaticSelectionContainerDelegate {
+  _SourceSelectionContainerDelegate(this.source);
+
+  final _SourceSelectionContainerState source;
+
+  SelectedContent? get rawSelectedContent => super.getSelectedContent();
+
   @override
   SelectedContent? getSelectedContent() {
-    final content = super.getSelectedContent();
+    final content = rawSelectedContent;
     if (content == null) return null;
-    return SelectedContent(plainText: '${content.plainText}\n');
+    return source.needsLineBreak
+        ? SelectedContent(plainText: '${content.plainText}\n')
+        : content;
   }
 }
 

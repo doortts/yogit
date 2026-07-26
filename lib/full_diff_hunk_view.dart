@@ -77,7 +77,7 @@ class HunkPresentationView extends StatelessWidget {
     );
 
     if (wrapLines) {
-      return SelectionArea(child: list(horizontalScroll: false));
+      return FullDiffSelectionArea(child: list(horizontalScroll: false));
     }
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -85,7 +85,7 @@ class HunkPresentationView extends StatelessWidget {
           constraints.maxWidth,
           _unwrappedContentWidth(context, hunk.changedLines),
         );
-        return SelectionArea(
+        return FullDiffSelectionArea(
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             primary: false,

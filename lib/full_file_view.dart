@@ -94,7 +94,7 @@ class FullFileView extends StatelessWidget {
       },
     );
 
-    return _withDeletedBanner(SelectionArea(child: list));
+    return _withDeletedBanner(FullDiffSelectionArea(child: list));
   }
 
   Widget _withDeletedBanner(Widget content) {
