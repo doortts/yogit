@@ -1,0 +1,174 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+  <defs>
+    <style>
+      .ui { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .mono { font-family: Menlo, Monaco, Consolas, monospace; }
+      .code-ko { font-family: Menlo, D2Coding, Monaco, monospace; }
+      .label { fill: #8f98aa; font-size: 12px; font-weight: 600; letter-spacing: .04em; }
+      .body { fill: #d7dce6; font-size: 14px; }
+      .small { fill: #9aa3b5; font-size: 12px; }
+      .code { fill: #d9dee9; font-size: 14px; }
+      .line { stroke: #303744; stroke-width: 1; }
+      .button { fill: #1e2530; stroke: #3b4554; stroke-width: 1; }
+    </style>
+    <pattern id="empty-lines" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="8" height="8" fill="#202630"/>
+      <rect width="2" height="8" fill="#39414e"/>
+    </pattern>
+  </defs>
+
+  <rect width="1440" height="900" fill="#12161d"/>
+  <rect width="1440" height="42" fill="#1b2029"/>
+  <circle cx="18" cy="21" r="5" fill="#ff5f57"/>
+  <circle cx="36" cy="21" r="5" fill="#febc2e"/>
+  <circle cx="54" cy="21" r="5" fill="#28c840"/>
+  <text x="78" y="26" class="ui body" font-size="13" font-weight="650">Yogit · Full Diff</text>
+  <text x="1320" y="26" class="mono small">⌘D</text>
+  <text x="1373" y="26" class="ui small">Close</text>
+
+  <!-- Navigation panes -->
+  <rect x="0" y="42" width="235" height="858" fill="#151a22"/>
+  <rect x="235" y="42" width="290" height="858" fill="#171c24"/>
+  <line x1="235" y1="42" x2="235" y2="900" class="line"/>
+  <line x1="525" y1="42" x2="525" y2="900" class="line"/>
+
+  <text x="18" y="72" class="ui label">NEARBY COMMITS</text>
+  <rect x="10" y="91" width="215" height="58" rx="7" fill="#233653" stroke="#3a78d1"/>
+  <text x="22" y="112" class="mono small" fill="#79aef8">40aff6d</text>
+  <text x="22" y="134" class="ui body">Make Retina windows pixel-aware</text>
+  <text x="22" y="176" class="mono small">62874a0</text>
+  <text x="22" y="197" class="ui body">Restore saved window dimensions</text>
+  <text x="22" y="238" class="mono small">65f4c80</text>
+  <text x="22" y="259" class="ui body">Use pixel dimensions for Retina</text>
+  <text x="22" y="300" class="mono small">c78b2ff</text>
+  <text x="22" y="321" class="ui body">Fix held diagonal arrow movement</text>
+
+  <text x="253" y="72" class="ui label">CHANGED FILES</text>
+  <text x="253" y="101" class="mono small" fill="#7da7e8">40aff6d</text>
+  <text x="318" y="101" class="ui small">Suwon Chae · 16 days ago</text>
+  <rect x="245" y="120" width="270" height="48" rx="6" fill="#213149"/>
+  <rect x="245" y="120" width="3" height="48" rx="1.5" fill="#51a7ff"/>
+  <text x="258" y="141" class="mono body">M  src/drlgfxio.pas</text>
+  <text x="258" y="159" class="mono small" fill="#6ecf87">+9</text>
+  <text x="283" y="159" class="mono small" fill="#f27983">−2</text>
+  <text x="258" y="199" class="mono body">M  src/drlua.pas</text>
+  <text x="258" y="240" class="mono body">M  src/drlmain.pas</text>
+  <text x="258" y="281" class="mono body">M  makefile</text>
+
+  <!-- File header -->
+  <rect x="525" y="42" width="915" height="62" fill="#1a2029"/>
+  <text x="545" y="69" class="mono body" font-weight="700">src/drlgfxio.pas</text>
+  <text x="545" y="90" class="mono small" fill="#6ecf87">+9</text>
+  <text x="571" y="90" class="mono small" fill="#f27983">−2</text>
+  <rect x="613" y="74" width="48" height="20" rx="10" fill="#253244"/>
+  <text x="625" y="88" class="mono small" fill="#a9b8cc">UTF-8</text>
+
+  <rect x="860" y="55" width="108" height="34" rx="6" class="button"/>
+  <text x="878" y="77" class="ui body">Open in editor</text>
+  <rect x="985" y="55" width="62" height="34" rx="6" fill="#274875" stroke="#4d95eb"/>
+  <text x="1000" y="77" class="ui body" fill="#f2f6ff" font-weight="650">Hunk</text>
+  <text x="1069" y="77" class="ui body">File</text>
+  <text x="1116" y="77" class="ui body">Blame</text>
+  <text x="1177" y="77" class="ui body">History</text>
+
+  <!-- Toolbar -->
+  <rect x="525" y="104" width="915" height="50" fill="#171c24"/>
+  <line x1="525" y1="104" x2="1440" y2="104" class="line"/>
+  <line x1="525" y1="154" x2="1440" y2="154" class="line"/>
+  <rect x="542" y="113" width="86" height="31" rx="5" class="button"/>
+  <text x="556" y="133" class="ui small">Focus mode</text>
+  <rect x="637" y="113" width="34" height="31" rx="5" class="button"/>
+  <text x="649" y="134" class="mono body">↑</text>
+  <rect x="674" y="113" width="62" height="31" rx="5" class="button"/>
+  <text x="686" y="133" class="mono small">1 / 9</text>
+  <rect x="739" y="113" width="34" height="31" rx="5" class="button"/>
+  <text x="751" y="134" class="mono body">↓</text>
+  <rect x="782" y="113" width="54" height="31" rx="5" class="button"/>
+  <text x="795" y="133" class="ui small">Split</text>
+  <rect x="849" y="113" width="98" height="31" rx="5" class="button"/>
+  <text x="862" y="133" class="ui small">diff 알고리즘</text>
+  <text x="959" y="133" class="mono small" fill="#77b8ff">Git setting</text>
+  <text x="1051" y="133" class="ui small">☐ Ignore whitespace</text>
+  <text x="1171" y="133" class="ui small">☑ Wrap</text>
+  <text x="1262" y="133" class="mono small" fill="#8390a5">⌘⇧↑/↓ · 48px</text>
+
+  <!-- Hunk 1 -->
+  <rect x="542" y="172" width="858" height="304" rx="8" fill="#181e27" stroke="#3a4657"/>
+  <rect x="542" y="172" width="858" height="42" rx="8" fill="#202733"/>
+  <path d="M542 206 H1400" class="line"/>
+  <text x="558" y="198" class="mono small" fill="#7fb6ff">−302–313  +302–315</text>
+  <text x="744" y="198" class="mono small">procedure TDRLLua.ReadWad</text>
+  <text x="1152" y="198" class="mono small">1 / 9</text>
+  <rect x="1212" y="179" width="172" height="28" rx="5" fill="#24334a" stroke="#416a9e"/>
+  <text x="1231" y="198" class="ui small" fill="#a9d2ff">View in full file →</text>
+
+  <rect x="542" y="214" width="98" height="262" fill="#141922"/>
+  <line x1="640" y1="214" x2="640" y2="476" class="line"/>
+  <text x="558" y="240" class="mono small">302</text><text x="603" y="240" class="mono small">302</text>
+  <text x="558" y="266" class="mono small">303</text><text x="603" y="266" class="mono small">303</text>
+  <text x="558" y="292" class="mono small">304</text><text x="603" y="292" class="mono small">304</text>
+  <text x="558" y="318" class="mono small">305</text><text x="603" y="318" class="mono small">305</text>
+  <rect x="542" y="326" width="858" height="52" fill="#173724"/>
+  <rect x="542" y="326" width="4" height="52" fill="#4fc978"/>
+  <text x="603" y="352" class="mono small" fill="#77dc98">306</text>
+  <text x="603" y="370" class="mono small" fill="#77dc98">307</text>
+  <text x="558" y="404" class="mono small">306</text><text x="603" y="404" class="mono small">308</text>
+  <text x="558" y="430" class="mono small">307</text><text x="603" y="430" class="mono small">309</text>
+  <text x="558" y="456" class="mono small">308</text><text x="603" y="456" class="mono small">310</text>
+
+  <text x="658" y="240" class="mono code"><tspan fill="#55b7f4">function</tspan> CheckID(<tspan fill="#55b7f4">const</tspan> iID : AnsiString) : Boolean;</text>
+  <text x="658" y="266" class="mono code"><tspan fill="#55b7f4">begin</tspan></text>
+  <text x="658" y="292" class="mono code">  Exit((iID &lt;&gt; <tspan fill="#d49373">'core'</tspan>) <tspan fill="#c586c0">and</tspan> (iID &lt;&gt; <tspan fill="#d49373">'drl'</tspan>));</text>
+  <text x="658" y="318" class="mono code"><tspan fill="#55b7f4">end</tspan>;</text>
+  <text x="658" y="352" class="mono code" fill="#d8f2df">+ Log(LOGINFO, <tspan fill="#d49373">'BASE MODULE VERSION: '</tspan> + VersionModule);</text>
+  <text x="658" y="370" class="code-ko code" fill="#d8f2df">+ // 변경된 버전을 기록한다</text>
+  <text x="658" y="404" class="mono code"><tspan fill="#55b7f4">end</tspan>;</text>
+  <text x="658" y="430" class="mono code"></text>
+  <text x="658" y="456" class="mono code"><tspan fill="#55b7f4">begin</tspan></text>
+
+  <!-- Hunk 2 -->
+  <rect x="542" y="494" width="858" height="272" rx="8" fill="#181e27" stroke="#343d4b"/>
+  <rect x="542" y="494" width="858" height="42" rx="8" fill="#202733"/>
+  <path d="M542 528 H1400" class="line"/>
+  <text x="558" y="520" class="mono small" fill="#7fb6ff">−451–458  +453–459</text>
+  <text x="744" y="520" class="mono small">procedure ConfigureWindow</text>
+  <text x="1152" y="520" class="mono small">2 / 9</text>
+  <rect x="1212" y="501" width="172" height="28" rx="5" fill="#24334a" stroke="#416a9e"/>
+  <text x="1231" y="520" class="ui small" fill="#a9d2ff">View in full file →</text>
+
+  <rect x="542" y="536" width="98" height="230" fill="#141922"/>
+  <line x1="640" y1="536" x2="640" y2="766" class="line"/>
+  <text x="558" y="563" class="mono small">451</text><text x="603" y="563" class="mono small">453</text>
+  <rect x="542" y="573" width="858" height="52" fill="#3b2025"/>
+  <rect x="542" y="573" width="4" height="52" fill="#f06d78"/>
+  <text x="558" y="599" class="mono small" fill="#f28a92">452</text>
+  <text x="558" y="617" class="mono small" fill="#f28a92">453</text>
+  <rect x="542" y="625" width="858" height="52" fill="#173724"/>
+  <rect x="542" y="625" width="4" height="52" fill="#4fc978"/>
+  <text x="603" y="651" class="mono small" fill="#77dc98">454</text>
+  <text x="603" y="669" class="mono small" fill="#77dc98">455</text>
+  <text x="558" y="706" class="mono small">454</text><text x="603" y="706" class="mono small">456</text>
+  <text x="558" y="732" class="mono small">455</text><text x="603" y="732" class="mono small">457</text>
+
+  <text x="658" y="563" class="mono code">Window := SDL_CreateWindow(Title, Width, Height, Flags);</text>
+  <text x="658" y="599" class="mono code" fill="#f5d7da">− Scale := DesktopScale;</text>
+  <text x="658" y="617" class="mono code" fill="#f5d7da">− SDL_SetWindowSize(Window, Width, Height);</text>
+  <text x="658" y="651" class="mono code" fill="#d8f2df">+ Scale := SDL_GetWindowDisplayScale(Window);</text>
+  <text x="658" y="669" class="mono code" fill="#d8f2df">+ SDL_SetWindowSize(Window, Round(Width * Scale), Round(Height * Scale));</text>
+  <text x="658" y="706" class="mono code"><tspan fill="#55b7f4">if</tspan> Window = nil <tspan fill="#55b7f4">then</tspan></text>
+  <text x="658" y="732" class="mono code">  RaiseLastSDLError;</text>
+
+  <!-- Mini map and footer -->
+  <rect x="1410" y="172" width="12" height="594" rx="6" fill="#252d39"/>
+  <rect x="1412" y="190" width="8" height="96" rx="4" fill="#586579"/>
+  <rect x="1412" y="202" width="8" height="20" rx="4" fill="#4fc978"/>
+  <rect x="1412" y="311" width="8" height="15" rx="4" fill="#f06d78"/>
+  <rect x="1412" y="333" width="8" height="17" rx="4" fill="#4fc978"/>
+  <rect x="1412" y="482" width="8" height="19" rx="4" fill="#4fc978"/>
+  <rect x="525" y="858" width="915" height="42" fill="#171c24"/>
+  <line x1="525" y1="858" x2="1440" y2="858" class="line"/>
+  <text x="545" y="884" class="ui small">Hunk view · 9 changes</text>
+  <text x="1122" y="884" class="ui small">Scroll page</text>
+  <text x="1200" y="884" class="mono small" fill="#a8c9f5">⌘⇧↑ / ⌘⇧↓</text>
+  <text x="1340" y="884" class="mono small">Menlo</text>
+</svg>

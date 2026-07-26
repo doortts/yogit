@@ -148,6 +148,43 @@ Hunk로 바꾸고 Hunk/File 모드는 유지합니다. Settings에서 값을 바
 화면이 좁아지면 주변 커밋 열을 먼저 접고 변경 파일 열을 다음으로
 접습니다. 콘텐츠 열은 현재 정해 둔 최소 너비보다 좁아지지 않습니다.
 
+## 검토 기준 시안
+
+다음 두 시안을 구현 기준선으로 사용합니다. 시안 원본은 SVG이므로 이후
+검토에서 글꼴, 색상, 간격, 기능 배치를 직접 고쳐 다시 비교할 수 있습니다.
+구현 결과가 시안과 달라야 할 때는 변경 이유를 설계 문서에 먼저
+기록합니다.
+
+앞서 검토한 대화형 시안의 머리글 두 줄, 세 열 탐색, 집중 모드, Split,
+변경 이동, 구문 색상, 단어 단위 강조, 미니맵은 그대로 이어받았습니다.
+적대적 리뷰 뒤에 확정한 설계에 맞춰 기존 `Diff`·`Inline` 조작은
+`Hunk`·`File`로 정리하고, 각 Hunk의 `View in full file`을 추가했습니다.
+아래 시안은 이 변경까지 합친 최신 기준입니다.
+
+### Full Diff Hunk 화면
+
+![Full Diff Hunk 화면 시안](assets/full-diff-workspace-mockup.svg)
+
+이 시안에서 확인할 핵심은 다음과 같습니다.
+
+- 주변 커밋, 변경 파일, Hunk 콘텐츠의 세 열 구조
+- 고정된 파일 머리글과 Diff 도구 모음
+- Hunk 블록마다 표시되는 줄 범위, 현재 위치, `View in full file`
+- 경로·hash·줄 번호·소스·단축키에는 Menlo를 쓰고, 버튼·설명·커밋
+  제목에는 시스템 UI 글꼴을 쓰는 구분
+- 한국어가 들어간 고정폭 소스 행만 D2Coding으로 자연스럽게 대체되는
+  모습
+- 추가·삭제 배경, 줄 번호 영역, 오른쪽 미니맵이 서로 같은 변경 위치를
+  가리키는 구성
+
+### Settings 화면
+
+![Full Diff Settings 화면 시안](assets/full-diff-settings-mockup.svg)
+
+초기 보기의 기본값은 Hunk입니다. 시안의 단축키 영역은 값을 바꾸는
+설정이 아니라, 타임라인 미리보기와 Full Diff가 같은 페이지 스크롤
+동작을 사용한다는 읽기 전용 안내입니다.
+
 ## 개발 단계
 
 단계 사이의 실제 의존 관계에 맞춰 순서를 정합니다. 각 단계가 끝날
@@ -163,8 +200,10 @@ Hunk로 바꾸고 Hunk/File 모드는 유지합니다. Settings에서 값을 바
 - 파일 머리글과 도구 모음을 두 줄로 나눕니다.
 - Hunk 블록을 기본 화면으로 만듭니다.
 - 집중 모드와 이전·다음 Hunk 이동을 추가합니다.
+- 타임라인 미리보기와 같은 페이지 스크롤 단축키를 추가합니다.
 - 줄바꿈과 공백 변경 무시 기능을 추가합니다.
 - `diff 알고리즘`이라는 고정 이름과 현재 선택값을 함께 표시합니다.
+- 화면 전체에 걸린 D2Coding을 제거하고 용도별 글꼴 규칙을 적용합니다.
 - 머지 부모 선택, 열 너비 조절, 로딩 상태, 캐시, 텍스트 선택, 기존
   키보드 탐색을 유지합니다.
 - 이후 File 모드에서 쓸 수 있도록 Git 출력 바이트를 보존하는 경계를
@@ -178,7 +217,7 @@ File 모드는 2차에서 추가하므로 1차에서는 Full File 초기 보기 
 - File 모드와 각 Hunk의 `View in full file`을 추가합니다.
 - Full Diff 초기 보기 설정을 추가합니다.
 - UTF-8, 바이너리, 지원하지 않는 인코딩을 구분하고 화면에 표시합니다.
-- 구문 강조를 추가합니다.
+- 기본·확장 문법 묶음과 파일명 매핑을 사용하는 구문 강조를 추가합니다.
 - 서로 짝지은 삭제·추가 행 안에서 단어 단위 변경을 강조합니다.
 - Hunk에서만 동작하는 Split을 추가합니다.
 - 문맥 행과 변경 행에서 줄 번호 영역이 끊어지지 않게 표시합니다.
@@ -314,9 +353,22 @@ History 키에는 이름 변경을 따라갈 경로를 넣습니다. 작업 트�
 
 ### 글꼴과 색상
 
-- 탐색 영역과 조작 기능에는 일반 UI 글꼴을 사용합니다.
-- 소스·경로·hash·줄 번호에는 D2Coding을 사용합니다.
-- 현재 Full Diff 화면 전체에 적용된 고정폭 글꼴 설정을 제거합니다.
+- 현재 Full Diff 화면 전체에 적용된 D2Coding을 제거하고, 정보의 성격에
+  따라 글꼴을 고릅니다.
+- 한국어를 표시한다는 이유만으로 D2Coding을 쓰지 않습니다. 한국어와
+  고정폭 정렬이 동시에 필요할 때만 D2Coding을 사용합니다.
+- 소스 글꼴 스택은 Menlo, D2Coding, Monaco 순서로 둡니다. 영문·숫자·
+  기호는 Menlo로 표시하고, Menlo에 없는 한국어 소스 주석과 문자열은
+  D2Coding으로 대체합니다.
+
+| 표시 대상 | 글꼴 | 적용 기준 |
+| --- | --- | --- |
+| 버튼, 메뉴, 모드 이름, 설명, 커밋 제목, 작성자 | 시스템 UI 글꼴 | 문장과 조작 기능의 빠른 읽기 |
+| 파일 경로, commit hash, 줄 번호, Hunk 범위, 추가·삭제 수, 인코딩, 알고리즘 선택값, 단축키 | Menlo | 짧은 기술 정보의 폭과 자릿수 정렬 |
+| 소스 코드와 patch 기호 | Menlo, D2Coding 대체 글꼴 | 코드 정렬을 유지하고 한국어 문자만 보완 |
+| 한국어가 포함된 정렬형 원본 Git 출력 | D2Coding | 한국어와 고정폭 정렬이 모두 필요 |
+| 한국어 커밋 제목과 일반 설명 | 시스템 UI 글꼴 | 고정폭 정렬이 필요하지 않음 |
+
 - 소스의 구문 색상을 유지합니다.
 - 추가·삭제는 옅은 배경색, 줄 번호 영역, `+`·`−` 기호로 구분합니다.
 - 선택한 Hunk에는 diff 색상을 덮지 않는 별도 테두리나 줄 번호 영역
@@ -324,11 +376,61 @@ History 키에는 이름 변경을 따라갈 경로를 넣습니다. 작업 트�
 
 ### 구문 강조와 단어 단위 변경
 
-결과 파일의 경로를 보고 언어를 정합니다. DRL 검증 대상에 `.pas` 파일이
-있으므로 첫 버전부터 Pascal/Delphi를 지원해야 합니다. 사용하는 구문
-강조 도구가 지원한다면 Dart, Swift, Kotlin/Java, JavaScript/TypeScript,
-Python, C/C++, Rust, Go, shell, JSON, YAML, XML도 지원합니다. 알 수 없는
-확장자는 일반 텍스트로 표시합니다.
+구현 기준 후보는
+[`highlighting`](https://pub.dev/packages/highlighting)입니다. 190개가 넘는
+문법을 제공하고 필요한 언어 파일만 가져와 등록할 수 있습니다. Yogit은
+패키지의 모델을 화면에 직접 노출하지 않고 `SyntaxHighlighter` 경계
+뒤에서 사용합니다. 패키지를 바꾸더라도 파일명 매핑, 화면 모델, 테스트가
+같이 바뀌지 않게 하기 위해서입니다.
+
+자동 추측은 사용하지 않습니다. 결과 파일의 경로, 확장자, 고정 파일명을
+`SyntaxLanguageRegistry`에서 문법 ID로 바꿉니다. 알 수 없는 파일은 일반
+텍스트로 표시합니다. DRL 검증 대상과 Yogit 자체 개발에 필요한 다음
+문법은 용량과 관계없이 기본 묶음에 넣습니다.
+
+- 소스: Pascal/Delphi, Dart, C, C++, C#, Objective-C, Swift, Java, Kotlin,
+  JavaScript, TypeScript, Python, Go, Rust, Ruby, PHP, Bash, PowerShell,
+  SQL
+- 웹·데이터·문서: HTML/XML, CSS, SCSS, JSON, YAML, Markdown, GraphQL,
+  Protocol Buffers, diff/patch
+- 빌드·설정: Dockerfile, Makefile, CMake, Gradle/Groovy, INI/TOML,
+  Java properties와 `.env`, Nginx, Nix, Apache, HTTP
+
+다음 문법은 확장 묶음입니다. 실제 배포 크기 기준을 통과하면 기본
+배포본에 함께 포함하며 별도의 사용자 설정으로 숨기지 않습니다.
+
+- Lua, Perl, R, Julia, Scala, Elixir, Erlang, Haskell, OCaml, F#, Clojure,
+  Lisp, Scheme
+- Verilog, VHDL, x86/ARM assembly, Fortran, MATLAB, QML, LaTeX
+
+파일명 매핑에는 확장자뿐 아니라 다음 예외를 반드시 포함합니다.
+
+| 파일 패턴 | 사용할 문법 |
+| --- | --- |
+| `*.pas`, `*.pp`, `*.dpr`, `*.lpr`, `*.lfm`, `*.dfm` | Delphi |
+| `Dockerfile*`, `Containerfile*` | Dockerfile |
+| `Makefile`, `GNUmakefile`, `*.mk` | Makefile |
+| `CMakeLists.txt`, `*.cmake` | CMake |
+| `build.gradle*`, `settings.gradle*` | Gradle 또는 Groovy |
+| `.gitconfig`, `.gitmodules`, `.editorconfig`, `*.ini`, `*.toml` | INI/TOML |
+| `.env*`, `*.properties` | properties |
+| `pubspec.yaml`, `.github/workflows/*.yml`, `docker-compose*.yml` | YAML |
+| `*.html`, `*.htm`, `*.svg`, `*.plist` | XML |
+| `*.patch`, `*.diff` | diff |
+
+JSON with Comments, Terraform/HCL, `.gitignore`, `.dockerignore`는 후보
+패키지에 정확히 대응하는 기본 문법이 없습니다. 첫 구현에서는 JSONC를
+JavaScript 문법으로, ignore 파일은 일반 텍스트로 표시합니다.
+Terraform/HCL은 일반 텍스트로 시작하고, 실제 파일을 사용한 fixture와
+작은 전용 문법을 함께 마련할 때 확장 묶음에 추가합니다. 비슷해 보이는
+다른 문법을 억지로 적용해 잘못된 색을 보여주지 않습니다.
+
+같은 도구 체인의 macOS release 빌드를 문법 추가 전후로 각각 만들고
+압축한 `.app` 크기를 비교합니다. 기본 묶음은 항상 유지합니다. 확장
+묶음까지 넣었을 때 증가분이 1 MiB 이하이고, DRL 검증 파일의 첫 Hunk
+강조가 50ms 안에 끝나면 확장 묶음을 모두 포함합니다. 어느 기준이든
+넘으면 사용 빈도가 낮은 확장 문법부터 빼고 측정 결과를 문서에
+기록합니다.
 
 구문 강조는 Git이 diff 행의 짝을 정한 뒤 적용하며 행의 짝을 바꾸지
 않습니다. 단어 단위 강조는 서로 짝지은 삭제·추가 행에만 적용합니다.
@@ -348,6 +450,17 @@ Python, C/C++, Rust, Go, shell, JSON, YAML, XML도 지원합니다. 알 수 없�
 미니맵의 변경 표시는 소스 행 비율로 배치합니다. 현재 화면 범위는 전체
 스크롤 길이에 대한 비율로 표시합니다. 미니맵의 변경 표시를 선택하면
 가장 가까운 Hunk 앵커로 이동합니다.
+
+페이지 스크롤은 타임라인 미리보기의 현재 동작을 그대로 따릅니다.
+`Command-Shift-Up`과 `Command-Shift-Down`으로 각각 48px 이동하며, 키를
+누르고 있으면 반복해서 움직입니다. 첫 입력만 100ms 동안 부드럽게
+움직이고 반복 입력은 밀리지 않도록 즉시 이동합니다. 위·아래 끝에서는
+범위를 벗어나지 않습니다.
+
+미리보기와 Full Diff가 단축키 표와 이동량을 따로 갖지 않도록 공통
+`PageScrollIntent`와 48px 상수를 사용합니다. Full Diff에서는 현재 보이는
+Hunk, File, Blame 콘텐츠의 스크롤 컨트롤러에 intent를 전달합니다.
+History 목록이나 메뉴에 포커스가 있으면 그 요소가 먼저 키를 처리합니다.
 
 ## 성능과 큰 파일 처리
 
@@ -383,6 +496,8 @@ Open in editor는 가능한 범위에서 유지합니다.
 
 - Up/Down: 파일 이동
 - Command-Up/Command-Down: 주변 커밋 이동
+- Command-Shift-Up/Command-Shift-Down: 현재 콘텐츠를 48px씩 페이지
+  스크롤
 - Option-Up/Option-Down: Hunk 앵커 이동
 - Command-Shift-F: 집중 모드 전환
 - Escape: 타임라인으로 돌아가기
@@ -421,7 +536,13 @@ Split, 줄바꿈, 공백 변경 무시는 켜짐·꺼짐 상태를 전달합니�
 - 원본 바이트에서 UTF-8·바이너리·지원하지 않는 인코딩을 구분하는 동작
 - Split 행 짝짓기와 대응하는 행이 없는 영역
 - 단어 단위 변경과 512토큰·20,000자 제한
+- 파일 확장자와 고정 파일명에 따른 문법 매핑, 알 수 없는 파일의 일반
+  텍스트 처리
+- 기본·확장 문법 등록 목록이 실제 패키지에서 모두 제공되는지 확인하는
+  동작
 - 미니맵의 소스 행 위치
+- 미리보기와 Full Diff가 같은 페이지 스크롤 intent와 48px 이동량을
+  사용하는지 확인하는 동작
 - 커밋 데이터의 캐시 키와 작업 트리의 캐시 우회
 - 전체 파일, Blame, 이름 변경을 따라가는 History 해석
 
@@ -442,11 +563,19 @@ Split, 줄바꿈, 공백 변경 무시는 켜짐·꺼짐 상태를 전달합니�
 - Hunk, File, Blame에서 이전·다음 변경 이동이 동작하는지 확인합니다.
 - 줄바꿈을 바꾸거나 미니맵을 사용해도 같은 의미의 변경 위치로
   이동하는지 확인합니다.
+- `Command-Shift-Up/Down`의 첫 입력, 키 반복, 위·아래 끝 제한이
+  타임라인 미리보기와 Full Diff에서 같은지 확인합니다.
+- 경로·hash·줄 번호·소스에는 Menlo가 적용되고, 한국어 소스 문자에는
+  D2Coding 대체 글꼴이 적용되며 일반 한국어 설명에는 시스템 UI 글꼴이
+  적용되는지 확인합니다.
 - 큰 파일과 지나치게 큰 파일에서 정해 둔 단순 표시를 사용하는지
   확인합니다.
 - 모드별 로딩, 늦게 도착한 요청, 바이너리, 오류 상태가 서로 영향을
   주지 않는지 확인합니다.
 - 메뉴와 텍스트 선택에서 원래 키보드 동작을 유지하는지 확인합니다.
+- 1440×900 Full Diff와 1120×640 Settings golden image를 이 문서의 SVG
+  시안과 비교해 머리글 두 줄, Hunk 블록, 글꼴 구역, 간격이 크게
+  달라지지 않았는지 확인합니다.
 
 ### DRL 수동 검증 대상
 
@@ -467,6 +596,9 @@ Split, 줄바꿈, 공백 변경 무시는 켜짐·꺼짐 상태를 전달합니�
 - Hunk와 Full File 초기 설정 모두 예상한 첫 번째 앵커에서 열려야 합니다.
 - Split으로 바꿔도 Hunk 수는 그대로이며 삭제·추가 행의 짝이 맞아야
   합니다.
+- 기본 문법만 넣은 release 앱과 확장 문법까지 넣은 release 앱의 압축
+  크기 차이가 1 MiB 이하인지 확인하고, 첫 Hunk 구문 강조 시간을
+  기록해야 합니다.
 
 이름 변경, 삭제, 바이너리, 지원하지 않는 인코딩, 머지 부모, 작업 트리,
 큰 파일은 변할 수 있는 실제 저장소 이력 대신 고정된 테스트 데이터로
