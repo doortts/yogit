@@ -3494,13 +3494,17 @@ class CommitGraphPainter extends CustomPainter {
     final departing = {
       for (final transition in row.transitions) transition.from,
     };
+    final joining = {
+      for (final transition in row.transitions)
+        if (!transitionBendsAtSource(row, transition)) transition.from,
+    };
     final arriving = {for (final transition in row.transitions) transition.to};
     return {
       for (final lane in row.nextLanes)
         if (lane == row.lane
             // The node hands its first parent straight down, unless its lane
-            // emptied here and a slide refilled it.
-            ? !arriving.contains(lane)
+            // joins another lane or a slide refills it.
+            ? !joining.contains(lane) && !arriving.contains(lane)
             : row.activeLanes.contains(lane) && !departing.contains(lane))
           lane,
     };

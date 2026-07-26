@@ -364,6 +364,30 @@ void main() {
     expect(pixel, isNot(rail(AvatarService.color(branch.committer))));
   });
 
+  test('a converged lane leaves no phantom rail above the next bend', () async {
+    final rows = layoutGraph([
+      _commit('T', ['C', 'B']),
+      _commit('B', ['C']),
+      _commit('C', ['P', 'N']),
+      _commit('N', ['P']),
+      _commit('P', const []),
+    ]);
+    final row = rows[2];
+    final painter = CommitGraphPainter(
+      row: row,
+      previous: rows[1],
+      selected: false,
+      committerColor: AvatarService.branchColor(row.branch),
+    );
+
+    expect(rows[1].transitions, [(from: 1, to: 0, sha: 'C')]);
+    expect(row.transitions, [(from: 0, to: 1, sha: 'N')]);
+    expect(
+      await _paintPixel(painter, x: painter.laneX(1).round(), y: 17),
+      _canvasBackground,
+    );
+  });
+
   test('selected band spans the full row to the graph boundary', () {
     final row = layoutGraph([_commit('C', const [])]).single;
     final painter = CommitGraphPainter(
