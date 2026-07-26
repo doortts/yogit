@@ -1555,12 +1555,88 @@ void main() {
     expect(saved?.time, 124);
     expect(tester.getSize(find.byKey(const Key('time-header'))).width, 124);
 
+    for (var press = 0; press < 9; press++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await tester.pump();
+    }
+    expect(saved?.time, 56);
+    expect(saved?.name, 150);
+  });
+
+  testWidgets('Date and Author columns hide and restore their last widths', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    TimelineColumnWidths? saved;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+          ),
+          controller: controller,
+          columnWidths: const TimelineColumnWidths(time: 80, name: 70),
+          onColumnWidthsChanged: (value) => saved = value,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(timelineColumns['time']!.min, 56);
+    expect(timelineColumns['name']!.min, 50);
+    expect(find.text('AUTHOR'), findsOneWidget);
+    expect(find.text('Ada Author'), findsOneWidget);
+
+    tester
+        .widget<Focus>(find.byKey(const Key('time-resizer-focus')))
+        .focusNode!
+        .requestFocus();
+    await tester.pump();
     for (var press = 0; press < 3; press++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
       await tester.pump();
     }
-    expect(saved?.time, 112);
-    expect(saved?.name, 150);
+    expect(tester.getSize(find.byKey(const Key('time-header'))).width, 56);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('time-header')), findsNothing);
+    expect(find.byKey(const Key('show-time-column')), findsOneWidget);
+    expect(saved?.showTime, isFalse);
+    expect(saved?.time, 56);
+
+    await tester.tap(find.byKey(const Key('show-time-column')));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byKey(const Key('time-header'))).width, 56);
+    expect(saved?.showTime, isTrue);
+
+    tester
+        .widget<Focus>(find.byKey(const Key('name-resizer-focus')))
+        .focusNode!
+        .requestFocus();
+    await tester.pump();
+    for (var press = 0; press < 3; press++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await tester.pump();
+    }
+    expect(tester.getSize(find.byKey(const Key('name-header'))).width, 50);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('name-header')), findsNothing);
+    expect(find.text('Ada Author'), findsNothing);
+    expect(find.byKey(const Key('show-name-column')), findsOneWidget);
+    expect(saved?.showName, isFalse);
+    expect(saved?.name, 50);
+
+    await tester.tap(find.byKey(const Key('show-name-column')));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byKey(const Key('name-header'))).width, 50);
+    expect(find.text('Ada Author'), findsOneWidget);
+    expect(saved?.showName, isTrue);
   });
 
   testWidgets('sidebar lists refs, filters them, and moves the selection', (
@@ -2137,14 +2213,24 @@ void main() {
   test(
     'column widths round-trip time and name and clamp to the design range',
     () {
-      const widths = TimelineColumnWidths(time: 130, name: 120, commit: 500);
+      const widths = TimelineColumnWidths(
+        time: 130,
+        name: 120,
+        commit: 500,
+        showTime: false,
+        showName: false,
+      );
       final decoded = TimelineColumnWidths.fromJson(widths.toJson());
       expect(decoded, widths);
       expect(decoded.time, 130);
       expect(decoded.name, 120);
       expect(decoded.commit, 500);
+      expect(decoded.showTime, isFalse);
+      expect(decoded.showName, isFalse);
       expect(const TimelineColumnWidths().refs, 156);
       expect(const TimelineColumnWidths().hash, 78);
+      expect(const TimelineColumnWidths().showTime, isTrue);
+      expect(const TimelineColumnWidths().showName, isTrue);
 
       // An unset graph or title width is omitted and comes back unset, so both
       // columns keep sizing themselves across restarts.
@@ -2177,7 +2263,7 @@ void main() {
         'graph': 10,
       });
       expect(clamped.time, 170);
-      expect(clamped.name, 100);
+      expect(clamped.name, 50);
       expect(clamped.refs, 240);
       expect(clamped.commit, 620);
       expect(clamped.graph, 40);

@@ -179,8 +179,8 @@ const timelineColumns = <String, ColumnSpec>{
   'graph': (label: 'Graph', min: 40, max: 260),
   'hash': (label: 'Hash', min: 64, max: 120),
   'commit': (label: 'Commit Message', min: 100, max: 620),
-  'time': (label: 'Date', min: 112, max: 170),
-  'name': (label: 'Name', min: 100, max: 240),
+  'time': (label: 'Date', min: 56, max: 170),
+  'name': (label: 'Author', min: 50, max: 240),
 };
 
 class TimelineScreen extends StatefulWidget {
@@ -282,6 +282,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
   late double? _commitWidth = widget.columnWidths.commit;
   late double? _graphWidth = widget.columnWidths.graph;
   late double _sidebarWidth = widget.columnWidths.sidebar;
+  late bool _showTime = widget.columnWidths.showTime;
+  late bool _showName = widget.columnWidths.showName;
 
   /// Test hook: the preview text the user last selected, so a test can prove that
   /// dragging over the panel really selects.
@@ -331,6 +333,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
       _commitWidth = widget.columnWidths.commit;
       _graphWidth = widget.columnWidths.graph;
       _sidebarWidth = widget.columnWidths.sidebar;
+      _showTime = widget.columnWidths.showTime;
+      _showName = widget.columnWidths.showName;
     }
     if (widget.previewWidth != oldWidget.previewWidth ||
         widget.previewHeight != oldWidget.previewHeight) {
@@ -365,6 +369,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
   };
 
   double _w(String column) => _widths[column]!;
+
+  bool _columnVisible(String column) => switch (column) {
+    'time' => _showTime,
+    'name' => _showName,
+    _ => true,
+  };
 
   /// Auto-fit: the snuggest width that still shows every loaded lane's node, so
   /// the first launch shows the whole graph and no more. The resizer reaches
@@ -1276,7 +1286,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 final commit = _selectedCommit;
                 return Text(
                   key: const Key('status-timestamp'),
-                  commit == null || commit.isWorkingTree
+                  commit == null || commit.isWorkingTree || !_showTime
                       ? ''
                       : exactCommitTime(commit.committerTimestamp),
                   style: const TextStyle(
@@ -1312,7 +1322,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
       // and a narrowing window compresses it — down to 100px, dragged or not —
       // before any other column clips.
       final graphWidth = _graphColumnWidth;
-      final fixed = _widths.values.reduce((a, b) => a + b) + graphWidth;
+      final fixed = _widths.entries
+          .where((entry) => _columnVisible(entry.key))
+          .fold(graphWidth, (sum, entry) => sum + entry.value);
       final available = constraints.maxWidth - fixed;
       final commitWidth = math.max(
         timelineColumns['commit']!.min,
@@ -1338,7 +1350,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   child: Row(
                     children: [
                       for (final column in timelineColumns.keys)
-                        _header(column, width(column)),
+                        if (_columnVisible(column))
+                          _header(column, width(column)),
                     ],
                   ),
                 ),
@@ -1393,7 +1406,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
         Positioned.fill(
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 9),
-            alignment: Alignment.centerLeft,
             decoration: const BoxDecoration(
               color: _panelSoft,
               border: Border(
@@ -1401,23 +1413,67 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 right: BorderSide(color: _border),
               ),
             ),
-            child: Text(
-              timelineColumns[column]!.label.toUpperCase(),
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: _muted,
-                fontSize: 12,
-                fontFamily: 'monospace',
-                fontWeight: FontWeight.w500,
-                letterSpacing: 0.66,
-              ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    timelineColumns[column]!.label.toUpperCase(),
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _muted,
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 0.66,
+                    ),
+                  ),
+                ),
+                if (column == 'commit' && !_showTime)
+                  _restoreColumnButton('time', 'D'),
+                if (column == 'commit' && !_showName)
+                  _restoreColumnButton('name', 'A'),
+              ],
             ),
           ),
         ),
         _resizer(column, width),
       ],
+    ),
+  );
+
+  Widget _restoreColumnButton(String column, String label) => Tooltip(
+    message: 'Show ${timelineColumns[column]!.label} column',
+    waitDuration: _tooltipDelay,
+    child: SizedBox(
+      width: 22,
+      height: 22,
+      child: TextButton(
+        key: Key('show-$column-column'),
+        onPressed: () {
+          setState(() {
+            if (column == 'time') {
+              _showTime = true;
+            } else {
+              _showName = true;
+            }
+          });
+          _saveColumnWidths();
+        },
+        style: TextButton.styleFrom(
+          foregroundColor: _muted,
+          padding: EdgeInsets.zero,
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          textStyle: const TextStyle(
+            fontSize: 11,
+            fontFamily: 'monospace',
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        child: Text(label),
+      ),
     ),
   );
 
@@ -1459,6 +1515,19 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// up where it is rather than jumping to a stored value.
   void _resize(String column, double next) {
     final spec = timelineColumns[column]!;
+    if ((column == 'time' || column == 'name') &&
+        next < spec.min &&
+        _w(column) <= spec.min) {
+      setState(() {
+        if (column == 'time') {
+          _showTime = false;
+        } else {
+          _showName = false;
+        }
+      });
+      _saveColumnWidths();
+      return;
+    }
     final clamped = next.clamp(spec.min, spec.max);
     setState(() {
       if (column == 'commit') {
@@ -1480,6 +1549,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
       commit: _commitWidth,
       time: _w('time'),
       name: _w('name'),
+      showTime: _showTime,
+      showName: _showName,
     ),
   );
 
@@ -1715,68 +1786,71 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   ),
                 ),
               ),
-              _cell(
-                _w('time'),
-                // The cell reads socially; the tooltip gives the exact moment.
-                _tooltip(
-                  commit.isWorkingTree
-                      ? null
-                      : exactCommitTime(commit.committerTimestamp),
-                  Text(
+              if (_showTime)
+                _cell(
+                  _w('time'),
+                  // The cell reads socially; the tooltip gives the exact moment.
+                  _tooltip(
                     commit.isWorkingTree
-                        ? 'working tree'
-                        : _socialTime(commit.committerTimestamp),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: selected ? _text : _muted,
-                      fontSize: 12,
-                      fontFamily: cellFont,
-                      fontFamilyFallback: cellFontFallback,
+                        ? null
+                        : exactCommitTime(commit.committerTimestamp),
+                    Text(
+                      commit.isWorkingTree
+                          ? 'working tree'
+                          : _socialTime(commit.committerTimestamp),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: selected ? _text : _muted,
+                        fontSize: 12,
+                        fontFamily: cellFont,
+                        fontFamilyFallback: cellFontFallback,
+                      ),
                     ),
                   ),
                 ),
-              ),
-              _cell(
-                _w('name'),
-                commit.isWorkingTree
-                    ? const Text(
-                        '—',
-                        style: TextStyle(
-                          color: _muted,
-                          fontSize: 12,
-                          fontFamily: cellFont,
-                          fontFamilyFallback: cellFontFallback,
-                        ),
-                      )
-                    : Row(
-                        children: [
-                          CommitAvatarStack(
-                            commit: commit,
-                            avatarService: widget.avatarService,
-                            showRemoteAvatars: widget.showRemoteAvatars,
-                            discColor: branchColor,
+              if (_showName)
+                _cell(
+                  _w('name'),
+                  commit.isWorkingTree
+                      ? const Text(
+                          '—',
+                          style: TextStyle(
+                            color: _muted,
+                            fontSize: 12,
+                            fontFamily: cellFont,
+                            fontFamilyFallback: cellFontFallback,
                           ),
-                          const SizedBox(width: 7),
-                          Expanded(
-                            child: Text(
-                              commit.author.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: selected
-                                    ? _text
-                                    : Color.lerp(_text, _main, 0.12),
-                                fontSize: 12,
-                                fontFamily: cellFont,
-                                fontFamilyFallback: cellFontFallback,
-                                fontWeight: FontWeight.w500,
+                        )
+                      : Row(
+                          children: [
+                            CommitAvatarStack(
+                              commit: commit,
+                              avatarService: widget.avatarService,
+                              showRemoteAvatars: widget.showRemoteAvatars,
+                              discColor: branchColor,
+                              stacked: _w('name') >= 57,
+                            ),
+                            const SizedBox(width: 7),
+                            Expanded(
+                              child: Text(
+                                commit.author.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: selected
+                                      ? _text
+                                      : Color.lerp(_text, _main, 0.12),
+                                  fontSize: 12,
+                                  fontFamily: cellFont,
+                                  fontFamilyFallback: cellFontFallback,
+                                  fontWeight: FontWeight.w500,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-              ),
+                          ],
+                        ),
+                ),
             ],
           ),
         ),

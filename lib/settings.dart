@@ -17,6 +17,8 @@ class TimelineColumnWidths {
     this.commit,
     this.time = 116,
     this.name = 150,
+    this.showTime = true,
+    this.showName = true,
   });
 
   final double sidebar;
@@ -32,6 +34,8 @@ class TimelineColumnWidths {
   final double? commit;
   final double time;
   final double name;
+  final bool showTime;
+  final bool showName;
 
   /// [graph] and [commit] only widen: pass a value to pin the column, and use
   /// `TimelineColumnWidths(...)` directly to clear it back to auto.
@@ -43,6 +47,8 @@ class TimelineColumnWidths {
     double? commit,
     double? time,
     double? name,
+    bool? showTime,
+    bool? showName,
   }) => TimelineColumnWidths(
     sidebar: sidebar ?? this.sidebar,
     refs: refs ?? this.refs,
@@ -51,6 +57,8 @@ class TimelineColumnWidths {
     commit: commit ?? this.commit,
     time: time ?? this.time,
     name: name ?? this.name,
+    showTime: showTime ?? this.showTime,
+    showName: showName ?? this.showName,
   );
 
   factory TimelineColumnWidths.fromJson(Object? value) {
@@ -68,12 +76,14 @@ class TimelineColumnWidths {
       graph: json['graph'] is num ? width('graph', 142, 40, 260) : null,
       hash: width('hash', 78, 64, 120),
       commit: json['commit'] is num ? width('commit', 380, 100, 620) : null,
-      time: width('time', 116, 112, 170),
-      name: width('name', 150, 100, 240),
+      time: width('time', 116, 56, 170),
+      name: width('name', 150, 50, 240),
+      showTime: json['showTime'] is bool ? json['showTime'] as bool : true,
+      showName: json['showName'] is bool ? json['showName'] as bool : true,
     );
   }
 
-  Map<String, double> toJson() => {
+  Map<String, Object> toJson() => {
     'sidebar': sidebar,
     'refs': refs,
     'graph': ?graph,
@@ -81,6 +91,8 @@ class TimelineColumnWidths {
     'commit': ?commit,
     'time': time,
     'name': name,
+    'showTime': showTime,
+    'showName': showName,
   };
 
   @override
@@ -92,11 +104,22 @@ class TimelineColumnWidths {
       hash == other.hash &&
       commit == other.commit &&
       time == other.time &&
-      name == other.name;
+      name == other.name &&
+      showTime == other.showTime &&
+      showName == other.showName;
 
   @override
-  int get hashCode =>
-      Object.hash(sidebar, refs, graph, hash, commit, time, name);
+  int get hashCode => Object.hash(
+    sidebar,
+    refs,
+    graph,
+    hash,
+    commit,
+    time,
+    name,
+    showTime,
+    showName,
+  );
 }
 
 /// `#RRGGBB` (or bare `RRGGBB`) to a color, or null when malformed.
