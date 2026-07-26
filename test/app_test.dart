@@ -3299,6 +3299,137 @@ void main() {
     expect(find.textContaining('minimal failed'), findsOneWidget);
   });
 
+  testWidgets('initial file loading has a distinct pending state', (
+    tester,
+  ) async {
+    final files = Completer<List<GitFileChange>>();
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('1', 'commit')],
+      files: (_, _) => files.future,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: repository,
+          commits: [commit('1', 'commit')],
+          initialIndex: 0,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byKey(const Key('diff-pending-files')), findsOneWidget);
+    expect(find.text('No changes'), findsNothing);
+
+    files.complete(const []);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('initial diff loading has a distinct pending state', (
+    tester,
+  ) async {
+    final diff = Completer<List<DiffLine>>();
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('1', 'commit')],
+      files: (_, _) async => const [
+        GitFileChange(
+          path: 'file.txt',
+          status: 'M',
+          additions: 0,
+          deletions: 0,
+        ),
+      ],
+      diff: (_, _, _, _, _) => diff.future,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: repository,
+          commits: [commit('1', 'commit')],
+          initialIndex: 0,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byKey(const Key('diff-pending-first-diff')), findsOneWidget);
+    expect(find.text('No changes'), findsNothing);
+
+    diff.complete(const []);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('an initial diff failure does not look like an empty diff', (
+    tester,
+  ) async {
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('1', 'commit')],
+      files: (_, _) async => const [
+        GitFileChange(
+          path: 'file.txt',
+          status: 'M',
+          additions: 0,
+          deletions: 0,
+        ),
+      ],
+      diff: (_, _, _, _, _) => Future.error(StateError('initial failed')),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: repository,
+          commits: [commit('1', 'commit')],
+          initialIndex: 0,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('diff-error-without-document')),
+      findsOneWidget,
+    );
+    expect(find.text('No changes'), findsNothing);
+    expect(find.textContaining('initial failed'), findsWidgets);
+  });
+
+  testWidgets('a successfully loaded empty document says no changes', (
+    tester,
+  ) async {
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('1', 'commit')],
+      files: (_, _) async => const [
+        GitFileChange(
+          path: 'file.txt',
+          status: 'M',
+          additions: 0,
+          deletions: 0,
+        ),
+      ],
+      diff: (_, _, _, _, _) async => const [],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: repository,
+          commits: [commit('1', 'commit')],
+          initialIndex: 0,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('No changes'), findsOneWidget);
+    expect(find.byKey(const Key('diff-pending-files')), findsNothing);
+    expect(find.byKey(const Key('diff-pending-first-diff')), findsNothing);
+    expect(find.byKey(const Key('diff-error-without-document')), findsNothing);
+  });
+
   testWidgets('hunk blocks mark additions and deletions', (tester) async {
     final repository = FakeGitRepository(
       (_, _) async => [commit('1', 'commit')],
@@ -3345,6 +3476,44 @@ void main() {
       tester.widget<ColoredBox>(addition).color,
       const Color(0xFF8AD6A1).withValues(alpha: 0.15),
     );
+  });
+
+  testWidgets('merge parent labels reserve technical font for the SHA', (
+    tester,
+  ) async {
+    const firstParent = '1111111111111111111111111111111111111111';
+    const secondParent = '2222222222222222222222222222222222222222';
+    final repository = FakeGitRepository(
+      (_, _) async => [
+        commit('merge', 'merge', parents: const [firstParent, secondParent]),
+      ],
+      files: (_, _) async => const [],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: repository,
+          commits: [
+            commit(
+              'merge',
+              'merge',
+              parents: const [firstParent, secondParent],
+            ),
+          ],
+          initialIndex: 0,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final label = tester.widget<Text>(find.textContaining('Parent 1').first);
+    final spans = (label.textSpan as TextSpan).children!.cast<TextSpan>();
+    expect(spans.first.text, 'Parent 1 · ');
+    expect(spans.first.style?.fontFamily, isNull);
+    expect(spans.last.text, '1111111');
+    expect(spans.last.style?.fontFamily, technicalFontFamily);
+    expect(spans.last.style?.fontFamilyFallback, technicalFontFallback);
   });
 
   testWidgets('an injected full diff controller stays externally owned', (
@@ -3399,6 +3568,58 @@ void main() {
 
     expect(session.state.wrapLines, isFalse);
     expect(fileLoads, 1);
+  });
+
+  testWidgets('full diff replaces its owned session when inputs change', (
+    tester,
+  ) async {
+    final oldCommits = [
+      commit('old', 'old commit', parents: const ['base']),
+    ];
+    final newCommits = [
+      commit('new', 'new commit', parents: const ['base']),
+    ];
+    final oldRepository = FakeGitRepository(
+      (_, _) async => oldCommits,
+      files: (_, _) async => const [
+        GitFileChange(path: 'old.txt', status: 'M', additions: 1, deletions: 0),
+      ],
+      diff: (_, _, _, _, _) async => const [
+        DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,0 +1 @@'),
+        DiffLine(kind: DiffLineKind.add, text: 'old body', newNumber: 1),
+      ],
+    );
+    final newRepository = FakeGitRepository(
+      (_, _) async => newCommits,
+      files: (_, _) async => const [
+        GitFileChange(path: 'new.txt', status: 'M', additions: 1, deletions: 0),
+      ],
+      diff: (_, _, _, _, _) async => const [
+        DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,0 +1 @@'),
+        DiffLine(kind: DiffLineKind.add, text: 'new body', newNumber: 1),
+      ],
+    );
+
+    Widget screen(
+      FullDiffRepository repository,
+      List<GitCommit> screenCommits,
+    ) => MaterialApp(
+      home: DiffScreen(
+        repository: repository,
+        commits: screenCommits,
+        initialIndex: 0,
+      ),
+    );
+
+    await tester.pumpWidget(screen(oldRepository, oldCommits));
+    await tester.pumpAndSettle();
+    expect(find.text('old body'), findsOneWidget);
+
+    await tester.pumpWidget(screen(newRepository, newCommits));
+    await tester.pumpAndSettle();
+
+    expect(find.text('new body'), findsOneWidget);
+    expect(find.text('old body'), findsNothing);
   });
 
   testWidgets('file and parent changes reset the hunk list to the top', (
@@ -5970,7 +6191,7 @@ void main() {
   });
 
   // ------------------------------------------------------------------ D2
-  testWidgets('the four data columns use the Korean-capable mono face', (
+  testWidgets('technical data uses mono while prose uses the system font', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -6275,6 +6496,81 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
     expect(session.state.focusMode, isFalse);
+  });
+
+  testWidgets('option-down reveals a hunk beyond the lazy list cache', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 600);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final commits = [
+      commit('1', 'commit', parents: const ['0']),
+    ];
+    final repository = FakeGitRepository(
+      (_, _) async => commits,
+      files: (_, _) async => const [
+        GitFileChange(
+          path: 'lib/a.dart',
+          status: 'M',
+          additions: 1,
+          deletions: 0,
+        ),
+      ],
+      diff: (_, _, _, _, _) async => [
+        const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,120 +1,120 @@'),
+        for (var index = 1; index <= 120; index++)
+          DiffLine(
+            kind: DiffLineKind.context,
+            text: 'first hunk line $index',
+            oldNumber: index,
+            newNumber: index,
+          ),
+        const DiffLine(kind: DiffLineKind.hunk, text: '@@ -500,0 +500 @@'),
+        const DiffLine(
+          kind: DiffLineKind.add,
+          text: 'second destination',
+          newNumber: 500,
+        ),
+      ],
+    );
+    final session = FullDiffSessionController(
+      repository: repository,
+      commits: commits,
+      initialIndex: 0,
+    );
+    addTearDown(session.dispose);
+    await session.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: repository,
+          commits: commits,
+          initialIndex: 0,
+          controller: session,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    const targetKey = Key('hunk-card-surface-hunk-1-0-500');
+    expect(find.byKey(targetKey), findsNothing);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+    await tester.pumpAndSettle();
+
+    expect(session.state.activeHunkIndex, 1);
+    final target = find.byKey(targetKey);
+    expect(target, findsOneWidget);
+    final viewport = tester.getRect(find.byKey(const Key('hunk-list')));
+    final targetRect = tester.getRect(target);
+    expect(targetRect.top, greaterThanOrEqualTo(viewport.top));
+    expect(targetRect.bottom, lessThanOrEqualTo(viewport.bottom));
   });
 
   testWidgets('full diff shares preview page scrolling', (tester) async {
@@ -6628,6 +6924,20 @@ void main() {
       tester.view.resetDevicePixelRatio();
       tester.view.resetPhysicalSize();
     });
+    final copied = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copied.add(
+              (call.arguments as Map<Object?, Object?>)['text']! as String,
+            );
+          }
+          return null;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null),
+    );
     await tester.pumpWidget(
       MaterialApp(
         home: DiffScreen(
@@ -6666,12 +6976,25 @@ void main() {
     // Drag with a mouse from the first line into the second.
     final first = find.text('alpha lib/one.dart');
     final second = find.text('beta lib/one.dart');
-    final paragraph = tester.renderObject<RenderParagraph>(
+    final firstParagraph = tester.renderObject<RenderParagraph>(
       find.descendant(of: first, matching: find.byType(RichText)),
     );
-    final start = paragraph.localToGlobal(
-      paragraph.getOffsetForCaret(const TextPosition(offset: 0), Rect.zero) +
+    final secondParagraph = tester.renderObject<RenderParagraph>(
+      find.descendant(of: second, matching: find.byType(RichText)),
+    );
+    final start = firstParagraph.localToGlobal(
+      firstParagraph.getOffsetForCaret(
+            const TextPosition(offset: 0),
+            Rect.zero,
+          ) +
           const Offset(1, 6),
+    );
+    final end = secondParagraph.localToGlobal(
+      secondParagraph.getOffsetForCaret(
+            const TextPosition(offset: 'beta lib/one.dart'.length),
+            Rect.zero,
+          ) +
+          const Offset(-1, 6),
     );
     final gesture = await tester.startGesture(
       start,
@@ -6679,13 +7002,19 @@ void main() {
     );
     addTearDown(gesture.removePointer);
     await tester.pump();
-    await gesture.moveTo(tester.getCenter(second));
+    await gesture.moveTo(end);
     await tester.pump();
     await gesture.up();
     await tester.pumpAndSettle();
 
+    Actions.invoke(tester.element(first), CopySelectionTextIntent.copy);
+    await tester.pump();
+    expect(copied, hasLength(1));
+    expect(copied.single, contains('alpha lib/one.dart'));
+    expect(copied.single, contains('beta lib/one.dart'));
+
     // The Hunk card keeps selection local, and the keyboard still drives the
-    // screen after the drag.
+    // screen after copying the drag selection.
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
     expect(find.text('alpha lib/two.dart'), findsOneWidget);

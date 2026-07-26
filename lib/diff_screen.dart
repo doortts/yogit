@@ -49,6 +49,11 @@ class _StepFileIntent extends Intent {
   final int delta;
 }
 
+/// Full-diff workspace for one controller-backed session.
+///
+/// Rebuilding an owned session with new [repository] or [commits] replaces that
+/// session. Changing [controller] swaps the subscription, while an injected
+/// controller remains externally owned and authoritative for its session.
 class DiffScreen extends StatefulWidget {
   const DiffScreen({
     required this.repository,
@@ -77,14 +82,15 @@ class _DiffScreenState extends State<DiffScreen> {
   final _diffScroll = ScrollController();
   Map<String, GlobalKey> _anchorKeys = <String, GlobalKey>{};
 
-  late final FullDiffSessionController _controller;
-  late final bool _ownsController;
+  late FullDiffSessionController _controller;
+  late bool _ownsController;
   late FullDiffSessionState _observedState;
   late double _commitsWidth;
   late double _filesWidth;
   bool _effectScheduled = false;
   bool _pendingScrollToTop = false;
-  bool _pendingActiveAnchor = false;
+  int? _pendingAnchorIndex;
+  int _pendingAnchorDirection = 0;
 
   @override
   void initState() {
@@ -102,6 +108,40 @@ class _DiffScreenState extends State<DiffScreen> {
     _observedState = _controller.state;
     _reconcileAnchorKeys(_observedState.document);
     _controller.addListener(_handleControllerChanged);
+    if (_ownsController) _controller.initialize();
+  }
+
+  @override
+  void didUpdateWidget(covariant DiffScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final controllerChanged = !identical(
+      widget.controller,
+      oldWidget.controller,
+    );
+    final ownedInputsChanged =
+        widget.controller == null &&
+        oldWidget.controller == null &&
+        (!identical(widget.repository, oldWidget.repository) ||
+            !identical(widget.commits, oldWidget.commits) ||
+            widget.initialIndex != oldWidget.initialIndex);
+    if (!controllerChanged && !ownedInputsChanged) return;
+
+    _controller.removeListener(_handleControllerChanged);
+    if (_ownsController) _controller.dispose();
+    _ownsController = widget.controller == null;
+    _controller =
+        widget.controller ??
+        FullDiffSessionController(
+          repository: widget.repository,
+          commits: widget.commits,
+          initialIndex: widget.initialIndex,
+        );
+    _observedState = _controller.state;
+    _reconcileAnchorKeys(_observedState.document);
+    _pendingScrollToTop = true;
+    _pendingAnchorIndex = null;
+    _controller.addListener(_handleControllerChanged);
+    _scheduleScrollEffect();
     if (_ownsController) _controller.initialize();
   }
 
@@ -126,14 +166,19 @@ class _DiffScreenState extends State<DiffScreen> {
     if (changedDocument) _reconcileAnchorKeys(next.document);
     if (movedContext) {
       _pendingScrollToTop = true;
-      if (next.activeHunkIndex == 0) _pendingActiveAnchor = false;
+      if (next.activeHunkIndex == 0) _pendingAnchorIndex = null;
     }
     if (!_pendingScrollToTop &&
         (changedDocument || previous.activeHunkIndex != next.activeHunkIndex) &&
         !(movedContext && next.activeHunkIndex == 0)) {
-      _pendingActiveAnchor = true;
+      _pendingAnchorIndex = next.activeHunkIndex;
+      _pendingAnchorDirection = next.activeHunkIndex.compareTo(
+        previous.activeHunkIndex,
+      );
     }
-    if (_pendingScrollToTop || _pendingActiveAnchor) _scheduleScrollEffect();
+    if (_pendingScrollToTop || _pendingAnchorIndex != null) {
+      _scheduleScrollEffect();
+    }
   }
 
   void _reconcileAnchorKeys(DiffDocument? document) {
@@ -157,29 +202,63 @@ class _DiffScreenState extends State<DiffScreen> {
           _pendingScrollToTop = false;
         }
       }
-      if (!_pendingActiveAnchor) return;
-      _pendingActiveAnchor = false;
+      final pendingIndex = _pendingAnchorIndex;
+      if (pendingIndex == null) return;
       final state = _controller.state;
       final document = state.document;
-      final index = state.activeHunkIndex;
-      if (document == null || index < 0 || index >= document.hunks.length) {
+      if (document == null ||
+          pendingIndex != state.activeHunkIndex ||
+          pendingIndex < 0 ||
+          pendingIndex >= document.hunks.length) {
+        _pendingAnchorIndex = null;
         return;
       }
       final context =
-          _anchorKeys[document.hunks[index].anchor.id]?.currentContext;
-      if (context == null) return;
-      Scrollable.ensureVisible(
-        context,
-        alignment: 0.1,
-        duration: const Duration(milliseconds: 100),
-      );
+          _anchorKeys[document.hunks[pendingIndex].anchor.id]?.currentContext;
+      if (context != null) {
+        _pendingAnchorIndex = null;
+        Scrollable.ensureVisible(
+          context,
+          alignment: 0.1,
+          duration: const Duration(milliseconds: 100),
+        );
+        return;
+      }
+      if (!_diffScroll.hasClients) {
+        _pendingAnchorIndex = null;
+        return;
+      }
+
+      final position = _diffScroll.position;
+      final direction = _pendingAnchorDirection == 0
+          ? _directionToUnmountedHunk(document, pendingIndex)
+          : _pendingAnchorDirection;
+      final nextOffset =
+          (position.pixels + direction * position.viewportDimension).clamp(
+            position.minScrollExtent,
+            position.maxScrollExtent,
+          );
+      if ((nextOffset - position.pixels).abs() < 0.5) {
+        _pendingAnchorIndex = null;
+        return;
+      }
+      _diffScroll.jumpTo(nextOffset);
+      _scheduleScrollEffect();
     });
+    WidgetsBinding.instance.scheduleFrame();
+  }
+
+  int _directionToUnmountedHunk(DiffDocument document, int targetIndex) {
+    for (final hunk in document.hunks) {
+      if (_anchorKeys[hunk.anchor.id]?.currentContext == null) continue;
+      if (targetIndex < hunk.index) return -1;
+      if (targetIndex > hunk.index) return 1;
+    }
+    return targetIndex == 0 ? -1 : 1;
   }
 
   void _stepHunk(int delta) {
     _controller.stepHunk(delta);
-    _pendingActiveAnchor = true;
-    _scheduleScrollEffect();
   }
 
   void _stepFile(int delta) {
@@ -195,7 +274,7 @@ class _DiffScreenState extends State<DiffScreen> {
 
   void _stepCommit(int delta) {
     final index = _controller.state.commitIndex;
-    final next = (index + delta).clamp(0, widget.commits.length - 1);
+    final next = (index + delta).clamp(0, _controller.commits.length - 1);
     if (next != index) _controller.selectCommit(next);
   }
 
@@ -512,9 +591,9 @@ class _DiffScreenState extends State<DiffScreen> {
           child: _selectable(
             ListView.builder(
               key: const Key('nearby-commits-list'),
-              itemCount: widget.commits.length,
+              itemCount: _controller.commits.length,
               itemBuilder: (context, index) {
-                final commit = widget.commits[index];
+                final commit = _controller.commits[index];
                 final selected = index == state.commitIndex;
                 return ListTile(
                   key: selected ? Key('selected-nearby-${commit.sha}') : null,
@@ -547,7 +626,7 @@ class _DiffScreenState extends State<DiffScreen> {
   );
 
   Widget _detailsAndFiles(FullDiffSessionState state) {
-    final commit = widget.commits[state.commitIndex];
+    final commit = _controller.commits[state.commitIndex];
     return Material(
       color: _surface,
       shape: const Border(right: BorderSide(color: _border)),
@@ -604,9 +683,16 @@ class _DiffScreenState extends State<DiffScreen> {
                       )
                         DropdownMenuItem(
                           value: commit.parents[index],
-                          child: Text(
-                            'Parent ${index + 1} · '
-                            '${_shortSha(commit.parents[index])}',
+                          child: Text.rich(
+                            TextSpan(
+                              children: [
+                                TextSpan(text: 'Parent ${index + 1} · '),
+                                TextSpan(
+                                  text: _shortSha(commit.parents[index]),
+                                  style: technicalTextStyle,
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                     ],
@@ -779,24 +865,77 @@ class _DiffScreenState extends State<DiffScreen> {
                 style: const TextStyle(color: _deleted, fontSize: 11),
               ),
             ),
-          Expanded(
-            child: HunkListView(
-              document: state.document ?? DiffDocument.empty,
-              activeHunkIndex: state.activeHunkIndex,
-              wrapLines: state.wrapLines,
-              controller: _diffScroll,
-              anchorKeys: _anchorKeys,
-              onHunkSelected: (index) {
-                if (index != state.activeHunkIndex) {
-                  _controller.selectHunk(index);
-                }
-              },
-            ),
-          ),
+          Expanded(child: _diffBody(state)),
         ],
       ),
     );
   }
+
+  Widget _diffBody(FullDiffSessionState state) {
+    final document = state.document;
+    if (document != null) {
+      return HunkListView(
+        document: document,
+        activeHunkIndex: state.activeHunkIndex,
+        wrapLines: state.wrapLines,
+        controller: _diffScroll,
+        anchorKeys: _anchorKeys,
+        onHunkSelected: (index) {
+          if (index != state.activeHunkIndex) {
+            _controller.selectHunk(index);
+          }
+        },
+      );
+    }
+    if (state.error != null) {
+      return _diffStatus(
+        key: const Key('diff-error-without-document'),
+        message: 'Unable to load diff',
+      );
+    }
+    if (state.loadingFiles) {
+      return _diffStatus(
+        key: const Key('diff-pending-files'),
+        message: 'Loading changed files…',
+        loading: true,
+      );
+    }
+    if (state.loadingDiff) {
+      return _diffStatus(
+        key: const Key('diff-pending-first-diff'),
+        message: 'Loading diff…',
+        loading: true,
+      );
+    }
+    return _diffStatus(
+      key: const Key('diff-no-file-selected'),
+      message: 'No file selected',
+    );
+  }
+
+  Widget _diffStatus({
+    required Key key,
+    required String message,
+    bool loading = false,
+  }) => ColoredBox(
+    key: key,
+    color: _background,
+    child: Center(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (loading) ...[
+            const SizedBox.square(
+              dimension: 14,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 8),
+          ],
+          Text(message, style: const TextStyle(color: _muted, fontSize: 12)),
+        ],
+      ),
+    ),
+  );
 
   Widget _selectable(Widget child) => SelectionArea(child: child);
 

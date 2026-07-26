@@ -487,6 +487,7 @@ void main() {
       );
       final item = _commit('a', ['b']);
 
+      await repository.loadDiff(item, 'lib/a.dart');
       await repository.loadDiff(
         item,
         'lib/a.dart',
@@ -494,8 +495,11 @@ void main() {
         ignoreWhitespace: true,
       );
 
+      expect(calls, hasLength(2));
+      expect(calls.first, contains('--unified=3'));
+      expect(calls.first, isNot(contains('--ignore-all-space')));
       expect(
-        calls.single,
+        calls.last,
         containsAllInOrder([
           '--unified=3',
           '--ignore-all-space',
