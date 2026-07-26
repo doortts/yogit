@@ -26,45 +26,60 @@ class FullHistoryView extends StatelessWidget {
   final ScrollController? controller;
 
   @override
-  Widget build(BuildContext context) => Actions(
-    actions: {
-      HistoryEntryIntent: CallbackAction<HistoryEntryIntent>(
-        onInvoke: (intent) {
-          onSelected(intent.entry);
-          return null;
-        },
-      ),
-    },
-    child: FocusTraversalGroup(
-      child: ListView.builder(
-        key: const Key('history-list'),
-        controller: controller,
-        primary: controller == null,
-        itemCount: entries.length,
-        itemBuilder: (context, index) {
-          final entry = entries[index];
-          return Focus(
-            autofocus: index == 0,
-            onKeyEvent: (_, event) {
-              if (event is KeyDownEvent &&
-                  event.logicalKey == LogicalKeyboardKey.enter) {
+  Widget build(BuildContext context) {
+    if (entries.isEmpty) {
+      return const Center(
+        child: Text(
+          'No file history',
+          style: TextStyle(color: fullDiffMuted, fontSize: 14),
+        ),
+      );
+    }
+    return Actions(
+      actions: {
+        HistoryEntryIntent: CallbackAction<HistoryEntryIntent>(
+          onInvoke: (intent) {
+            onSelected(intent.entry);
+            return null;
+          },
+        ),
+      },
+      child: FocusTraversalGroup(
+        child: ListView.builder(
+          key: const Key('history-list'),
+          controller: controller,
+          primary: controller == null,
+          itemCount: entries.length,
+          itemBuilder: (context, index) {
+            final entry = entries[index];
+            final isSelected = identical(entry, selected);
+            void activate() =>
                 Actions.invoke(context, HistoryEntryIntent(entry));
-                return KeyEventResult.handled;
-              }
-              return KeyEventResult.ignored;
-            },
-            child: InkWell(
-              onTap: () => Actions.invoke(context, HistoryEntryIntent(entry)),
-              child: HistoryRow(
-                entry: entry,
-                selected: identical(entry, selected),
+            return Focus(
+              autofocus: index == 0,
+              onKeyEvent: (_, event) {
+                if (event is KeyDownEvent &&
+                    event.logicalKey == LogicalKeyboardKey.enter) {
+                  activate();
+                  return KeyEventResult.handled;
+                }
+                return KeyEventResult.ignored;
+              },
+              child: Semantics(
+                selected: isSelected,
+                button: true,
+                onTap: activate,
+                child: InkWell(
+                  onTap: activate,
+                  child: HistoryRow(entry: entry, selected: isSelected),
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class HistoryRow extends StatelessWidget {

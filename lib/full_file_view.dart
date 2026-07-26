@@ -36,10 +36,12 @@ class FullFileView extends StatelessWidget {
       FileContentKind.utf8 => null,
     };
     if (status != null) {
-      return Center(
-        child: Text(
-          status,
-          style: const TextStyle(color: fullDiffMuted, fontSize: 14),
+      return _withDeletedBanner(
+        Center(
+          child: Text(
+            status,
+            style: const TextStyle(color: fullDiffMuted, fontSize: 14),
+          ),
         ),
       );
     }
@@ -80,7 +82,11 @@ class FullFileView extends StatelessWidget {
       },
     );
 
-    if (document.side != FileDocumentSide.old) return list;
+    return _withDeletedBanner(SelectionArea(child: list));
+  }
+
+  Widget _withDeletedBanner(Widget content) {
+    if (document.side != FileDocumentSide.old) return content;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -94,7 +100,7 @@ class FullFileView extends StatelessWidget {
             ),
           ),
         ),
-        Expanded(child: list),
+        Expanded(child: content),
       ],
     );
   }

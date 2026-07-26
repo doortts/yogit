@@ -137,6 +137,49 @@ void main() {
     expect(find.text('1'), findsOneWidget);
   });
 
+  testWidgets('deleted file keeps its banner with every source state', (
+    tester,
+  ) async {
+    final cases = <(FileContentKind, String)>[
+      (FileContentKind.binary, 'Binary file'),
+      (FileContentKind.unsupportedEncoding, 'Unsupported encoding'),
+      (FileContentKind.tooLarge, 'File too large'),
+      (FileContentKind.utf8, 'Empty file'),
+    ];
+
+    for (final (kind, label) in cases) {
+      await tester.pumpWidget(
+        qaApp(
+          FullFileView(
+            document: FileDocument(
+              revision: commitA.parents.single,
+              path: 'deleted.txt',
+              side: FileDocumentSide.old,
+              bytes: Uint8List(0),
+              kind: kind,
+              lines: const [],
+              hasTrailingNewline: false,
+              disableRichRendering: true,
+              fingerprint: '0:0',
+            ),
+            path: 'deleted.txt',
+            activeAnchor: null,
+            wrapLines: false,
+            highlighter: fakeHighlighter,
+            anchorKeys: const {},
+          ),
+        ),
+      );
+
+      expect(
+        find.text('Deleted file · showing previous version'),
+        findsOneWidget,
+        reason: '$kind',
+      );
+      expect(find.text(label), findsOneWidget, reason: '$kind');
+    }
+  });
+
   testWidgets('file view skips rich rendering when the document disables it', (
     tester,
   ) async {
@@ -167,6 +210,46 @@ void main() {
 
     expect(find.text('alpha'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('file source can be selected for copying', (tester) async {
+    final document = FileDocument.fromBytes(
+      revision: commitA.sha,
+      path: fileA.path,
+      side: FileDocumentSide.result,
+      bytes: Uint8List.fromList(utf8.encode('alpha\n')),
+      gitMarkedBinary: false,
+    );
+
+    await tester.pumpWidget(
+      qaApp(
+        FullFileView(
+          document: document,
+          path: document.path,
+          activeAnchor: null,
+          wrapLines: false,
+          highlighter: fakeHighlighter,
+          anchorKeys: const {},
+        ),
+      ),
+    );
+
+    expect(
+      find.ancestor(
+        of: find.text('alpha'),
+        matching: find.byType(SelectionArea),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('history shows an explicit empty state', (tester) async {
+    await tester.pumpWidget(
+      qaApp(FullHistoryView(entries: const [], onSelected: (_) {})),
+    );
+
+    expect(find.text('No file history'), findsOneWidget);
+    expect(find.byKey(const Key('history-list')), findsNothing);
   });
 
   testWidgets('history focus does not select until enter', (tester) async {
@@ -211,6 +294,33 @@ void main() {
 
     await tester.tap(find.text(historyEntries[1].commit.subject));
     expect(selected, same(historyEntries[1]));
+  });
+
+  testWidgets('history exposes the selected row as a semantic button', (
+    tester,
+  ) async {
+    final semanticsHandle = tester.ensureSemantics();
+    await tester.pumpWidget(
+      qaApp(
+        FullHistoryView(
+          entries: historyEntries,
+          selected: historyEntries.first,
+          onSelected: (_) {},
+        ),
+      ),
+    );
+
+    final selectedSemantics = tester.widget<Semantics>(
+      find.ancestor(
+        of: find.byKey(Key('history-row-${commitA.sha}')),
+        matching: find.byWidgetPredicate(
+          (widget) => widget is Semantics && widget.properties.selected == true,
+        ),
+      ),
+    );
+    expect(selectedSemantics.properties.button, isTrue);
+    expect(selectedSemantics.properties.onTap, isNotNull);
+    semanticsHandle.dispose();
   });
 
   testWidgets('history uses a supplied scroll controller', (tester) async {
@@ -323,6 +433,44 @@ void main() {
 
     expect(find.text('alpha'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('blame source can be selected for copying', (tester) async {
+    final file = FileDocument.fromBytes(
+      revision: commitA.sha,
+      path: fileA.path,
+      side: FileDocumentSide.result,
+      bytes: Uint8List.fromList(utf8.encode('alpha\n')),
+      gitMarkedBinary: false,
+    );
+    final blame = BlameDocument.fromGitLines(file, const [
+      GitBlameLine(
+        lineNumber: 1,
+        sha: '40aff6d123456789',
+        author: 'Suwon Chae',
+        uncommitted: false,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      qaApp(
+        FullBlameView(
+          document: blame,
+          activeAnchor: null,
+          wrapLines: false,
+          highlighter: fakeHighlighter,
+          anchorKeys: const {},
+        ),
+      ),
+    );
+
+    expect(
+      find.ancestor(
+        of: find.text('alpha'),
+        matching: find.byType(SelectionArea),
+      ),
+      findsOneWidget,
+    );
   });
 }
 

@@ -30,29 +30,31 @@ class FullBlameView extends StatelessWidget {
       FileDocumentSide.old => activeAnchor?.oldLine,
       FileDocumentSide.result => activeAnchor?.newLine,
     };
-    return ListView.builder(
-      key: const Key('blame-list'),
-      controller: controller,
-      primary: controller == null,
-      itemCount: document.file.lines.length,
-      itemBuilder: (context, index) {
-        final lineNumber = index + 1;
-        final current = lineNumber == sourceLine;
-        Widget row = BlameSourceRow(
-          blame: document.lines[index],
-          source: document.file.lines[index],
-          path: document.file.path,
-          wrapLines: wrapLines,
-          highlighter: document.file.disableRichRendering
-              ? const _NoopSyntaxHighlighter()
-              : highlighter,
-          current: current,
-        );
-        if (current && activeAnchor != null) {
-          row = KeyedSubtree(key: _anchorKey(activeAnchor!), child: row);
-        }
-        return row;
-      },
+    return SelectionArea(
+      child: ListView.builder(
+        key: const Key('blame-list'),
+        controller: controller,
+        primary: controller == null,
+        itemCount: document.file.lines.length,
+        itemBuilder: (context, index) {
+          final lineNumber = index + 1;
+          final current = lineNumber == sourceLine;
+          Widget row = BlameSourceRow(
+            blame: document.lines[index],
+            source: document.file.lines[index],
+            path: document.file.path,
+            wrapLines: wrapLines,
+            highlighter: document.file.disableRichRendering
+                ? const _NoopSyntaxHighlighter()
+                : highlighter,
+            current: current,
+          );
+          if (current && activeAnchor != null) {
+            row = KeyedSubtree(key: _anchorKey(activeAnchor!), child: row);
+          }
+          return row;
+        },
+      ),
     );
   }
 
