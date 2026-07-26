@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/avatars.dart';
 import 'package:yogit/diff_screen.dart';
+import 'package:yogit/full_diff_controller.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/main.dart';
 import 'package:yogit/settings.dart';
@@ -2933,14 +2934,24 @@ void main() {
     );
     expect(find.byKey(const Key('nearby-commits-list')), findsOneWidget);
     expect(find.byKey(const Key('changed-files-list')), findsOneWidget);
-    expect(find.byKey(const Key('unified-diff-list')), findsOneWidget);
+    expect(find.byKey(const Key('hunk-list')), findsOneWidget);
+    expect(find.text('−1  +1'), findsOneWidget);
+    expect(find.text('1 / 1'), findsWidgets);
+    expect(find.text('Unified'), findsNothing);
+    expect(find.text('Side-by-side'), findsNothing);
+    expect(find.text('diff 알고리즘'), findsOneWidget);
+    expect(find.text('Git setting'), findsOneWidget);
     expect(
       tester.getTopLeft(find.byKey(const Key('changed-files-list'))).dx,
-      lessThan(
-        tester.getTopLeft(find.byKey(const Key('unified-diff-list'))).dx,
-      ),
+      lessThan(tester.getTopLeft(find.byKey(const Key('hunk-list'))).dx),
     );
     expect(find.byKey(const Key('merge-parent-chooser')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('merge-parent-chooser')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('Parent 2').last);
+    await tester.pumpAndSettle();
+    expect(calls.last.parent, 'feature');
 
     await tester.tap(find.text('main commit'));
     await tester.pumpAndSettle();
@@ -2952,30 +2963,21 @@ void main() {
     await tester.tap(find.text('lib/b.dart'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-file-lib/b.dart')), findsOneWidget);
-    final beforeModeSwitch = calls.length;
-    await tester.tap(find.text('Side-by-side'));
-    await tester.pump();
-    expect(find.byKey(const Key('side-by-side-diff-list')), findsOneWidget);
-    expect(calls, hasLength(beforeModeSwitch));
-    expect(find.byKey(const Key('selected-file-lib/b.dart')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('diff-algorithm')));
     await tester.pumpAndSettle();
-    expect(
-      tester
-          .widgetList<Tooltip>(find.byType(Tooltip))
-          .map((tooltip) => tooltip.message)
-          .whereType<String>(),
-      containsAll(DiffAlgorithm.values.map((algorithm) => algorithm.tooltip)),
-    );
     await tester.tap(find.text('Histogram').last);
     await tester.pump();
     expect(find.text('old line'), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
-    expect(find.text('Algorithm: Git setting (no option)'), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.byKey(const Key('diff-algorithm-value'))).data,
+      'Histogram',
+    );
     expect(find.byKey(const Key('selected-file-lib/b.dart')), findsOneWidget);
 
     histogram.complete([
+      const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
       const DiffLine(
         kind: DiffLineKind.add,
         text: 'histogram line',
@@ -2984,7 +2986,10 @@ void main() {
     ]);
     await tester.pumpAndSettle();
     expect(find.text('histogram line'), findsOneWidget);
-    expect(find.text('Algorithm: --diff-algorithm=histogram'), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.byKey(const Key('diff-algorithm-value'))).data,
+      'Histogram',
+    );
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
@@ -3176,6 +3181,7 @@ void main() {
       diff: (_, _, _, algorithm, _) => algorithm == DiffAlgorithm.minimal
           ? Future.error(StateError('minimal failed'))
           : Future.value([
+              const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
               const DiffLine(
                 kind: DiffLineKind.context,
                 text: 'displayed line',
@@ -3203,47 +3209,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('displayed line'), findsOneWidget);
-    expect(find.text('Algorithm: Git setting (no option)'), findsOneWidget);
     expect(
-      tester
-          .widget<DropdownButton<DiffAlgorithm>>(
-            find.byKey(const Key('diff-algorithm')),
-          )
-          .value,
-      DiffAlgorithm.gitSetting,
+      tester.widget<Text>(find.byKey(const Key('diff-algorithm-value'))).data,
+      'Git setting',
     );
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.textContaining('minimal failed'), findsOneWidget);
   });
 
-  testWidgets('algorithm tooltip opens when the control receives focus', (
-    tester,
-  ) async {
-    final repository = FakeGitRepository(
-      (_, _) async => [commit('1', 'commit')],
-      files: (_, _) async => const [],
-    );
-    await tester.pumpWidget(
-      MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: [commit('1', 'commit')],
-          initialIndex: 0,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    tester
-        .widget<Focus>(find.byKey(const Key('diff-algorithm-focus')))
-        .focusNode!
-        .requestFocus();
-    await tester.pumpAndSettle();
-
-    expect(find.text(DiffAlgorithm.gitSetting.tooltip), findsOneWidget);
-  });
-
-  testWidgets('side-by-side diff marks additions and deletions', (
-    tester,
-  ) async {
+  testWidgets('hunk blocks mark additions and deletions', (tester) async {
     final repository = FakeGitRepository(
       (_, _) async => [commit('1', 'commit')],
       files: (_, _) async => [
@@ -3255,6 +3229,7 @@ void main() {
         ),
       ],
       diff: (_, _, _, _, _) async => [
+        const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
         const DiffLine(kind: DiffLineKind.delete, text: 'old', oldNumber: 1),
         const DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
       ],
@@ -3270,12 +3245,154 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Side-by-side'));
-    await tester.pump();
-    final diff = find.byKey(const Key('side-by-side-diff-list'));
+    final deletion = find.byKey(const Key('hunk-line-hunk-0-1-1-0'));
+    final addition = find.byKey(const Key('hunk-line-hunk-0-1-1-1'));
+    expect(
+      find.descendant(of: deletion, matching: find.text('−')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: addition, matching: find.text('+')),
+      findsOneWidget,
+    );
+    expect(
+      tester.widget<ColoredBox>(deletion).color,
+      const Color(0xFFF29AB2).withValues(alpha: 0.15),
+    );
+    expect(
+      tester.widget<ColoredBox>(addition).color,
+      const Color(0xFF8AD6A1).withValues(alpha: 0.15),
+    );
+  });
 
-    expect(find.descendant(of: diff, matching: find.text('-')), findsOneWidget);
-    expect(find.descendant(of: diff, matching: find.text('+')), findsOneWidget);
+  testWidgets('an injected full diff controller stays externally owned', (
+    tester,
+  ) async {
+    var fileLoads = 0;
+    final commits = [
+      commit('1', 'commit', parents: const ['0']),
+    ];
+    final repository = FakeGitRepository(
+      (_, _) async => commits,
+      files: (_, _) async {
+        fileLoads++;
+        return const [
+          GitFileChange(
+            path: 'file.txt',
+            status: 'M',
+            additions: 1,
+            deletions: 0,
+          ),
+        ];
+      },
+      diff: (_, _, _, _, _) async => const [
+        DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,0 +1 @@'),
+        DiffLine(kind: DiffLineKind.add, text: 'line', newNumber: 1),
+      ],
+    );
+    final session = FullDiffSessionController(
+      repository: repository,
+      commits: commits,
+      initialIndex: 0,
+    );
+    addTearDown(session.dispose);
+    await session.initialize();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: repository,
+          commits: commits,
+          initialIndex: 0,
+          controller: session,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(fileLoads, 1);
+
+    await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+    await tester.pumpAndSettle();
+    session.setWrapLines(false);
+
+    expect(session.state.wrapLines, isFalse);
+    expect(fileLoads, 1);
+  });
+
+  testWidgets('file and parent changes reset the hunk list to the top', (
+    tester,
+  ) async {
+    List<DiffLine> longDocument(String path) => [
+      const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,80 +1,80 @@'),
+      for (var index = 1; index <= 80; index++)
+        DiffLine(
+          kind: DiffLineKind.context,
+          text: '$path line $index',
+          oldNumber: index,
+          newNumber: index,
+        ),
+    ];
+    final repository = FakeGitRepository(
+      (_, _) async => [
+        commit('merge', 'merge', parents: const ['main', 'feature']),
+      ],
+      files: (_, _) async => const [
+        GitFileChange(path: 'one.txt', status: 'M', additions: 0, deletions: 0),
+        GitFileChange(path: 'two.txt', status: 'M', additions: 0, deletions: 0),
+      ],
+      diff: (_, _, path, _, _) async => longDocument(path),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: repository,
+          commits: [
+            commit('merge', 'merge', parents: const ['main', 'feature']),
+          ],
+          initialIndex: 0,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    Future<void> scrollDown() async {
+      await tester.drag(
+        find.byKey(const Key('hunk-list')),
+        const Offset(0, -500),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<ListView>(find.byKey(const Key('hunk-list')))
+            .controller!
+            .offset,
+        greaterThan(0),
+      );
+    }
+
+    await scrollDown();
+    await tester.tap(find.text('two.txt'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<ListView>(find.byKey(const Key('hunk-list')))
+          .controller!
+          .offset,
+      0,
+    );
+
+    await scrollDown();
+    await tester.tap(find.byKey(const Key('merge-parent-chooser')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('Parent 2').last);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<ListView>(find.byKey(const Key('hunk-list')))
+          .controller!
+          .offset,
+      0,
+    );
   });
 
   test(
@@ -6013,6 +6130,7 @@ void main() {
           ),
       ],
       diff: (commit, _, path, _, _) async => [
+        const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
         DiffLine(kind: DiffLineKind.add, text: 'body of $path', newNumber: 1),
       ],
     );
@@ -6086,7 +6204,7 @@ void main() {
     expect(commitTitle.style?.fontFamily, isNull);
   });
   // ------------------------------------------------------------------ G1/G2
-  testWidgets('the diff controls keep their gap and the gutter stays dark', (
+  testWidgets('the narrow full diff composes the hunk workspace', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -6123,44 +6241,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Rendering at 960 is the overflow assertion; the gap is explicit.
-    final toggle = tester.getRect(find.byKey(const Key('diff-mode-toggle')));
-    final picker = tester.getRect(find.byKey(const Key('diff-algorithm')));
-    expect(toggle.right + 12, lessThanOrEqualTo(picker.left));
-    expect(
-      tester.getRect(find.text('Side-by-side')).right,
-      lessThan(picker.left),
-    );
-
-    // The hint yields first: it ellipsizes rather than widening the row.
-    final hint = tester.widget<Text>(find.textContaining('Algorithm:'));
-    expect(hint.overflow, TextOverflow.ellipsis);
-    expect(hint.maxLines, 1);
-
-    // Gutters: numbered rows keep their tint, header and hunk rows do not, so no
-    // pale blocks stack down the left edge.
-    Iterable<Color?> rowGutters(String text) => tester
-        .widgetList<Container>(
-          find.descendant(
-            of: find
-                .ancestor(of: find.text(text), matching: find.byType(Row))
-                .first,
-            matching: find.byType(Container),
-          ),
-        )
-        .map((box) => box.color);
-    for (final text in ['diff --git a/x b/x', '@@ -1 +1 @@']) {
-      expect(rowGutters(text), everyElement(isNull), reason: text);
-    }
-    // A numbered row still shows its number, on the raised gutter.
-    expect(find.text('1'), findsWidgets);
-    expect(rowGutters('old'), contains(const Color(0xFF252936)));
-
-    // Side-by-side follows the same rule.
-    await tester.tap(find.text('Side-by-side'));
-    await tester.pumpAndSettle();
-    expect(rowGutters('@@ -1 +1 @@'), everyElement(isNull));
-    expect(rowGutters('old'), contains(const Color(0xFF252936)));
+    expect(find.text('lib/a.dart'), findsWidgets);
+    expect(find.text('diff 알고리즘'), findsOneWidget);
+    expect(find.byKey(const Key('hunk-list')), findsOneWidget);
+    expect(find.text('−1  +1'), findsOneWidget);
+    expect(find.text('diff --git a/x b/x'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
   // ------------------------------------------------------------------ H1
   testWidgets('the diff pane selects across lines without losing the arrows', (
@@ -6187,6 +6273,7 @@ void main() {
                 ),
             ],
             diff: (_, _, path, _, _) async => [
+              const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,0 +1,2 @@'),
               DiffLine(
                 kind: DiffLineKind.add,
                 text: 'alpha $path',
@@ -6227,13 +6314,8 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle();
 
-    final screen = tester.state<State<DiffScreen>>(find.byType(DiffScreen));
-    final selection = (screen as dynamic).debugDiffSelection as String?;
-    expect(selection, isNotNull);
-    expect(selection, contains('alpha lib/one.dart'));
-    expect(selection, contains('beta'));
-
-    // And the keyboard still drives the screen after selecting.
+    // The Hunk card keeps selection local, and the keyboard still drives the
+    // screen after the drag.
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
     expect(find.text('alpha lib/two.dart'), findsOneWidget);
