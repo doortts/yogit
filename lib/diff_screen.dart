@@ -525,7 +525,13 @@ class _DiffScreenState extends State<DiffScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  subtitle: Text(commit.shortSha),
+                  subtitle: Text(
+                    commit.shortSha,
+                    style: const TextStyle(
+                      fontFamily: technicalFontFamily,
+                      fontFamilyFallback: technicalFontFallback,
+                    ),
+                  ),
                   onTap: () {
                     if (index != state.commitIndex) {
                       _controller.selectCommit(index);
@@ -563,9 +569,26 @@ class _DiffScreenState extends State<DiffScreen> {
                   ),
                 ),
                 const SizedBox(height: 5),
-                Text(
-                  '${commit.shortSha} · ${commit.author.name}',
-                  style: const TextStyle(color: _muted, fontSize: 11),
+                Row(
+                  children: [
+                    Text(
+                      commit.shortSha,
+                      style: const TextStyle(
+                        color: _muted,
+                        fontFamily: technicalFontFamily,
+                        fontFamilyFallback: technicalFontFallback,
+                        fontSize: 11,
+                      ),
+                    ),
+                    Flexible(
+                      child: Text(
+                        ' · ${commit.author.name}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: _muted, fontSize: 11),
+                      ),
+                    ),
+                  ],
                 ),
                 if (commit.parents.length > 1) ...[
                   const SizedBox(height: 8),

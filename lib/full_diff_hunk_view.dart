@@ -169,7 +169,12 @@ class _HunkHeader extends StatelessWidget {
               hunk.context,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: _text, fontSize: 12),
+              style: const TextStyle(
+                color: _text,
+                fontFamily: technicalFontFamily,
+                fontFamilyFallback: technicalFontFallback,
+                fontSize: 12,
+              ),
             ),
           ),
           const SizedBox(width: 10),

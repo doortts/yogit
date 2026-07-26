@@ -6552,6 +6552,24 @@ void main() {
     expect(path.style?.fontFamily, technicalFontFamily);
     expect(path.style?.fontFamilyFallback, technicalFontFallback);
 
+    final nearbyHash = tester.widget<Text>(
+      find.descendant(
+        of: find.byKey(const Key('nearby-column')),
+        matching: find.text('newer'),
+      ),
+    );
+    expect(nearbyHash.style?.fontFamily, technicalFontFamily);
+    expect(nearbyHash.style?.fontFamilyFallback, technicalFontFallback);
+
+    final detailsHash = tester.widget<Text>(
+      find.descendant(
+        of: find.byKey(const Key('details-files-column')),
+        matching: find.text('newer'),
+      ),
+    );
+    expect(detailsHash.style?.fontFamily, technicalFontFamily);
+    expect(detailsHash.style?.fontFamilyFallback, technicalFontFallback);
+
     final commitTitle = tester.widget<Text>(find.text('newer commit').first);
     expect(commitTitle.style?.fontFamily, isNull);
   });

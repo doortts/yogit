@@ -7,6 +7,7 @@ import 'package:yogit/full_diff_header.dart';
 import 'package:yogit/full_diff_hunk_view.dart';
 import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/git.dart';
+import 'package:yogit/typography.dart';
 
 void main() {
   testWidgets('keeps the algorithm name fixed beside its selected value', (
@@ -269,6 +270,24 @@ void main() {
     expect(find.textContaining('diff --git'), findsNothing);
     expect(find.text('−'), findsOneWidget);
     expect(find.text('+'), findsOneWidget);
+  });
+
+  testWidgets('renders hunk context with the technical font stack', (
+    tester,
+  ) async {
+    final document = DiffDocument.fromLines(const [
+      DiffLine(
+        kind: DiffLineKind.hunk,
+        text: '@@ -10 +10 @@ procedure ConfigureWindow',
+      ),
+      DiffLine(kind: DiffLineKind.context, text: 'begin', oldNumber: 10),
+    ]);
+
+    await _pumpHunkList(tester, document: document);
+
+    final context = tester.widget<Text>(find.text('procedure ConfigureWindow'));
+    expect(context.style?.fontFamily, technicalFontFamily);
+    expect(context.style?.fontFamilyFallback, technicalFontFallback);
   });
 
   testWidgets('shows surrounding context and exact add and delete fills', (
