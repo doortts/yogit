@@ -21,7 +21,6 @@ const _muted = Color(0xFF8D94A8);
 const _hash = Color(0xFFEF6C63);
 const _accent = Color(0xFF263246);
 const _selectedRow = Color(0xFF1F4D8F);
-const _selectedChip = Color(0xFF2B4E86);
 const _deleted = Color(0xFFF29AB2);
 const _renamed = Color(0xFFB6A0EA);
 
@@ -1950,129 +1949,144 @@ class _TimelineScreenState extends State<TimelineScreen> {
         onTap: () => _select(index),
         child: ColoredBox(
           color: selected
-              ? _selectedRow
+              ? _background
               : hovered
               ? _accent.withValues(alpha: 0.48)
               : _background,
-          child: Row(
+          child: Stack(
             children: [
-              _refsCell(entry.rowIndex, commit, refs, branchColor, selected),
-              _graphCell(
-                Key('graph-painter-${entry.rowIndex}'),
-                painter,
-                graphWidth,
-                cellKey: Key('graph-cell-${entry.rowIndex}'),
-                node: commit.isWorkingTree || merge
-                    ? null
-                    : Positioned(
-                        left: painter.laneX(row.lane) - avatarSize / 2,
-                        top: (TimelineScreen.rowHeight - avatarSize) / 2,
-                        child: CommitAvatarStack(
-                          commit: commit,
-                          avatarService: widget.avatarService,
-                          showRemoteAvatars: widget.showRemoteAvatars,
-                          size: avatarSize,
-                          stacked: stacked,
-                          discColor: branchColor,
-                        ),
-                      ),
-              ),
-              _cell(
-                _w('hash'),
-                Text(
-                  commit.isWorkingTree ? '·······' : commit.shortSha,
-                  style: TextStyle(
-                    color: selected ? _text : _hash,
-                    fontSize: 12,
-                    fontFamily: cellFont,
-                    fontFamilyFallback: cellFontFallback,
-                    fontWeight: FontWeight.w500,
+              if (selected)
+                Positioned(
+                  left: _w('refs') + painter.laneX(row.lane),
+                  top: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: ColoredBox(
+                    key: Key('selection-band-${commit.sha}'),
+                    color: _selectedRow,
                   ),
                 ),
-                leftBorder: branchColor,
-                ruleKey: Key('hash-rule-${entry.rowIndex}'),
-              ),
-              _cell(
-                commitWidth,
-                Text(
-                  commit.subject,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: _text,
-                    fontSize: 14,
-                    fontFamily: cellFont,
-                    fontFamilyFallback: cellFontFallback,
-                  ),
-                ),
-              ),
-              if (_showTime)
-                _cell(
-                  _w('time'),
-                  // The cell reads socially; the tooltip gives the exact moment.
-                  _tooltip(
-                    commit.isWorkingTree
+              Row(
+                children: [
+                  _refsCell(entry.rowIndex, commit, refs, branchColor),
+                  _graphCell(
+                    Key('graph-painter-${entry.rowIndex}'),
+                    painter,
+                    graphWidth,
+                    cellKey: Key('graph-cell-${entry.rowIndex}'),
+                    node: commit.isWorkingTree || merge
                         ? null
-                        : exactCommitTime(commit.committerTimestamp),
+                        : Positioned(
+                            left: painter.laneX(row.lane) - avatarSize / 2,
+                            top: (TimelineScreen.rowHeight - avatarSize) / 2,
+                            child: CommitAvatarStack(
+                              commit: commit,
+                              avatarService: widget.avatarService,
+                              showRemoteAvatars: widget.showRemoteAvatars,
+                              size: avatarSize,
+                              stacked: stacked,
+                              discColor: branchColor,
+                            ),
+                          ),
+                  ),
+                  _cell(
+                    _w('hash'),
                     Text(
-                      commit.isWorkingTree
-                          ? 'working tree'
-                          : _socialTime(commit.committerTimestamp),
+                      commit.isWorkingTree ? '·······' : commit.shortSha,
+                      style: TextStyle(
+                        color: selected ? _text : _hash,
+                        fontSize: 12,
+                        fontFamily: cellFont,
+                        fontFamilyFallback: cellFontFallback,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    leftBorder: branchColor,
+                    ruleKey: Key('hash-rule-${entry.rowIndex}'),
+                  ),
+                  _cell(
+                    commitWidth,
+                    Text(
+                      commit.subject,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: selected ? _text : _muted,
-                        fontSize: 12,
+                      style: const TextStyle(
+                        color: _text,
+                        fontSize: 14,
                         fontFamily: cellFont,
                         fontFamilyFallback: cellFontFallback,
                       ),
                     ),
                   ),
-                ),
-              if (_showName)
-                _cell(
-                  _w('name'),
-                  commit.isWorkingTree
-                      ? const Text(
-                          '—',
+                  if (_showTime)
+                    _cell(
+                      _w('time'),
+                      // The cell reads socially; the tooltip gives the exact moment.
+                      _tooltip(
+                        commit.isWorkingTree
+                            ? null
+                            : exactCommitTime(commit.committerTimestamp),
+                        Text(
+                          commit.isWorkingTree
+                              ? 'working tree'
+                              : _socialTime(commit.committerTimestamp),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: _muted,
+                            color: selected ? _text : _muted,
                             fontSize: 12,
                             fontFamily: cellFont,
                             fontFamilyFallback: cellFontFallback,
                           ),
-                        )
-                      : Row(
-                          children: [
-                            if (_w('name') >= 47) ...[
-                              CommitAvatarStack(
-                                commit: commit,
-                                avatarService: widget.avatarService,
-                                showRemoteAvatars: widget.showRemoteAvatars,
-                                discColor: branchColor,
-                                stacked: _w('name') >= 57,
-                              ),
-                              const SizedBox(width: 7),
-                            ],
-                            Expanded(
-                              child: Text(
-                                commit.author.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: selected
-                                      ? _text
-                                      : Color.lerp(_text, _main, 0.12),
-                                  fontSize: 12,
-                                  fontFamily: cellFont,
-                                  fontFamilyFallback: cellFontFallback,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                          ],
                         ),
-                ),
+                      ),
+                    ),
+                  if (_showName)
+                    _cell(
+                      _w('name'),
+                      commit.isWorkingTree
+                          ? const Text(
+                              '—',
+                              style: TextStyle(
+                                color: _muted,
+                                fontSize: 12,
+                                fontFamily: cellFont,
+                                fontFamilyFallback: cellFontFallback,
+                              ),
+                            )
+                          : Row(
+                              children: [
+                                if (_w('name') >= 47) ...[
+                                  CommitAvatarStack(
+                                    commit: commit,
+                                    avatarService: widget.avatarService,
+                                    showRemoteAvatars: widget.showRemoteAvatars,
+                                    discColor: branchColor,
+                                    stacked: _w('name') >= 57,
+                                  ),
+                                  const SizedBox(width: 7),
+                                ],
+                                Expanded(
+                                  child: Text(
+                                    commit.author.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: selected
+                                          ? _text
+                                          : Color.lerp(_text, _main, 0.12),
+                                      fontSize: 12,
+                                      fontFamily: cellFont,
+                                      fontFamilyFallback: cellFontFallback,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                    ),
+                ],
+              ),
             ],
           ),
         ),
@@ -2088,7 +2102,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
     GitCommit commit,
     List<GitRef> refs,
     Color color,
-    bool selected,
   ) => SizedBox(
     key: Key('refs-cell-$index'),
     width: _w('refs'),
@@ -2112,7 +2125,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                       top: 6,
                       width: slot - 2,
                       height: 24,
-                      child: _refChip(commit, shown[index], color, selected),
+                      child: _refChip(commit, shown[index], color),
                     ),
                 ],
               );
@@ -2120,22 +2133,18 @@ class _TimelineScreenState extends State<TimelineScreen> {
           ),
   );
 
-  Widget _refChip(GitCommit commit, GitRef ref, Color color, bool selected) =>
-      Container(
-        key: Key('ref-chip-${commit.sha}-${ref.name}'),
-        padding: const EdgeInsets.symmetric(horizontal: 5),
-        decoration: BoxDecoration(
-          color: selected ? _selectedChip : color.withValues(alpha: 0.14),
-          border: Border.all(color: color.withValues(alpha: 0.55)),
-          borderRadius: BorderRadius.circular(5),
-        ),
-        child: Row(
-          children: [
-            _refGlyph(ref, color, selected),
-            _refName(ref, color, selected),
-          ],
-        ),
-      );
+  Widget _refChip(GitCommit commit, GitRef ref, Color color) => Container(
+    key: Key('ref-chip-${commit.sha}-${ref.name}'),
+    padding: const EdgeInsets.symmetric(horizontal: 5),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.14),
+      border: Border.all(color: color.withValues(alpha: 0.55)),
+      borderRadius: BorderRadius.circular(5),
+    ),
+    child: Row(
+      children: [_refGlyph(ref, color, false), _refName(ref, color, false)],
+    ),
+  );
 
   Widget _refGlyph(GitRef ref, Color color, bool selected) =>
       ref.isHead || ref.isTag
