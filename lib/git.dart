@@ -661,6 +661,7 @@ class GitRepository implements FullDiffRepository {
     );
   }
 
+  @override
   Future<List<GitFileChange>> loadFiles(
     GitCommit commit, {
     String? parent,
@@ -685,6 +686,7 @@ class GitRepository implements FullDiffRepository {
     ];
   }
 
+  @override
   Future<List<DiffLine>> loadDiff(
     GitCommit commit,
     String path, {
