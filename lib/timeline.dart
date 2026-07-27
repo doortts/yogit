@@ -2975,6 +2975,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
     );
   }
 
+  void _forwardFullDiffPreferences(FullDiffPreferences preferences) {
+    if (!mounted) return;
+    widget.onFullDiffPreferencesChanged?.call(preferences);
+  }
+
+  void _forwardFullDiffColumnWidths(FullDiffColumnWidths widths) {
+    if (!mounted) return;
+    widget.onFullDiffColumnWidthsChanged?.call(widths);
+  }
+
   void _openFullDiff() {
     final commit = _selectedCommit!;
     if (widget.onOpenFullDiff case final callback?) {
@@ -2986,8 +2996,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
     final initialIndex = _commits.indexOf(commit);
     final initialPreferences = widget.fullDiffPreferences;
     final columnWidths = widget.fullDiffColumnWidths;
-    final onPreferencesChanged = widget.onFullDiffPreferencesChanged;
-    final onColumnWidthsChanged = widget.onFullDiffColumnWidthsChanged;
     final avatarService = widget.avatarService;
     final showRemoteAvatars = widget.showRemoteAvatars;
     Navigator.of(context).push(
@@ -2997,9 +3005,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
           commits: commits,
           initialIndex: initialIndex,
           initialPreferences: initialPreferences,
-          onPreferencesChanged: onPreferencesChanged,
+          onPreferencesChanged: _forwardFullDiffPreferences,
           columnWidths: columnWidths,
-          onColumnWidthsChanged: onColumnWidthsChanged,
+          onColumnWidthsChanged: _forwardFullDiffColumnWidths,
           editorService: ExternalEditorService(repositoryRoot: repository.root),
           avatarService: avatarService,
           showRemoteAvatars: showRemoteAvatars,

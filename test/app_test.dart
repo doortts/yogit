@@ -2894,6 +2894,91 @@ void main() {
     },
   );
 
+  testWidgets(
+    'full diff opened before settings load persists through live callbacks',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1200, 800);
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+      final store = DelayedMemorySettingsStore();
+      await tester.pumpWidget(
+        YogitApp(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('1', 'commit')],
+            files: (_, _) async => const [],
+          ),
+          settingsStore: store,
+          discoverAvatars: false,
+          windowFrameController: controller,
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Side-by-side'));
+      await tester.pump();
+      expect(store.saveCount, 0);
+
+      store.completeLoad();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('History'));
+      await tester.pumpAndSettle();
+      expect(store.saveCount, 1);
+      expect(
+        store.current.fullDiffPreferences,
+        const FullDiffPreferences(
+          view: FullDiffView.history,
+          layout: DiffLayout.sideBySide,
+        ),
+      );
+
+      await tester.drag(
+        find.byKey(const Key('details-files-column-resizer')),
+        const Offset(20, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(store.saveCount, 2);
+      expect(store.current.fullDiffColumnWidths.files, 310);
+
+      await tester.tap(find.byKey(const Key('full-diff-back')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester
+            .getSemantics(find.bySemanticsLabel('History'))
+            .flagsCollection
+            .isSelected,
+        ui.Tristate.isTrue,
+      );
+      expect(
+        tester
+            .getSemantics(find.bySemanticsLabel('Side-by-side'))
+            .flagsCollection
+            .isSelected,
+        ui.Tristate.isTrue,
+      );
+      expect(
+        tester.getSize(find.byKey(const Key('details-files-column'))).width,
+        310,
+      );
+
+      final staleCallback = tester
+          .widget<DiffScreen>(find.byType(DiffScreen))
+          .onPreferencesChanged!;
+      final savedBeforeDispose = store.saveCount;
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      staleCallback(const FullDiffPreferences());
+      expect(store.saveCount, savedBeforeDispose);
+    },
+  );
+
   testWidgets('uncommitted changes lead the timeline as a working tree row', (
     tester,
   ) async {
@@ -8423,6 +8508,22 @@ class FailingSettingsStore extends MemorySettingsStore {
   @override
   Future<void> save(AppSettings settings) async {
     throw const FileSystemException('settings write failed');
+  }
+}
+
+class DelayedMemorySettingsStore extends MemorySettingsStore {
+  final _load = Completer<AppSettings>();
+  var saveCount = 0;
+
+  void completeLoad() => _load.complete(current);
+
+  @override
+  Future<AppSettings> load() => _load.future;
+
+  @override
+  Future<void> save(AppSettings settings) async {
+    saveCount++;
+    await super.save(settings);
   }
 }
 
