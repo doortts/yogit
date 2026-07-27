@@ -1845,6 +1845,25 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets('blame rows expose one exact semantics label', (tester) async {
+    final semantics = tester.ensureSemantics();
+    await pumpInteractiveBlameView(tester);
+
+    final summaryNode = tester.getSemantics(
+      find.byKey(const Key('blame-line-3')),
+    );
+    expect(summaryNode.label, 'Line 3, Commit summary 3');
+    expect(summaryNode.childrenCountInTraversalOrder, 0);
+
+    await pumpInteractiveBlameView(tester, emptyThirdSummary: true);
+    final fallbackNode = tester.getSemantics(
+      find.byKey(const Key('blame-line-3')),
+    );
+    expect(fallbackNode.label, 'Line 3, 40aff6d, Suwon Chae');
+    expect(fallbackNode.childrenCountInTraversalOrder, 0);
+    semantics.dispose();
+  });
+
   testWidgets(
     'blame arrows recover a selected row far outside the lazy cache',
     (tester) async {

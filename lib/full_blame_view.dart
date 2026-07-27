@@ -93,6 +93,7 @@ class FullBlameViewState extends State<FullBlameView> {
                   Widget interactive = Semantics(
                     key: Key('blame-line-$lineNumber'),
                     container: true,
+                    excludeSemantics: true,
                     label: _semanticsLabel(lineNumber, blame),
                     selected: selected,
                     button: true,
