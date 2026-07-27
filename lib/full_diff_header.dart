@@ -209,6 +209,7 @@ class GlobalDiffToolbar extends StatelessWidget {
     required this.onIgnoreWhitespaceChanged,
     required this.onWrapLinesChanged,
     this.algorithmChooserKey,
+    this.algorithmEnabled = true,
     this.showLeadingControls = true,
     this.showShortcutHints = false,
     super.key,
@@ -231,6 +232,7 @@ class GlobalDiffToolbar extends StatelessWidget {
   final ValueChanged<bool> onIgnoreWhitespaceChanged;
   final ValueChanged<bool> onWrapLinesChanged;
   final GlobalKey<FullDiffAlgorithmChooserState>? algorithmChooserKey;
+  final bool algorithmEnabled;
   final bool showLeadingControls;
   final bool showShortcutHints;
 
@@ -258,6 +260,7 @@ class GlobalDiffToolbar extends StatelessWidget {
           child: FullDiffAlgorithmChooser(
             key: algorithmChooserKey,
             algorithm: algorithm,
+            enabled: algorithmEnabled,
             onSelected: onAlgorithmSelected,
             compact: compact,
             dense: dense,

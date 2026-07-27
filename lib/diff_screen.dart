@@ -962,6 +962,8 @@ class _DiffScreenState extends State<DiffScreen> {
                       ),
                       GlobalDiffToolbar(
                         algorithmChooserKey: _algorithmChooserKey,
+                        algorithmEnabled:
+                            state.requestedAlgorithm == state.appliedAlgorithm,
                         view: state.view,
                         layout: state.layout,
                         hunkEnabled: state.requestedScope == DiffScope.hunks,

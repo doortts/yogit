@@ -30,8 +30,8 @@ const diffAlgorithmDetails = <DiffAlgorithm, DiffAlgorithmDetails>{
   ),
   DiffAlgorithm.minimal: DiffAlgorithmDetails(
     description: '계산을 더 수행해 가능한 한 작은 변경 묶음을 찾습니다.',
-    bestFor: '작은 diff가 중요하고 계산 시간이 허용되는 파일',
-    example: ['반복 줄 사이의 변경', '가장 짧은 삭제·추가 묶음 선택'],
+    bestFor: '작은 diff가 중요하고 계산 시간이 더 걸려도 괜찮은 파일',
+    example: ['반복되는 줄 사이의 변경', '가장 짧은 삭제·추가 묶음 선택'],
   ),
   DiffAlgorithm.patience: DiffAlgorithmDetails(
     description: '고유한 줄을 기준으로 이동한 코드의 경계를 찾습니다.',
@@ -41,7 +41,7 @@ const diffAlgorithmDetails = <DiffAlgorithm, DiffAlgorithmDetails>{
   DiffAlgorithm.histogram: DiffAlgorithmDetails(
     description: '빈도가 낮은 줄을 기준으로 반복 코드의 경계를 찾습니다.',
     bestFor: '비슷한 줄이 많이 반복되는 소스',
-    example: ['반복되는 end 사이의 변경', '희소한 선언 줄을 기준점으로 사용'],
+    example: ['반복되는 end 사이의 변경', '드물게 나오는 선언 줄을 기준점으로 사용'],
   ),
 };
 
@@ -52,6 +52,7 @@ class FullDiffAlgorithmChooser extends StatefulWidget {
   const FullDiffAlgorithmChooser({
     required this.algorithm,
     required this.onSelected,
+    this.enabled = true,
     this.compact = false,
     this.dense = false,
     super.key,
@@ -59,6 +60,7 @@ class FullDiffAlgorithmChooser extends StatefulWidget {
 
   final DiffAlgorithm algorithm;
   final ValueChanged<DiffAlgorithm> onSelected;
+  final bool enabled;
   final bool compact;
   final bool dense;
 
@@ -70,6 +72,7 @@ class FullDiffAlgorithmChooser extends StatefulWidget {
 class FullDiffAlgorithmChooserState extends State<FullDiffAlgorithmChooser> {
   final _buttonKey = GlobalKey();
   final _buttonFocus = FocusNode(debugLabel: 'diff algorithm chooser');
+  LogicalKeyboardKey? _suppressedApplyKey;
   bool _menuOpen = false;
 
   @override
@@ -79,7 +82,7 @@ class FullDiffAlgorithmChooserState extends State<FullDiffAlgorithmChooser> {
   }
 
   Future<void> show() async {
-    if (_menuOpen) return;
+    if (_menuOpen || !widget.enabled || _suppressedApplyKey != null) return;
     final buttonContext = _buttonKey.currentContext;
     if (buttonContext == null) return;
     final button = buttonContext.findRenderObject()! as RenderBox;
@@ -105,7 +108,12 @@ class FullDiffAlgorithmChooserState extends State<FullDiffAlgorithmChooser> {
         constraints: BoxConstraints.tightFor(width: menuWidth),
         popUpAnimationStyle: AnimationStyle.noAnimation,
         requestFocus: true,
-        items: [_AlgorithmChooserEntry(appliedAlgorithm: widget.algorithm)],
+        items: [
+          _AlgorithmChooserEntry(
+            appliedAlgorithm: widget.algorithm,
+            onApplyKeyDown: (key) => _suppressedApplyKey = key,
+          ),
+        ],
       );
       if (selected != null && mounted) widget.onSelected(selected);
     } finally {
@@ -114,43 +122,55 @@ class FullDiffAlgorithmChooserState extends State<FullDiffAlgorithmChooser> {
     }
   }
 
+  KeyEventResult _handleButtonKey(FocusNode _, KeyEvent event) {
+    if (event.logicalKey != _suppressedApplyKey) {
+      return KeyEventResult.ignored;
+    }
+    if (event is KeyUpEvent) _suppressedApplyKey = null;
+    return KeyEventResult.handled;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Semantics(
       key: const Key('diff-algorithm'),
       container: true,
       button: true,
+      enabled: widget.enabled,
       excludeSemantics: true,
       label: 'diff 알고리즘: ${widget.algorithm.label}',
       hint:
           'Git이 변경 구간을 나누는 방식을 정합니다. '
           '${diffAlgorithmDescription(widget.algorithm)}',
-      onTap: show,
+      onTap: widget.enabled ? show : null,
       child: Material(
         color: Colors.transparent,
-        child: InkWell(
-          key: _buttonKey,
-          focusNode: _buttonFocus,
-          onTap: show,
-          borderRadius: BorderRadius.circular(fullDiffControlRadius),
-          child: Container(
-            key: const Key('diff-algorithm-value'),
-            height: fullDiffControlHeight,
-            padding: EdgeInsets.symmetric(
-              horizontal: widget.compact || widget.dense ? 4 : 8,
-            ),
-            decoration: BoxDecoration(
-              color: fullDiffControl,
-              borderRadius: BorderRadius.circular(fullDiffControlRadius),
-              border: Border.all(color: const Color(0x1A000000)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(widget.algorithm.label),
-                SizedBox(width: widget.compact ? 2 : 4),
-                const Icon(Icons.arrow_drop_down, size: 16),
-              ],
+        child: Focus(
+          onKeyEvent: _handleButtonKey,
+          child: InkWell(
+            key: _buttonKey,
+            focusNode: _buttonFocus,
+            onTap: widget.enabled ? show : null,
+            borderRadius: BorderRadius.circular(fullDiffControlRadius),
+            child: Container(
+              key: const Key('diff-algorithm-value'),
+              height: fullDiffControlHeight,
+              padding: EdgeInsets.symmetric(
+                horizontal: widget.compact || widget.dense ? 4 : 8,
+              ),
+              decoration: BoxDecoration(
+                color: fullDiffControl,
+                borderRadius: BorderRadius.circular(fullDiffControlRadius),
+                border: Border.all(color: const Color(0x1A000000)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(widget.algorithm.label),
+                  SizedBox(width: widget.compact ? 2 : 4),
+                  const Icon(Icons.arrow_drop_down, size: 16),
+                ],
+              ),
             ),
           ),
         ),
@@ -160,9 +180,13 @@ class FullDiffAlgorithmChooserState extends State<FullDiffAlgorithmChooser> {
 }
 
 class _AlgorithmChooserEntry extends PopupMenuEntry<DiffAlgorithm> {
-  const _AlgorithmChooserEntry({required this.appliedAlgorithm});
+  const _AlgorithmChooserEntry({
+    required this.appliedAlgorithm,
+    required this.onApplyKeyDown,
+  });
 
   final DiffAlgorithm appliedAlgorithm;
+  final ValueChanged<LogicalKeyboardKey> onApplyKeyDown;
 
   @override
   double get height => 304;
@@ -210,7 +234,8 @@ class _AlgorithmChooserEntryState extends State<_AlgorithmChooserEntry> {
     _focusNodes[values[nextIndex]]!.requestFocus();
   }
 
-  void _applyFocused() {
+  void _applyFocused(LogicalKeyboardKey key) {
+    widget.onApplyKeyDown(key);
     Navigator.pop(context, _focusedAlgorithm);
   }
 
@@ -224,9 +249,10 @@ class _AlgorithmChooserEntryState extends State<_AlgorithmChooserEntry> {
         SingleActivator(LogicalKeyboardKey.arrowUp): _MoveAlgorithmFocusIntent(
           -1,
         ),
-        SingleActivator(LogicalKeyboardKey.enter): _ApplyAlgorithmIntent(),
-        SingleActivator(LogicalKeyboardKey.numpadEnter):
-            _ApplyAlgorithmIntent(),
+        SingleActivator(LogicalKeyboardKey.enter, includeRepeats: false):
+            _ApplyAlgorithmIntent(LogicalKeyboardKey.enter),
+        SingleActivator(LogicalKeyboardKey.numpadEnter, includeRepeats: false):
+            _ApplyAlgorithmIntent(LogicalKeyboardKey.numpadEnter),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -237,8 +263,8 @@ class _AlgorithmChooserEntryState extends State<_AlgorithmChooserEntry> {
             },
           ),
           _ApplyAlgorithmIntent: CallbackAction<_ApplyAlgorithmIntent>(
-            onInvoke: (_) {
-              _applyFocused();
+            onInvoke: (intent) {
+              _applyFocused(intent.key);
               return null;
             },
           ),
@@ -256,6 +282,7 @@ class _AlgorithmChooserEntryState extends State<_AlgorithmChooserEntry> {
                     for (final algorithm in DiffAlgorithm.values)
                       Semantics(
                         key: Key('algorithm-option-${algorithm.name}'),
+                        excludeSemantics: true,
                         button: true,
                         inMutuallyExclusiveGroup: true,
                         selected: algorithm == widget.appliedAlgorithm,
@@ -346,5 +373,7 @@ class _MoveAlgorithmFocusIntent extends Intent {
 }
 
 class _ApplyAlgorithmIntent extends Intent {
-  const _ApplyAlgorithmIntent();
+  const _ApplyAlgorithmIntent(this.key);
+
+  final LogicalKeyboardKey key;
 }

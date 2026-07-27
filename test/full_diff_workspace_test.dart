@@ -1984,6 +1984,140 @@ void main() {
     },
   );
 
+  testWidgets('held enter applies one algorithm until key up', (tester) async {
+    final fixture = await workspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1070, 842),
+    );
+    final requestsBefore = fixture.repository.diffRequests.length;
+
+    await sendChord(tester, LogicalKeyboardKey.keyA, meta: true, shift: true);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(fixture.controller.state.appliedAlgorithm, DiffAlgorithm.myers);
+    expect(fixture.repository.diffRequests, hasLength(requestsBefore + 1));
+    expect(find.byKey(const Key('algorithm-details-myers')), findsNothing);
+
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+
+    expect(fixture.repository.diffRequests, hasLength(requestsBefore + 1));
+    expect(find.byKey(const Key('algorithm-details-myers')), findsNothing);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(find.byKey(const Key('algorithm-details-myers')), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(fixture.controller.state.appliedAlgorithm, DiffAlgorithm.minimal);
+    expect(fixture.repository.diffRequests, hasLength(requestsBefore + 2));
+  });
+
+  testWidgets('held numpad enter does not reopen the algorithm chooser', (
+    tester,
+  ) async {
+    final fixture = await workspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1070, 842),
+    );
+    final requestsBefore = fixture.repository.diffRequests.length;
+
+    await tester.tap(find.byKey(const Key('diff-algorithm')));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.numpadEnter);
+    await tester.pumpAndSettle();
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.numpadEnter);
+    await tester.pump();
+
+    expect(fixture.controller.state.appliedAlgorithm, DiffAlgorithm.myers);
+    expect(fixture.repository.diffRequests, hasLength(requestsBefore + 1));
+    expect(find.byKey(const Key('algorithm-details-myers')), findsNothing);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.numpadEnter);
+    await tester.tap(find.byKey(const Key('diff-algorithm')));
+    await tester.pump();
+    expect(find.byKey(const Key('algorithm-details-myers')), findsOneWidget);
+  });
+
+  testWidgets('pending algorithm request keeps its chooser closed', (
+    tester,
+  ) async {
+    final pending = Completer<List<DiffLine>>();
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..diff = ((_, _, _, algorithm, _) {
+        if (algorithm == DiffAlgorithm.myers) return pending.future;
+        return Future.value(twoHunkLines);
+      })
+      ..content = ((_, _, _) async => resultFile.bytes);
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await pumpWorkspace(
+      tester,
+      controller: controller,
+      size: const Size(1070, 842),
+    );
+    final requestsBefore = repository.diffRequests.length;
+
+    await tester.tap(find.byKey(const Key('diff-algorithm')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('algorithm-option-myers')));
+    await tester.pump();
+    expect(controller.state.requestedAlgorithm, DiffAlgorithm.myers);
+    expect(controller.state.appliedAlgorithm, DiffAlgorithm.gitSetting);
+    expect(repository.diffRequests, hasLength(requestsBefore + 1));
+    expect(
+      tester
+          .getSemantics(find.byKey(const Key('diff-algorithm')))
+          .getSemanticsData()
+          .flagsCollection
+          .isEnabled,
+      ui.Tristate.isFalse,
+    );
+
+    await tester.tap(find.byKey(const Key('diff-algorithm')));
+    await tester.pump();
+
+    expect(find.byKey(const Key('algorithm-details-gitSetting')), findsNothing);
+    expect(repository.diffRequests, hasLength(requestsBefore + 1));
+
+    pending.complete(twoHunkLines);
+    await tester.pumpAndSettle();
+    expect(controller.state.appliedAlgorithm, DiffAlgorithm.myers);
+
+    await tester.tap(find.byKey(const Key('diff-algorithm')));
+    await tester.pump();
+    expect(find.byKey(const Key('algorithm-details-myers')), findsOneWidget);
+    expect(
+      tester
+          .getSemantics(find.byKey(const Key('algorithm-option-myers')))
+          .getSemanticsData()
+          .flagsCollection
+          .isSelected,
+      ui.Tristate.isTrue,
+    );
+  });
+
   testWidgets('escape cancels algorithm preview and restores toolbar focus', (
     tester,
   ) async {

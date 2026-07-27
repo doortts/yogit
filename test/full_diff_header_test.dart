@@ -100,6 +100,7 @@ void main() {
       }
     }
     expect(selectedOptions, [DiffAlgorithm.histogram]);
+    expect(find.semantics.byLabel('Myers'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('algorithm-option-histogram')));
     await tester.pumpAndSettle();
