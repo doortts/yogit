@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/full_diff_code_row.dart';
 import 'package:yogit/full_diff_header.dart';
+import 'package:yogit/full_diff_hunk_header.dart';
 import 'package:yogit/full_diff_hunk_view.dart';
 import 'package:yogit/full_diff_inline_view.dart';
 import 'package:yogit/full_diff_model.dart';
@@ -847,6 +848,10 @@ void main() {
     final richText = tester.widget<RichText>(
       find.byKey(const Key('code-row-source-text')),
     );
+    expect((richText.text as TextSpan).style?.fontSize, 10);
+    expect((richText.text as TextSpan).style?.height, 21 / 10);
+    expect(tester.widget<Text>(find.text('314')).style?.fontSize, 8);
+    expect(tester.widget<Text>(find.text('+')).style?.fontSize, 8);
     final spans = (richText.text as TextSpan).children!.cast<TextSpan>();
     expect(
       spans.any(
@@ -855,6 +860,25 @@ void main() {
             span.style?.decoration == TextDecoration.underline,
       ),
       isTrue,
+    );
+  });
+
+  testWidgets('hunk headers use the approved compact type size', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      qaApp(
+        FullDiffHunkHeader(
+          hunk: twoHunkDocument.hunks.first,
+          path: fileA.path,
+          hunkCount: twoHunkDocument.hunks.length,
+        ),
+      ),
+    );
+
+    expect(
+      tester.widget<Text>(find.textContaining('lines')).style?.fontSize,
+      10,
     );
   });
 

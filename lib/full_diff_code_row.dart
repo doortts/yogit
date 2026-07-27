@@ -14,16 +14,16 @@ const _sourceStyle = TextStyle(
   color: Colors.white,
   fontFamily: technicalFontFamily,
   fontFamilyFallback: technicalFontFallback,
-  fontSize: 14,
-  height: 21 / 14,
+  fontSize: 10,
+  height: 21 / 10,
 );
 
 const _gutterStyle = TextStyle(
   color: fullDiffMuted,
   fontFamily: technicalFontFamily,
   fontFamilyFallback: technicalFontFallback,
-  fontSize: 12,
-  height: 21 / 12,
+  fontSize: 8,
+  height: 21 / 8,
 );
 
 class FullDiffSelectionArea extends StatefulWidget {

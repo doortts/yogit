@@ -345,10 +345,92 @@ void main() {
         tester.getSemantics(selectedSemantics).flagsCollection.isSelected,
         ui.Tristate.isTrue,
       );
+      expect(
+        tester
+            .widget<Text>(
+              find.descendant(of: row, matching: find.text(commitA.subject)),
+            )
+            .style
+            ?.fontSize,
+        11,
+      );
+      expect(
+        tester
+            .widget<Text>(
+              find.descendant(
+                of: row,
+                matching: find.textContaining(commitA.shortSha),
+              ),
+            )
+            .style
+            ?.fontSize,
+        10,
+      );
+      expect(
+        tester
+            .widget<Text>(
+              find.descendant(
+                of: row,
+                matching: find.text(fixtureIdentity.name),
+              ),
+            )
+            .style
+            ?.fontSize,
+        10,
+      );
+      expect(
+        tester
+            .widget<Text>(
+              find.descendant(of: row, matching: find.textContaining('ago')),
+            )
+            .style
+            ?.fontSize,
+        10,
+      );
 
       semantics.dispose();
     },
   );
+
+  testWidgets('uses compact typography in commit and file lists', (
+    tester,
+  ) async {
+    final fixture = await workspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(600, 842),
+    );
+
+    expect(tester.widget<Text>(find.text(commitA.subject)).style?.fontSize, 11);
+    expect(
+      tester
+          .widget<Text>(find.textContaining(commitA.shortSha).first)
+          .style
+          ?.fontSize,
+      10,
+    );
+    final fileList = find.byKey(const Key('changed-files-list'));
+    expect(
+      tester
+          .widget<Text>(
+            find.descendant(of: fileList, matching: find.text(fileA.path)),
+          )
+          .style
+          ?.fontSize,
+      11,
+    );
+    expect(
+      tester
+          .widget<Text>(
+            find.descendant(of: fileList, matching: find.text('+12 −4')),
+          )
+          .style
+          ?.fontSize,
+      10,
+    );
+  });
 
   testWidgets('parent chooser changes all selected resources', (tester) async {
     const merge = GitCommit(

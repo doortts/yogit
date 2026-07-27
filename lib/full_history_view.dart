@@ -114,7 +114,7 @@ class HistoryRow extends StatelessWidget {
                   style: const TextStyle(
                     fontFamily: technicalFontFamily,
                     fontFamilyFallback: technicalFontFallback,
-                    fontSize: 12,
+                    fontSize: 10,
                   ),
                 ),
               ),
@@ -128,7 +128,7 @@ class HistoryRow extends StatelessWidget {
                   entry.commit.subject,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 14),
+                  style: const TextStyle(fontSize: 11),
                 ),
                 const SizedBox(height: 2),
                 Row(
@@ -140,20 +140,20 @@ class HistoryRow extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: fullDiffMuted,
-                          fontSize: 12,
+                          fontSize: 10,
                         ),
                       ),
                     ),
                     const Text(
                       ' · ',
-                      style: TextStyle(color: fullDiffMuted, fontSize: 12),
+                      style: TextStyle(color: fullDiffMuted, fontSize: 10),
                     ),
                     Text(
                       _relativeTime(entry.commit.committerTimestamp),
                       maxLines: 1,
                       style: const TextStyle(
                         color: fullDiffMuted,
-                        fontSize: 12,
+                        fontSize: 10,
                       ),
                     ),
                   ],

@@ -682,7 +682,7 @@ class _DiffScreenState extends State<DiffScreen> {
                 '⌘↑↓',
                 style: technicalTextStyle.copyWith(
                   color: fullDiffMuted,
-                  fontSize: 11,
+                  fontSize: 9,
                   fontWeight: FontWeight.normal,
                 ),
               ),
@@ -720,7 +720,7 @@ class _DiffScreenState extends State<DiffScreen> {
                             commit.subject,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 14),
+                            style: const TextStyle(fontSize: 11),
                           ),
                           const SizedBox(height: 3),
                           Text(
@@ -729,7 +729,7 @@ class _DiffScreenState extends State<DiffScreen> {
                             overflow: TextOverflow.clip,
                             style: technicalTextStyle.copyWith(
                               color: fullDiffMuted,
-                              fontSize: 12,
+                              fontSize: 10,
                             ),
                           ),
                         ],
@@ -763,7 +763,7 @@ class _DiffScreenState extends State<DiffScreen> {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 14,
+                    fontSize: 11,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -774,7 +774,7 @@ class _DiffScreenState extends State<DiffScreen> {
                   overflow: TextOverflow.ellipsis,
                   style: technicalTextStyle.copyWith(
                     color: fullDiffMuted,
-                    fontSize: 11,
+                    fontSize: 10,
                   ),
                 ),
                 if (commit.parents.length > 1) ...[
@@ -846,7 +846,7 @@ class _DiffScreenState extends State<DiffScreen> {
                         overflow: TextOverflow.ellipsis,
                         style: technicalTextStyle.copyWith(
                           color: fullDiffMuted,
-                          fontSize: 11,
+                          fontSize: 9,
                           fontWeight: FontWeight.normal,
                         ),
                       ),
@@ -889,7 +889,10 @@ class _DiffScreenState extends State<DiffScreen> {
                                 children: [
                                   SizedBox(
                                     width: 24,
-                                    child: Text(_statusLetter(file.status)),
+                                    child: Text(
+                                      _statusLetter(file.status),
+                                      style: const TextStyle(fontSize: 9),
+                                    ),
                                   ),
                                   Expanded(
                                     child: Column(
@@ -917,7 +920,7 @@ class _DiffScreenState extends State<DiffScreen> {
                                               fontFamily: technicalFontFamily,
                                               fontFamilyFallback:
                                                   technicalFontFallback,
-                                              fontSize: 14,
+                                              fontSize: 11,
                                             ),
                                           ),
                                         ),
@@ -927,7 +930,7 @@ class _DiffScreenState extends State<DiffScreen> {
                                           '−${file.deletions ?? '—'}',
                                           style: technicalTextStyle.copyWith(
                                             color: fullDiffMuted,
-                                            fontSize: 11,
+                                            fontSize: 10,
                                           ),
                                         ),
                                       ],

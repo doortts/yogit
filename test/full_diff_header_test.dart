@@ -170,7 +170,7 @@ void main() {
     expect(path.maxLines, 1);
     expect(path.overflow, TextOverflow.ellipsis);
     expect(path.style?.fontFamily, technicalFontFamily);
-    expect(path.style?.fontSize, 14);
+    expect(path.style?.fontSize, 11);
 
     for (final key in [
       'open-editor',

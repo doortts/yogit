@@ -68,7 +68,7 @@ class GlobalFileBar extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: technicalTextStyle.copyWith(
                         color: Colors.white,
-                        fontSize: 14,
+                        fontSize: 11,
                       ),
                     ),
                   ),
@@ -473,7 +473,7 @@ class _HeaderBadge extends StatelessWidget {
         label,
         style: technicalTextStyle.copyWith(
           color: foreground,
-          fontSize: 13,
+          fontSize: 9,
           height: 1,
         ),
       ),

@@ -33,8 +33,8 @@ class FullDiffHunkHeader extends StatelessWidget {
       style: const TextStyle(
         fontFamily: technicalFontFamily,
         fontFamilyFallback: technicalFontFallback,
-        fontSize: 14,
-        height: 21 / 14,
+        fontSize: 10,
+        height: 21 / 10,
         color: fullDiffMuted,
       ),
     ),
