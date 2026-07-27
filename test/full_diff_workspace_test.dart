@@ -275,6 +275,23 @@ void main() {
     });
   }
 
+  testWidgets('the 480px toolbar uses the compact algorithm label', (
+    tester,
+  ) async {
+    final fixture = await workspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    await fixture.controller.selectAlgorithm(DiffAlgorithm.histogram);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(480, 560),
+    );
+
+    expect(find.text('Histogram'), findsOneWidget);
+    expect(find.textContaining('diff 알고리즘 ·'), findsNothing);
+    expect(find.semantics.byLabel('diff 알고리즘: Histogram'), findsOneWidget);
+  });
+
   testWidgets('focus mode restores pane widths and selection', (tester) async {
     final fixture = await workspaceFixture();
     addTearDown(fixture.controller.dispose);

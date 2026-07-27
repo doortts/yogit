@@ -11,6 +11,15 @@ String fileSummary(GitFileChange file) =>
     '${file.status.characters.first} · '
     '+${file.additions ?? '—'} −${file.deletions ?? '—'}';
 
+String diffAlgorithmDescription(DiffAlgorithm value) => switch (value) {
+  DiffAlgorithm.gitSetting =>
+    'Git 설정에 지정된 알고리즘을 사용합니다. 설정이 없으면 Git의 기본 동작을 따릅니다.',
+  DiffAlgorithm.myers => '일반적인 소스 변경을 빠르게 비교하는 Git의 기본 알고리즘입니다.',
+  DiffAlgorithm.minimal => '계산을 더 수행해 가능한 한 작은 변경 결과를 찾습니다. 큰 파일에서는 느릴 수 있습니다.',
+  DiffAlgorithm.patience => '고유한 줄을 기준으로 삼아 이동하거나 재구성한 코드의 경계를 읽기 쉽게 만듭니다.',
+  DiffAlgorithm.histogram => '빈도가 낮은 줄을 기준으로 삼아 반복이 많은 코드의 변경 경계를 찾습니다.',
+};
+
 class GlobalFileBar extends StatelessWidget {
   const GlobalFileBar({
     required this.file,
@@ -549,36 +558,51 @@ class _AlgorithmMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Semantics(
+    container: true,
     button: true,
-    label: 'diff 알고리즘',
-    child: PopupMenuButton<DiffAlgorithm>(
-      key: const Key('diff-algorithm'),
-      tooltip: 'diff 알고리즘',
-      onSelected: onSelected,
-      itemBuilder: (context) => [
-        for (final value in DiffAlgorithm.values)
-          CheckedPopupMenuItem<DiffAlgorithm>(
-            value: value,
-            checked: value == algorithm,
-            child: Text(value.label),
+    label: 'diff 알고리즘: ${algorithm.label}',
+    child: ExcludeSemantics(
+      child: PopupMenuButton<DiffAlgorithm>(
+        key: const Key('diff-algorithm'),
+        tooltip: '',
+        onSelected: onSelected,
+        itemBuilder: (context) => [
+          for (final value in DiffAlgorithm.values)
+            CheckedPopupMenuItem<DiffAlgorithm>(
+              value: value,
+              checked: value == algorithm,
+              child: Text(value.label),
+            ),
+        ],
+        padding: EdgeInsets.zero,
+        child: Tooltip(
+          waitDuration: const Duration(milliseconds: 500),
+          richMessage: TextSpan(
+            children: [
+              WidgetSpan(child: Text('Diff 알고리즘 · ${algorithm.label}')),
+              const TextSpan(text: '\n'),
+              WidgetSpan(child: Text(diffAlgorithmDescription(algorithm))),
+            ],
           ),
-      ],
-      padding: EdgeInsets.zero,
-      child: Container(
-        height: fullDiffControlHeight,
-        padding: EdgeInsets.symmetric(horizontal: compact ? 4 : 8),
-        decoration: BoxDecoration(
-          color: fullDiffControl,
-          borderRadius: BorderRadius.circular(fullDiffControlRadius),
-          border: Border.all(color: _fullDiffInputBorder),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('diff 알고리즘'),
-            SizedBox(width: compact ? 2 : 4),
-            const Icon(Icons.arrow_drop_down, size: 16),
-          ],
+          child: Container(
+            height: fullDiffControlHeight,
+            padding: EdgeInsets.symmetric(horizontal: compact ? 4 : 8),
+            decoration: BoxDecoration(
+              color: fullDiffControl,
+              borderRadius: BorderRadius.circular(fullDiffControlRadius),
+              border: Border.all(color: _fullDiffInputBorder),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  compact ? algorithm.label : 'diff 알고리즘 · ${algorithm.label}',
+                ),
+                SizedBox(width: compact ? 2 : 4),
+                const Icon(Icons.arrow_drop_down, size: 16),
+              ],
+            ),
+          ),
         ),
       ),
     ),
