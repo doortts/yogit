@@ -24,8 +24,8 @@ HTML은 고정된 예시 행을 그리지만 구현 캡처는 검수용 데이�
 | 00 Hunk | [기준](../../specs/assets/full-diff-qa/00-overview-hunk.png) | [구현](actual/00-overview-hunk.png) | [차이](diff/00-overview-hunk.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 탐색 2열과 두 번째 Hunk 배치 확인 |
 | 01 Inline | [기준](../../specs/assets/full-diff-qa/01-diff-inline.png) | [구현](actual/01-diff-inline.png) | [차이](diff/01-diff-inline.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 선행 문맥, Hunk 제목, 활성 구간 순서 확인 |
 | 02 Split | [기준](../../specs/assets/full-diff-qa/02-diff-split.png) | [구현](actual/02-diff-split.png) | [차이](diff/02-diff-split.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 이전·이후 행 두 열과 가운데 경계 확인 |
-| 03 File | [기준](../../specs/assets/full-diff-qa/03-file-view.png) | [구현](actual/03-file-view.png) | [차이](diff/03-file-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 선택 Hunk 제목 다음에 결과 쪽 추가 행이 이어지는지 확인 |
-| 04 Blame | [기준](../../specs/assets/full-diff-qa/04-blame-view.png) | [구현](actual/04-blame-view.png) | [차이](diff/04-blame-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — Hunk 제목, 줄 번호, 80px 메타데이터, 변경 소스 순서 확인 |
+| 03 File | [기준](../../specs/assets/full-diff-qa/03-file-view.png) | [구현](actual/03-file-view.png) | [차이](diff/03-file-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 선택한 Hunk 하나의 제목과 결과 쪽 추가 행만 표시되는지 확인 |
+| 04 Blame | [기준](../../specs/assets/full-diff-qa/04-blame-view.png) | [구현](actual/04-blame-view.png) | [차이](diff/04-blame-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 선택한 Hunk 하나의 제목·변경 표시와 80px 메타데이터 순서 확인 |
 | 05 History | [기준](../../specs/assets/full-diff-qa/05-history-view.png) | [구현](actual/05-history-view.png) | [차이](diff/05-history-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 시각 선택 색 없이 중립 행 배경을 유지하고 현재 커밋의 접근성 selected 상태와 제목 아래 작성자·경과 시간 배치 확인 |
 | 06 집중 모드 | [기준](../../specs/assets/full-diff-qa/06-focus-mode.png) | [구현](actual/06-focus-mode.png) | [차이](diff/06-focus-mode.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 탐색 열 제거, 머리글 정렬, 본문 확장 확인 |
 | 07 공백 무시 | [기준](../../specs/assets/full-diff-qa/07-ignore-whitespace.png) | [구현](actual/07-ignore-whitespace.png) | [차이](diff/07-ignore-whitespace.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 선택 상태와 공백 행 제거 확인 |
@@ -39,6 +39,9 @@ HTML은 고정된 예시 행을 그리지만 구현 캡처는 검수용 데이�
 03·04·05·07·08은 Split 상태로 캡처했다. 검수 하네스는 Flutter SDK의
 Material Icons와 Roboto, macOS의 Menlo와 Apple SD Gothic Neo를
 불러오며 Menlo에 없는 글자는 앱에 포함된 D2Coding으로 표시한다.
+File과 Blame은 선택한 Hunk의 제목과 변경 표시만 투영하도록 고친 뒤
+03·04를 다시 캡처했다. 미니맵은 선택한 이전·결과 쪽 소스 범위로
+뷰포트를 계산하며, 아래 수치는 이 계산을 적용한 현재 캡처 기준이다.
 
 ## 픽셀 차이
 
@@ -48,19 +51,19 @@ JPEG라서 넓고 단색인 배경도 미세한 차이로 집계된다.
 
 | 이미지 | 크기 | changed | changed % | mean RGB | max RGB |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 00-overview-hunk | 782×842 | 253,755 | 38.5386 | 8.9651 | 255 |
-| 01-diff-inline | 782×842 | 339,916 | 51.6241 | 15.8542 | 255 |
-| 02-diff-split | 1070×842 | 442,279 | 49.0908 | 15.0808 | 255 |
-| 03-file-view | 1070×842 | 403,574 | 44.7948 | 12.9542 | 255 |
-| 04-blame-view | 1070×842 | 419,078 | 46.5156 | 14.0174 | 255 |
+| 00-overview-hunk | 782×842 | 253,911 | 38.5623 | 8.9820 | 255 |
+| 01-diff-inline | 782×842 | 339,916 | 51.6241 | 15.8557 | 255 |
+| 02-diff-split | 1070×842 | 442,432 | 49.1078 | 15.0879 | 255 |
+| 03-file-view | 1070×842 | 345,870 | 38.3899 | 11.5105 | 255 |
+| 04-blame-view | 1070×842 | 362,361 | 40.2203 | 12.6334 | 255 |
 | 05-history-view | 1070×842 | 273,172 | 30.3208 | 7.4224 | 255 |
-| 06-focus-mode | 1070×842 | 183,644 | 20.3836 | 3.3508 | 255 |
-| 07-ignore-whitespace | 1070×842 | 447,836 | 49.7076 | 15.5643 | 255 |
-| 08-wrap-lines | 1070×842 | 475,223 | 52.7475 | 16.3073 | 255 |
-| 09-next-change | 1280×720 | 654,846 | 71.0553 | 8.9486 | 240 |
-| 10-algorithm-histogram | 1280×720 | 654,612 | 71.0299 | 8.8465 | 248 |
-| 11-responsive-650 | 650×549 | 158,025 | 44.2833 | 11.4902 | 255 |
-| 12-responsive-480 | 480×549 | 105,379 | 39.9890 | 9.7327 | 255 |
+| 06-focus-mode | 1070×842 | 183,760 | 20.3965 | 3.3467 | 255 |
+| 07-ignore-whitespace | 1070×842 | 447,980 | 49.7236 | 15.5707 | 255 |
+| 08-wrap-lines | 1070×842 | 475,143 | 52.7386 | 16.3043 | 255 |
+| 09-next-change | 1280×720 | 654,946 | 71.0662 | 8.9426 | 240 |
+| 10-algorithm-histogram | 1280×720 | 654,738 | 71.0436 | 8.8405 | 248 |
+| 11-responsive-650 | 650×549 | 157,670 | 44.1838 | 11.4431 | 255 |
+| 12-responsive-480 | 480×549 | 105,044 | 39.8619 | 9.6684 | 255 |
 
 ## 구문 강조 성능과 앱 크기
 
@@ -74,14 +77,14 @@ flutter test --concurrency=1 \
   benchmark/full_diff_syntax_benchmark_test.dart --reporter expanded
 ```
 
-DRL 첫 Hunk의 12줄을 30번 강조했다. 격리 실행의 첫 실행은 15,899µs,
-p95는 2,060µs로 50ms 기준을 통과했다.
+DRL 첫 Hunk의 12줄을 30번 강조했다. 격리 실행의 첫 실행은 16,504µs,
+p95는 2,267µs로 50ms 기준을 통과했다.
 
 | 빌드 | 압축 크기 |
 | --- | ---: |
-| `YOGIT_EXTENDED_SYNTAX=false` | 23,142,608 bytes |
-| `YOGIT_EXTENDED_SYNTAX=true` | 23,321,678 bytes |
-| 증가량 | 179,070 bytes |
+| `YOGIT_EXTENDED_SYNTAX=false` | 23,160,330 bytes |
+| `YOGIT_EXTENDED_SYNTAX=true` | 23,336,348 bytes |
+| 증가량 | 176,018 bytes |
 
 증가량은 1,048,576바이트 기준보다 작다. 두 기준을 모두 통과했으므로
 `extendedSyntaxEnabled`의 기본값은 `true`로 유지했다. 포함한 확장

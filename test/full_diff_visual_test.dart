@@ -734,8 +734,16 @@ void main() {
     );
     final painter = paint.painter! as FullDiffMinimapPainter;
     final height = tester.getSize(minimap).height;
-    expect(painter.viewport.top, closeTo(height / 3, 1));
-    expect(painter.viewport.height, closeTo(height * 0.24, 1));
+    final sourceLineCount = tester
+        .widget<FullDiffMinimap>(find.byType(FullDiffMinimap))
+        .sourceLineCount;
+    expect(sourceLineCount, 441);
+    expect(painter.viewport, isNotNull);
+    expect(
+      painter.viewport!.top,
+      closeTo(height * 319.5 / sourceLineCount - 9, 0.01),
+    );
+    expect(painter.viewport!.height, 18);
   });
 
   testWidgets('history rows place author and age below the title', (

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'full_diff_anchor_probe.dart';
 import 'full_diff_code_row.dart';
 import 'full_diff_hunk_header.dart';
 import 'full_diff_model.dart';
@@ -16,6 +17,10 @@ class InlinePresentationView extends StatelessWidget {
     required this.wrapLines,
     required this.highlighter,
     required this.anchorKeys,
+    this.richRenderingEnabled = true,
+    this.wordDiffer = changedWordRanges,
+    this.onAnchorProbeAttached,
+    this.onAnchorProbeDetached,
     this.controller,
     super.key,
   });
@@ -26,6 +31,10 @@ class InlinePresentationView extends StatelessWidget {
   final bool wrapLines;
   final FullDiffSyntaxHighlighter highlighter;
   final Map<String, GlobalKey> anchorKeys;
+  final bool richRenderingEnabled;
+  final FullDiffWordDiffer wordDiffer;
+  final FullDiffAnchorProbeCallback? onAnchorProbeAttached;
+  final FullDiffAnchorProbeCallback? onAnchorProbeDetached;
   final ScrollController? controller;
 
   @override
@@ -39,52 +48,67 @@ class InlinePresentationView extends StatelessWidget {
       );
     }
 
-    return ListView.builder(
-      controller: controller,
-      primary: controller == null,
-      itemCount: document.hunks.length,
-      itemBuilder: (context, index) {
-        final hunk = document.hunks[index];
-        final wordRanges = _wordRangesByLine(hunk.lines);
-        final current = activeAnchor?.hunkIndex == hunk.index;
-        final firstChange = hunk.lines.indexWhere(
-          (line) =>
-              line.kind == DiffLineKind.add || line.kind == DiffLineKind.delete,
-        );
-        final leadingContextCount = firstChange < 0 ? 0 : firstChange;
-        Widget codeRow(DiffLine line) => FullDiffCodeRow(
-          line: line,
-          path: path,
-          wrapLines: wrapLines,
-          highlighter: highlighter,
-          current:
-              current &&
-              (line.kind == DiffLineKind.add ||
-                  line.kind == DiffLineKind.delete),
-          wordRanges: wordRanges[line] ?? const [],
-          compactGutter: true,
-        );
-        return KeyedSubtree(
-          key: _anchorKey(hunk.anchor),
-          child: FullDiffSelectionArea(
-            child: Column(
-              key: Key('inline-hunk-$index'),
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (final line in hunk.lines.take(leadingContextCount))
-                  codeRow(line),
-                FullDiffHunkHeader(
-                  hunk: hunk,
-                  path: path,
-                  hunkCount: document.hunks.length,
-                ),
-                for (final line in hunk.lines.skip(leadingContextCount))
-                  codeRow(line),
-              ],
-            ),
-          ),
-        );
-      },
+    final items = _inlineItems(document);
+    final allSourceText = [
+      for (final item in items)
+        if (item.line case final line?) line.text,
+    ].join('\n');
+    return FullDiffSelectionArea(
+      allSourceText: allSourceText,
+      child: ListView.builder(
+        controller: controller,
+        primary: controller == null,
+        itemCount: items.length,
+        itemBuilder: (context, itemIndex) {
+          final item = items[itemIndex];
+          final hunk = item.hunk;
+          final current = activeAnchor?.hunkIndex == hunk.index;
+          Widget child;
+          if (item.line case final line?) {
+            final wordRanges = richRenderingEnabled
+                ? item.wordRanges(wordDiffer)
+                : const <WordRange>[];
+            child = FullDiffCodeRow(
+              key: Key('inline-line-${hunk.index}-${item.lineIndex}'),
+              line: line,
+              path: path,
+              wrapLines: wrapLines,
+              highlighter: highlighter,
+              current:
+                  current &&
+                  (line.kind == DiffLineKind.add ||
+                      line.kind == DiffLineKind.delete),
+              wordRanges: wordRanges,
+              compactGutter: true,
+              richRenderingEnabled: richRenderingEnabled,
+              selectionOrder: FullDiffSelectionOrder(row: item.sourceRow!),
+            );
+          } else {
+            child = SelectionContainer.disabled(
+              child: FullDiffHunkHeader(
+                hunk: hunk,
+                path: path,
+                hunkCount: document.hunks.length,
+              ),
+            );
+          }
+          if (item.firstInHunk) {
+            child = KeyedSubtree(
+              key: _anchorKey(hunk.anchor),
+              child: KeyedSubtree(
+                key: Key('inline-hunk-${hunk.index}'),
+                child: child,
+              ),
+            );
+          }
+          return FullDiffAnchorProbe(
+            anchor: hunk.anchor,
+            onAttached: onAnchorProbeAttached,
+            onDetached: onAnchorProbeDetached,
+            child: child,
+          );
+        },
+      ),
     );
   }
 
@@ -93,17 +117,109 @@ class InlinePresentationView extends StatelessWidget {
       (throw StateError('Missing GlobalKey for ${anchor.id}'));
 }
 
-Map<DiffLine, List<WordRange>> _wordRangesByLine(List<DiffLine> lines) {
-  final ranges = <DiffLine, List<WordRange>>{};
+List<_InlineItem> _inlineItems(DiffDocument document) {
+  final items = <_InlineItem>[];
+  var sourceRow = 0;
+  for (final hunk in document.hunks) {
+    final lineDescriptors = _inlineLines(hunk.lines);
+    final firstChange = hunk.lines.indexWhere(
+      (line) =>
+          line.kind == DiffLineKind.add || line.kind == DiffLineKind.delete,
+    );
+    final leadingContextCount = firstChange < 0 ? 0 : firstChange;
+    var firstInHunk = true;
+
+    void addLine(int lineIndex) {
+      final descriptor = lineDescriptors[lineIndex];
+      items.add(
+        _InlineItem(
+          hunk: hunk,
+          line: descriptor.line,
+          lineIndex: lineIndex,
+          sourceRow: sourceRow++,
+          pairedLine: descriptor.pairedLine,
+          oldSide: descriptor.oldSide,
+          firstInHunk: firstInHunk,
+        ),
+      );
+      firstInHunk = false;
+    }
+
+    for (var index = 0; index < leadingContextCount; index++) {
+      addLine(index);
+    }
+    items.add(_InlineItem(hunk: hunk, firstInHunk: firstInHunk));
+    firstInHunk = false;
+    for (var index = leadingContextCount; index < hunk.lines.length; index++) {
+      addLine(index);
+    }
+  }
+  return items;
+}
+
+List<_InlineLineDescriptor> _inlineLines(List<DiffLine> lines) {
+  final descriptors = <DiffLine, _InlineLineDescriptor>{};
   for (final pair in pairDiff(lines)) {
     final left = pair.left;
     final right = pair.right;
     if (left?.kind != DiffLineKind.delete || right?.kind != DiffLineKind.add) {
       continue;
     }
-    final changes = changedWordRanges(left!.text, right!.text);
-    ranges[left] = changes.oldRanges;
-    ranges[right] = changes.newRanges;
+    descriptors[left!] = _InlineLineDescriptor(
+      line: left,
+      pairedLine: right!,
+      oldSide: true,
+    );
+    descriptors[right] = _InlineLineDescriptor(
+      line: right,
+      pairedLine: left,
+      oldSide: false,
+    );
   }
-  return ranges;
+  return [
+    for (final line in lines)
+      descriptors[line] ?? _InlineLineDescriptor(line: line),
+  ];
+}
+
+class _InlineLineDescriptor {
+  const _InlineLineDescriptor({
+    required this.line,
+    this.pairedLine,
+    this.oldSide = false,
+  });
+
+  final DiffLine line;
+  final DiffLine? pairedLine;
+  final bool oldSide;
+}
+
+class _InlineItem {
+  const _InlineItem({
+    required this.hunk,
+    this.line,
+    this.lineIndex,
+    this.sourceRow,
+    this.pairedLine,
+    this.oldSide = false,
+    this.firstInHunk = false,
+  });
+
+  final DiffHunk hunk;
+  final DiffLine? line;
+  final int? lineIndex;
+  final int? sourceRow;
+  final DiffLine? pairedLine;
+  final bool oldSide;
+  final bool firstInHunk;
+
+  List<WordRange> wordRanges(FullDiffWordDiffer differ) {
+    final current = line;
+    final paired = pairedLine;
+    if (current == null || paired == null) return const [];
+    final changes = oldSide
+        ? differ(current.text, paired.text)
+        : differ(paired.text, current.text);
+    return oldSide ? changes.oldRanges : changes.newRanges;
+  }
 }

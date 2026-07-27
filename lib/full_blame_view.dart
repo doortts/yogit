@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'full_diff_anchor_probe.dart';
 import 'full_diff_code_row.dart';
 import 'full_diff_hunk_header.dart';
 import 'full_diff_model.dart';
@@ -16,6 +17,8 @@ class FullBlameView extends StatelessWidget {
     required this.wrapLines,
     required this.highlighter,
     required this.anchorKeys,
+    this.onAnchorProbeAttached,
+    this.onAnchorProbeDetached,
     this.controller,
     super.key,
   });
@@ -26,6 +29,8 @@ class FullBlameView extends StatelessWidget {
   final bool wrapLines;
   final FullDiffSyntaxHighlighter highlighter;
   final Map<String, GlobalKey> anchorKeys;
+  final FullDiffAnchorProbeCallback? onAnchorProbeAttached;
+  final FullDiffAnchorProbeCallback? onAnchorProbeDetached;
   final ScrollController? controller;
 
   @override
@@ -35,6 +40,7 @@ class FullBlameView extends StatelessWidget {
       hunks: hunks,
       side: document.file.side,
       lineCount: lineCount,
+      activeAnchor: activeAnchor,
     );
     final sourceLine = sourceMap.activeLine(activeAnchor);
     return FullDiffSelectionArea(
@@ -46,14 +52,17 @@ class FullBlameView extends StatelessWidget {
         itemBuilder: (context, index) {
           final item = sourceMap.itemAt(index);
           if (item case FullSourceHunkHeaderItem(:final hunk)) {
-            return KeyedSubtree(
-              key: Key('blame-hunk-header-${hunk.anchor.id}'),
-              child: KeyedSubtree(
-                key: _anchorKey(hunk.anchor),
-                child: FullDiffHunkHeader(
-                  hunk: hunk,
-                  path: document.file.path,
-                  hunkCount: hunks.length,
+            return _probe(
+              hunk.anchor,
+              KeyedSubtree(
+                key: Key('blame-hunk-header-${hunk.anchor.id}'),
+                child: KeyedSubtree(
+                  key: _anchorKey(hunk.anchor),
+                  child: FullDiffHunkHeader(
+                    hunk: hunk,
+                    path: document.file.path,
+                    hunkCount: hunks.length,
+                  ),
                 ),
               ),
             );
@@ -61,21 +70,28 @@ class FullBlameView extends StatelessWidget {
           final sourceItem = item as FullSourceLineItem;
           final lineNumber = sourceItem.lineNumber;
           final current = lineNumber == sourceLine;
-          return KeyedSubtree(
-            key: Key('blame-line-$lineNumber'),
-            child: KeyedSubtree(
-              key: current ? Key('blame-current-line-$lineNumber') : null,
-              child: BlameSourceRow(
-                blame: document.lines[lineNumber - 1],
-                source: document.file.lines[lineNumber - 1],
-                path: document.file.path,
-                side: document.file.side,
-                kind: sourceItem.kind,
-                wrapLines: wrapLines,
-                highlighter: document.file.disableRichRendering
-                    ? const _NoopSyntaxHighlighter()
-                    : highlighter,
-                current: current,
+          return _probe(
+            nearestHunkAnchorForSourceLine(
+              hunks: hunks,
+              side: document.file.side,
+              lineNumber: lineNumber,
+            ),
+            KeyedSubtree(
+              key: Key('blame-line-$lineNumber'),
+              child: KeyedSubtree(
+                key: current ? Key('blame-current-line-$lineNumber') : null,
+                child: BlameSourceRow(
+                  blame: document.lines[lineNumber - 1],
+                  source: document.file.lines[lineNumber - 1],
+                  path: document.file.path,
+                  side: document.file.side,
+                  kind: sourceItem.kind,
+                  wrapLines: wrapLines,
+                  highlighter: document.file.disableRichRendering
+                      ? const _NoopSyntaxHighlighter()
+                      : highlighter,
+                  current: current,
+                ),
               ),
             ),
           );
@@ -87,6 +103,15 @@ class FullBlameView extends StatelessWidget {
   GlobalKey _anchorKey(DiffAnchor anchor) =>
       anchorKeys[anchor.id] ??
       (throw StateError('Missing GlobalKey for ${anchor.id}'));
+
+  Widget _probe(DiffAnchor? anchor, Widget child) => anchor == null
+      ? child
+      : FullDiffAnchorProbe(
+          anchor: anchor,
+          onAttached: onAnchorProbeAttached,
+          onDetached: onAnchorProbeDetached,
+          child: child,
+        );
 }
 
 class BlameSourceRow extends StatelessWidget {

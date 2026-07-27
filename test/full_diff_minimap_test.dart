@@ -23,7 +23,7 @@ void main() {
       activeAnchor: document.hunks[1].anchor,
       sourceLineCount: 100,
       height: 500,
-      deletedFile: false,
+      sourceSide: FileDocumentSide.result,
     );
 
     expect(geometry.markers, hasLength(2));
@@ -47,14 +47,14 @@ void main() {
       activeAnchor: null,
       sourceLineCount: 100,
       height: 102,
-      deletedFile: false,
+      sourceSide: FileDocumentSide.result,
     );
     final deleted = MinimapGeometry.fromDocument(
       document: document,
       activeAnchor: null,
       sourceLineCount: 100,
       height: 102,
-      deletedFile: true,
+      sourceSide: FileDocumentSide.old,
     );
 
     expect(regular.markers.single.top, 79);
@@ -72,14 +72,14 @@ void main() {
       activeAnchor: null,
       sourceLineCount: 100,
       height: 102,
-      deletedFile: false,
+      sourceSide: FileDocumentSide.result,
     );
     final deleted = MinimapGeometry.fromDocument(
       document: document,
       activeAnchor: null,
       sourceLineCount: 100,
       height: 102,
-      deletedFile: true,
+      sourceSide: FileDocumentSide.old,
     );
 
     expect(regular.markers.single.top, 81);
@@ -93,7 +93,7 @@ void main() {
         activeAnchor: null,
         sourceLineCount: 0,
         height: 2,
-        deletedFile: false,
+        sourceSide: FileDocumentSide.result,
       ).markers,
       isEmpty,
     );
@@ -140,6 +140,121 @@ void main() {
     expect(shortDocument.height, 12);
   });
 
+  test('maps active hunk ranges on the selected source side', () {
+    final document = DiffDocument.fromLines(const [
+      DiffLine(kind: DiffLineKind.hunk, text: '@@ -10,40 +80,5 @@ uneven'),
+      DiffLine(
+        kind: DiffLineKind.context,
+        text: 'line',
+        oldNumber: 10,
+        newNumber: 80,
+      ),
+    ]);
+    final hunk = document.hunks.single;
+
+    final oldViewport = hunkViewport(
+      hunk: hunk,
+      sourceSide: FileDocumentSide.old,
+      sourceLineCount: 100,
+      height: 200,
+    );
+    final resultViewport = hunkViewport(
+      hunk: hunk,
+      sourceSide: FileDocumentSide.result,
+      sourceLineCount: 100,
+      height: 200,
+    );
+
+    expect(oldViewport?.top, 18);
+    expect(oldViewport?.height, 80);
+    expect(resultViewport?.top, 154);
+    expect(resultViewport?.height, 18);
+    expect(sourceLineCountForSide(document, FileDocumentSide.old), 49);
+    expect(sourceLineCountForSide(document, FileDocumentSide.result), 84);
+  });
+
+  test('normalizes deletion boundaries, EOF, and empty source ranges', () {
+    final deletion = DiffDocument.fromLines(const [
+      DiffLine(kind: DiffLineKind.hunk, text: '@@ -81 +82,0 @@ delete'),
+      DiffLine(kind: DiffLineKind.delete, text: 'deleted', oldNumber: 81),
+    ]).hunks.single;
+    final eofAddition = DiffDocument.fromLines(const [
+      DiffLine(kind: DiffLineKind.hunk, text: '@@ -100,0 +101 @@ add'),
+      DiffLine(kind: DiffLineKind.add, text: 'added', newNumber: 101),
+    ]).hunks.single;
+
+    final deletionBoundary = hunkViewport(
+      hunk: deletion,
+      sourceSide: FileDocumentSide.result,
+      sourceLineCount: 81,
+      height: 200,
+    )!;
+    expect(deletionBoundary.top, 182);
+    expect(deletionBoundary.height, 18);
+
+    final eofBoundary = hunkViewport(
+      hunk: eofAddition,
+      sourceSide: FileDocumentSide.old,
+      sourceLineCount: 100,
+      height: 200,
+    )!;
+    expect(eofBoundary.top, 182);
+    expect(eofBoundary.height, 18);
+
+    expect(
+      hunkViewport(
+        hunk: deletion,
+        sourceSide: FileDocumentSide.result,
+        sourceLineCount: 0,
+        height: 10,
+      ),
+      isA<MinimapViewport>()
+          .having((viewport) => viewport.top, 'top', 0)
+          .having((viewport) => viewport.height, 'height', 10),
+    );
+    expect(
+      hunkViewport(
+        hunk: deletion,
+        sourceSide: FileDocumentSide.old,
+        sourceLineCount: 0,
+        height: 200,
+      ),
+      isNull,
+    );
+    expect(
+      hunkViewport(
+        hunk: null,
+        sourceSide: FileDocumentSide.result,
+        sourceLineCount: 100,
+        height: 200,
+      ),
+      isNull,
+    );
+  });
+
+  test('nullable viewport changes invalidate minimap painting', () {
+    final geometry = MinimapGeometry.fromDocument(
+      document: DiffDocument.empty,
+      activeAnchor: null,
+      sourceLineCount: 0,
+      height: 100,
+      sourceSide: FileDocumentSide.result,
+    );
+    final withoutViewport = FullDiffMinimapPainter(
+      geometry: geometry,
+      viewport: null,
+    );
+    final same = FullDiffMinimapPainter(geometry: geometry, viewport: null);
+    final withViewport = FullDiffMinimapPainter(
+      geometry: geometry,
+      viewport: const MinimapViewport(top: 0, height: 18),
+    );
+
+    expect(withoutViewport.shouldRepaint(same), isFalse);
+    expect(withViewport.shouldRepaint(withoutViewport), isTrue);
+    expect(withoutViewport.shouldRepaint(withViewport), isTrue);
+  });
+
   test('chooses the nearest marker and clamps pointer coordinates', () {
     final document = DiffDocument.fromLines(const [
       DiffLine(kind: DiffLineKind.hunk, text: '@@ -10 +10 @@ one'),
@@ -152,7 +267,7 @@ void main() {
       activeAnchor: document.hunks.first.anchor,
       sourceLineCount: 100,
       height: 500,
-      deletedFile: false,
+      sourceSide: FileDocumentSide.result,
     );
 
     expect(
@@ -181,7 +296,7 @@ void main() {
             document: twoHunkDocument,
             activeAnchor: twoHunkDocument.hunks.first.anchor,
             sourceLineCount: 100,
-            deletedFile: false,
+            sourceSide: FileDocumentSide.result,
             view: FullDiffView.history,
             presentation: DiffPresentation.hunk,
             scrollController: scrollController,
@@ -218,7 +333,7 @@ void main() {
                   document: twoHunkDocument,
                   activeAnchor: twoHunkDocument.hunks.first.anchor,
                   sourceLineCount: 100,
-                  deletedFile: false,
+                  sourceSide: FileDocumentSide.result,
                   view: FullDiffView.diff,
                   presentation: DiffPresentation.inline,
                   scrollController: scrollController,
@@ -243,8 +358,8 @@ void main() {
         ),
       );
       final painter = paint.painter! as FullDiffMinimapPainter;
-      expect(painter.viewport.top, 30);
-      expect(painter.viewport.height, 75);
+      expect(painter.viewport!.top, 30);
+      expect(painter.viewport!.height, 75);
       expect(
         tester.getSize(find.byKey(const Key('full-diff-minimap'))).width,
         fullDiffMinimapWidth,
@@ -285,7 +400,7 @@ void main() {
                 document: document,
                 activeAnchor: document.hunks.first.anchor,
                 sourceLineCount: 2000,
-                deletedFile: false,
+                sourceSide: FileDocumentSide.result,
                 view: FullDiffView.diff,
                 presentation: DiffPresentation.inline,
                 scrollController: scrollController,
@@ -324,7 +439,7 @@ void main() {
               document: twoHunkDocument,
               activeAnchor: twoHunkDocument.hunks.first.anchor,
               sourceLineCount: 30,
-              deletedFile: false,
+              sourceSide: FileDocumentSide.result,
               view: FullDiffView.diff,
               presentation: DiffPresentation.inline,
               scrollController: scrollController,
@@ -367,7 +482,7 @@ void main() {
               document: twoHunkDocument,
               activeAnchor: activeAnchor,
               sourceLineCount: 30,
-              deletedFile: false,
+              sourceSide: FileDocumentSide.result,
               view: FullDiffView.diff,
               presentation: DiffPresentation.inline,
               scrollController: scrollController,
@@ -420,7 +535,7 @@ void main() {
                 document: twoHunkDocument,
                 activeAnchor: activeAnchor,
                 sourceLineCount: 30,
-                deletedFile: false,
+                sourceSide: FileDocumentSide.result,
                 view: FullDiffView.diff,
                 presentation: DiffPresentation.inline,
                 scrollController: scrollController,
@@ -465,7 +580,7 @@ void main() {
             document: DiffDocument.empty,
             activeAnchor: null,
             sourceLineCount: 0,
-            deletedFile: false,
+            sourceSide: FileDocumentSide.result,
             view: FullDiffView.diff,
             presentation: DiffPresentation.hunk,
             scrollController: scrollController,
@@ -509,7 +624,7 @@ void main() {
                 document: twoHunkDocument,
                 activeAnchor: twoHunkDocument.hunks.first.anchor,
                 sourceLineCount: 100,
-                deletedFile: false,
+                sourceSide: FileDocumentSide.result,
                 view: FullDiffView.diff,
                 presentation: DiffPresentation.inline,
                 scrollController: scrollController,
@@ -594,7 +709,7 @@ void main() {
                   document: twoHunkDocument,
                   activeAnchor: twoHunkDocument.hunks.first.anchor,
                   sourceLineCount: 100,
-                  deletedFile: false,
+                  sourceSide: FileDocumentSide.result,
                   view: scenario.view,
                   presentation: scenario.presentation,
                   scrollController: scrollController,

@@ -105,6 +105,11 @@ class FullDiffSessionState {
     null => file.loading ? 'Loading' : '—',
   };
 
+  bool get richRenderingEnabled {
+    final document = file.data;
+    return document != null && !document.disableRichRendering;
+  }
+
   FullDiffSessionState copyWith({
     List<GitCommit>? nearbyCommits,
     GitCommit? selectedCommit,

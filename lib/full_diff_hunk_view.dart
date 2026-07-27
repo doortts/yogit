@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'full_diff_anchor_probe.dart';
 import 'full_diff_code_row.dart';
 import 'full_diff_hunk_header.dart';
 import 'full_diff_model.dart';
@@ -19,6 +20,10 @@ class HunkPresentationView extends StatelessWidget {
     required this.wrapLines,
     required this.highlighter,
     required this.anchorKeys,
+    this.richRenderingEnabled = true,
+    this.wordDiffer = changedWordRanges,
+    this.onAnchorProbeAttached,
+    this.onAnchorProbeDetached,
     this.controller,
     super.key,
   });
@@ -29,6 +34,10 @@ class HunkPresentationView extends StatelessWidget {
   final bool wrapLines;
   final FullDiffSyntaxHighlighter highlighter;
   final Map<String, GlobalKey> anchorKeys;
+  final bool richRenderingEnabled;
+  final FullDiffWordDiffer wordDiffer;
+  final FullDiffAnchorProbeCallback? onAnchorProbeAttached;
+  final FullDiffAnchorProbeCallback? onAnchorProbeDetached;
   final ScrollController? controller;
 
   @override
@@ -46,39 +55,74 @@ class HunkPresentationView extends StatelessWidget {
     }
 
     final hunk = document.hunks[hunkIndex];
-    final wordRanges = _wordRangesByLine(hunk.lines);
-    Widget list({required bool horizontalScroll}) => ListView(
+    final lines = _hunkLines(hunk.lines);
+    final allSourceText = lines
+        .map((descriptor) => descriptor.line.text)
+        .join('\n');
+    Widget list({required bool horizontalScroll}) => ListView.builder(
       key: const Key('hunk-list'),
       controller: controller,
       primary: controller == null,
-      children: [
-        KeyedSubtree(
-          key: Key('hunk-card-surface-${hunk.anchor.id}'),
-          child: KeyedSubtree(
-            key: _anchorKey(hunk.anchor),
+      itemCount: lines.length + 1,
+      itemBuilder: (context, itemIndex) {
+        if (itemIndex == 0) {
+          Widget header = SelectionContainer.disabled(
             child: FullDiffHunkHeader(
               hunk: hunk,
               path: path,
               hunkCount: document.hunks.length,
             ),
-          ),
-        ),
-        for (final (index, line) in hunk.changedLines.indexed)
-          FullDiffCodeRow(
-            key: Key('hunk-line-${hunk.anchor.id}-$index'),
-            line: line,
-            path: path,
-            wrapLines: wrapLines,
-            highlighter: highlighter,
-            current: index == 0,
-            wordRanges: wordRanges[line] ?? const [],
-            horizontalScroll: horizontalScroll,
-          ),
-      ],
+          );
+          if (lines.isEmpty) {
+            header = KeyedSubtree(
+              key: Key('hunk-card-surface-${hunk.anchor.id}'),
+              child: KeyedSubtree(key: _anchorKey(hunk.anchor), child: header),
+            );
+          }
+          return FullDiffAnchorProbe(
+            anchor: hunk.anchor,
+            onAttached: onAnchorProbeAttached,
+            onDetached: onAnchorProbeDetached,
+            child: header,
+          );
+        }
+        final lineIndex = itemIndex - 1;
+        final descriptor = lines[lineIndex];
+        final wordRanges = richRenderingEnabled
+            ? descriptor.wordRanges(wordDiffer)
+            : const <WordRange>[];
+        Widget row = FullDiffCodeRow(
+          key: Key('hunk-line-${hunk.anchor.id}-$lineIndex'),
+          line: descriptor.line,
+          path: path,
+          wrapLines: wrapLines,
+          highlighter: highlighter,
+          current: lineIndex == 0,
+          wordRanges: wordRanges,
+          horizontalScroll: horizontalScroll,
+          richRenderingEnabled: richRenderingEnabled,
+          selectionOrder: FullDiffSelectionOrder(row: lineIndex),
+        );
+        if (lineIndex == 0) {
+          row = KeyedSubtree(
+            key: Key('hunk-card-surface-${hunk.anchor.id}'),
+            child: KeyedSubtree(key: _anchorKey(hunk.anchor), child: row),
+          );
+        }
+        return FullDiffAnchorProbe(
+          anchor: hunk.anchor,
+          onAttached: onAnchorProbeAttached,
+          onDetached: onAnchorProbeDetached,
+          child: row,
+        );
+      },
     );
 
     if (wrapLines) {
-      return FullDiffSelectionArea(child: list(horizontalScroll: false));
+      return FullDiffSelectionArea(
+        allSourceText: allSourceText,
+        child: list(horizontalScroll: false),
+      );
     }
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -87,6 +131,7 @@ class HunkPresentationView extends StatelessWidget {
           _unwrappedContentWidth(context, hunk.changedLines),
         );
         return FullDiffSelectionArea(
+          allSourceText: allSourceText,
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             primary: false,
@@ -127,17 +172,49 @@ double _unwrappedContentWidth(BuildContext context, Iterable<DiffLine> lines) {
   return fullDiffLineNumberWidth + widest + 20;
 }
 
-Map<DiffLine, List<WordRange>> _wordRangesByLine(List<DiffLine> lines) {
-  final ranges = <DiffLine, List<WordRange>>{};
+List<_HunkLineDescriptor> _hunkLines(List<DiffLine> lines) {
+  final descriptors = <DiffLine, _HunkLineDescriptor>{};
   for (final pair in pairDiff(lines)) {
     final left = pair.left;
     final right = pair.right;
     if (left?.kind != DiffLineKind.delete || right?.kind != DiffLineKind.add) {
       continue;
     }
-    final changes = changedWordRanges(left!.text, right!.text);
-    ranges[left] = changes.oldRanges;
-    ranges[right] = changes.newRanges;
+    descriptors[left!] = _HunkLineDescriptor(
+      line: left,
+      pairedLine: right!,
+      oldSide: true,
+    );
+    descriptors[right] = _HunkLineDescriptor(
+      line: right,
+      pairedLine: left,
+      oldSide: false,
+    );
   }
-  return ranges;
+  return [
+    for (final line in lines)
+      if (line.kind == DiffLineKind.add || line.kind == DiffLineKind.delete)
+        descriptors[line] ?? _HunkLineDescriptor(line: line),
+  ];
+}
+
+class _HunkLineDescriptor {
+  const _HunkLineDescriptor({
+    required this.line,
+    this.pairedLine,
+    this.oldSide = false,
+  });
+
+  final DiffLine line;
+  final DiffLine? pairedLine;
+  final bool oldSide;
+
+  List<WordRange> wordRanges(FullDiffWordDiffer differ) {
+    final paired = pairedLine;
+    if (paired == null) return const [];
+    final changes = oldSide
+        ? differ(line.text, paired.text)
+        : differ(paired.text, line.text);
+    return oldSide ? changes.oldRanges : changes.newRanges;
+  }
 }

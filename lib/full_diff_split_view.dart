@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'full_diff_anchor_probe.dart';
 import 'full_diff_code_row.dart';
 import 'full_diff_hunk_header.dart';
 import 'full_diff_model.dart';
@@ -18,6 +19,10 @@ class SplitPresentationView extends StatelessWidget {
     required this.showOldSide,
     required this.highlighter,
     required this.anchorKeys,
+    this.richRenderingEnabled = true,
+    this.wordDiffer = changedWordRanges,
+    this.onAnchorProbeAttached,
+    this.onAnchorProbeDetached,
     this.controller,
     super.key,
   });
@@ -30,6 +35,10 @@ class SplitPresentationView extends StatelessWidget {
   final bool showOldSide;
   final FullDiffSyntaxHighlighter highlighter;
   final Map<String, GlobalKey> anchorKeys;
+  final bool richRenderingEnabled;
+  final FullDiffWordDiffer wordDiffer;
+  final FullDiffAnchorProbeCallback? onAnchorProbeAttached;
+  final FullDiffAnchorProbeCallback? onAnchorProbeDetached;
   final ScrollController? controller;
 
   @override
@@ -43,55 +52,62 @@ class SplitPresentationView extends StatelessWidget {
       );
     }
 
-    final list = ListView.builder(
-      controller: controller,
-      primary: controller == null,
-      itemCount: document.hunks.length,
-      itemBuilder: (context, hunkIndex) {
-        final hunk = document.hunks[hunkIndex];
-        final current = activeAnchor?.hunkIndex == hunk.index;
-        final pairs = pairDiff(hunk.lines);
-        final firstChange = pairs.indexWhere(
-          (pair) =>
-              pair.left?.kind == DiffLineKind.delete ||
-              pair.right?.kind == DiffLineKind.add,
-        );
-        final leadingContextCount = firstChange < 0 ? 0 : firstChange;
-        Widget splitRow(int rowIndex) => _SplitRow(
-          pair: pairs[rowIndex],
-          rowIndex: rowIndex,
-          oldPath: oldPath,
-          newPath: newPath,
-          wrapLines: wrapLines,
-          showOldSide: showOldSide,
-          highlighter: highlighter,
-          current: current,
-        );
-        return KeyedSubtree(
-          key: _anchorKey(hunk.anchor),
-          child: FullDiffSelectionArea(
-            child: Column(
-              key: Key('split-hunk-$hunkIndex'),
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (var index = 0; index < leadingContextCount; index++)
-                  splitRow(index),
-                FullDiffHunkHeader(
-                  hunk: hunk,
-                  path: newPath,
-                  hunkCount: document.hunks.length,
-                ),
-                for (
-                  var index = leadingContextCount;
-                  index < pairs.length;
-                  index++
-                )
-                  splitRow(index),
-              ],
-            ),
-          ),
-        );
-      },
+    final items = _splitItems(document);
+    final allSourceText = [
+      for (final item in items)
+        if (item.pair case final pair?) _pairSourceText(pair, showOldSide),
+    ].join('\n');
+    final list = FullDiffSelectionArea(
+      allSourceText: allSourceText,
+      child: ListView.builder(
+        controller: controller,
+        primary: controller == null,
+        itemCount: items.length,
+        itemBuilder: (context, itemIndex) {
+          final item = items[itemIndex];
+          final hunk = item.hunk;
+          final current = activeAnchor?.hunkIndex == hunk.index;
+          Widget child;
+          if (item.pair case final pair?) {
+            child = _SplitRow(
+              key: Key('split-row-${hunk.index}-${item.pairIndex}'),
+              pair: pair,
+              sourceRow: item.sourceRow!,
+              oldPath: oldPath,
+              newPath: newPath,
+              wrapLines: wrapLines,
+              showOldSide: showOldSide,
+              highlighter: highlighter,
+              current: current,
+              richRenderingEnabled: richRenderingEnabled,
+              wordDiffer: wordDiffer,
+            );
+          } else {
+            child = SelectionContainer.disabled(
+              child: FullDiffHunkHeader(
+                hunk: hunk,
+                path: newPath,
+                hunkCount: document.hunks.length,
+              ),
+            );
+          }
+          if (item.firstInHunk) {
+            child = KeyedSubtree(
+              key: _anchorKey(hunk.anchor),
+              child: KeyedSubtree(
+                key: Key('split-hunk-${hunk.index}'),
+                child: child,
+              ),
+            );
+          }
+          return FullDiffAnchorProbe(
+            anchor: hunk.anchor,
+            onAttached: onAnchorProbeAttached,
+            onDetached: onAnchorProbeDetached,
+            child: child,
+          );
+        },
+      ),
     );
     return showOldSide
         ? KeyedSubtree(key: const Key('split-old-pane'), child: list)
@@ -103,40 +119,110 @@ class SplitPresentationView extends StatelessWidget {
       (throw StateError('Missing GlobalKey for ${anchor.id}'));
 }
 
+List<_SplitItem> _splitItems(DiffDocument document) {
+  final items = <_SplitItem>[];
+  var sourceRow = 0;
+  for (final hunk in document.hunks) {
+    final pairs = pairDiff(hunk.lines);
+    final firstChange = pairs.indexWhere(
+      (pair) =>
+          pair.left?.kind == DiffLineKind.delete ||
+          pair.right?.kind == DiffLineKind.add,
+    );
+    final leadingContextCount = firstChange < 0 ? 0 : firstChange;
+    var firstInHunk = true;
+
+    void addPair(int pairIndex) {
+      items.add(
+        _SplitItem(
+          hunk: hunk,
+          pair: pairs[pairIndex],
+          pairIndex: pairIndex,
+          sourceRow: sourceRow++,
+          firstInHunk: firstInHunk,
+        ),
+      );
+      firstInHunk = false;
+    }
+
+    for (var index = 0; index < leadingContextCount; index++) {
+      addPair(index);
+    }
+    items.add(_SplitItem(hunk: hunk, firstInHunk: firstInHunk));
+    firstInHunk = false;
+    for (var index = leadingContextCount; index < pairs.length; index++) {
+      addPair(index);
+    }
+  }
+  return items;
+}
+
+String _pairSourceText(DiffPair pair, bool showOldSide) {
+  final left = pair.left?.text;
+  final right = pair.right?.text;
+  if (!showOldSide) return right ?? '';
+  if (left == null) return right ?? '';
+  if (right == null) return left;
+  return '$left\t$right';
+}
+
+class _SplitItem {
+  const _SplitItem({
+    required this.hunk,
+    this.pair,
+    this.pairIndex,
+    this.sourceRow,
+    this.firstInHunk = false,
+  });
+
+  final DiffHunk hunk;
+  final DiffPair? pair;
+  final int? pairIndex;
+  final int? sourceRow;
+  final bool firstInHunk;
+}
+
 class _SplitRow extends StatelessWidget {
   const _SplitRow({
     required this.pair,
-    required this.rowIndex,
+    required this.sourceRow,
     required this.oldPath,
     required this.newPath,
     required this.wrapLines,
     required this.showOldSide,
     required this.highlighter,
     required this.current,
+    required this.richRenderingEnabled,
+    required this.wordDiffer,
+    super.key,
   });
 
   final DiffPair pair;
-  final int rowIndex;
+  final int sourceRow;
   final String oldPath;
   final String newPath;
   final bool wrapLines;
   final bool showOldSide;
   final FullDiffSyntaxHighlighter highlighter;
   final bool current;
+  final bool richRenderingEnabled;
+  final FullDiffWordDiffer wordDiffer;
 
   @override
   Widget build(BuildContext context) {
     final left = pair.left;
     final right = pair.right;
     final wordChanges =
-        left?.kind == DiffLineKind.delete && right?.kind == DiffLineKind.add
-        ? changedWordRanges(left!.text, right!.text)
+        richRenderingEnabled &&
+            left?.kind == DiffLineKind.delete &&
+            right?.kind == DiffLineKind.add
+        ? wordDiffer(left!.text, right!.text)
         : WordChangeRanges.empty;
     final markCurrent =
         current &&
         (left?.kind == DiffLineKind.delete || right?.kind == DiffLineKind.add);
     final newSide = right == null
-        ? HatchedDiffCell(key: Key('split-missing-new-$rowIndex'))
+        ? HatchedDiffCell(key: Key('split-missing-new-$sourceRow'))
         : FullDiffCodeRow(
             line: right,
             path: newPath,
@@ -145,6 +231,11 @@ class _SplitRow extends StatelessWidget {
             current: markCurrent,
             wordRanges: wordChanges.newRanges,
             compactGutter: true,
+            richRenderingEnabled: richRenderingEnabled,
+            selectionOrder: FullDiffSelectionOrder(
+              row: sourceRow,
+              column: showOldSide ? 1 : 0,
+            ),
           );
 
     if (!showOldSide) return newSide;
@@ -154,7 +245,7 @@ class _SplitRow extends StatelessWidget {
       children: [
         Expanded(
           child: left == null
-              ? HatchedDiffCell(key: Key('split-missing-old-$rowIndex'))
+              ? HatchedDiffCell(key: Key('split-missing-old-$sourceRow'))
               : FullDiffCodeRow(
                   line: left,
                   path: oldPath,
@@ -163,6 +254,8 @@ class _SplitRow extends StatelessWidget {
                   current: markCurrent,
                   wordRanges: wordChanges.oldRanges,
                   compactGutter: true,
+                  richRenderingEnabled: richRenderingEnabled,
+                  selectionOrder: FullDiffSelectionOrder(row: sourceRow),
                 ),
         ),
         const VerticalDivider(width: 1, color: fullDiffDivider),

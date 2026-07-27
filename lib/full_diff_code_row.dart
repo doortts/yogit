@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 
 import 'full_diff_syntax.dart';
 import 'full_diff_syntax_contract.dart';
@@ -28,11 +29,13 @@ const _gutterStyle = TextStyle(
 class FullDiffSelectionArea extends StatefulWidget {
   const FullDiffSelectionArea({
     required this.child,
+    this.allSourceText,
     this.debugOnSelectionOrderResolved,
     super.key,
   });
 
   final Widget child;
+  final String? allSourceText;
 
   @visibleForTesting
   final VoidCallback? debugOnSelectionOrderResolved;
@@ -42,9 +45,12 @@ class FullDiffSelectionArea extends StatefulWidget {
 }
 
 class _FullDiffSelectionAreaState extends State<FullDiffSelectionArea> {
+  final _selectionAreaKey = GlobalKey<SelectionAreaState>();
   final _sources = <_SourceSelectionContainerState>[];
   _SelectionSnapshot? _snapshot;
   bool _snapshotClearScheduled = false;
+  bool _modelSelectAll = false;
+  String? _selectedText;
   bool _disposed = false;
 
   void register(_SourceSelectionContainerState source) {
@@ -80,6 +86,11 @@ class _FullDiffSelectionAreaState extends State<FullDiffSelectionArea> {
           for (final source in _sources)
             if (source.rawSelectedContent != null) source,
         ]..sort((left, right) {
+          final leftOrder = left.selectionOrder;
+          final rightOrder = right.selectionOrder;
+          if (leftOrder != null && rightOrder != null) {
+            return leftOrder.compareTo(rightOrder);
+          }
           final leftOrigin = _sourceOrigin(left);
           final rightOrigin = _sourceOrigin(right);
           if (leftOrigin == null || rightOrigin == null) {
@@ -99,6 +110,14 @@ class _FullDiffSelectionAreaState extends State<FullDiffSelectionArea> {
     for (var index = 0; index < selected.length; index++) {
       if (index == selected.length - 1) {
         separators[selected[index]] = '';
+        continue;
+      }
+      final currentOrder = selected[index].selectionOrder;
+      final nextOrder = selected[index + 1].selectionOrder;
+      if (currentOrder != null && nextOrder != null) {
+        separators[selected[index]] = currentOrder.row == nextOrder.row
+            ? '\t'
+            : '\n';
         continue;
       }
       final currentOrigin = _sourceOrigin(selected[index]);
@@ -137,10 +156,48 @@ class _FullDiffSelectionAreaState extends State<FullDiffSelectionArea> {
   }
 
   @override
-  Widget build(BuildContext context) => _FullDiffSelectionGroup(
-    state: this,
-    child: SelectionArea(child: widget.child),
-  );
+  Widget build(BuildContext context) {
+    final selectionArea = _FullDiffSelectionGroup(
+      state: this,
+      child: SelectionArea(
+        key: _selectionAreaKey,
+        onSelectionChanged: widget.allSourceText == null
+            ? null
+            : (content) {
+                _modelSelectAll = false;
+                _selectedText = content?.plainText;
+              },
+        child: widget.child,
+      ),
+    );
+    if (widget.allSourceText == null) return selectionArea;
+    return Actions(
+      actions: <Type, Action<Intent>>{
+        SelectAllTextIntent: CallbackAction<SelectAllTextIntent>(
+          onInvoke: (intent) {
+            _selectionAreaKey.currentState?.selectableRegion.selectAll(
+              intent.cause,
+            );
+            _modelSelectAll = true;
+            return null;
+          },
+        ),
+        CopySelectionTextIntent: CallbackAction<CopySelectionTextIntent>(
+          onInvoke: (intent) {
+            if (_modelSelectAll) {
+              unawaited(
+                Clipboard.setData(ClipboardData(text: widget.allSourceText!)),
+              );
+            } else if (_selectedText case final selectedText?) {
+              unawaited(Clipboard.setData(ClipboardData(text: selectedText)));
+            }
+            return null;
+          },
+        ),
+      },
+      child: selectionArea,
+    );
+  }
 }
 
 class _SelectionSnapshot {
@@ -175,6 +232,8 @@ class FullDiffCodeRow extends StatelessWidget {
     this.compactGutter = false,
     this.leadingMetadata,
     this.horizontalScroll = true,
+    this.richRenderingEnabled = true,
+    this.selectionOrder,
     super.key,
   });
 
@@ -187,6 +246,8 @@ class FullDiffCodeRow extends StatelessWidget {
   final bool compactGutter;
   final Widget? leadingMetadata;
   final bool horizontalScroll;
+  final bool richRenderingEnabled;
+  final FullDiffSelectionOrder? selectionOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -205,7 +266,9 @@ class FullDiffCodeRow extends StatelessWidget {
         style: _sourceStyle,
         children: _sourceSpans(
           line.text,
-          highlighter.highlightLine(path, line.text),
+          richRenderingEnabled
+              ? highlighter.highlightLine(path, line.text)
+              : const [],
           wordRanges,
         ),
       ),
@@ -236,7 +299,10 @@ class FullDiffCodeRow extends StatelessWidget {
                       constraints: const BoxConstraints(minHeight: 27),
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(10, 3, 10, 3),
-                        child: _SourceSelectionContainer(child: source),
+                        child: _SourceSelectionContainer(
+                          selectionOrder: selectionOrder,
+                          child: source,
+                        ),
                       ),
                     ),
                     if (current)
@@ -299,10 +365,28 @@ class FullDiffCodeRow extends StatelessWidget {
   }
 }
 
+@immutable
+class FullDiffSelectionOrder implements Comparable<FullDiffSelectionOrder> {
+  const FullDiffSelectionOrder({required this.row, this.column = 0});
+
+  final int row;
+  final int column;
+
+  @override
+  int compareTo(FullDiffSelectionOrder other) {
+    final rowComparison = row.compareTo(other.row);
+    return rowComparison != 0 ? rowComparison : column.compareTo(other.column);
+  }
+}
+
 class _SourceSelectionContainer extends StatefulWidget {
-  const _SourceSelectionContainer({required this.child});
+  const _SourceSelectionContainer({
+    required this.child,
+    required this.selectionOrder,
+  });
 
   final Widget child;
+  final FullDiffSelectionOrder? selectionOrder;
 
   @override
   State<_SourceSelectionContainer> createState() =>
@@ -315,6 +399,7 @@ class _SourceSelectionContainerState extends State<_SourceSelectionContainer> {
   _FullDiffSelectionAreaState? _selectionGroup;
 
   SelectedContent? get rawSelectedContent => _delegate.rawSelectedContent;
+  FullDiffSelectionOrder? get selectionOrder => widget.selectionOrder;
 
   void _handleSelectionChanged() {
     _selectionGroup?.invalidateSelectionSnapshot();
@@ -328,6 +413,14 @@ class _SourceSelectionContainerState extends State<_SourceSelectionContainer> {
     _selectionGroup?.unregister(this);
     _selectionGroup = nextGroup;
     _selectionGroup?.register(this);
+  }
+
+  @override
+  void didUpdateWidget(covariant _SourceSelectionContainer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectionOrder != widget.selectionOrder) {
+      _selectionGroup?.invalidateSelectionSnapshot();
+    }
   }
 
   @override

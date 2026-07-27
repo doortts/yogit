@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'full_diff_anchor_probe.dart';
 import 'full_diff_code_row.dart';
 import 'full_diff_hunk_header.dart';
 import 'full_diff_model.dart';
@@ -17,6 +18,8 @@ class FullFileView extends StatelessWidget {
     required this.wrapLines,
     required this.highlighter,
     required this.anchorKeys,
+    this.onAnchorProbeAttached,
+    this.onAnchorProbeDetached,
     this.controller,
     super.key,
   });
@@ -28,6 +31,8 @@ class FullFileView extends StatelessWidget {
   final bool wrapLines;
   final FullDiffSyntaxHighlighter highlighter;
   final Map<String, GlobalKey> anchorKeys;
+  final FullDiffAnchorProbeCallback? onAnchorProbeAttached;
+  final FullDiffAnchorProbeCallback? onAnchorProbeDetached;
   final ScrollController? controller;
 
   @override
@@ -53,6 +58,7 @@ class FullFileView extends StatelessWidget {
       hunks: hunks,
       side: document.side,
       lineCount: document.lines.length,
+      activeAnchor: activeAnchor,
     );
     final sourceLine = sourceMap.activeLine(activeAnchor);
     final list = ListView.builder(
@@ -74,14 +80,17 @@ class FullFileView extends StatelessWidget {
         }
         final item = sourceMap.itemAt(index);
         if (item case FullSourceHunkHeaderItem(:final hunk)) {
-          return KeyedSubtree(
-            key: Key('file-hunk-header-${hunk.anchor.id}'),
-            child: KeyedSubtree(
-              key: _anchorKey(hunk.anchor),
-              child: FullDiffHunkHeader(
-                hunk: hunk,
-                path: path,
-                hunkCount: hunks.length,
+          return _probe(
+            hunk.anchor,
+            KeyedSubtree(
+              key: Key('file-hunk-header-${hunk.anchor.id}'),
+              child: KeyedSubtree(
+                key: _anchorKey(hunk.anchor),
+                child: FullDiffHunkHeader(
+                  hunk: hunk,
+                  path: path,
+                  hunkCount: hunks.length,
+                ),
               ),
             ),
           );
@@ -97,18 +106,25 @@ class FullFileView extends StatelessWidget {
               ? lineNumber
               : null,
         );
-        return KeyedSubtree(
-          key: Key('file-line-$lineNumber'),
-          child: KeyedSubtree(
-            key: current ? Key('file-current-line-$lineNumber') : null,
-            child: FullDiffCodeRow(
-              line: line,
-              path: path,
-              wrapLines: wrapLines,
-              highlighter: document.disableRichRendering
-                  ? const _NoopSyntaxHighlighter()
-                  : highlighter,
-              current: current,
+        return _probe(
+          nearestHunkAnchorForSourceLine(
+            hunks: hunks,
+            side: document.side,
+            lineNumber: lineNumber,
+          ),
+          KeyedSubtree(
+            key: Key('file-line-$lineNumber'),
+            child: KeyedSubtree(
+              key: current ? Key('file-current-line-$lineNumber') : null,
+              child: FullDiffCodeRow(
+                line: line,
+                path: path,
+                wrapLines: wrapLines,
+                highlighter: document.disableRichRendering
+                    ? const _NoopSyntaxHighlighter()
+                    : highlighter,
+                current: current,
+              ),
             ),
           ),
         );
@@ -141,6 +157,15 @@ class FullFileView extends StatelessWidget {
   GlobalKey _anchorKey(DiffAnchor anchor) =>
       anchorKeys[anchor.id] ??
       (throw StateError('Missing GlobalKey for ${anchor.id}'));
+
+  Widget _probe(DiffAnchor? anchor, Widget child) => anchor == null
+      ? child
+      : FullDiffAnchorProbe(
+          anchor: anchor,
+          onAttached: onAnchorProbeAttached,
+          onDetached: onAnchorProbeDetached,
+          child: child,
+        );
 }
 
 class _NoopSyntaxHighlighter implements FullDiffSyntaxHighlighter {

@@ -602,7 +602,7 @@ class _FullDiffQaDetailState extends State<FullDiffQaDetail> {
                           document: patch,
                           activeAnchor: state.activeAnchor,
                           sourceLineCount: patch.sourceLineCount,
-                          deletedFile: false,
+                          sourceSide: FileDocumentSide.result,
                           view: state.view,
                           presentation: state.presentation,
                           scrollController: _scrollController,

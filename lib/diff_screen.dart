@@ -84,6 +84,7 @@ class _DiffScreenState extends State<DiffScreen> {
   final _contentViewportKey = GlobalKey();
   final _highlighter = HighlightJsSyntaxHighlighter();
   Map<String, GlobalKey> _anchorKeys = <String, GlobalKey>{};
+  final Map<String, Set<BuildContext>> _anchorProbeContexts = {};
 
   late FullDiffSessionController _controller;
   late ExternalEditorService _editorService;
@@ -221,10 +222,23 @@ class _DiffScreenState extends State<DiffScreen> {
 
   void _reconcileAnchorKeys(DiffDocument? document) {
     final previous = _anchorKeys;
+    _anchorProbeContexts.clear();
     _anchorKeys = <String, GlobalKey>{
       for (final hunk in document?.hunks ?? const <DiffHunk>[])
         hunk.anchor.id: previous[hunk.anchor.id] ?? GlobalKey(),
     };
+  }
+
+  void _attachAnchorProbe(DiffAnchor anchor, BuildContext context) {
+    (_anchorProbeContexts[anchor.id] ??= <BuildContext>{}).add(context);
+  }
+
+  void _detachAnchorProbe(DiffAnchor anchor, BuildContext context) {
+    final contexts = _anchorProbeContexts[anchor.id];
+    contexts?.remove(context);
+    if (contexts?.isEmpty ?? false) {
+      _anchorProbeContexts.remove(anchor.id);
+    }
   }
 
   void _queueAttachedAnchorScroll() {
@@ -358,8 +372,30 @@ class _DiffScreenState extends State<DiffScreen> {
     if (viewport is! RenderBox || !viewport.attached) return;
     final centerY =
         viewport.localToGlobal(Offset.zero).dy + viewport.size.height / 2;
+    final viewportRect = viewport.localToGlobal(Offset.zero) & viewport.size;
     DiffAnchor? nearest;
     var nearestDistance = double.infinity;
+    var hasAttachedProbe = false;
+    for (final hunk in document.hunks) {
+      for (final context
+          in _anchorProbeContexts[hunk.anchor.id] ?? const <BuildContext>{}) {
+        final renderObject = context.findRenderObject();
+        if (renderObject is! RenderBox || !renderObject.attached) continue;
+        hasAttachedProbe = true;
+        final rect =
+            renderObject.localToGlobal(Offset.zero) & renderObject.size;
+        if (!rect.overlaps(viewportRect)) continue;
+        final distance = (rect.center.dy - centerY).abs();
+        if (distance < nearestDistance) {
+          nearest = hunk.anchor;
+          nearestDistance = distance;
+        }
+      }
+    }
+    if (hasAttachedProbe) {
+      if (nearest != null) _controller.syncAnchorFromScroll(nearest);
+      return;
+    }
     for (final hunk in document.hunks) {
       final context = _anchorKeys[hunk.anchor.id]?.currentContext;
       final renderObject = context?.findRenderObject();
@@ -986,12 +1022,8 @@ class _DiffScreenState extends State<DiffScreen> {
                 child: FullDiffMinimap(
                   document: state.patch.data ?? DiffDocument.empty,
                   activeAnchor: state.activeAnchor,
-                  sourceLineCount:
-                      state.file.data?.lines.length ??
-                      state.patch.data?.sourceLineCount ??
-                      0,
-                  deletedFile:
-                      state.selectedFile?.status.startsWith('D') ?? false,
+                  sourceLineCount: _minimapSourceLineCount(state),
+                  sourceSide: _minimapSourceSide(state),
                   view: state.view,
                   presentation: state.presentation,
                   scrollController: _contentScroll,
@@ -1002,6 +1034,23 @@ class _DiffScreenState extends State<DiffScreen> {
           ],
         ),
       );
+
+  FileDocumentSide _minimapSourceSide(FullDiffSessionState state) {
+    final loadedSide = state.file.data?.side;
+    if (loadedSide != null) return loadedSide;
+    return state.selectedFile?.status.startsWith('D') ?? false
+        ? FileDocumentSide.old
+        : FileDocumentSide.result;
+  }
+
+  int _minimapSourceLineCount(FullDiffSessionState state) {
+    final loadedLineCount = state.file.data?.lines.length ?? 0;
+    if (loadedLineCount > 0) return loadedLineCount;
+    final patch = state.patch.data;
+    return patch == null
+        ? 0
+        : sourceLineCountForSide(patch, _minimapSourceSide(state));
+  }
 
   Widget _contentFor(FullDiffSessionState state, double viewportWidth) =>
       switch (state.view) {
@@ -1022,6 +1071,8 @@ class _DiffScreenState extends State<DiffScreen> {
       wrapLines: state.wrapLines,
       highlighter: _highlighter,
       anchorKeys: _anchorKeys,
+      onAnchorProbeAttached: _attachAnchorProbe,
+      onAnchorProbeDetached: _detachAnchorProbe,
       controller: _contentScroll,
     );
   }
@@ -1045,6 +1096,9 @@ class _DiffScreenState extends State<DiffScreen> {
         wrapLines: state.wrapLines,
         highlighter: _highlighter,
         anchorKeys: _anchorKeys,
+        richRenderingEnabled: state.richRenderingEnabled,
+        onAnchorProbeAttached: _attachAnchorProbe,
+        onAnchorProbeDetached: _detachAnchorProbe,
         controller: _contentScroll,
       ),
       DiffPresentation.inline => InlinePresentationView(
@@ -1054,6 +1108,9 @@ class _DiffScreenState extends State<DiffScreen> {
         wrapLines: state.wrapLines,
         highlighter: _highlighter,
         anchorKeys: _anchorKeys,
+        richRenderingEnabled: state.richRenderingEnabled,
+        onAnchorProbeAttached: _attachAnchorProbe,
+        onAnchorProbeDetached: _detachAnchorProbe,
         controller: _contentScroll,
       ),
       DiffPresentation.split => SplitPresentationView(
@@ -1065,6 +1122,9 @@ class _DiffScreenState extends State<DiffScreen> {
         showOldSide: viewportWidth > 480,
         highlighter: _highlighter,
         anchorKeys: _anchorKeys,
+        richRenderingEnabled: state.richRenderingEnabled,
+        onAnchorProbeAttached: _attachAnchorProbe,
+        onAnchorProbeDetached: _detachAnchorProbe,
         controller: _contentScroll,
       ),
     };
@@ -1102,6 +1162,8 @@ class _DiffScreenState extends State<DiffScreen> {
       wrapLines: state.wrapLines,
       highlighter: _highlighter,
       anchorKeys: _anchorKeys,
+      onAnchorProbeAttached: _attachAnchorProbe,
+      onAnchorProbeDetached: _detachAnchorProbe,
       controller: _contentScroll,
     );
   }

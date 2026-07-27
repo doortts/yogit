@@ -369,6 +369,9 @@ class WordChangeRanges {
   bool get isEmpty => oldRanges.isEmpty && newRanges.isEmpty;
 }
 
+typedef FullDiffWordDiffer =
+    WordChangeRanges Function(String oldText, String newText);
+
 List<WordRange> tokenizeWords(String text) {
   final matches = RegExp(r'\w+|[^\w\s]+|\s+').allMatches(text);
   return List.unmodifiable(

@@ -6837,7 +6837,8 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
-    expect(scroll.offset, maximum);
+    expect(scroll.offset, scroll.position.maxScrollExtent);
+    expect(scroll.offset, lessThanOrEqualTo(maximum));
   });
 
   testWidgets('full diff popup handles arrows before screen shortcuts', (

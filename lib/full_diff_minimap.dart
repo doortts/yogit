@@ -49,13 +49,13 @@ class MinimapGeometry {
     required DiffAnchor? activeAnchor,
     required int sourceLineCount,
     required double height,
-    required bool deletedFile,
+    required FileDocumentSide sourceSide,
   }) {
     return MinimapGeometry(
       markers: List<MinimapMarker>.unmodifiable(
         document.hunks.map((hunk) {
           final anchor = hunk.anchor;
-          final line = deletedFile
+          final line = sourceSide == FileDocumentSide.old
               ? anchor.oldLine ?? hunk.oldStart
               : anchor.newLine ?? hunk.newStart;
           final hasAddition = hunk.lines.any(
@@ -77,6 +77,26 @@ class MinimapGeometry {
   }
 
   final List<MinimapMarker> markers;
+}
+
+int sourceLineCountForSide(DiffDocument document, FileDocumentSide sourceSide) {
+  var maximum = 0;
+  for (final hunk in document.hunks) {
+    final start = sourceSide == FileDocumentSide.old
+        ? hunk.oldStart
+        : hunk.newStart;
+    final count = sourceSide == FileDocumentSide.old
+        ? hunk.oldCount
+        : hunk.newCount;
+    maximum = math.max(maximum, start + math.max(0, count - 1));
+    for (final line in hunk.lines) {
+      final number = sourceSide == FileDocumentSide.old
+          ? line.oldNumber
+          : line.newNumber;
+      if (number != null) maximum = math.max(maximum, number);
+    }
+  }
+  return maximum;
 }
 
 double lineToTop(int line, int lineCount, double height) {
@@ -113,6 +133,52 @@ MinimapViewport scrollViewport({
   return MinimapViewport(top: scrollFraction * travel, height: viewportHeight);
 }
 
+MinimapViewport? hunkViewport({
+  required DiffHunk? hunk,
+  required FileDocumentSide sourceSide,
+  required int sourceLineCount,
+  required double height,
+}) {
+  if (hunk == null) return null;
+  final trackHeight = math.max(0.0, height);
+  final lineCount = math.max(0, sourceLineCount);
+  final start = sourceSide == FileDocumentSide.old
+      ? hunk.oldStart
+      : hunk.newStart;
+  final count = sourceSide == FileDocumentSide.old
+      ? hunk.oldCount
+      : hunk.newCount;
+  if (lineCount == 0) {
+    if (count > 0) return null;
+    return MinimapViewport(
+      top: 0,
+      height: math.min(_minimumViewportHeight, trackHeight),
+    );
+  }
+
+  late final int boundaryStart;
+  late final int boundaryEnd;
+  if (count > 0) {
+    boundaryStart = (start - 1).clamp(0, lineCount);
+    boundaryEnd = (boundaryStart + count).clamp(boundaryStart, lineCount);
+  } else {
+    boundaryStart = start.clamp(0, lineCount);
+    boundaryEnd = boundaryStart;
+  }
+  final rawTop = boundaryStart / lineCount * trackHeight;
+  final rawBottom = boundaryEnd / lineCount * trackHeight;
+  final viewportHeight = math.min(
+    trackHeight,
+    math.max(_minimumViewportHeight, rawBottom - rawTop),
+  );
+  final travel = math.max(0.0, trackHeight - viewportHeight);
+  final center = (rawTop + rawBottom) / 2;
+  return MinimapViewport(
+    top: (center - viewportHeight / 2).clamp(0.0, travel).toDouble(),
+    height: viewportHeight,
+  );
+}
+
 DiffAnchor? nearestAnchorForY(
   double y,
   double height,
@@ -135,7 +201,7 @@ class FullDiffMinimap extends StatefulWidget {
     required this.document,
     required this.activeAnchor,
     required this.sourceLineCount,
-    required this.deletedFile,
+    required this.sourceSide,
     required this.view,
     required this.presentation,
     required this.scrollController,
@@ -147,7 +213,7 @@ class FullDiffMinimap extends StatefulWidget {
   final DiffDocument document;
   final DiffAnchor? activeAnchor;
   final int sourceLineCount;
-  final bool deletedFile;
+  final FileDocumentSide sourceSide;
   final FullDiffView view;
   final DiffPresentation presentation;
   final ScrollController scrollController;
@@ -171,7 +237,7 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
   DiffAnchor? _cachedActiveAnchor;
   int? _cachedSourceLineCount;
   double? _cachedHeight;
-  bool? _cachedDeletedFile;
+  FileDocumentSide? _cachedSourceSide;
   FullDiffView? _cachedView;
   DiffPresentation? _cachedPresentation;
 
@@ -203,22 +269,18 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
     if (_dragging || _programmaticScrollSerial > 0) return;
   }
 
-  MinimapViewport _viewport(double height) {
+  MinimapViewport? _viewport(double height) {
     if (_usesAnchorDrag && widget.document.hunks.isNotEmpty) {
-      const viewportFraction = 0.24;
-      final activeIndex = _activeHunkIndex.clamp(
-        0,
-        widget.document.hunks.length - 1,
-      );
-      final topFraction = activeIndex == 1
-          ? 0.28
-          : 0.12 +
-                (widget.document.hunks.length == 1
-                    ? 0
-                    : activeIndex / (widget.document.hunks.length - 1) * 0.64);
-      return MinimapViewport(
-        top: height * topFraction,
-        height: height * viewportFraction,
+      final activeIndex = _activeHunkIndex;
+      final activeHunk =
+          activeIndex < 0 || activeIndex >= widget.document.hunks.length
+          ? null
+          : widget.document.hunks[activeIndex];
+      return hunkViewport(
+        hunk: activeHunk,
+        sourceSide: widget.sourceSide,
+        sourceLineCount: widget.sourceLineCount,
+        height: height,
       );
     }
     final position = _position;
@@ -277,9 +339,12 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
     final viewport = _viewport(height);
     final y = details.localPosition.dy;
     _draggingViewport =
-        !_usesAnchorDrag && _hasScrollableContent && viewport.contains(y);
+        !_usesAnchorDrag &&
+        _hasScrollableContent &&
+        viewport != null &&
+        viewport.contains(y);
     if (_draggingViewport) {
-      _dragOffset = y - viewport.top;
+      _dragOffset = y - viewport!.top;
     } else {
       _selectAnchor(y, height, deduplicate: true);
     }
@@ -293,6 +358,7 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
     }
 
     final viewport = _viewport(height);
+    if (viewport == null) return;
     final travel = math.max(0.0, height - viewport.height);
     final fraction = travel == 0
         ? 0.0
@@ -347,7 +413,7 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
         _sameAnchor(_cachedActiveAnchor, widget.activeAnchor) &&
         _cachedSourceLineCount == widget.sourceLineCount &&
         _cachedHeight == height &&
-        _cachedDeletedFile == widget.deletedFile &&
+        _cachedSourceSide == widget.sourceSide &&
         _cachedView == widget.view &&
         _cachedPresentation == widget.presentation) {
       return cached;
@@ -358,14 +424,14 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
       activeAnchor: widget.activeAnchor,
       sourceLineCount: widget.sourceLineCount,
       height: height,
-      deletedFile: widget.deletedFile,
+      sourceSide: widget.sourceSide,
     );
     _cachedGeometry = geometry;
     _cachedDocument = widget.document;
     _cachedActiveAnchor = widget.activeAnchor;
     _cachedSourceLineCount = widget.sourceLineCount;
     _cachedHeight = height;
-    _cachedDeletedFile = widget.deletedFile;
+    _cachedSourceSide = widget.sourceSide;
     _cachedView = widget.view;
     _cachedPresentation = widget.presentation;
     return geometry;
@@ -445,7 +511,7 @@ class FullDiffMinimapPainter extends CustomPainter {
   });
 
   final MinimapGeometry geometry;
-  final MinimapViewport viewport;
+  final MinimapViewport? viewport;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -459,20 +525,22 @@ class FullDiffMinimapPainter extends CustomPainter {
         ..strokeWidth = 1,
     );
 
-    final viewportRect = Rect.fromLTWH(
-      1,
-      viewport.top.clamp(0.0, size.height),
-      math.max(0, size.width - 1),
-      viewport.height.clamp(0.0, size.height),
-    );
-    canvas.drawRect(viewportRect, Paint()..color = fullDiffMinimapViewport);
-    canvas.drawRect(
-      viewportRect,
-      Paint()
-        ..color = fullDiffMinimapRing
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1,
-    );
+    if (viewport case final viewport?) {
+      final viewportRect = Rect.fromLTWH(
+        1,
+        viewport.top.clamp(0.0, size.height),
+        math.max(0, size.width - 1),
+        viewport.height.clamp(0.0, size.height),
+      );
+      canvas.drawRect(viewportRect, Paint()..color = fullDiffMinimapViewport);
+      canvas.drawRect(
+        viewportRect,
+        Paint()
+          ..color = fullDiffMinimapRing
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1,
+      );
+    }
 
     for (final marker in geometry.markers) {
       canvas.drawRect(
@@ -490,8 +558,8 @@ class FullDiffMinimapPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant FullDiffMinimapPainter oldDelegate) {
     return oldDelegate.geometry != geometry ||
-        oldDelegate.viewport.top != viewport.top ||
-        oldDelegate.viewport.height != viewport.height;
+        oldDelegate.viewport?.top != viewport?.top ||
+        oldDelegate.viewport?.height != viewport?.height;
   }
 }
 

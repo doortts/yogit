@@ -132,195 +132,314 @@ void main() {
     },
   );
 
-  testWidgets(
-    'file old side shows deletion styling and keeps EOF hunk headers unique',
-    (tester) async {
-      final file = FileDocument.fromBytes(
-        revision: commitA.parents.single,
-        path: 'old.txt',
-        side: FileDocumentSide.old,
-        bytes: Uint8List.fromList(utf8.encode('alpha\nold value\n')),
-        gitMarkedBinary: false,
-      );
-      const firstAnchor = DiffAnchor(hunkIndex: 0, oldLine: 2, newLine: 2);
-      const eofAnchor = DiffAnchor(hunkIndex: 1, oldLine: 3, newLine: 3);
-      const hunks = [
-        DiffHunk(
-          index: 0,
-          oldStart: 2,
-          oldCount: 1,
-          newStart: 2,
-          newCount: 1,
-          context: 'replace value',
-          lines: [
-            DiffLine(
-              kind: DiffLineKind.delete,
-              text: 'old value',
-              oldNumber: 2,
-            ),
-            DiffLine(kind: DiffLineKind.add, text: 'new value', newNumber: 2),
-          ],
-          anchor: firstAnchor,
-        ),
-        DiffHunk(
-          index: 1,
-          oldStart: 3,
-          oldCount: 1,
-          newStart: 3,
-          newCount: 0,
-          context: 'delete at EOF',
-          lines: [
-            DiffLine(
-              kind: DiffLineKind.delete,
-              text: 'removed value',
-              oldNumber: 3,
-            ),
-          ],
-          anchor: eofAnchor,
-        ),
-      ];
-      final firstKey = GlobalKey(debugLabel: firstAnchor.id);
-      final eofKey = GlobalKey(debugLabel: eofAnchor.id);
-
-      await tester.pumpWidget(
-        qaApp(
-          FullFileView(
-            document: file,
-            hunks: hunks,
-            path: file.path,
-            activeAnchor: firstAnchor,
-            wrapLines: false,
-            highlighter: fakeHighlighter,
-            anchorKeys: {firstAnchor.id: firstKey, eofAnchor.id: eofKey},
+  testWidgets('file moves header anchor and decoration to the active hunk', (
+    tester,
+  ) async {
+    final file = FileDocument.fromBytes(
+      revision: commitA.sha,
+      path: 'result.txt',
+      side: FileDocumentSide.result,
+      bytes: Uint8List.fromList(
+        utf8.encode('zero\nfirst changed\nmiddle\nsecond changed\n'),
+      ),
+      gitMarkedBinary: false,
+    );
+    const firstAnchor = DiffAnchor(hunkIndex: 0, oldLine: 2, newLine: 2);
+    const secondAnchor = DiffAnchor(hunkIndex: 1, oldLine: 4, newLine: 4);
+    const hunks = [
+      DiffHunk(
+        index: 0,
+        oldStart: 2,
+        oldCount: 1,
+        newStart: 2,
+        newCount: 1,
+        context: 'first change',
+        lines: [
+          DiffLine(kind: DiffLineKind.delete, text: 'first old', oldNumber: 2),
+          DiffLine(kind: DiffLineKind.add, text: 'first changed', newNumber: 2),
+        ],
+        anchor: firstAnchor,
+      ),
+      DiffHunk(
+        index: 1,
+        oldStart: 4,
+        oldCount: 1,
+        newStart: 4,
+        newCount: 1,
+        context: 'second change',
+        lines: [
+          DiffLine(kind: DiffLineKind.delete, text: 'second old', oldNumber: 4),
+          DiffLine(
+            kind: DiffLineKind.add,
+            text: 'second changed',
+            newNumber: 4,
           ),
-        ),
-      );
+        ],
+        anchor: secondAnchor,
+      ),
+    ];
+    final firstKey = GlobalKey(debugLabel: firstAnchor.id);
+    final secondKey = GlobalKey(debugLabel: secondAnchor.id);
+    final keys = {firstAnchor.id: firstKey, secondAnchor.id: secondKey};
 
-      final firstHeader = find.byKey(Key('file-hunk-header-${firstAnchor.id}'));
-      final deletedRow = find.byKey(const Key('file-line-2'));
-      final eofHeader = find.byKey(Key('file-hunk-header-${eofAnchor.id}'));
-      expect(firstHeader, findsOneWidget);
-      expect(eofHeader, findsOneWidget);
-      expect(
-        tester.getBottomLeft(firstHeader).dy,
-        tester.getTopLeft(deletedRow).dy,
-      );
-      expect(
-        tester.getTopLeft(eofHeader).dy,
-        tester.getBottomLeft(deletedRow).dy,
-      );
-      expect(firstKey.currentContext, isNotNull);
-      expect(eofKey.currentContext, isNotNull);
+    Widget view(DiffAnchor activeAnchor) => qaApp(
+      FullFileView(
+        document: file,
+        hunks: hunks,
+        path: file.path,
+        activeAnchor: activeAnchor,
+        wrapLines: false,
+        highlighter: fakeHighlighter,
+        anchorKeys: keys,
+      ),
+    );
+
+    await tester.pumpWidget(view(firstAnchor));
+
+    expect(
+      find.byKey(Key('file-hunk-header-${firstAnchor.id}')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(Key('file-hunk-header-${secondAnchor.id}')),
+      findsNothing,
+    );
+    expect(firstKey.currentContext, isNotNull);
+    expect(secondKey.currentContext, isNull);
+    expect(
+      tester
+          .widget<FullDiffCodeRow>(
+            find.descendant(
+              of: find.byKey(const Key('file-line-2')),
+              matching: find.byType(FullDiffCodeRow),
+            ),
+          )
+          .line
+          .kind,
+      DiffLineKind.add,
+    );
+    expect(
+      tester
+          .widget<FullDiffCodeRow>(
+            find.descendant(
+              of: find.byKey(const Key('file-line-4')),
+              matching: find.byType(FullDiffCodeRow),
+            ),
+          )
+          .line
+          .kind,
+      DiffLineKind.context,
+    );
+
+    await tester.pumpWidget(view(secondAnchor));
+
+    expect(find.byKey(Key('file-hunk-header-${firstAnchor.id}')), findsNothing);
+    expect(
+      find.byKey(Key('file-hunk-header-${secondAnchor.id}')),
+      findsOneWidget,
+    );
+    expect(firstKey.currentContext, isNull);
+    expect(secondKey.currentContext, isNotNull);
+    expect(
+      tester
+          .widget<FullDiffCodeRow>(
+            find.descendant(
+              of: find.byKey(const Key('file-line-2')),
+              matching: find.byType(FullDiffCodeRow),
+            ),
+          )
+          .line
+          .kind,
+      DiffLineKind.context,
+    );
+    expect(
+      tester
+          .widget<FullDiffCodeRow>(
+            find.descendant(
+              of: find.byKey(const Key('file-line-4')),
+              matching: find.byType(FullDiffCodeRow),
+            ),
+          )
+          .line
+          .kind,
+      DiffLineKind.add,
+    );
+  });
+
+  testWidgets('file old side decorates only the active deletion hunk', (
+    tester,
+  ) async {
+    final file = FileDocument.fromBytes(
+      revision: commitA.parents.single,
+      path: 'old.txt',
+      side: FileDocumentSide.old,
+      bytes: Uint8List.fromList(utf8.encode('alpha\nold value\n')),
+      gitMarkedBinary: false,
+    );
+    const firstAnchor = DiffAnchor(hunkIndex: 0, oldLine: 2, newLine: 2);
+    const eofAnchor = DiffAnchor(hunkIndex: 1, oldLine: 3, newLine: 3);
+    const hunks = [
+      DiffHunk(
+        index: 0,
+        oldStart: 2,
+        oldCount: 1,
+        newStart: 2,
+        newCount: 1,
+        context: 'replace value',
+        lines: [
+          DiffLine(kind: DiffLineKind.delete, text: 'old value', oldNumber: 2),
+          DiffLine(kind: DiffLineKind.add, text: 'new value', newNumber: 2),
+        ],
+        anchor: firstAnchor,
+      ),
+      DiffHunk(
+        index: 1,
+        oldStart: 3,
+        oldCount: 1,
+        newStart: 3,
+        newCount: 0,
+        context: 'delete at EOF',
+        lines: [
+          DiffLine(
+            kind: DiffLineKind.delete,
+            text: 'removed value',
+            oldNumber: 3,
+          ),
+        ],
+        anchor: eofAnchor,
+      ),
+    ];
+    final firstKey = GlobalKey(debugLabel: firstAnchor.id);
+    final eofKey = GlobalKey(debugLabel: eofAnchor.id);
+
+    await tester.pumpWidget(
+      qaApp(
+        FullFileView(
+          document: file,
+          hunks: hunks,
+          path: file.path,
+          activeAnchor: firstAnchor,
+          wrapLines: false,
+          highlighter: fakeHighlighter,
+          anchorKeys: {firstAnchor.id: firstKey, eofAnchor.id: eofKey},
+        ),
+      ),
+    );
+
+    final firstHeader = find.byKey(Key('file-hunk-header-${firstAnchor.id}'));
+    final deletedRow = find.byKey(const Key('file-line-2'));
+    final eofHeader = find.byKey(Key('file-hunk-header-${eofAnchor.id}'));
+    expect(firstHeader, findsOneWidget);
+    expect(eofHeader, findsNothing);
+    expect(
+      tester.getBottomLeft(firstHeader).dy,
+      tester.getTopLeft(deletedRow).dy,
+    );
+    expect(firstKey.currentContext, isNotNull);
+    expect(eofKey.currentContext, isNull);
+    final renderedLine = tester.widget<FullDiffCodeRow>(
+      find.descendant(of: deletedRow, matching: find.byType(FullDiffCodeRow)),
+    );
+    expect(renderedLine.line.kind, DiffLineKind.delete);
+    expect(renderedLine.line.oldNumber, 2);
+    expect(renderedLine.line.newNumber, isNull);
+    expect(
+      find.descendant(
+        of: deletedRow,
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is ColoredBox && widget.color == fullDiffDeletedSource,
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('file keeps only the active deletion-only result header at EOF', (
+    tester,
+  ) async {
+    final file = FileDocument.fromBytes(
+      revision: commitA.sha,
+      path: 'result.txt',
+      side: FileDocumentSide.result,
+      bytes: Uint8List.fromList(utf8.encode('alpha\nomega\n')),
+      gitMarkedBinary: false,
+    );
+    const firstAnchor = DiffAnchor(hunkIndex: 0, oldLine: 3, newLine: null);
+    const secondAnchor = DiffAnchor(hunkIndex: 1, oldLine: 4, newLine: null);
+    const hunks = [
+      DiffHunk(
+        index: 0,
+        oldStart: 3,
+        oldCount: 1,
+        newStart: 3,
+        newCount: 0,
+        context: 'first EOF deletion',
+        lines: [
+          DiffLine(
+            kind: DiffLineKind.delete,
+            text: 'removed first',
+            oldNumber: 3,
+          ),
+        ],
+        anchor: firstAnchor,
+      ),
+      DiffHunk(
+        index: 1,
+        oldStart: 4,
+        oldCount: 1,
+        newStart: 3,
+        newCount: 0,
+        context: 'second EOF deletion',
+        lines: [
+          DiffLine(
+            kind: DiffLineKind.delete,
+            text: 'removed second',
+            oldNumber: 4,
+          ),
+        ],
+        anchor: secondAnchor,
+      ),
+    ];
+    final firstKey = GlobalKey(debugLabel: firstAnchor.id);
+    final secondKey = GlobalKey(debugLabel: secondAnchor.id);
+
+    await tester.pumpWidget(
+      qaApp(
+        FullFileView(
+          document: file,
+          hunks: hunks,
+          path: file.path,
+          activeAnchor: firstAnchor,
+          wrapLines: false,
+          highlighter: fakeHighlighter,
+          anchorKeys: {firstAnchor.id: firstKey, secondAnchor.id: secondKey},
+        ),
+      ),
+    );
+
+    final lastSourceRow = find.byKey(const Key('file-line-2'));
+    final firstHeader = find.byKey(Key('file-hunk-header-${firstAnchor.id}'));
+    final secondHeader = find.byKey(Key('file-hunk-header-${secondAnchor.id}'));
+    expect(
+      tester.getTopLeft(firstHeader).dy,
+      tester.getBottomLeft(lastSourceRow).dy,
+    );
+    expect(secondHeader, findsNothing);
+    expect(firstKey.currentContext, isNotNull);
+    expect(secondKey.currentContext, isNull);
+    for (final lineNumber in [1, 2]) {
       final renderedLine = tester.widget<FullDiffCodeRow>(
-        find.descendant(of: deletedRow, matching: find.byType(FullDiffCodeRow)),
-      );
-      expect(renderedLine.line.kind, DiffLineKind.delete);
-      expect(renderedLine.line.oldNumber, 2);
-      expect(renderedLine.line.newNumber, isNull);
-      expect(
         find.descendant(
-          of: deletedRow,
-          matching: find.byWidgetPredicate(
-            (widget) =>
-                widget is ColoredBox && widget.color == fullDiffDeletedSource,
-          ),
-        ),
-        findsOneWidget,
-      );
-      expect(tester.takeException(), isNull);
-    },
-  );
-
-  testWidgets(
-    'file keeps deletion-only result headers unique at the same EOF boundary',
-    (tester) async {
-      final file = FileDocument.fromBytes(
-        revision: commitA.sha,
-        path: 'result.txt',
-        side: FileDocumentSide.result,
-        bytes: Uint8List.fromList(utf8.encode('alpha\nomega\n')),
-        gitMarkedBinary: false,
-      );
-      const firstAnchor = DiffAnchor(hunkIndex: 0, oldLine: 3, newLine: null);
-      const secondAnchor = DiffAnchor(hunkIndex: 1, oldLine: 4, newLine: null);
-      const hunks = [
-        DiffHunk(
-          index: 0,
-          oldStart: 3,
-          oldCount: 1,
-          newStart: 3,
-          newCount: 0,
-          context: 'first EOF deletion',
-          lines: [
-            DiffLine(
-              kind: DiffLineKind.delete,
-              text: 'removed first',
-              oldNumber: 3,
-            ),
-          ],
-          anchor: firstAnchor,
-        ),
-        DiffHunk(
-          index: 1,
-          oldStart: 4,
-          oldCount: 1,
-          newStart: 3,
-          newCount: 0,
-          context: 'second EOF deletion',
-          lines: [
-            DiffLine(
-              kind: DiffLineKind.delete,
-              text: 'removed second',
-              oldNumber: 4,
-            ),
-          ],
-          anchor: secondAnchor,
-        ),
-      ];
-      final firstKey = GlobalKey(debugLabel: firstAnchor.id);
-      final secondKey = GlobalKey(debugLabel: secondAnchor.id);
-
-      await tester.pumpWidget(
-        qaApp(
-          FullFileView(
-            document: file,
-            hunks: hunks,
-            path: file.path,
-            activeAnchor: firstAnchor,
-            wrapLines: false,
-            highlighter: fakeHighlighter,
-            anchorKeys: {firstAnchor.id: firstKey, secondAnchor.id: secondKey},
-          ),
+          of: find.byKey(Key('file-line-$lineNumber')),
+          matching: find.byType(FullDiffCodeRow),
         ),
       );
-
-      final lastSourceRow = find.byKey(const Key('file-line-2'));
-      final firstHeader = find.byKey(Key('file-hunk-header-${firstAnchor.id}'));
-      final secondHeader = find.byKey(
-        Key('file-hunk-header-${secondAnchor.id}'),
-      );
-      expect(
-        tester.getTopLeft(firstHeader).dy,
-        tester.getBottomLeft(lastSourceRow).dy,
-      );
-      expect(
-        tester.getTopLeft(secondHeader).dy,
-        tester.getBottomLeft(firstHeader).dy,
-      );
-      expect(firstKey.currentContext, isNotNull);
-      expect(secondKey.currentContext, isNotNull);
-      for (final lineNumber in [1, 2]) {
-        final renderedLine = tester.widget<FullDiffCodeRow>(
-          find.descendant(
-            of: find.byKey(Key('file-line-$lineNumber')),
-            matching: find.byType(FullDiffCodeRow),
-          ),
-        );
-        expect(renderedLine.line.kind, DiffLineKind.context);
-      }
-      expect(tester.takeException(), isNull);
-    },
-  );
+      expect(renderedLine.line.kind, DiffLineKind.context);
+    }
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('file view distinguishes every non-source state', (tester) async {
     final cases = <(FileContentKind, String)>[
@@ -792,6 +911,130 @@ void main() {
       );
     },
   );
+
+  testWidgets('blame projects only the active hunk header and decoration', (
+    tester,
+  ) async {
+    final file = FileDocument.fromBytes(
+      revision: commitA.sha,
+      path: 'result.txt',
+      side: FileDocumentSide.result,
+      bytes: Uint8List.fromList(
+        utf8.encode('zero\nfirst changed\nmiddle\nsecond changed\n'),
+      ),
+      gitMarkedBinary: false,
+    );
+    final blame = BlameDocument.fromGitLines(file, const [
+      GitBlameLine(
+        lineNumber: 1,
+        sha: '1111111',
+        author: 'First',
+        uncommitted: false,
+      ),
+      GitBlameLine(
+        lineNumber: 2,
+        sha: '1111111',
+        author: 'First',
+        uncommitted: false,
+      ),
+      GitBlameLine(
+        lineNumber: 3,
+        sha: '2222222',
+        author: 'Second',
+        uncommitted: false,
+      ),
+      GitBlameLine(
+        lineNumber: 4,
+        sha: '2222222',
+        author: 'Second',
+        uncommitted: false,
+      ),
+    ]);
+    const firstAnchor = DiffAnchor(hunkIndex: 0, oldLine: 2, newLine: 2);
+    const secondAnchor = DiffAnchor(hunkIndex: 1, oldLine: 4, newLine: 4);
+    const hunks = [
+      DiffHunk(
+        index: 0,
+        oldStart: 2,
+        oldCount: 1,
+        newStart: 2,
+        newCount: 1,
+        context: 'first change',
+        lines: [
+          DiffLine(kind: DiffLineKind.delete, text: 'first old', oldNumber: 2),
+          DiffLine(kind: DiffLineKind.add, text: 'first changed', newNumber: 2),
+        ],
+        anchor: firstAnchor,
+      ),
+      DiffHunk(
+        index: 1,
+        oldStart: 4,
+        oldCount: 1,
+        newStart: 4,
+        newCount: 1,
+        context: 'second change',
+        lines: [
+          DiffLine(kind: DiffLineKind.delete, text: 'second old', oldNumber: 4),
+          DiffLine(
+            kind: DiffLineKind.add,
+            text: 'second changed',
+            newNumber: 4,
+          ),
+        ],
+        anchor: secondAnchor,
+      ),
+    ];
+    final firstKey = GlobalKey(debugLabel: firstAnchor.id);
+    final secondKey = GlobalKey(debugLabel: secondAnchor.id);
+
+    await tester.pumpWidget(
+      qaApp(
+        FullBlameView(
+          document: blame,
+          hunks: hunks,
+          activeAnchor: secondAnchor,
+          wrapLines: false,
+          highlighter: fakeHighlighter,
+          anchorKeys: {firstAnchor.id: firstKey, secondAnchor.id: secondKey},
+        ),
+      ),
+    );
+
+    expect(
+      find.byKey(Key('blame-hunk-header-${firstAnchor.id}')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(Key('blame-hunk-header-${secondAnchor.id}')),
+      findsOneWidget,
+    );
+    expect(firstKey.currentContext, isNull);
+    expect(secondKey.currentContext, isNotNull);
+    expect(
+      tester
+          .widget<FullDiffCodeRow>(
+            find.descendant(
+              of: find.byKey(const Key('blame-line-2')),
+              matching: find.byType(FullDiffCodeRow),
+            ),
+          )
+          .line
+          .kind,
+      DiffLineKind.context,
+    );
+    expect(
+      tester
+          .widget<FullDiffCodeRow>(
+            find.descendant(
+              of: find.byKey(const Key('blame-line-4')),
+              matching: find.byType(FullDiffCodeRow),
+            ),
+          )
+          .line
+          .kind,
+      DiffLineKind.add,
+    );
+  });
 
   testWidgets('blame keeps the selected hunk header for an empty file', (
     tester,

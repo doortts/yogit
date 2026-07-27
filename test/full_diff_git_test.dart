@@ -132,6 +132,85 @@ void main() {
     },
   );
 
+  test('worktree rename history starts from the path at HEAD', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'old.txt', 'committed\n', 'base');
+    await runGit(root, ['mv', 'old.txt', 'new.txt']);
+
+    final repository = GitRepository(root.path);
+    final working = (await repository.loadWorkingTree())!;
+    final file = (await repository.loadFiles(working)).single;
+    final history = await repository.loadFileHistory(working, file);
+
+    expect(file.status, startsWith('R'));
+    expect(file.oldPath, 'old.txt');
+    expect(file.path, 'new.txt');
+    expect(history.map((entry) => entry.commit.subject), contains('base'));
+    expect(history.single.path, 'old.txt');
+  });
+
+  test('history uses old path only for worktree renames', () async {
+    final calls = <List<String>>[];
+    final repository = GitRepository(
+      '/repo',
+      runner: (executable, arguments, {workingDirectory}) async {
+        calls.add(List.unmodifiable(arguments));
+        return ProcessResult(0, 0, '', '');
+      },
+    );
+    const identity = GitIdentity(name: 'Test', email: 'test@example.com');
+    const working = GitCommit(
+      sha: '',
+      shortSha: '',
+      parents: ['head'],
+      author: identity,
+      authorTimestamp: 0,
+      committer: identity,
+      committerTimestamp: 0,
+      refs: [],
+      subject: 'working',
+    );
+    const committed = GitCommit(
+      sha: 'commit',
+      shortSha: 'commit',
+      parents: ['parent'],
+      author: identity,
+      authorTimestamp: 0,
+      committer: identity,
+      committerTimestamp: 0,
+      refs: [],
+      subject: 'committed',
+    );
+    const cases = <({GitCommit commit, String status, String expected})>[
+      (commit: working, status: 'R100', expected: 'old.txt'),
+      (commit: working, status: 'D', expected: 'selected.txt'),
+      (commit: working, status: 'M', expected: 'selected.txt'),
+      (commit: working, status: 'T', expected: 'selected.txt'),
+      (commit: working, status: 'A', expected: 'selected.txt'),
+      (commit: working, status: 'C100', expected: 'selected.txt'),
+      (commit: committed, status: 'R100', expected: 'selected.txt'),
+      (commit: committed, status: 'D', expected: 'selected.txt'),
+    ];
+
+    for (final value in cases) {
+      await repository.loadFileHistory(
+        value.commit,
+        GitFileChange(
+          path: 'selected.txt',
+          oldPath: 'old.txt',
+          status: value.status,
+          additions: 0,
+          deletions: 0,
+        ),
+      );
+    }
+
+    expect(calls.map((arguments) => arguments.last), [
+      for (final value in cases) value.expected,
+    ]);
+  });
+
   test('blames tracked and untracked working tree contents', () async {
     final root = await createGitFixture();
     addTearDown(() => root.delete(recursive: true));
@@ -163,6 +242,136 @@ void main() {
     expect(untrackedBlame, hasLength(1));
     expect(untrackedBlame.single.author, 'Uncommitted');
   });
+
+  test(
+    'untracked worktree symlink uses link text for diff file and blame',
+    () async {
+      final root = await createGitFixture();
+      addTearDown(() => root.delete(recursive: true));
+      final external = await Directory.systemTemp.createTemp('yogit_external_');
+      addTearDown(() => external.delete(recursive: true));
+      final sentinel = File('${external.path}/sentinel.txt');
+      await sentinel.writeAsString('EXTERNAL_SENTINEL\nDO_NOT_READ\n');
+      await writeAndCommit(root, 'base.txt', 'base\n', 'base');
+      await Link('${root.path}/untracked-link').create(sentinel.path);
+
+      final repository = GitRepository(root.path);
+      final working = (await repository.loadWorkingTree())!;
+      final link = (await repository.loadFiles(
+        working,
+      )).singleWhere((file) => file.path == 'untracked-link');
+
+      final diff = await repository.loadDiff(working, link);
+      final bytes = await repository.loadFileBytes(working, link);
+      final blame = await repository.loadBlame(working, link);
+
+      expect(
+        diff
+            .where((line) => line.kind == DiffLineKind.add)
+            .map((line) => line.text),
+        [sentinel.path],
+      );
+      expect(utf8.decode(bytes), sentinel.path);
+      expect(blame, hasLength(1));
+      expect(blame.single.author, 'Uncommitted');
+    },
+  );
+
+  test('worktree symlink reader preserves every link target form', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    final external = await Directory.systemTemp.createTemp('yogit_external_');
+    addTearDown(() => external.delete(recursive: true));
+    await writeAndCommit(root, 'base.txt', 'base\n', 'base');
+    final sentinel = File('${external.path}/sentinel.txt');
+    await sentinel.writeAsString('EXTERNAL_SENTINEL\n');
+    final relativeTarget =
+        '../${external.uri.pathSegments.where((part) => part.isNotEmpty).last}'
+        '/sentinel.txt';
+    final targets = <String, String>{
+      'relative-link': relativeTarget,
+      'absolute-link': sentinel.path,
+      'broken-link': 'missing/target',
+      'directory-link': external.path,
+    };
+    for (final entry in targets.entries) {
+      await Link('${root.path}/${entry.key}').create(entry.value);
+    }
+
+    final repository = GitRepository(root.path);
+    final working = (await repository.loadWorkingTree())!;
+    final files = {
+      for (final file in await repository.loadFiles(working)) file.path: file,
+    };
+
+    for (final entry in targets.entries) {
+      final bytes = await repository.loadFileBytes(working, files[entry.key]!);
+      expect(utf8.decode(bytes), entry.value, reason: entry.key);
+    }
+  });
+
+  test(
+    'tracked worktree symlink blame uses link text through safe contents',
+    () async {
+      final root = await createGitFixture();
+      addTearDown(() => root.delete(recursive: true));
+      final external = await Directory.systemTemp.createTemp('yogit_external_');
+      addTearDown(() => external.delete(recursive: true));
+      final sentinel = File('${external.path}/sentinel.txt');
+      await sentinel.writeAsString('EXTERNAL_SENTINEL\nDO_NOT_READ\n');
+      final link = Link('${root.path}/tracked-link');
+      await link.create('initial-target');
+      await runGit(root, ['add', '--', 'tracked-link']);
+      await runGit(root, ['commit', '-m', 'base link']);
+      await link.delete();
+      await link.create(sentinel.path);
+
+      final calls = <List<String>>[];
+      final repository = GitRepository(
+        root.path,
+        runner: (executable, arguments, {workingDirectory}) {
+          calls.add(List.unmodifiable(arguments));
+          return runProcess(
+            executable,
+            arguments,
+            workingDirectory: workingDirectory,
+          );
+        },
+      );
+      final working = (await repository.loadWorkingTree())!;
+      final file = (await repository.loadFiles(
+        working,
+      )).singleWhere((entry) => entry.path == 'tracked-link');
+
+      final diff = await repository.loadDiff(working, file);
+      final bytes = await repository.loadFileBytes(working, file);
+      final blame = await repository.loadBlame(
+        working,
+        file,
+        workingTreeBytes: bytes,
+      );
+
+      expect(
+        diff
+            .where((line) => line.kind == DiffLineKind.add)
+            .map((line) => line.text),
+        [sentinel.path],
+      );
+      expect(utf8.decode(bytes), sentinel.path);
+      expect(blame, hasLength(1));
+      final blameCall = calls.singleWhere(
+        (arguments) => arguments.first == 'blame',
+      );
+      final contentsPath = blameCall[blameCall.indexOf('--contents') + 1];
+      expect(contentsPath, isNot(link.path));
+      expect(contentsPath, isNot(sentinel.path));
+      expect(contentsPath, startsWith(Directory.systemTemp.path));
+      expect(
+        FileSystemEntity.typeSync(contentsPath, followLinks: false),
+        FileSystemEntityType.notFound,
+      );
+    },
+  );
 
   test(
     'requires displayed bytes before blaming a tracked working file',

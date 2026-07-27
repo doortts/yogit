@@ -1,6 +1,29 @@
 import 'full_diff_model.dart';
 import 'git.dart';
 
+DiffAnchor? nearestHunkAnchorForSourceLine({
+  required List<DiffHunk> hunks,
+  required FileDocumentSide side,
+  required int lineNumber,
+}) {
+  if (hunks.isEmpty) return null;
+  int coordinate(DiffHunk hunk) => switch (side) {
+    FileDocumentSide.old => hunk.anchor.oldLine ?? hunk.oldStart,
+    FileDocumentSide.result => hunk.anchor.newLine ?? hunk.newStart,
+  };
+
+  var nearest = hunks.first;
+  var distance = (coordinate(nearest) - lineNumber).abs();
+  for (final hunk in hunks.skip(1)) {
+    final candidateDistance = (coordinate(hunk) - lineNumber).abs();
+    if (candidateDistance < distance) {
+      nearest = hunk;
+      distance = candidateDistance;
+    }
+  }
+  return nearest.anchor;
+}
+
 sealed class FullSourceHunkItem {
   const FullSourceHunkItem();
 }
@@ -29,12 +52,17 @@ class FullSourceHunkMap {
     required List<DiffHunk> hunks,
     required FileDocumentSide side,
     required this.lineCount,
+    required DiffAnchor? activeAnchor,
   }) : _side = side,
        _lineKinds = <int, DiffLineKind>{},
-       _activeLines = <int, int?>{},
-       _headers = _buildHeaders(hunks, side, lineCount) {
+       _activeLines = <int, int?>{} {
+    final activeHunks = [
+      for (final hunk in hunks)
+        if (hunk.index == activeAnchor?.hunkIndex) hunk,
+    ];
+    _headers = _buildHeaders(activeHunks, side, lineCount);
     if (lineCount == 0) return;
-    for (final hunk in hunks) {
+    for (final hunk in activeHunks) {
       final sideLines = _sideLines(hunk, side, lineCount);
       _activeLines[hunk.index] = sideLines.isEmpty
           ? null
@@ -47,7 +75,7 @@ class FullSourceHunkMap {
 
   final int lineCount;
   final FileDocumentSide _side;
-  final List<_HeaderPlacement> _headers;
+  late final List<_HeaderPlacement> _headers;
   final Map<int, DiffLineKind> _lineKinds;
   final Map<int, int?> _activeLines;
 

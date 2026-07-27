@@ -792,7 +792,7 @@ class GitRepository implements FullDiffRepository {
     bool ignoreWhitespace = false,
   }) async {
     if (commit.isWorkingTree && (_untrackedFiles[file] ?? false)) {
-      return _untrackedDiff(await File('$root/${file.path}').readAsBytes());
+      return _untrackedDiff(await _readWorktreeBytes(file.path));
     }
     return parseUnifiedDiff(
       await _run([
@@ -816,7 +816,7 @@ class GitRepository implements FullDiffRepository {
   }) async {
     final deleted = file.status.startsWith('D');
     if (commit.isWorkingTree && !deleted) {
-      return File('$root/${file.path}').readAsBytes();
+      return _readWorktreeBytes(file.path);
     }
     final revision = deleted ? await _baseFor(commit, parent) : commit.sha;
     final path = deleted ? file.oldPath ?? file.path : file.path;
@@ -831,28 +831,36 @@ class GitRepository implements FullDiffRepository {
     Uint8List? workingTreeBytes,
   }) async {
     if (commit.isWorkingTree && (_untrackedFiles[file] ?? false)) {
-      final bytes =
-          workingTreeBytes ?? await File('$root/${file.path}').readAsBytes();
+      final bytes = workingTreeBytes ?? await _readWorktreeBytes(file.path);
       return _uncommittedBlame(bytes);
     }
 
     final base = await _baseFor(commit, parent);
-    final absolutePath = '$root/${file.path}';
     if (commit.isWorkingTree && !file.status.startsWith('D')) {
       final expected = workingTreeBytes;
       if (expected == null) {
         throw StateError('Working tree bytes are required');
       }
-      final before = await File(absolutePath).readAsBytes();
-      final output = await _run(
-        blameArguments(
-          commit: commit,
-          file: file,
-          base: base,
-          absolutePath: absolutePath,
-        ),
+      final before = await _readWorktreeBytes(file.path);
+      final contentsDirectory = await Directory.systemTemp.createTemp(
+        'yogit_blame_',
       );
-      final after = await File(absolutePath).readAsBytes();
+      final contents = File('${contentsDirectory.path}/contents');
+      late final String output;
+      try {
+        await contents.writeAsBytes(expected, flush: true);
+        output = await _run(
+          blameArguments(
+            commit: commit,
+            file: file,
+            base: base,
+            contentsPath: contents.path,
+          ),
+        );
+      } finally {
+        await contentsDirectory.delete(recursive: true);
+      }
+      final after = await _readWorktreeBytes(file.path);
       if (!_sameBytes(before, expected) || !_sameBytes(after, expected)) {
         throw StateError('Working tree file changed');
       }
@@ -860,15 +868,17 @@ class GitRepository implements FullDiffRepository {
     }
 
     return _parseBlamePorcelain(
-      await _run(
-        blameArguments(
-          commit: commit,
-          file: file,
-          base: base,
-          absolutePath: absolutePath,
-        ),
-      ),
+      await _run(blameArguments(commit: commit, file: file, base: base)),
     );
+  }
+
+  Future<Uint8List> _readWorktreeBytes(String path) async {
+    final absolutePath = '$root/$path';
+    final type = await FileSystemEntity.type(absolutePath, followLinks: false);
+    if (type == FileSystemEntityType.link) {
+      return Uint8List.fromList(utf8.encode(await Link(absolutePath).target()));
+    }
+    return File(absolutePath).readAsBytes();
   }
 
   @override
@@ -887,7 +897,9 @@ class GitRepository implements FullDiffRepository {
         '-z',
         commit.isWorkingTree ? 'HEAD' : commit.sha,
         '--',
-        file.status.startsWith('D') ? file.oldPath ?? file.path : file.path,
+        commit.isWorkingTree && file.status.startsWith('R')
+            ? file.oldPath ?? file.path
+            : file.path,
       ]),
     );
   }
@@ -1060,14 +1072,17 @@ List<String> blameArguments({
   required GitCommit commit,
   required GitFileChange file,
   required String base,
-  required String absolutePath,
+  String? contentsPath,
 }) {
   if (commit.isWorkingTree && !file.status.startsWith('D')) {
+    if (contentsPath == null) {
+      throw ArgumentError.notNull('contentsPath');
+    }
     return [
       'blame',
       '--line-porcelain',
       '--contents',
-      absolutePath,
+      contentsPath,
       'HEAD',
       '--',
       file.path,

@@ -11,6 +11,7 @@ import 'package:yogit/full_diff_inline_view.dart';
 import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/full_diff_split_view.dart';
 import 'package:yogit/full_diff_syntax.dart';
+import 'package:yogit/full_diff_syntax_contract.dart';
 import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/git.dart';
 
@@ -509,27 +510,148 @@ void main() {
     expect(copied.single, isNot(contains('+')));
   });
 
-  testWidgets('split avoids intrinsic layout for a large unwrapped hunk', (
-    tester,
-  ) async {
-    final document = DiffDocument.fromLines([
-      const DiffLine(kind: DiffLineKind.hunk, text: '@@ -0,0 +1,600 @@ large'),
-      for (var index = 1; index <= 600; index++)
-        DiffLine(
-          kind: DiffLineKind.add,
-          text: 'added line $index',
-          newNumber: index,
-        ),
-    ]);
-    final controller = ScrollController();
-    addTearDown(controller.dispose);
+  for (final presentation in DiffPresentation.values) {
+    testWidgets(
+      '${presentation.name} lazily mounts a 600-line unwrapped hunk',
+      (tester) async {
+        final document = DiffDocument.fromLines([
+          const DiffLine(
+            kind: DiffLineKind.hunk,
+            text: '@@ -1,300 +1,300 @@ large',
+          ),
+          for (var index = 1; index <= 300; index++) ...[
+            DiffLine(
+              kind: DiffLineKind.delete,
+              text: 'old $index ${'segment ' * 20}',
+              oldNumber: index,
+            ),
+            DiffLine(
+              kind: DiffLineKind.add,
+              text: 'new $index ${'segment ' * 20}',
+              newNumber: index,
+            ),
+          ],
+        ]);
+        final controller = ScrollController();
+        addTearDown(controller.dispose);
+        final highlighter = _CountingSyntaxHighlighter();
+        var wordDiffCalls = 0;
+        WordChangeRanges wordDiffer(String oldText, String newText) {
+          wordDiffCalls++;
+          return WordChangeRanges.empty;
+        }
 
-    await tester.pumpWidget(
-      qaApp(
-        SizedBox(
-          width: 800,
-          height: 200,
-          child: SplitPresentationView(
+        final lastKey = switch (presentation) {
+          DiffPresentation.hunk => Key(
+            'hunk-line-${document.hunks.single.anchor.id}-599',
+          ),
+          DiffPresentation.inline => const Key('inline-line-0-599'),
+          DiffPresentation.split => const Key('split-row-0-299'),
+        };
+        final view = switch (presentation) {
+          DiffPresentation.hunk => HunkPresentationView(
+            document: document,
+            activeAnchor: document.hunks.single.anchor,
+            path: fileA.path,
+            wrapLines: false,
+            highlighter: highlighter,
+            wordDiffer: wordDiffer,
+            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
+            controller: controller,
+          ),
+          DiffPresentation.inline => InlinePresentationView(
+            document: document,
+            activeAnchor: document.hunks.single.anchor,
+            path: fileA.path,
+            wrapLines: false,
+            highlighter: highlighter,
+            wordDiffer: wordDiffer,
+            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
+            controller: controller,
+          ),
+          DiffPresentation.split => SplitPresentationView(
+            document: document,
+            activeAnchor: document.hunks.single.anchor,
+            oldPath: fileA.path,
+            newPath: fileA.path,
+            wrapLines: false,
+            showOldSide: true,
+            highlighter: highlighter,
+            wordDiffer: wordDiffer,
+            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
+            controller: controller,
+          ),
+        };
+
+        await tester.pumpWidget(
+          qaApp(SizedBox(width: 800, height: 200, child: view)),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byType(FullDiffCodeRow).evaluate().length, lessThan(80));
+        expect(highlighter.calls, lessThan(80));
+        expect(wordDiffCalls, lessThan(80));
+        expect(find.byKey(lastKey), findsNothing);
+        expect(find.byType(IntrinsicHeight), findsNothing);
+
+        controller.jumpTo(controller.position.maxScrollExtent);
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(lastKey), findsOneWidget);
+      },
+    );
+  }
+
+  for (final presentation in DiffPresentation.values) {
+    testWidgets(
+      'lazy ${presentation.name} select all copies every source row',
+      (tester) async {
+        final copied = <String>[];
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+              if (call.method == 'Clipboard.setData') {
+                copied.add(
+                  (call.arguments as Map<Object?, Object?>)['text']! as String,
+                );
+              }
+              return null;
+            });
+        addTearDown(
+          () => TestDefaultBinaryMessengerBinding
+              .instance
+              .defaultBinaryMessenger
+              .setMockMethodCallHandler(SystemChannels.platform, null),
+        );
+        final document = DiffDocument.fromLines([
+          const DiffLine(
+            kind: DiffLineKind.hunk,
+            text: '@@ -0,0 +1,600 @@ copy all',
+          ),
+          for (var index = 1; index <= 600; index++)
+            DiffLine(
+              kind: DiffLineKind.add,
+              text: 'copy line $index',
+              newNumber: index,
+            ),
+        ]);
+        final view = switch (presentation) {
+          DiffPresentation.hunk => HunkPresentationView(
+            document: document,
+            activeAnchor: document.hunks.single.anchor,
+            path: fileA.path,
+            wrapLines: false,
+            highlighter: fakeHighlighter,
+            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
+          ),
+          DiffPresentation.inline => InlinePresentationView(
+            document: document,
+            activeAnchor: document.hunks.single.anchor,
+            path: fileA.path,
+            wrapLines: false,
+            highlighter: fakeHighlighter,
+            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
+          ),
+          DiffPresentation.split => SplitPresentationView(
             document: document,
             activeAnchor: document.hunks.single.anchor,
             oldPath: fileA.path,
@@ -538,16 +660,112 @@ void main() {
             showOldSide: true,
             highlighter: fakeHighlighter,
             anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
+          ),
+        };
+
+        await tester.pumpWidget(
+          qaApp(SizedBox(width: 800, height: 200, child: view)),
+        );
+        await tester.pumpAndSettle();
+        final firstSource = tester.element(find.text('copy line 1'));
+
+        Actions.invoke(
+          firstSource,
+          const SelectAllTextIntent(SelectionChangedCause.keyboard),
+        );
+        await tester.pump();
+        Actions.invoke(firstSource, CopySelectionTextIntent.copy);
+        await tester.pump();
+
+        expect(copied, hasLength(1));
+        expect(copied.single.split('\n'), hasLength(600));
+        expect(copied.single, startsWith('copy line 1\n'));
+        expect(copied.single, endsWith('\ncopy line 600'));
+      },
+    );
+  }
+
+  for (final presentation in DiffPresentation.values) {
+    testWidgets(
+      '${presentation.name} disables syntax and word diff for a large patch',
+      (tester) async {
+        final document = DiffDocument.fromLines([
+          const DiffLine(
+            kind: DiffLineKind.hunk,
+            text: '@@ -1,300 +1,300 @@ large',
+          ),
+          for (var index = 1; index <= 300; index++) ...[
+            DiffLine(
+              kind: DiffLineKind.delete,
+              text: 'old $index ${'segment ' * 20}',
+              oldNumber: index,
+            ),
+            DiffLine(
+              kind: DiffLineKind.add,
+              text: 'new $index ${'segment ' * 20}',
+              newNumber: index,
+            ),
+          ],
+        ]);
+        final controller = ScrollController();
+        addTearDown(controller.dispose);
+        final highlighter = _CountingSyntaxHighlighter();
+        var wordDiffCalls = 0;
+        WordChangeRanges wordDiffer(String oldText, String newText) {
+          wordDiffCalls++;
+          return WordChangeRanges.empty;
+        }
+
+        final view = switch (presentation) {
+          DiffPresentation.hunk => HunkPresentationView(
+            document: document,
+            activeAnchor: document.hunks.single.anchor,
+            path: fileA.path,
+            wrapLines: false,
+            richRenderingEnabled: false,
+            highlighter: highlighter,
+            wordDiffer: wordDiffer,
+            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
             controller: controller,
           ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
+          DiffPresentation.inline => InlinePresentationView(
+            document: document,
+            activeAnchor: document.hunks.single.anchor,
+            path: fileA.path,
+            wrapLines: false,
+            richRenderingEnabled: false,
+            highlighter: highlighter,
+            wordDiffer: wordDiffer,
+            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
+            controller: controller,
+          ),
+          DiffPresentation.split => SplitPresentationView(
+            document: document,
+            activeAnchor: document.hunks.single.anchor,
+            oldPath: fileA.path,
+            newPath: fileA.path,
+            wrapLines: false,
+            showOldSide: true,
+            richRenderingEnabled: false,
+            highlighter: highlighter,
+            wordDiffer: wordDiffer,
+            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
+            controller: controller,
+          ),
+        };
 
-    expect(find.byType(FullDiffCodeRow), findsNWidgets(600));
-    expect(find.byType(IntrinsicHeight), findsNothing);
-  });
+        await tester.pumpWidget(
+          qaApp(SizedBox(width: 800, height: 200, child: view)),
+        );
+        await tester.pumpAndSettle();
+        controller.jumpTo(controller.position.maxScrollExtent);
+        await tester.pumpAndSettle();
+
+        expect(highlighter.calls, 0);
+        expect(wordDiffCalls, 0);
+      },
+    );
+  }
 
   testWidgets('split keeps a deletion hatch when the old side is hidden', (
     tester,
@@ -582,24 +800,23 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets(
-    'hunk empty state and each hunk selection boundary are explicit',
-    (tester) async {
-      await pumpPresentation(
-        tester,
-        presentation: DiffPresentation.hunk,
-        document: DiffDocument.fromLines(const []),
-      );
-      expect(find.text('현재 옵션으로 표시할 변경이 없습니다'), findsOneWidget);
+  testWidgets('hunk empty state and one lazy selection boundary are explicit', (
+    tester,
+  ) async {
+    await pumpPresentation(
+      tester,
+      presentation: DiffPresentation.hunk,
+      document: DiffDocument.fromLines(const []),
+    );
+    expect(find.text('현재 옵션으로 표시할 변경이 없습니다'), findsOneWidget);
 
-      await pumpPresentation(
-        tester,
-        presentation: DiffPresentation.inline,
-        document: twoHunkDocument,
-      );
-      expect(find.byType(SelectionArea), findsNWidgets(2));
-    },
-  );
+    await pumpPresentation(
+      tester,
+      presentation: DiffPresentation.inline,
+      document: twoHunkDocument,
+    );
+    expect(find.byType(SelectionArea), findsOneWidget);
+  });
 
   testWidgets('code rows expose sign current line and word emphasis', (
     tester,
@@ -930,4 +1147,17 @@ Future<void> pumpPresentation(
   };
   await tester.pumpWidget(qaApp(SizedBox(width: 800, child: child)));
   await tester.pumpAndSettle();
+}
+
+class _CountingSyntaxHighlighter implements FullDiffSyntaxHighlighter {
+  int calls = 0;
+
+  @override
+  List<CodeTokenSpan> highlightLine(String path, String source) {
+    calls++;
+    return const [];
+  }
+
+  @override
+  String? languageForPath(String path) => null;
 }

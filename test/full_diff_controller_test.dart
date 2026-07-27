@@ -32,6 +32,7 @@ void main() {
       expect(controller.state.patch.loading, isTrue);
       expect(controller.state.file.loading, isTrue);
       expect(controller.state.encodingLabel, 'Loading');
+      expect(controller.state.richRenderingEnabled, isFalse);
       controller
         ..setView(FullDiffView.file)
         ..setPresentation(DiffPresentation.split);
@@ -40,11 +41,17 @@ void main() {
       expect(repository.diffRequests, hasLength(1));
 
       patch.complete(twoHunkLines);
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.state.patch.data?.hunks, hasLength(2));
+      expect(controller.state.file.data, isNull);
+      expect(controller.state.richRenderingEnabled, isFalse);
+
       content.complete(Uint8List.fromList(utf8.encode('one\ntwo\n')));
       await loading;
 
       expect(controller.state.patch.data?.hunks, hasLength(2));
       expect(controller.state.file.data?.kind, FileContentKind.utf8);
+      expect(controller.state.richRenderingEnabled, isTrue);
       expect(controller.state.activeAnchor?.hunkIndex, 0);
     },
   );

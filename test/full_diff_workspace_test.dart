@@ -489,6 +489,57 @@ void main() {
     );
   });
 
+  final tooManyLines = Uint8List((fullDiffTextLineLimit + 1) * 2);
+  for (var index = 0; index < tooManyLines.length; index += 2) {
+    tooManyLines[index] = 0x78;
+    tooManyLines[index + 1] = 0x0A;
+  }
+  for (final scenario in [
+    (label: 'binary', bytes: Uint8List.fromList([0x00, 0x01])),
+    (label: 'too-large', bytes: tooManyLines),
+  ]) {
+    testWidgets(
+      '${scenario.label} file minimap falls back to patch-side coordinates',
+      (tester) async {
+        final repository = FakeFullDiffRepository()
+          ..files = ((_, _) async => const [fileA])
+          ..diff = ((_, _, _, _, _) async => const [
+            DiffLine(
+              kind: DiffLineKind.hunk,
+              text: '@@ -10,2 +300,5 @@ fallback',
+            ),
+            DiffLine(
+              kind: DiffLineKind.context,
+              text: 'line',
+              oldNumber: 10,
+              newNumber: 300,
+            ),
+          ])
+          ..content = ((_, _, _) async => scenario.bytes);
+        final controller = FullDiffSessionController(
+          repository: repository,
+          commits: const [commitA],
+          initialIndex: 0,
+          initialView: FullDiffInitialView.hunk,
+        );
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        await pumpWorkspace(
+          tester,
+          controller: controller,
+          size: const Size(1070, 650),
+        );
+
+        final minimap = tester.widget<FullDiffMinimap>(
+          find.byType(FullDiffMinimap),
+        );
+        expect(controller.state.file.data?.lines, isEmpty);
+        expect(minimap.sourceSide, FileDocumentSide.result);
+        expect(minimap.sourceLineCount, 304);
+      },
+    );
+  }
+
   testWidgets('file load errors stay distinct from an empty successful load', (
     tester,
   ) async {
@@ -834,7 +885,7 @@ void main() {
     DiffPresentation.split,
   ]) {
     testWidgets(
-      '${presentation.name} fully reveals a hunk beyond one long lazy item',
+      '${presentation.name} keeps viewport anchors stable across long wrapped hunks',
       (tester) async {
         final lines = <DiffLine>[
           const DiffLine(
@@ -844,7 +895,9 @@ void main() {
           for (var row = 0; row < 160; row++)
             DiffLine(
               kind: DiffLineKind.context,
-              text: 'long first hunk context $row',
+              text:
+                  'long first hunk context $row '
+                  '${row.isEven ? 'wrapped segment ' * 12 : ''}',
               oldNumber: row + 1,
               newNumber: row + 1,
             ),
@@ -855,23 +908,26 @@ void main() {
           ),
           const DiffLine(
             kind: DiffLineKind.hunk,
-            text: '@@ -200,2 +200,2 @@ distant target',
+            text: '@@ -200,161 +200,161 @@ distant target',
           ),
-          const DiffLine(
-            kind: DiffLineKind.context,
-            text: 'distant context',
-            oldNumber: 200,
-            newNumber: 200,
-          ),
+          for (var row = 0; row < 160; row++)
+            DiffLine(
+              kind: DiffLineKind.context,
+              text:
+                  'distant context $row '
+                  '${row.isOdd ? 'wrapped segment ' * 12 : ''}',
+              oldNumber: 200 + row,
+              newNumber: 200 + row,
+            ),
           const DiffLine(
             kind: DiffLineKind.delete,
             text: 'distant old',
-            oldNumber: 201,
+            oldNumber: 360,
           ),
           const DiffLine(
             kind: DiffLineKind.add,
             text: 'distant new',
-            newNumber: 201,
+            newNumber: 360,
           ),
         ];
         final repository = FakeFullDiffRepository();
@@ -903,18 +959,27 @@ void main() {
         final viewportRect = tester.getRect(
           find.byKey(const Key('content-scrollable')),
         );
-        final firstHunkRect = tester.getRect(
-          find.byKey(
-            Key(
-              presentation == DiffPresentation.inline
-                  ? 'inline-hunk-0'
-                  : 'split-hunk-0',
-            ),
+        final firstRow = find.byKey(
+          Key(
+            presentation == DiffPresentation.inline
+                ? 'inline-line-0-0'
+                : 'split-row-0-0',
           ),
         );
-
-        expect(firstHunkRect.height, greaterThan(viewportRect.height * 3));
+        expect(tester.getRect(firstRow).height, greaterThan(27));
         expect(targetFinder, findsNothing);
+        final scrollable = find
+            .descendant(
+              of: find.byKey(const Key('content-scrollable')),
+              matching: find.byType(Scrollable),
+            )
+            .first;
+        for (var viewport = 0; viewport < 3; viewport++) {
+          await tester.drag(scrollable, const Offset(0, -300));
+          await tester.pumpAndSettle();
+          expect(controller.state.activeAnchor?.hunkIndex, 0);
+        }
+
         controller.selectAnchor(target);
         await tester.pumpAndSettle();
 
@@ -923,6 +988,11 @@ void main() {
         final targetRect = tester.getRect(targetFinder);
         expect(targetRect.top, greaterThanOrEqualTo(viewportRect.top));
         expect(targetRect.bottom, lessThanOrEqualTo(viewportRect.bottom));
+        for (var viewport = 0; viewport < 2; viewport++) {
+          await tester.drag(scrollable, const Offset(0, -240));
+          await tester.pumpAndSettle();
+          expect(controller.state.activeAnchor?.hunkIndex, 1);
+        }
       },
     );
   }
