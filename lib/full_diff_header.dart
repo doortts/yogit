@@ -185,7 +185,9 @@ class GlobalDiffToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width <= 480;
+    final width = MediaQuery.sizeOf(context).width;
+    final compact = width <= 480;
+    final dense = width <= 782;
     final navigationEnabled = view != FullDiffView.history && anchorCount > 0;
     final displayedIndex = anchorCount == 0
         ? 0
@@ -199,7 +201,7 @@ class GlobalDiffToolbar extends StatelessWidget {
         label: '이전 변경 구간',
         icon: Icons.arrow_upward,
         onPressed: canGoPrevious ? onPrevious : null,
-        compact: compact,
+        compact: compact || dense,
       ),
       Semantics(
         enabled: navigationEnabled,
@@ -225,7 +227,7 @@ class GlobalDiffToolbar extends StatelessWidget {
         label: '다음 변경 구간',
         icon: Icons.arrow_downward,
         onPressed: canGoNext ? onNext : null,
-        compact: compact,
+        compact: compact || dense,
       ),
       if (loadingPatch)
         const SizedBox.square(
@@ -236,6 +238,7 @@ class GlobalDiffToolbar extends StatelessWidget {
         algorithm: algorithm,
         onSelected: onAlgorithmSelected,
         compact: compact,
+        dense: dense,
       ),
       _HeaderToggle(
         controlKey: const Key('ignore-whitespace'),
@@ -243,7 +246,7 @@ class GlobalDiffToolbar extends StatelessWidget {
         value: ignoreWhitespace,
         icon: Icons.space_bar,
         onChanged: onIgnoreWhitespaceChanged,
-        compact: compact,
+        compact: compact || dense,
       ),
       _HeaderToggle(
         controlKey: const Key('wrap-lines'),
@@ -251,11 +254,11 @@ class GlobalDiffToolbar extends StatelessWidget {
         value: wrapLines,
         icon: Icons.wrap_text,
         onChanged: onWrapLinesChanged,
-        compact: compact,
+        compact: compact || dense,
       ),
     ];
     final trailingControls = Wrap(
-      spacing: compact ? 3 : 6,
+      spacing: compact ? 3 : (dense ? 0 : 6),
       runSpacing: 6,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: trailingChildren,
@@ -276,7 +279,7 @@ class GlobalDiffToolbar extends StatelessWidget {
             ? WrapAlignment.spaceBetween
             : WrapAlignment.end,
         runSpacing: 8,
-        spacing: 10,
+        spacing: width <= 782 ? 0 : 10,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           if (showLeadingControls)
@@ -550,11 +553,13 @@ class _AlgorithmMenu extends StatelessWidget {
     required this.algorithm,
     required this.onSelected,
     this.compact = false,
+    this.dense = false,
   });
 
   final DiffAlgorithm algorithm;
   final ValueChanged<DiffAlgorithm> onSelected;
   final bool compact;
+  final bool dense;
 
   @override
   Widget build(BuildContext context) => Semantics(
@@ -586,7 +591,7 @@ class _AlgorithmMenu extends StatelessWidget {
           ),
           child: Container(
             height: fullDiffControlHeight,
-            padding: EdgeInsets.symmetric(horizontal: compact ? 4 : 8),
+            padding: EdgeInsets.symmetric(horizontal: compact || dense ? 4 : 8),
             decoration: BoxDecoration(
               color: fullDiffControl,
               borderRadius: BorderRadius.circular(fullDiffControlRadius),
