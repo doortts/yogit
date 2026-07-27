@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760">
+  <defs>
+    <clipPath id="surface">
+      <rect width="1200" height="760" rx="18"/>
+    </clipPath>
+    <style>
+      .ui { font: 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #f3f3f3; }
+      .small { font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #919191; }
+      .code { font: 13px Menlo, Monaco, monospace; fill: #f3f3f3; }
+      .code-small { font: 12px Menlo, Monaco, monospace; fill: #919191; }
+      .button { fill: #363636; stroke: rgba(255,255,255,.12); }
+      .button-active { fill: #f3f3f3; }
+      .button-active-text { fill: #181818; }
+      .divider { stroke: rgba(255,255,255,.10); stroke-width: 1; }
+    </style>
+  </defs>
+
+  <g clip-path="url(#surface)">
+    <rect width="1200" height="760" fill="#181818"/>
+    <rect width="1200" height="58" fill="#242424"/>
+    <rect y="58" width="1200" height="58" fill="#242424"/>
+    <line x1="0" y1="58" x2="1200" y2="58" class="divider"/>
+    <line x1="0" y1="116" x2="1200" y2="116" class="divider"/>
+
+    <rect x="14" y="14" width="34" height="30" rx="12" class="button"/>
+    <text x="31" y="35" text-anchor="middle" class="ui">←</text>
+    <text x="60" y="35" class="code">makefile.lua</text>
+    <rect x="170" y="14" width="142" height="30" rx="15" fill="#0d273f"/>
+    <text x="241" y="35" text-anchor="middle" class="code" fill="#83c4ff">M · +7 −0 · 3.1 KB</text>
+
+    <rect x="508" y="14" width="104" height="30" rx="12" class="button"/>
+    <text x="560" y="35" text-anchor="middle" class="ui">▤ 집중 모드</text>
+    <rect x="620" y="14" width="118" height="30" rx="12" class="button"/>
+    <text x="679" y="35" text-anchor="middle" class="ui">편집기로 열기</text>
+    <rect x="746" y="14" width="56" height="30" rx="12" class="button"/>
+    <text x="774" y="35" text-anchor="middle" class="ui">File</text>
+    <rect x="810" y="14" width="56" height="30" rx="12" class="button"/>
+    <text x="838" y="35" text-anchor="middle" class="ui">Diff</text>
+    <rect x="874" y="14" width="68" height="30" rx="12" class="button-active"/>
+    <text x="908" y="35" text-anchor="middle" class="ui button-active-text">Blame</text>
+    <rect x="950" y="14" width="74" height="30" rx="12" class="button"/>
+    <text x="987" y="35" text-anchor="middle" class="ui">History</text>
+    <rect x="1032" y="14" width="70" height="30" rx="15" fill="#0d273f"/>
+    <text x="1067" y="35" text-anchor="middle" class="code" fill="#83c4ff">UTF-8</text>
+
+    <text x="18" y="93" class="small">diff 알고리즘</text>
+    <rect x="106" y="72" width="116" height="30" rx="12" class="button"/>
+    <text x="164" y="93" text-anchor="middle" class="ui">Git setting⌄</text>
+    <rect x="230" y="72" width="94" height="30" rx="12" class="button"/>
+    <text x="277" y="93" text-anchor="middle" class="ui">↵ 공백 무시</text>
+    <rect x="332" y="72" width="82" height="30" rx="12" class="button"/>
+    <text x="373" y="93" text-anchor="middle" class="ui">≋ 줄바꿈</text>
+
+    <rect x="548" y="72" width="34" height="30" rx="12" class="button"/>
+    <text x="565" y="93" text-anchor="middle" class="ui">↑</text>
+    <text x="608" y="93" text-anchor="middle" class="code-small">2 / 7</text>
+    <rect x="634" y="72" width="34" height="30" rx="12" class="button"/>
+    <text x="651" y="93" text-anchor="middle" class="ui">↓</text>
+
+    <rect x="928" y="72" width="64" height="30" rx="12" class="button"/>
+    <text x="960" y="93" text-anchor="middle" class="ui">Hunk</text>
+    <rect x="1000" y="72" width="68" height="30" rx="12" class="button"/>
+    <text x="1034" y="93" text-anchor="middle" class="ui">Inline</text>
+    <rect x="1076" y="72" width="68" height="30" rx="12" class="button"/>
+    <text x="1110" y="93" text-anchor="middle" class="ui">Split</text>
+
+    <rect x="838" y="48" width="214" height="34" rx="7" fill="#111111" stroke="rgba(255,255,255,.18)"/>
+    <text x="945" y="70" text-anchor="middle" class="small" fill="#f3f3f3">파일의 변경 이력을 보여줍니다</text>
+
+    <rect y="116" width="278" height="644" fill="#202020"/>
+    <line x1="278" y1="116" x2="278" y2="760" class="divider"/>
+    <rect x="278" y="116" width="348" height="644" fill="#1c1c1c"/>
+    <line x1="626" y1="116" x2="626" y2="760" class="divider"/>
+
+    <text x="18" y="146" class="small">변경 파일 · 14 files · +467 −31</text>
+    <line x1="0" y1="158" x2="278" y2="158" class="divider"/>
+
+    <text x="18" y="190" class="code">M</text>
+    <text x="48" y="187" class="code">bin/data/drl/main.lua</text>
+    <text x="48" y="207" class="code-small">+12 −8 · 18.4 KB</text>
+    <line x1="0" y1="220" x2="278" y2="220" class="divider"/>
+
+    <rect x="0" y="220" width="278" height="62" fill="#0d273f"/>
+    <text x="18" y="252" class="code">M</text>
+    <text x="48" y="249" class="code" fill="#83c4ff">makefile.lua</text>
+    <text x="48" y="269" class="code-small" fill="#c4dcf1">+7 −0 · 3.1 KB</text>
+    <line x1="0" y1="282" x2="278" y2="282" class="divider"/>
+
+    <text x="18" y="314" class="code">A</text>
+    <text x="48" y="311" class="code">scripts/generate-macos-icon.sh</text>
+    <text x="48" y="331" class="code-small">+162 −0 · 6.8 KB</text>
+    <line x1="0" y1="344" x2="278" y2="344" class="divider"/>
+
+    <text x="18" y="376" class="code">M</text>
+    <text x="48" y="373" class="code">src/dfbeing.pas</text>
+    <text x="48" y="393" class="code-small">+13 −0 · 42.7 KB</text>
+    <line x1="0" y1="406" x2="278" y2="406" class="divider"/>
+
+    <text x="298" y="146" class="small">줄별 변경 이력</text>
+    <text x="648" y="146" class="small">makefile.lua · 전체 파일</text>
+    <line x1="278" y1="158" x2="1200" y2="158" class="divider"/>
+
+    <g transform="translate(0,0)">
+      <circle cx="304" cy="180" r="11" fill="#24394a" stroke="#83c4ff" stroke-width="2"/>
+      <text x="304" y="183" text-anchor="middle" class="small" font-size="8">SC</text>
+      <text x="338" y="184" text-anchor="end" class="code-small">1</text>
+      <text x="350" y="184" class="small" fill="#f3f3f3">makefile up</text>
+      <text x="614" y="184" text-anchor="end" class="code-small">06/24/26</text>
+      <rect x="622" y="158" width="4" height="44" fill="#83c4ff"/>
+      <text x="648" y="184" class="code" fill="#6ea352"># macOS SDL3 build configuration</text>
+    </g>
+    <line x1="278" y1="202" x2="1200" y2="202" class="divider"/>
+
+    <circle cx="304" cy="224" r="11" fill="#24394a" stroke="#83c4ff" stroke-width="2"/>
+    <text x="304" y="227" text-anchor="middle" class="small" font-size="8">SC</text>
+    <text x="338" y="228" text-anchor="end" class="code-small">2</text>
+    <text x="350" y="228" class="small" fill="#f3f3f3">makefile up</text>
+    <text x="614" y="228" text-anchor="end" class="code-small">06/24/26</text>
+    <rect x="622" y="202" width="4" height="44" fill="#83c4ff"/>
+    <text x="648" y="228" class="code"><tspan fill="#5da9df">local</tspan> root = project_root()</text>
+    <line x1="278" y1="246" x2="1200" y2="246" class="divider"/>
+
+    <circle cx="304" cy="268" r="11" fill="#3a2f26" stroke="#f68b59" stroke-width="2"/>
+    <text x="304" y="271" text-anchor="middle" class="small" font-size="8">EP</text>
+    <text x="338" y="272" text-anchor="end" class="code-small">3</text>
+    <text x="350" y="272" class="small" fill="#f3f3f3">Initial source/data commit</text>
+    <text x="614" y="272" text-anchor="end" class="code-small">12/07/16</text>
+    <rect x="622" y="246" width="4" height="44" fill="#f68b59"/>
+    <line x1="278" y1="290" x2="1200" y2="290" class="divider"/>
+
+    <circle cx="304" cy="312" r="11" fill="#2b3c34" stroke="#7ab991" stroke-width="2"/>
+    <text x="304" y="315" text-anchor="middle" class="small" font-size="8">SC</text>
+    <text x="338" y="316" text-anchor="end" class="code-small">4</text>
+    <text x="350" y="316" class="small" fill="#f3f3f3">Add macOS SDL3 build support</text>
+    <text x="614" y="316" text-anchor="end" class="code-small">07/10/26</text>
+    <rect x="622" y="290" width="4" height="44" fill="#7ab991"/>
+    <text x="648" y="316" class="code"><tspan fill="#5da9df">function</tspan> setup_macos()</text>
+    <line x1="278" y1="334" x2="1200" y2="334" class="divider"/>
+
+    <circle cx="304" cy="356" r="11" fill="#2b3c34" stroke="#7ab991" stroke-width="2"/>
+    <text x="304" y="359" text-anchor="middle" class="small" font-size="8">SC</text>
+    <text x="338" y="360" text-anchor="end" class="code-small">5</text>
+    <text x="350" y="360" class="small" fill="#f3f3f3">Add macOS SDL3 build support</text>
+    <text x="614" y="360" text-anchor="end" class="code-small">07/10/26</text>
+    <rect x="622" y="334" width="4" height="44" fill="#7ab991"/>
+    <text x="648" y="360" class="code">  <tspan fill="#5da9df">local</tspan> sdk = <tspan fill="#ffbfa0">'macosx'</tspan></text>
+    <line x1="278" y1="378" x2="1200" y2="378" class="divider"/>
+
+    <circle cx="304" cy="400" r="11" fill="#302b3d" stroke="#a995df" stroke-width="2"/>
+    <text x="304" y="403" text-anchor="middle" class="small" font-size="8">SC</text>
+    <text x="338" y="404" text-anchor="end" class="code-small">6</text>
+    <text x="350" y="404" class="small" fill="#f3f3f3">Fix macOS packaging regressions</text>
+    <text x="614" y="404" text-anchor="end" class="code-small">07/05/26</text>
+    <rect x="622" y="378" width="4" height="44" fill="#a995df"/>
+    <text x="648" y="404" class="code">  WindowPixelRatio = detect_scale()</text>
+    <line x1="278" y1="422" x2="1200" y2="422" class="divider"/>
+
+    <circle cx="304" cy="444" r="11" fill="#302b3d" stroke="#a995df" stroke-width="2"/>
+    <text x="304" y="447" text-anchor="middle" class="small" font-size="8">SC</text>
+    <text x="338" y="448" text-anchor="end" class="code-small">7</text>
+    <text x="350" y="448" class="small" fill="#f3f3f3">Fix macOS packaging regressions</text>
+    <text x="614" y="448" text-anchor="end" class="code-small">07/05/26</text>
+    <rect x="622" y="422" width="4" height="44" fill="#a995df"/>
+    <text x="648" y="448" class="code" fill="#5da9df">end</text>
+  </g>
+</svg>
