@@ -1523,6 +1523,7 @@ class _DiffScreenState extends State<DiffScreen> {
       historyWidth: _historyWidth,
       onHistoryResized: _resizeHistory,
       onHistoryResizeEnd: _saveColumnWidths,
+      showHistory: !state.focusMode,
       history: FullHistoryView(
         entries: history,
         selected: state.selectedHistoryEntry,

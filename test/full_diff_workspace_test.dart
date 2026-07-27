@@ -1249,10 +1249,13 @@ void main() {
   ) async {
     final fixture = await workspaceFixture();
     addTearDown(fixture.controller.dispose);
+    FullDiffColumnWidths? saved;
     await pumpWorkspace(
       tester,
       controller: fixture.controller,
       size: const Size(1070, 842),
+      columnWidths: const FullDiffColumnWidths(history: 244, files: 318),
+      onColumnWidthsChanged: (value) => saved = value,
     );
     await tester.drag(
       find.byKey(const Key('details-files-column-resizer')),
@@ -1271,8 +1274,14 @@ void main() {
     final historyWidth = tester
         .getSize(find.byKey(const Key('history-list-pane')))
         .width;
+    final savedBeforeFocus = saved;
+    expect(
+      savedBeforeFocus,
+      const FullDiffColumnWidths(history: 264, files: 342),
+    );
     final commit = fixture.controller.state.selectedCommit;
     final file = fixture.controller.state.selectedFile;
+    final historyEntry = fixture.controller.state.selectedHistoryEntry;
 
     await tester.tap(find.text('집중 모드'));
     await tester.pump();
@@ -1280,12 +1289,18 @@ void main() {
     expect(find.byKey(const Key('nearby-commits-list')), findsNothing);
     expect(find.byKey(const Key('nearby-column-resizer')), findsNothing);
     expect(find.byKey(const Key('commit-files-pane')), findsNothing);
+    expect(find.byKey(const Key('history-list-pane')), findsNothing);
+    expect(find.byKey(const Key('history-list')), findsNothing);
+    expect(find.byKey(const Key('history-list-column-resizer')), findsNothing);
+    expect(find.byKey(const Key('history-detail-divider')), findsNothing);
     expect(
-      tester.getSize(find.byKey(const Key('history-list-pane'))).width,
-      historyWidth,
+      tester.getSize(find.byKey(const Key('full-diff-detail-pane'))).width,
+      1070,
     );
     expect(find.byKey(const Key('diff-column')), findsOneWidget);
     expect(find.text('탐색 패널'), findsOneWidget);
+    expect(saved, savedBeforeFocus);
+    expect(fixture.controller.state.selectedHistoryEntry, same(historyEntry));
 
     await tester.tap(find.text('탐색 패널'));
     await tester.pump();
@@ -1300,6 +1315,8 @@ void main() {
     );
     expect(fixture.controller.state.selectedCommit, same(commit));
     expect(fixture.controller.state.selectedFile, same(file));
+    expect(fixture.controller.state.selectedHistoryEntry, same(historyEntry));
+    expect(saved, savedBeforeFocus);
   });
 
   testWidgets('selected rows and source state are not color-only', (
@@ -1411,7 +1428,7 @@ void main() {
     const scenarios = [
       (workspaceWidth: 760.0, listWidth: 280.0),
       (workspaceWidth: 600.0, listWidth: 244.0),
-      (workspaceWidth: 480.0, listWidth: 180.0),
+      (workspaceWidth: 500.0, listWidth: 180.0),
     ];
     for (final scenario in scenarios) {
       await tester.pumpWidget(
@@ -1446,6 +1463,42 @@ void main() {
             .getSize(find.byKey(const Key('history-list-column-resizer')))
             .width,
         8,
+      );
+    }
+  });
+
+  testWidgets('History hides navigation when fewer than 500px remain', (
+    tester,
+  ) async {
+    for (final width in [480.0, 400.0]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: width,
+              height: 400,
+              child: FullHistoryWorkspace(
+                historyWidth: 244,
+                onHistoryResized: (_) {},
+                onHistoryResizeEnd: () {},
+                history: const SizedBox(),
+                detail: const SizedBox(),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.byKey(const Key('history-list-pane')), findsNothing);
+      expect(find.byKey(const Key('history-detail-divider')), findsNothing);
+      expect(
+        find.byKey(const Key('history-list-column-resizer')),
+        findsNothing,
+      );
+      expect(
+        tester.getSize(find.byKey(const Key('full-diff-detail-pane'))).width,
+        width,
       );
     }
   });
@@ -1604,11 +1657,13 @@ void main() {
     (tester) async {
       final fixture = await historyWorkspaceFixture();
       addTearDown(fixture.controller.dispose);
+      FullDiffColumnWidths? saved;
       await pumpWorkspace(
         tester,
         controller: fixture.controller,
         size: const Size(700, 842),
         columnWidths: const FullDiffColumnWidths(history: 244, files: 318),
+        onColumnWidthsChanged: (value) => saved = value,
       );
 
       expect(
@@ -1628,9 +1683,37 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('details-files-column')), findsNothing);
       expect(
+        tester.getSize(find.byKey(const Key('history-list-pane'))).width,
+        244,
+      );
+      expect(
         tester.getSize(find.byKey(const Key('full-diff-detail-pane'))).width,
         greaterThanOrEqualTo(320),
       );
+      expect(saved, isNull);
+
+      tester.view.physicalSize = const Size(480, 842);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('details-files-column')), findsNothing);
+      expect(find.byKey(const Key('history-list-pane')), findsNothing);
+      expect(find.byKey(const Key('history-detail-divider')), findsNothing);
+      expect(
+        tester.getSize(find.byKey(const Key('full-diff-detail-pane'))).width,
+        480,
+      );
+      expect(saved, isNull);
+
+      tester.view.physicalSize = const Size(700, 842);
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSize(find.byKey(const Key('details-files-column'))).width,
+        200,
+      );
+      expect(
+        tester.getSize(find.byKey(const Key('history-list-pane'))).width,
+        180,
+      );
+      expect(saved, isNull);
     },
   );
 
@@ -1874,7 +1957,6 @@ void main() {
   ) async {
     final fixture = await historyWorkspaceFixture();
     addTearDown(fixture.controller.dispose);
-    fixture.controller.setFocusMode(true);
     await pumpWorkspace(
       tester,
       controller: fixture.controller,
@@ -1905,7 +1987,6 @@ void main() {
   ) async {
     final fixture = await historyWorkspaceFixture();
     addTearDown(fixture.controller.dispose);
-    fixture.controller.setFocusMode(true);
     await pumpWorkspace(
       tester,
       controller: fixture.controller,
@@ -1946,7 +2027,6 @@ void main() {
   ) async {
     final fixture = await historyWorkspaceFixture();
     addTearDown(fixture.controller.dispose);
-    fixture.controller.setFocusMode(true);
     await pumpWorkspace(
       tester,
       controller: fixture.controller,
@@ -1983,7 +2063,6 @@ void main() {
       },
     );
     addTearDown(fixture.controller.dispose);
-    fixture.controller.setFocusMode(true);
     await pumpWorkspace(
       tester,
       controller: fixture.controller,
@@ -2148,7 +2227,6 @@ void main() {
             : historicalFiles.future,
       );
       addTearDown(fixture.controller.dispose);
-      fixture.controller.setFocusMode(true);
       await pumpWorkspace(
         tester,
         controller: fixture.controller,

@@ -10,6 +10,7 @@ class FullHistoryWorkspace extends StatelessWidget {
     required this.onHistoryResizeEnd,
     required this.history,
     required this.detail,
+    this.showHistory = true,
     super.key,
   });
 
@@ -18,30 +19,35 @@ class FullHistoryWorkspace extends StatelessWidget {
   final VoidCallback onHistoryResizeEnd;
   final Widget history;
   final Widget detail;
+  final bool showHistory;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
+      final showNavigation =
+          showHistory &&
+          constraints.maxWidth >= FullDiffColumnWidths.minHistory + 320;
       final maxHistory = (constraints.maxWidth - 320).clamp(
         FullDiffColumnWidths.minHistory,
         FullDiffColumnWidths.maxHistory,
       );
       return Row(
         children: [
-          KeyedSubtree(
-            key: const Key('history-list-pane'),
-            child: FullDiffResizablePane(
-              width: historyWidth,
-              minWidth: FullDiffColumnWidths.minHistory,
-              maxWidth: maxHistory,
-              label: 'History pane width',
-              resizerKey: const Key('history-list-column-resizer'),
-              dividerKey: const Key('history-detail-divider'),
-              onChanged: onHistoryResized,
-              onChangeEnd: onHistoryResizeEnd,
-              child: history,
+          if (showNavigation)
+            KeyedSubtree(
+              key: const Key('history-list-pane'),
+              child: FullDiffResizablePane(
+                width: historyWidth,
+                minWidth: FullDiffColumnWidths.minHistory,
+                maxWidth: maxHistory,
+                label: 'History pane width',
+                resizerKey: const Key('history-list-column-resizer'),
+                dividerKey: const Key('history-detail-divider'),
+                onChanged: onHistoryResized,
+                onChangeEnd: onHistoryResizeEnd,
+                child: history,
+              ),
             ),
-          ),
           Expanded(
             key: const Key('full-diff-detail-pane'),
             child: KeyedSubtree(

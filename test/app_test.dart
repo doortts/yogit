@@ -7450,8 +7450,7 @@ void main() {
     await session.initialize();
     session
       ..setView(FullDiffView.history)
-      ..setLayout(DiffLayout.unified)
-      ..setFocusMode(true);
+      ..setLayout(DiffLayout.unified);
     await tester.pumpWidget(
       MaterialApp(
         home: DiffScreen(
