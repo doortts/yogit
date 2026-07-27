@@ -25,6 +25,9 @@ typedef QaCase = ({
   bool detailOnly,
 });
 
+bool isFinalPolishCapture(String name) =>
+    RegExp(r'^(18|19|20|21|22|23)-').hasMatch(name);
+
 const qaCases = <QaCase>[
   (
     name: '00-overview-hunk',
@@ -185,6 +188,54 @@ const qaCases = <QaCase>[
     algorithm: DiffAlgorithm.gitSetting,
     detailOnly: false,
   ),
+  (
+    name: '18-final-default',
+    size: Size(1070, 842),
+    view: FullDiffView.diff,
+    presentation: DiffPresentation.hunk,
+    focus: false,
+    whitespace: false,
+    wrap: false,
+    hunk: 1,
+    algorithm: DiffAlgorithm.gitSetting,
+    detailOnly: false,
+  ),
+  (
+    name: '21-final-focus',
+    size: Size(1070, 842),
+    view: FullDiffView.diff,
+    presentation: DiffPresentation.hunk,
+    focus: true,
+    whitespace: false,
+    wrap: false,
+    hunk: 1,
+    algorithm: DiffAlgorithm.gitSetting,
+    detailOnly: false,
+  ),
+  (
+    name: '22-final-responsive-650',
+    size: Size(650, 549),
+    view: FullDiffView.diff,
+    presentation: DiffPresentation.hunk,
+    focus: false,
+    whitespace: false,
+    wrap: false,
+    hunk: 1,
+    algorithm: DiffAlgorithm.gitSetting,
+    detailOnly: false,
+  ),
+  (
+    name: '23-final-responsive-480',
+    size: Size(480, 549),
+    view: FullDiffView.diff,
+    presentation: DiffPresentation.hunk,
+    focus: false,
+    whitespace: false,
+    wrap: false,
+    hunk: 1,
+    algorithm: DiffAlgorithm.gitSetting,
+    detailOnly: false,
+  ),
 ];
 
 const followupCases = [
@@ -272,7 +323,19 @@ void main() {
     expect(img.decodePng(sideBySideFile.readAsBytesSync())?.width, 4);
   });
 
-  testWidgets('782px keeps each global header on one line', (tester) async {
+  test('final QA fixture covers byte-size and blame metadata states', () {
+    expect(qaFiles.map((file) => file.sizeBytes), [3174, 847, 6963, null]);
+    expect(qaBlameLines[312].authorEmail, 'suwon.chae@example.com');
+    expect(qaBlameLines[312].authorTimestamp, 1782259200);
+    expect(
+      qaBlameLines[312].summary,
+      'Persist Retina-aware window dimensions while restoring saved display state',
+    );
+  });
+
+  testWidgets('1070px keeps both approved global headers on one line', (
+    tester,
+  ) async {
     addTearDown(() {
       tester.view.resetDevicePixelRatio();
       tester.view.resetPhysicalSize();
@@ -280,13 +343,13 @@ void main() {
     final controller = await qaControllerFor();
     addTearDown(controller.dispose);
     tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(782, 842);
+    tester.view.physicalSize = const Size(1070, 842);
     await tester.pumpWidget(
       MaterialApp(
         theme: fullDiffQaTheme(),
         home: FullDiffQaComparisonCanvas(
           controller: controller,
-          surfaceSize: const Size(782, 842),
+          surfaceSize: const Size(1070, 842),
         ),
       ),
     );
@@ -298,9 +361,23 @@ void main() {
     );
     expect(
       tester.getCenter(find.text('집중 모드')).dy,
-      closeTo(tester.getCenter(find.text('diff 알고리즘 · Git setting')).dy, 0.5),
+      closeTo(tester.getCenter(find.text('편집기로 열기')).dy, 0.5),
     );
-    expect(find.text('주변 커밋'), findsOneWidget);
+    expect(
+      tester.getCenter(find.text('diff 알고리즘')).dy,
+      closeTo(
+        tester.getCenter(find.byKey(const Key('diff-algorithm-value'))).dy,
+        0.5,
+      ),
+    );
+    expect(
+      tester.getCenter(find.text('diff 알고리즘')).dy,
+      closeTo(
+        tester.getCenter(find.byKey(const Key('change-counter'))).dy,
+        0.5,
+      ),
+    );
+    expect(find.text('주변 커밋'), findsNothing);
     expect(find.text('변경 파일'), findsOneWidget);
     final openEditorInk = find
         .ancestor(
@@ -342,7 +419,8 @@ void main() {
           .first;
       expect(tester.widget<InkWell>(openEditorInk).onTap, isNotNull);
       expect(find.text('working tree'), findsNothing);
-      expect(find.text('40aff6d'), findsWidgets);
+      expect(find.text('40aff6d'), findsNothing);
+      expect(find.text('src/drlua.pas'), findsWidgets);
     },
   );
 
@@ -439,7 +517,7 @@ void main() {
     );
     final stats = find.descendant(
       of: selectedFile,
-      matching: find.text('+12 −4'),
+      matching: find.text('+12 −4 · 3.1 KB'),
     );
     expect(tester.getSize(path).width, greaterThan(70));
     expect(
@@ -470,16 +548,22 @@ void main() {
     );
     await tester.pump();
 
-    final controlY = tester
-        .getCenter(find.byKey(const Key('change-counter')))
+    final settingsY = tester
+        .getCenter(find.byKey(const Key('diff-algorithm')))
         .dy;
     for (final key in [
       const Key('diff-algorithm'),
       const Key('ignore-whitespace'),
       const Key('wrap-lines'),
     ]) {
-      expect(tester.getCenter(find.byKey(key)).dy, closeTo(controlY, 0.5));
+      expect(tester.getCenter(find.byKey(key)).dy, closeTo(settingsY, 0.5));
     }
+    final navigationY = tester
+        .getCenter(find.byKey(const Key('change-counter')))
+        .dy;
+    expect(tester.getCenter(find.text('Hunk')).dy, closeTo(navigationY, 0.5));
+    expect(tester.getCenter(find.text('Inline')).dy, closeTo(navigationY, 0.5));
+    expect(tester.getCenter(find.text('Split')).dy, closeTo(navigationY, 0.5));
   });
 
   testWidgets('480px initial hunk keeps the unwrapped source at x=0', (
@@ -560,7 +644,11 @@ void main() {
     expect(back.left, lessThan(80));
     expect(back.right, lessThan(fileIcon.left));
     expect(fileIcon.right, lessThan(path.left));
-    expect(tester.getTopLeft(find.text('탐색 패널')).dx, lessThan(80));
+    final focus = tester.getRect(find.text('탐색 패널'));
+    final editor = tester.getRect(find.text('편집기로 열기'));
+    expect(focus.right, lessThan(editor.left));
+    expect(find.byKey(const Key('commit-files-pane')), findsNothing);
+    expect(find.byKey(const Key('diff-column')), findsOneWidget);
   });
 
   for (final presentation in DiffPresentation.values) {
@@ -614,60 +702,87 @@ void main() {
     );
   }
 
-  for (final view in [FullDiffView.file, FullDiffView.blame]) {
-    testWidgets('${view.name} initially reveals the selected source anchor', (
-      tester,
-    ) async {
-      addTearDown(() {
-        tester.view.resetDevicePixelRatio();
-        tester.view.resetPhysicalSize();
-      });
-      final controller = await qaControllerFor(view: view, activeHunkIndex: 1);
-      addTearDown(controller.dispose);
-      tester.view.devicePixelRatio = 1;
-      tester.view.physicalSize = const Size(1070, 842);
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: fullDiffQaTheme(),
-          home: FullDiffQaComparisonCanvas(
-            controller: controller,
-            surfaceSize: const Size(1070, 842),
-          ),
-        ),
-      );
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 100));
-      await tester.pump(const Duration(milliseconds: 100));
-      await tester.pump();
-
-      final linePrefix = view == FullDiffView.file ? 'file' : 'blame';
-      final viewport = tester.getRect(
-        find.byKey(const Key('content-scrollable')),
-      );
-      final activeAnchor = controller.state.activeAnchor!;
-      final header = find.byKey(
-        Key('$linePrefix-hunk-header-${activeAnchor.id}'),
-      );
-      final line309 = find.byKey(Key('$linePrefix-line-309'));
-      final changedRow = find.byKey(Key('$linePrefix-line-313'));
-      expect(header, findsOneWidget);
-      expect(changedRow, findsOneWidget);
-      expect(line309, findsOneWidget);
-      expect(
-        tester.getTopLeft(line309).dy,
-        inInclusiveRange(viewport.top - 27, viewport.top + 27),
-      );
-      expect(
-        tester.getRect(header).overlaps(viewport),
-        isTrue,
-        reason: '${view.name} selected Hunk header',
-      );
-      expect(tester.getBottomLeft(header).dy, tester.getTopLeft(changedRow).dy);
-      expect(find.byKey(Key('$linePrefix-current-line-313')), findsOneWidget);
+  testWidgets('file initially reveals the selected source anchor', (
+    tester,
+  ) async {
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
     });
-  }
+    final controller = await qaControllerFor(
+      view: FullDiffView.file,
+      activeHunkIndex: 1,
+    );
+    addTearDown(controller.dispose);
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1070, 842);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: fullDiffQaTheme(),
+        home: FullDiffQaComparisonCanvas(
+          controller: controller,
+          surfaceSize: const Size(1070, 842),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump();
 
-  testWidgets('blame uses one compact SHA and author-initials bundle', (
+    final viewport = tester.getRect(
+      find.byKey(const Key('content-scrollable')),
+    );
+    final activeAnchor = controller.state.activeAnchor!;
+    final header = find.byKey(Key('file-hunk-header-${activeAnchor.id}'));
+    final line309 = find.byKey(const Key('file-line-309'));
+    final changedRow = find.byKey(const Key('file-line-313'));
+    expect(header, findsOneWidget);
+    expect(changedRow, findsOneWidget);
+    expect(line309, findsOneWidget);
+    expect(
+      tester.getTopLeft(line309).dy,
+      inInclusiveRange(viewport.top - 27, viewport.top + 27),
+    );
+    expect(tester.getRect(header).overlaps(viewport), isTrue);
+    expect(tester.getBottomLeft(header).dy, tester.getTopLeft(changedRow).dy);
+    expect(find.byKey(const Key('file-current-line-313')), findsOneWidget);
+  });
+
+  testWidgets('final polish canvas uses approved desktop geometry', (
+    tester,
+  ) async {
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final controller = await qaControllerFor();
+    addTearDown(controller.dispose);
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1070, 842);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: fullDiffQaTheme(),
+        home: FullDiffQaComparisonCanvas(
+          controller: controller,
+          finalPolishGeometry: true,
+          surfaceSize: const Size(1070, 842),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      tester.getRect(find.byKey(const Key('full-diff-product-shell'))),
+      const Rect.fromLTWH(0, 0, 1070, 760),
+    );
+    expect(
+      tester.getSize(find.byKey(const Key('commit-files-pane'))).width,
+      278,
+    );
+  });
+
+  testWidgets('blame renders aligned metadata columns and source', (
     tester,
   ) async {
     addTearDown(() {
@@ -692,15 +807,30 @@ void main() {
     await tester.pump();
 
     final metadata = find.byKey(const Key('blame-metadata-313'));
-    expect(tester.getSize(metadata).width, 80);
+    expect(tester.getSize(metadata).width, greaterThanOrEqualTo(250));
     expect(
       find.descendant(of: metadata, matching: find.text('SC')),
       findsOneWidget,
     );
-    expect(find.text('Suwon Chae'), findsNothing);
+    expect(
+      find.descendant(
+        of: metadata,
+        matching: find.text(
+          'Persist Retina-aware window dimensions while restoring saved display state',
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: metadata, matching: find.text('2026-06-24')),
+      findsOneWidget,
+    );
 
     final row = find.byKey(const Key('blame-line-313'));
     final lineNumber = find.descendant(of: row, matching: find.text('313'));
+    final summary = find.byKey(const Key('blame-summary-313'));
+    final date = find.byKey(const Key('blame-date-313'));
+    final rail = find.byKey(const Key('blame-rail-313'));
     final source = find.descendant(
       of: row,
       matching: find.text(
@@ -709,12 +839,13 @@ void main() {
     );
     expect(
       tester.getTopLeft(lineNumber).dx,
-      lessThan(tester.getTopLeft(metadata).dx),
+      lessThan(tester.getTopLeft(summary).dx),
     );
-    expect(
-      tester.getTopLeft(metadata).dx,
-      lessThan(tester.getTopLeft(source).dx),
-    );
+    expect(tester.getTopLeft(summary).dx, lessThan(tester.getTopLeft(date).dx));
+    expect(tester.getTopLeft(date).dx, lessThan(tester.getTopLeft(rail).dx));
+    expect(tester.getTopLeft(rail).dx, lessThan(tester.getTopLeft(source).dx));
+    expect(tester.getSize(rail).width, 4);
+    expect(find.byKey(const Key('blame-hunk-header-hunk-1')), findsNothing);
   });
 
   testWidgets('detail QA state includes the approved hunk minimap viewport', (
@@ -837,6 +968,7 @@ void main() {
         child: FullDiffQaComparisonCanvas(
           controller: controller,
           detailOnly: scenario.detailOnly,
+          finalPolishGeometry: isFinalPolishCapture(scenario.name),
           surfaceSize: scenario.size,
         ),
       );
@@ -892,6 +1024,80 @@ void main() {
       );
     });
   }
+
+  testWidgets('capture 19-final-history', (tester) async {
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final controller = await qaControllerFor(
+      view: FullDiffView.history,
+      selectPastHistory: true,
+      activeHunkIndex: 0,
+    );
+    addTearDown(controller.dispose);
+    const size = Size(1070, 842);
+
+    await capture(
+      tester,
+      name: '19-final-history',
+      size: size,
+      child: FullDiffQaComparisonCanvas(
+        controller: controller,
+        finalPolishGeometry: true,
+        surfaceSize: size,
+      ),
+      prepare: () async {
+        final historyRowFocus = focusQaHistoryRow(tester, 'c78b2ff');
+        await tester.pump();
+        expect(historyRowFocus.hasPrimaryFocus, isTrue);
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer();
+        addTearDown(mouse.removePointer);
+        await mouse.moveTo(tester.getCenter(find.text('History')));
+        await tester.pump(const Duration(milliseconds: 500));
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(find.text('파일의 변경 이력을 보여줍니다'), findsOneWidget);
+        expect(
+          controller.state.selectedHistoryEntry?.commit.shortSha,
+          '65f4c80',
+        );
+      },
+      target: find.byType(Overlay),
+    );
+  });
+
+  testWidgets('capture 20-final-blame', (tester) async {
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final controller = await qaControllerFor(
+      view: FullDiffView.blame,
+      activeHunkIndex: 1,
+    );
+    addTearDown(controller.dispose);
+    const size = Size(1440, 842);
+
+    await capture(
+      tester,
+      name: '20-final-blame',
+      size: size,
+      child: FullDiffQaComparisonCanvas(
+        controller: controller,
+        finalPolishGeometry: true,
+        surfaceSize: size,
+        showRemoteAvatars: false,
+      ),
+      prepare: () async {
+        expect(find.byKey(const Key('blame-avatar-313')), findsOneWidget);
+        expect(find.text('SC'), findsWidgets);
+        expect(find.byKey(const Key('blame-summary-313')), findsOneWidget);
+        expect(find.byKey(const Key('blame-date-313')), findsOneWidget);
+        expect(find.byKey(const Key('blame-rail-313')), findsOneWidget);
+      },
+    );
+  });
 
   testWidgets('capture 14-algorithm-tooltip', (tester) async {
     addTearDown(() {

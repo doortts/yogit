@@ -5,6 +5,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/diff_screen.dart';
 import 'package:yogit/full_diff_controller.dart';
 import 'package:yogit/full_diff_header.dart';
@@ -51,18 +52,21 @@ const qaFiles = <GitFileChange>[
     status: 'M',
     additions: 12,
     deletions: 4,
+    sizeBytes: 3174,
   ),
   GitFileChange(
     path: 'src/window_sdl.pas',
     status: 'M',
     additions: 9,
     deletions: 3,
+    sizeBytes: 847,
   ),
   GitFileChange(
     path: 'macos/retina.pas',
     status: 'A',
     additions: 13,
     deletions: 0,
+    sizeBytes: 6963,
   ),
   GitFileChange(
     path: 'macos/legacy_scale.pas',
@@ -73,12 +77,19 @@ const qaFiles = <GitFileChange>[
 ];
 
 const qaHistoricalFiles = <GitFileChange>[
-  GitFileChange(path: 'src/drlua.pas', status: 'M', additions: 3, deletions: 1),
+  GitFileChange(
+    path: 'src/drlua.pas',
+    status: 'M',
+    additions: 3,
+    deletions: 1,
+    sizeBytes: 3072,
+  ),
   GitFileChange(
     path: 'src/window_sdl.pas',
     status: 'M',
     additions: 4,
     deletions: 2,
+    sizeBytes: 812,
   ),
 ];
 
@@ -350,6 +361,11 @@ final qaBlameLines = List<GitBlameLine>.generate(450, (index) {
     lineNumber: lineNumber,
     sha: changed ? '40aff6d' : 'a8eda6d',
     author: changed ? 'Suwon Chae' : 'epyon',
+    authorEmail: changed ? 'suwon.chae@example.com' : 'epyon@example.com',
+    authorTimestamp: changed ? 1782259200 : 1481068800,
+    summary: changed
+        ? 'Persist Retina-aware window dimensions while restoring saved display state'
+        : 'Initial source and data import',
     uncommitted: false,
   );
 }, growable: false);
@@ -435,6 +451,13 @@ ThemeData fullDiffQaTheme() => ThemeData(
   fontFamilyFallback: const ['Roboto', 'D2Coding'],
 );
 
+FocusNode focusQaHistoryRow(WidgetTester tester, String sha) {
+  final row = find.byKey(Key('history-row-$sha'));
+  final node = Focus.of(tester.element(row));
+  node.requestFocus();
+  return node;
+}
+
 Future<FullDiffSessionController> qaControllerFor({
   FullDiffView view = FullDiffView.diff,
   DiffPresentation presentation = DiffPresentation.hunk,
@@ -502,13 +525,17 @@ class FullDiffQaProductShell extends StatelessWidget {
   const FullDiffQaProductShell({
     required this.controller,
     this.detailOnly = false,
+    this.finalPolishGeometry = false,
     this.viewportWidth,
+    this.showRemoteAvatars = true,
     super.key,
   });
 
   final FullDiffSessionController controller;
   final bool detailOnly;
+  final bool finalPolishGeometry;
   final double? viewportWidth;
+  final bool showRemoteAvatars;
 
   @override
   Widget build(BuildContext context) => RepaintBoundary(
@@ -521,7 +548,10 @@ class FullDiffQaProductShell extends StatelessWidget {
             initialIndex: 0,
             initialView: FullDiffInitialView.hunk,
             controller: controller,
-            columnWidths: _qaColumnWidths(viewportWidth),
+            columnWidths: finalPolishGeometry
+                ? const FullDiffColumnWidths(files: 278)
+                : _qaColumnWidths(viewportWidth),
+            showRemoteAvatars: showRemoteAvatars,
           ),
   );
 }
@@ -530,22 +560,36 @@ class FullDiffQaComparisonCanvas extends StatelessWidget {
   const FullDiffQaComparisonCanvas({
     required this.controller,
     this.detailOnly = false,
+    this.finalPolishGeometry = false,
     this.surfaceSize,
+    this.showRemoteAvatars = true,
     super.key,
   });
 
   final FullDiffSessionController controller;
   final bool detailOnly;
+  final bool finalPolishGeometry;
   final Size? surfaceSize;
+  final bool showRemoteAvatars;
 
   @override
   Widget build(BuildContext context) {
     final productShell = FullDiffQaProductShell(
       controller: controller,
       detailOnly: detailOnly,
+      finalPolishGeometry: finalPolishGeometry,
       viewportWidth: surfaceSize?.width,
+      showRemoteAvatars: showRemoteAvatars,
     );
     final sizedWorkspace = switch ((surfaceSize, detailOnly)) {
+      (final Size size, false) when finalPolishGeometry => Align(
+        alignment: Alignment.topCenter,
+        child: SizedBox(
+          width: size.width,
+          height: math.min(size.height, 760),
+          child: productShell,
+        ),
+      ),
       (final Size size, false) => Padding(
         padding: const EdgeInsets.fromLTRB(
           fullDiffComparisonCanvasInset,

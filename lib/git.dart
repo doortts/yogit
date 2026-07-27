@@ -1376,8 +1376,8 @@ List<GitBlameLine> _parseBlamePorcelain(String output) {
       metadata = (
         author: line.substring('author '.length),
         email: metadata!.email,
-        timestamp: metadata!.timestamp,
-        summary: metadata!.summary,
+        timestamp: metadata.timestamp,
+        summary: metadata.summary,
       );
       continue;
     }
@@ -1388,25 +1388,25 @@ List<GitBlameLine> _parseBlamePorcelain(String output) {
         email: email.startsWith('<') && email.endsWith('>')
             ? email.substring(1, email.length - 1)
             : email,
-        timestamp: metadata!.timestamp,
-        summary: metadata!.summary,
+        timestamp: metadata.timestamp,
+        summary: metadata.summary,
       );
       continue;
     }
     if (line.startsWith('author-time ') && sha != null) {
       metadata = (
         author: metadata!.author,
-        email: metadata!.email,
+        email: metadata.email,
         timestamp: int.tryParse(line.substring('author-time '.length)),
-        summary: metadata!.summary,
+        summary: metadata.summary,
       );
       continue;
     }
     if (line.startsWith('summary ') && sha != null) {
       metadata = (
         author: metadata!.author,
-        email: metadata!.email,
-        timestamp: metadata!.timestamp,
+        email: metadata.email,
+        timestamp: metadata.timestamp,
         summary: line.substring('summary '.length),
       );
     }

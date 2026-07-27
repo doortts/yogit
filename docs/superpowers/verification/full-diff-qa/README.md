@@ -1,16 +1,17 @@
 # Full Diff 최종 검수
 
 2026-07-27에 기존 승인 이미지 13장, 후속 검수 이미지 5장과 macOS 앱을
-기준으로 확인했다. 이번 후속 수정에서는 실제 History 상세 너비와
-알고리즘 목적 설명이 달라진 05·14·17만 다시 캡처했고 나머지 기준
-이미지는 그대로 유지했다. 00–04·06–12 기준 이미지는 이름만 `.png`이고
-실제 내용은 JPEG라서 차이 도구는 파일 시그니처로 형식을 판별한다.
-05·13–17 기준 이미지는 검토를 통과한 Flutter PNG 캡처다. JPEG 압축과
-Flutter 글꼴 래스터라이징에서 생기는 픽셀 차이는 아래 수치에 포함했다.
-수동 판정에서는 구성 요소의 위치·크기·줄바꿈·말줄임·색·테두리를 각각
+기준으로 확인했다. 최종 보완에서 제품 배치가 바뀌어 구현 이미지
+00~17을 모두 새로 캡처하고 차이 이미지와 수치도 현재 이미지로 다시
+계산했다. 00–04·06–12 기준 이미지는 이름만 `.png`이고 실제 내용은
+JPEG라서 차이 도구는 파일 시그니처로 형식을 판별한다. 05·13–17 기준
+이미지는 검토를 통과한 Flutter PNG 캡처다. JPEG 압축과 Flutter 글꼴
+래스터라이징에서 생기는 픽셀 차이는 아래 수치에 포함했다.
+
+수동 판정에서는 구성 요소의 위치·크기·줄바꿈·말줄임·색·테두리를
 확인했다. 기준 HTML은 고정된 예시 행을 그리지만 구현 캡처는 검수용
-데이터를 실제 위젯으로 렌더링하므로 행의 개수와 문구가 다른 구간은 픽셀
-일치 판정에서 제외했다.
+데이터를 실제 위젯으로 렌더링하므로 행의 개수와 문구가 다른 구간은
+픽셀 일치 판정에서 제외했다.
 
 ## 이미지 판정
 
@@ -28,8 +29,8 @@ Flutter 글꼴 래스터라이징에서 생기는 픽셀 차이는 아래 수치
 | 01 Inline | [기준](../../specs/assets/full-diff-qa/01-diff-inline.png) | [구현](actual/01-diff-inline.png) | [차이](diff/01-diff-inline.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 선행 문맥, Hunk 제목, 활성 구간 순서 확인 |
 | 02 Split | [기준](../../specs/assets/full-diff-qa/02-diff-split.png) | [구현](actual/02-diff-split.png) | [차이](diff/02-diff-split.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 이전·이후 행 두 열과 가운데 경계 확인 |
 | 03 File | [기준](../../specs/assets/full-diff-qa/03-file-view.png) | [구현](actual/03-file-view.png) | [차이](diff/03-file-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 선택한 Hunk 하나의 제목과 결과 쪽 추가 행만 표시되는지 확인 |
-| 04 Blame | [기준](../../specs/assets/full-diff-qa/04-blame-view.png) | [구현](actual/04-blame-view.png) | [차이](diff/04-blame-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 선택한 Hunk 하나의 제목·변경 표시와 80px 메타데이터 순서 확인 |
-| 05 History | [기준](../../specs/assets/full-diff-qa/05-history-view.png) | [구현](actual/05-history-view.png) | [차이](diff/05-history-view.png) | History 목록과 좁은 상세의 한쪽 결과 표시 | 기준 상수 적용 | History 작업 영역이 760px 미만이라 목록 240px, 상세 영역과 1px 경계 | 통과: 실제 상세 너비 467px에서 Split 설정을 유지하되 한쪽 결과만 표시해 잘림을 막음 |
+| 04 Blame | [기준](../../specs/assets/full-diff-qa/04-blame-view.png) | [구현](actual/04-blame-view.png) | [차이](diff/04-blame-view.png) | 전체 소스와 6개 열 | SHA별 색상선 적용 | Hunk 머리글 없이 줄별 정렬 | 통과: 아바타·줄 번호·제목·날짜·4px 색상선·소스 순서 확인 |
+| 05 History | [기준](../../specs/assets/full-diff-qa/05-history-view.png) | [구현](actual/05-history-view.png) | [차이](diff/05-history-view.png) | History 목록과 565px Split 상세의 양쪽 결과 표시 | 기준 상수 적용 | History 작업 영역 약 846px, 목록 280px, 상세 565px와 1px 경계 | 통과: 목록과 양쪽 결과를 유지하면서 현재 시점의 여러 Hunk를 함께 표시 |
 | 06 집중 모드 | [기준](../../specs/assets/full-diff-qa/06-focus-mode.png) | [구현](actual/06-focus-mode.png) | [차이](diff/06-focus-mode.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 탐색 열 제거, 머리글 정렬, 본문 확장 확인 |
 | 07 공백 무시 | [기준](../../specs/assets/full-diff-qa/07-ignore-whitespace.png) | [구현](actual/07-ignore-whitespace.png) | [차이](diff/07-ignore-whitespace.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 선택 상태와 공백 행 제거 확인 |
 | 08 줄바꿈 | [기준](../../specs/assets/full-diff-qa/08-wrap-lines.png) | [구현](actual/08-wrap-lines.png) | [차이](diff/08-wrap-lines.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 선택 상태, 한 개의 줄 번호, 긴 소스 줄바꿈 확인 |
@@ -37,19 +38,20 @@ Flutter 글꼴 래스터라이징에서 생기는 픽셀 차이는 아래 수치
 | 10 Histogram | [기준](../../specs/assets/full-diff-qa/10-algorithm-histogram.png) | [구현](actual/10-algorithm-histogram.png) | [차이](diff/10-algorithm-histogram.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: Histogram 상태, 두 번째 Hunk, 미니맵 확인 |
 | 11 650px | [기준](../../specs/assets/full-diff-qa/11-responsive-650.png) | [구현](actual/11-responsive-650.png) | [차이](diff/11-responsive-650.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 파일 경로와 통계를 두 줄로 배치하고 파일 열 유지 |
 | 12 480px | [기준](../../specs/assets/full-diff-qa/12-responsive-480.png) | [구현](actual/12-responsive-480.png) | [차이](diff/12-responsive-480.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 두 탐색 열 제거, 한 줄 조작부, 초기 가로 이동값 0, Hunk 제목과 313행의 왼쪽 정렬 확인 |
-| 13 글자와 뒤로 가기 | [기준](../../specs/assets/full-diff-qa/13-font-and-back.png) | [구현](actual/13-font-and-back.png) | [차이](diff/13-font-and-back.png) | 뒤로 가기→파일 아이콘→경로 순서 | 기존 상단 색 유지 | 목록 11·10·9px, diff 10·8px 간격 유지 | 통과: 작은 글자가 행 안에서 붙거나 잘리지 않고 32px 뒤로 가기 버튼이 가장 왼쪽에 있음 |
+| 13 글자와 뒤로 가기 | [기준](../../specs/assets/full-diff-qa/13-font-and-back.png) | [구현](actual/13-font-and-back.png) | [차이](diff/13-font-and-back.png) | 뒤로 가기→파일 아이콘→경로 순서 | 기존 상단 색 유지 | 파일 이름 13px, 통계·코드·Hunk 12px, 줄 번호 10px | 통과: 최신 글자 크기가 행 안에서 잘리지 않고 32px 뒤로 가기 버튼이 가장 왼쪽에 있음 |
 | 14 알고리즘 설명 | [기준](../../specs/assets/full-diff-qa/14-algorithm-tooltip.png) | [구현](actual/14-algorithm-tooltip.png) | [차이](diff/14-algorithm-tooltip.png) | 닫힌 버튼에 Histogram 표시 | 어두운 화면 위에 뜨는 밝은 임시 팝오버의 대비 분명 | diff 머리글과 첫 소스 행 위에 잠시 겹치며 내용은 선명하게 읽힘 | 통과: 선택값, 설정 목적과 반복 코드용 Histogram 설명을 한눈에 읽을 수 있음 |
 | 15 표시 불가 | [기준](../../specs/assets/full-diff-qa/15-unavailable-panel.png) | [구현](actual/15-unavailable-panel.png) | [차이](diff/15-unavailable-panel.png) | 경로→통계→UTF-8→사유→옵션 순서 | 속성 칩과 사유의 대비 분명 | 빈 본문 중앙에서 한 줄 정보 흐름 유지 | 통과: `src/drlua.pas`, `M · +12 −4`, `UTF-8`, 변경이 없다는 사유와 현재 옵션을 순서대로 확인 |
-| 16 History 상세 | [기준](../../specs/assets/full-diff-qa/16-history-detail.png) | [구현](actual/16-history-detail.png) | [차이](diff/16-history-detail.png) | 선택한 65f4c80과 과거 Hunk 표시 | 선택 행과 변경 행 색 구분 | History 작업 영역이 760px 미만이라 목록 240px, 1px 경계 뒤 상세 확장 | 통과: 목록을 유지한 채 과거 커밋의 파일 목록·통계와 1개 Hunk가 오른쪽에서 함께 바뀜. 목록 280px은 History 작업 영역 자체가 760px 이상일 때만 적용 |
-| 17 History Split | [기준](../../specs/assets/full-diff-qa/17-history-detail-split.png) | [구현](actual/17-history-detail-split.png) | [차이](diff/17-history-detail-split.png) | 선택한 65f4c80과 과거 Split 설정 | 추가 배경과 결과 쪽 경계 분명 | 467px 상세에서는 한쪽 결과로 접힘 | 통과: Split 설정은 유지하고 실제 상세 너비에 맞춰 결과 쪽만 표시해 모든 검수용 소스 줄이 잘리지 않음 |
+| 16 History 상세 | [기준](../../specs/assets/full-diff-qa/16-history-detail.png) | [구현](actual/16-history-detail.png) | [차이](diff/16-history-detail.png) | 선택한 65f4c80과 과거 Hunk 표시 | 선택 행과 변경 행 색 구분 | History 작업 영역 약 846px, 목록 280px, 상세 565px와 1px 경계 | 통과: 목록을 유지한 채 과거 커밋의 파일 목록·통계와 1개 Hunk가 오른쪽에서 함께 바뀜 |
+| 17 History Split | [기준](../../specs/assets/full-diff-qa/17-history-detail-split.png) | [구현](actual/17-history-detail-split.png) | [차이](diff/17-history-detail-split.png) | 선택한 65f4c80과 과거 Split 설정 | 추가 배경과 결과 쪽 경계 분명 | History 작업 영역 약 846px, 목록 280px, 상세 565px | 통과: Split의 이전·결과 쪽을 함께 표시하면서 검수용 소스 줄과 빗금 셀 경계를 유지 |
 
 승인 이미지가 작업 표보다 우선한다. 승인 이미지에서 Split이 선택된
 03·04·05·07·08은 Split 상태로 캡처했다. 검수 하네스는 Flutter SDK의
 Material Icons와 Roboto, macOS의 Menlo와 Apple SD Gothic Neo를
 불러오며 Menlo에 없는 글자는 앱에 포함된 D2Coding으로 표시한다.
-File과 Blame은 선택한 Hunk의 제목과 변경 표시만 투영하도록 고친 뒤
-03·04를 다시 캡처했다. 미니맵은 선택한 이전·결과 쪽 소스 범위로
-뷰포트를 계산하며 아래 수치는 이 계산을 적용한 현재 캡처 기준이다.
+File은 선택한 Hunk의 제목과 변경 표시를 투영한다. Blame은 Hunk
+머리글 없이 전체 소스와 줄별 메타데이터를 나란히 표시한다. 미니맵은
+선택한 이전·결과 쪽 소스 범위로 뷰포트를 계산하며 아래 수치는 이
+계산을 적용한 현재 캡처 기준이다.
 
 ## 픽셀 차이
 
@@ -59,24 +61,24 @@ JPEG라서 넓고 단색인 배경도 미세한 차이로 집계된다.
 
 | 이미지 | 크기 | changed | changed % | mean RGB | max RGB |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 00-overview-hunk | 782×842 | 269,413 | 40.9166 | 11.3120 | 255 |
-| 01-diff-inline | 782×842 | 362,554 | 55.0622 | 16.9980 | 255 |
-| 02-diff-split | 1070×842 | 456,589 | 50.6792 | 15.3780 | 255 |
-| 03-file-view | 1070×842 | 371,904 | 41.2796 | 12.0217 | 253 |
-| 04-blame-view | 1070×842 | 386,525 | 42.9024 | 13.1967 | 255 |
-| 05-history-view | 1070×842 | 0 | 0.0000 | 0.0000 | 0 |
-| 06-focus-mode | 1070×842 | 212,180 | 23.5510 | 6.2048 | 255 |
-| 07-ignore-whitespace | 1070×842 | 458,523 | 50.8938 | 16.2115 | 255 |
-| 08-wrap-lines | 1070×842 | 490,665 | 54.4615 | 16.7609 | 255 |
-| 09-next-change | 1280×720 | 656,183 | 71.2004 | 8.8207 | 236 |
-| 10-algorithm-histogram | 1280×720 | 655,952 | 71.1753 | 8.8111 | 242 |
-| 11-responsive-650 | 650×549 | 175,328 | 49.1321 | 15.6722 | 242 |
-| 12-responsive-480 | 480×549 | 123,525 | 46.8750 | 15.7065 | 242 |
-| 13-font-and-back | 1070×842 | 0 | 0.0000 | 0.0000 | 0 |
-| 14-algorithm-tooltip | 1070×842 | 0 | 0.0000 | 0.0000 | 0 |
-| 15-unavailable-panel | 1070×842 | 0 | 0.0000 | 0.0000 | 0 |
-| 16-history-detail | 1070×842 | 0 | 0.0000 | 0.0000 | 0 |
-| 17-history-detail-split | 1070×842 | 0 | 0.0000 | 0.0000 | 0 |
+| 00-overview-hunk | 782×842 | 286,472 | 43.5074 | 11.5929 | 242 |
+| 01-diff-inline | 782×842 | 376,247 | 57.1418 | 17.0905 | 250 |
+| 02-diff-split | 1070×842 | 462,975 | 51.3880 | 16.2409 | 255 |
+| 03-file-view | 1070×842 | 377,265 | 41.8746 | 12.3743 | 248 |
+| 04-blame-view | 1070×842 | 385,932 | 42.8366 | 15.6257 | 255 |
+| 05-history-view | 1070×842 | 163,181 | 18.1123 | 9.6271 | 255 |
+| 06-focus-mode | 1070×842 | 214,778 | 23.8393 | 6.5926 | 255 |
+| 07-ignore-whitespace | 1070×842 | 464,830 | 51.5939 | 17.1112 | 255 |
+| 08-wrap-lines | 1070×842 | 496,505 | 55.1097 | 17.6716 | 255 |
+| 09-next-change | 1280×720 | 662,783 | 71.9166 | 9.1219 | 240 |
+| 10-algorithm-histogram | 1280×720 | 662,578 | 71.8943 | 9.1151 | 248 |
+| 11-responsive-650 | 650×549 | 176,822 | 49.5508 | 16.8026 | 242 |
+| 12-responsive-480 | 480×549 | 137,109 | 52.0298 | 17.4395 | 242 |
+| 13-font-and-back | 1070×842 | 90,584 | 10.0544 | 4.9268 | 255 |
+| 14-algorithm-tooltip | 1070×842 | 120,955 | 13.4254 | 11.3948 | 255 |
+| 15-unavailable-panel | 1070×842 | 74,043 | 8.2184 | 4.0775 | 255 |
+| 16-history-detail | 1070×842 | 89,869 | 9.9750 | 5.0576 | 255 |
+| 17-history-detail-split | 1070×842 | 103,657 | 11.5054 | 5.4960 | 255 |
 
 ## 구문 강조 성능과 앱 크기
 
@@ -125,7 +127,7 @@ Flutter에서 저장소 경로를 Dart 진입점으로 해석해 실패했다. �
 | 이전·다음 | 통과 | 카운터와 미니맵이 `1 / 9`와 `2 / 9` 사이에서 함께 이동 |
 | Histogram | 통과 | 메뉴에서 Histogram의 선택 표시 확인 |
 | 공백 무시·줄바꿈·집중 모드 | 통과 | 각 기능을 켰다가 끄고 행 구성과 탐색 패널 복원을 확인 |
-| History 포커스 후 Enter | 수동 미검증 | Computer Use에서 Flutter 행 포커스를 안정적으로 지정하지 못함. `history focus does not select until enter` 자동 테스트는 통과 |
+| History 키보드 이동 | 통과 | `file and History lists move selection and focus explicitly`에서 목록 포커스 이동, 화살표 확정 선택과 상세 diff 변경 확인 |
 | Settings 초기값 두 가지 | 통과 | Hunk와 `Full file focused on first change`로 새 Full Diff를 각각 열어 초기 화면 확인. 검수 뒤 Hunk로 복원 |
 | 작업 트리 편집기로 열기 | 통과 | `scripts/package-macos-release.sh`를 눌러 TextEdit가 같은 절대 경로와 파일 내용을 연 것을 확인 |
 | 651·650·481·480px | 통과 | 651은 두 탐색 열, 650은 파일 열만, 481은 파일 열, 480은 콘텐츠만 표시. 실제 캡처 너비도 각각 확인 |
@@ -133,3 +135,30 @@ Flutter에서 저장소 경로를 Dart 진입점으로 해석해 실패했다. �
 반응형 수동 검수 중 macOS 창의 최소 너비가 960px라서 경계에 도달하지
 못하는 문제를 찾았다. 최소 너비를 480px로 낮추고 자동 테스트로
 고정한 뒤 네 경계를 다시 확인했다.
+
+## 최종 보완 캡처 18~23
+
+00~17의 기준 이미지는 이전 승인 단계의 시안이고 구현 이미지와
+`diff/`는 현재 제품 배치로 다시 생성했다. 2026-07-27 최종 보완에서는
+아래 여섯 장을 최신 승인 시안의 최종 판정 기준으로 추가했다. 자세한
+근거는 [최종 보완 검토](final-polish-review.md)에 기록했다.
+
+| 상태 | 캡처 | 크기 | 판정 |
+| --- | --- | ---: | --- |
+| 기본 Diff | [18-final-default](actual/18-final-default.png) | 1070×842 | 통과: 파일+콘텐츠 두 열, 크기, 머리글과 버튼 순서 확인 |
+| History | [19-final-history](actual/19-final-history.png) | 1070×842 | 통과: 도움말, 선택 반전, 포커스 테두리와 상세 diff 확인 |
+| Blame | [20-final-blame](actual/20-final-blame.png) | 1440×842 | 통과: 이니셜, 줄 번호, 제목, 날짜, 4px 색상선과 소스 정렬 확인 |
+| 집중 모드 | [21-final-focus](actual/21-final-focus.png) | 1070×842 | 통과: 파일 열 제거와 탐색 패널·편집기 버튼 순서 확인 |
+| 650px | [22-final-responsive-650](actual/22-final-responsive-650.png) | 650×549 | 통과: 파일+콘텐츠와 조작부 그룹 줄바꿈 확인 |
+| 480px | [23-final-responsive-480](actual/23-final-responsive-480.png) | 480×549 | 통과: 콘텐츠 단독 표시와 Hunk 행 정렬 확인 |
+
+승인 시안과 나란히 비교해 버튼 위치, 알고리즘 라벨 분리, 파일 이름
+배경, 글자 크기, Blame 열 경계와 반응형 전환을 확인했다. 저장소
+데이터에 따라 달라지는 문자열을 제외하면 1px보다 큰 설계 차이는
+찾지 못했다. 데스크톱 캡처는 승인 시안의 작업 영역 높이 760px과
+파일 열 너비 278px을 사용하며 자동 테스트로 두 값을 고정했다.
+
+최종 시각 테스트는 43개가 통과했다. 기본·축소 syntax 전체 테스트는
+각각 451개가 통과했고, 정적 분석은 문제 0, benchmark는 첫 실행
+15,018µs와 p95 2,272µs로 기준을 통과했다. macOS 릴리스 앱은
+55.3MB로 빌드됐다.
