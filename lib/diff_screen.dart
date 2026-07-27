@@ -13,6 +13,7 @@ import 'full_diff_hunk_view.dart';
 import 'full_diff_inline_view.dart';
 import 'full_diff_minimap.dart';
 import 'full_diff_model.dart';
+import 'full_diff_selectable_row.dart';
 import 'full_diff_split_view.dart';
 import 'full_diff_syntax.dart';
 import 'full_diff_theme.dart';
@@ -41,6 +42,12 @@ class _StepHunkIntent extends Intent {
 
 class _StepFileIntent extends Intent {
   const _StepFileIntent(this.delta);
+
+  final int delta;
+}
+
+class _StepPrimaryFileIntent extends Intent {
+  const _StepPrimaryFileIntent(this.delta);
 
   final int delta;
 }
@@ -565,6 +572,11 @@ class _DiffScreenState extends State<DiffScreen> {
                 _StepFileIntent(-1),
             SingleActivator(LogicalKeyboardKey.arrowDown, meta: true):
                 _StepFileIntent(1),
+            SingleActivator(LogicalKeyboardKey.arrowUp): _StepPrimaryFileIntent(
+              -1,
+            ),
+            SingleActivator(LogicalKeyboardKey.arrowDown):
+                _StepPrimaryFileIntent(1),
           },
           child: Actions(
             actions: <Type, Action<Intent>>{
@@ -590,6 +602,14 @@ class _DiffScreenState extends State<DiffScreen> {
               _StepFileIntent: CallbackAction<_StepFileIntent>(
                 onInvoke: (intent) {
                   _stepFile(intent.delta);
+                  return null;
+                },
+              ),
+              _StepPrimaryFileIntent: CallbackAction<_StepPrimaryFileIntent>(
+                onInvoke: (intent) {
+                  if (_controller.state.view != FullDiffView.history) {
+                    _stepFile(intent.delta);
+                  }
                   return null;
                 },
               ),
@@ -791,56 +811,65 @@ class _DiffScreenState extends State<DiffScreen> {
                                   ? null
                                   : () =>
                                         unawaited(_controller.selectFile(file)),
-                              child: Container(
-                                key: selected
-                                    ? Key('selected-file-${file.path}')
-                                    : null,
-                                color: selected
-                                    ? fullDiffSelection
-                                    : Colors.transparent,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 9,
-                                ),
-                                child: Row(
-                                  children: [
-                                    SizedBox(
-                                      width: 24,
-                                      child: Text(
-                                        _statusLetter(file.status),
-                                        style: const TextStyle(fontSize: 9),
-                                      ),
+                              child: ListenableBuilder(
+                                listenable: _historyListFocus,
+                                builder: (context, _) => FullDiffSelectableRowSurface(
+                                  key: selected
+                                      ? Key('selected-file-${file.path}')
+                                      : null,
+                                  selected: selected,
+                                  focused:
+                                      selected &&
+                                      (state.view != FullDiffView.history ||
+                                          !_historyListFocus.hasFocus),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 9,
                                     ),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.stretch,
-                                        children: [
-                                          Text(
-                                            file.path,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              fontFamily: technicalFontFamily,
-                                              fontFamilyFallback:
-                                                  technicalFontFallback,
-                                              fontSize: 13,
-                                            ),
+                                    child: Row(
+                                      children: [
+                                        SizedBox(
+                                          width: 24,
+                                          child: Text(
+                                            _statusLetter(file.status),
+                                            style: const TextStyle(fontSize: 9),
                                           ),
-                                          const SizedBox(height: 3),
-                                          Text(
-                                            '+${file.additions ?? '—'} '
-                                            '−${file.deletions ?? '—'} · '
-                                            '${formatByteSize(file.sizeBytes)}',
-                                            style: technicalTextStyle.copyWith(
-                                              color: fullDiffMuted,
-                                              fontSize: 12,
-                                            ),
+                                        ),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.stretch,
+                                            children: [
+                                              Text(
+                                                file.path,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                  fontFamily:
+                                                      technicalFontFamily,
+                                                  fontFamilyFallback:
+                                                      technicalFontFallback,
+                                                  fontSize: 13,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 3),
+                                              Text(
+                                                '+${file.additions ?? '—'} '
+                                                '−${file.deletions ?? '—'} · '
+                                                '${formatByteSize(file.sizeBytes)}',
+                                                style: technicalTextStyle
+                                                    .copyWith(
+                                                      color: fullDiffMuted,
+                                                      fontSize: 12,
+                                                    ),
+                                              ),
+                                            ],
                                           ),
-                                        ],
-                                      ),
+                                        ),
+                                      ],
                                     ),
-                                  ],
+                                  ),
                                 ),
                               ),
                             ),

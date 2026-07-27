@@ -11,6 +11,7 @@ import 'package:yogit/full_diff_hunk_header.dart';
 import 'package:yogit/full_diff_controller.dart';
 import 'package:yogit/full_diff_minimap.dart';
 import 'package:yogit/full_diff_model.dart';
+import 'package:yogit/full_diff_selectable_row.dart';
 import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/full_history_view.dart';
 import 'package:yogit/full_history_workspace.dart';
@@ -696,16 +697,9 @@ void main() {
     );
     semantics.dispose();
     final selectedRow = find.byKey(Key('selected-file-${fileA.path}'));
-    expect(tester.widget<Container>(selectedRow).color, fullDiffSelection);
-    expect(
-      find.descendant(
-        of: selectedRow,
-        matching: find.byWidgetPredicate(
-          (widget) => widget is Container && widget.decoration is BoxDecoration,
-        ),
-      ),
-      findsNothing,
-    );
+    final surface = tester.widget<FullDiffSelectableRowSurface>(selectedRow);
+    expect(surface.selected, isTrue);
+    expect(surface.focused, isTrue);
     expect(find.text('+'), findsWidgets);
     expect(find.text('−'), findsWidgets);
     expect(find.byKey(const Key('code-row-current-marker')), findsOneWidget);
@@ -725,10 +719,9 @@ void main() {
       final semantics = tester.ensureSemantics();
       final row = find.byKey(Key('history-row-${commitA.sha}'));
 
-      expect(
-        (tester.widget<Container>(row).decoration as BoxDecoration).color,
-        fullDiffSelection,
-      );
+      final surface = tester.widget<FullDiffSelectableRowSurface>(row);
+      expect(surface.selected, isTrue);
+      expect(surface.focused, isFalse);
       final selectedSemantics = find.ancestor(
         of: row,
         matching: find.byWidgetPredicate(
@@ -1406,6 +1399,12 @@ void main() {
       tester.element(find.byKey(const Key('content-scrollable'))),
     ).requestFocus();
     await tester.pump();
+    await sendChord(tester, LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(controller.state.selectedFile, fileB);
+    await controller.selectFile(fileA);
+    await tester.pumpAndSettle();
+
     await sendChord(tester, LogicalKeyboardKey.arrowDown, meta: true);
     await tester.pumpAndSettle();
     expect(controller.state.selectedFile, fileB);
@@ -1469,6 +1468,14 @@ void main() {
     filesFocus.focusNode!.requestFocus();
     await tester.pump();
     expect(filesFocus.focusNode!.hasFocus, isTrue);
+    expect(
+      tester
+          .widget<FullDiffSelectableRowSurface>(
+            find.byKey(Key('selected-file-${fileA.path}')),
+          )
+          .focused,
+      isTrue,
+    );
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
@@ -1477,6 +1484,14 @@ void main() {
     );
     expect(historyFocus.focusNode!.hasFocus, isTrue);
     expect(controller.state.selectedHistoryEntry, isNotNull);
+    expect(
+      tester
+          .widget<FullDiffSelectableRowSurface>(
+            find.byKey(Key('selected-file-${fileA.path}')),
+          )
+          .focused,
+      isFalse,
+    );
 
     await sendChord(tester, LogicalKeyboardKey.arrowDown, meta: true);
     await tester.pumpAndSettle();
