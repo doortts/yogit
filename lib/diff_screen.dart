@@ -271,6 +271,21 @@ class _DiffScreenState extends State<DiffScreen> {
     return false;
   }
 
+  KeyEventResult _handlePageScrollKeyEvent(FocusNode _, KeyEvent event) {
+    final intent = pageScrollIntentFor(
+      event,
+      metaPressed: HardwareKeyboard.instance.isMetaPressed,
+      shiftPressed: HardwareKeyboard.instance.isShiftPressed,
+    );
+    if (intent == null) return KeyEventResult.ignored;
+    applyPageScroll(
+      _contentScroll,
+      direction: intent.direction,
+      animate: event is KeyDownEvent,
+    );
+    return KeyEventResult.handled;
+  }
+
   void _invalidateEditorRequest() {
     _editorRequestSerial++;
     _openingEditor = false;
@@ -755,20 +770,6 @@ class _DiffScreenState extends State<DiffScreen> {
             SingleActivator(LogicalKeyboardKey.escape):
                 _ReturnToTimelineIntent(),
             SingleActivator(
-              LogicalKeyboardKey.arrowUp,
-              meta: true,
-              shift: true,
-            ): PageScrollIntent(
-              -1,
-            ),
-            SingleActivator(
-              LogicalKeyboardKey.arrowDown,
-              meta: true,
-              shift: true,
-            ): PageScrollIntent(
-              1,
-            ),
-            SingleActivator(
               LogicalKeyboardKey.keyF,
               meta: true,
               shift: true,
@@ -930,22 +931,10 @@ class _DiffScreenState extends State<DiffScreen> {
                   return null;
                 },
               ),
-              PageScrollIntent: CallbackAction<PageScrollIntent>(
-                onInvoke: (intent) {
-                  final animate =
-                      !_contentScroll.clientsReady ||
-                      !_contentScroll.position.isScrollingNotifier.value;
-                  applyPageScroll(
-                    _contentScroll,
-                    direction: intent.direction,
-                    animate: animate,
-                  );
-                  return null;
-                },
-              ),
             },
             child: Focus(
               autofocus: true,
+              onKeyEvent: _handlePageScrollKeyEvent,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(fullDiffOuterRadius),
                 child: ColoredBox(

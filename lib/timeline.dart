@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import 'avatars.dart';
@@ -372,7 +373,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
   final _focusNode = FocusNode();
   final _timelineKey = GlobalKey();
   final _scrollController = ScrollController();
-  final _previewScrollController = ScrollController();
+  final _previewFilesScrollController = ScrollController();
+  final _previewDiffScrollController = ScrollController();
+  ScrollController? _activePreviewScrollController;
   final _commits = <GitCommit>[];
   final _committersBySha = <String, GitIdentity>{};
   var _rows = <GraphRow>[];
@@ -479,7 +482,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
     _scrollController
       ..removeListener(_maybeLoadNextPage)
       ..dispose();
-    _previewScrollController.dispose();
+    _previewFilesScrollController.dispose();
+    _previewDiffScrollController.dispose();
     for (final node in _resizerFocus.values) {
       node.dispose();
     }
@@ -646,7 +650,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       if (pageScrollIntent != null) {
         if (_previewController.previewPlacement != PreviewPlacement.closed) {
           applyPageScroll(
-            _previewScrollController,
+            _activePreviewScrollController ?? _previewDiffScrollController,
             direction: pageScrollIntent.direction,
             animate: event is KeyDownEvent,
           );
@@ -2567,7 +2571,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
     final current = _previewPaths[commit.sha] ?? files.first.path;
     final index = files.indexWhere((file) => file.path == current);
     final next = (index + delta).clamp(0, files.length - 1);
-    setState(() => _previewPaths[commit.sha] = files[next].path);
+    _selectPreviewFile(commit, files[next].path);
+  }
+
+  void _selectPreviewFile(GitCommit commit, String path) {
+    setState(() => _previewPaths[commit.sha] = path);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_previewDiffScrollController.hasClients) {
+        _previewDiffScrollController.jumpTo(0);
+      }
+    });
   }
 
   Widget _previewBody(GitCommit commit, bool bottom) {
@@ -2587,75 +2600,113 @@ class _TimelineScreenState extends State<TimelineScreen> {
           );
         }
         final selectedPath = selectedFile?.path;
-        final info = Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              commit.subject,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: _text,
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 9),
-            Text(
-              commit.isWorkingTree
-                  ? 'Working tree changes'
-                  : 'commit ${commit.sha}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: _muted,
-                fontSize: 12,
-                fontFamily: 'monospace',
-              ),
-            ),
-            _previewPerson(commit),
-            _previewStats(changes),
-            _previewFileList(commit, changes, snapshot.hasError, selectedPath),
-          ],
-        );
-        final diff = Container(
-          key: const Key('preview-diff'),
-          decoration: const BoxDecoration(
-            border: Border(top: BorderSide(color: _border)),
-          ),
-          child: selectedPath == null
-              ? const Center(
-                  child: Text(
-                    'Select a file to load its diff.',
-                    style: TextStyle(color: _muted, fontSize: 12),
-                  ),
-                )
-              : _previewDiff(commit, selectedFile!),
-        );
-        // One scroll view for the whole body: nothing inside competes for the
-        // drag, which is what lets a mouse drag select text across it.
-        return SingleChildScrollView(
-          key: const Key('preview-scroll'),
-          controller: _previewScrollController,
+        final info = Padding(
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-          child: bottom
-              ? Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(width: 240, child: info),
-                    const SizedBox(width: 16),
-                    Expanded(child: diff),
-                  ],
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [info, diff],
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                commit.subject,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: _text,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
                 ),
+              ),
+              const SizedBox(height: 9),
+              Text(
+                commit.isWorkingTree
+                    ? 'Working tree changes'
+                    : 'commit ${commit.sha}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: _muted,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              _previewPerson(commit),
+              _previewStats(changes),
+              _previewFileList(
+                commit,
+                changes,
+                snapshot.hasError,
+                selectedPath,
+              ),
+            ],
+          ),
         );
+        final diff = Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          child: Container(
+            key: const Key('preview-diff'),
+            child: selectedPath == null
+                ? const Center(
+                    child: Text(
+                      'Select a file to load its diff.',
+                      style: TextStyle(color: _muted, fontSize: 12),
+                    ),
+                  )
+                : _previewDiff(commit, selectedFile!),
+          ),
+        );
+        return bottom
+            ? Row(
+                children: [
+                  SizedBox(width: 240, child: _previewScrollableInfo(info)),
+                  const VerticalDivider(width: 1, color: _border),
+                  Expanded(child: _previewScrollableDiff(diff)),
+                ],
+              )
+            : Column(
+                children: [
+                  Expanded(child: _previewScrollableInfo(info)),
+                  const Divider(height: 1, color: _border),
+                  Expanded(child: _previewScrollableDiff(diff)),
+                ],
+              );
       },
     );
   }
+
+  Widget _previewScrollableInfo(Widget info) => _previewScrollable(
+    key: const Key('preview-files-scroll'),
+    controller: _previewFilesScrollController,
+    child: info,
+  );
+
+  Widget _previewScrollableDiff(Widget diff) => _previewScrollable(
+    key: const Key('preview-diff-scroll'),
+    controller: _previewDiffScrollController,
+    child: diff,
+  );
+
+  Widget _previewScrollable({
+    required Key key,
+    required ScrollController controller,
+    required Widget child,
+  }) => Listener(
+    behavior: HitTestBehavior.translucent,
+    onPointerDown: (_) => _activePreviewScrollController = controller,
+    child: NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification is UserScrollNotification &&
+            notification.direction != ScrollDirection.idle) {
+          _activePreviewScrollController = controller;
+        }
+        return false;
+      },
+      child: SingleChildScrollView(
+        key: key,
+        controller: controller,
+        child: child,
+      ),
+    ),
+  );
 
   Widget _previewPerson(GitCommit commit) {
     final separateCommitter =
@@ -2844,7 +2895,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       SizedBox(
         height: 28,
         child: InkWell(
-          onTap: () => setState(() => _previewPaths[commit.sha] = file.path),
+          onTap: () => _selectPreviewFile(commit, file.path),
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: selected ? _accent : null,

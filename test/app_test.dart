@@ -401,8 +401,10 @@ void main() {
     expect(find.text('README.md'), findsOneWidget);
     expect(find.text('+lib/first.dart changed'), findsOneWidget);
     expect(
-      tester.getTopLeft(find.byKey(const Key('preview-files'))).dy,
-      lessThan(tester.getTopLeft(find.byKey(const Key('preview-diff'))).dy),
+      tester.getTopLeft(find.byKey(const Key('preview-files-scroll'))).dy,
+      lessThan(
+        tester.getTopLeft(find.byKey(const Key('preview-diff-scroll'))).dy,
+      ),
     );
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
@@ -6548,7 +6550,7 @@ void main() {
     expect(top('alpha'), lessThan(top('gone')));
   });
   // ------------------------------------------------------------------ C1/C2
-  testWidgets('a mouse drag selects preview text, and the body scrolls as one', (
+  testWidgets('preview file and diff panes scroll independently', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -6562,7 +6564,7 @@ void main() {
         FakeGitRepository(
           (_, _) async => [commit('1', 'first commit')],
           files: (_, _) async => [
-            for (var index = 0; index < 6; index++)
+            for (var index = 0; index < 12; index++)
               GitFileChange(
                 path: 'lib/file$index.dart',
                 status: 'M',
@@ -6571,7 +6573,7 @@ void main() {
               ),
           ],
           diff: (_, _, _, _, _) async => [
-            for (var index = 0; index < 40; index++)
+            for (var index = 0; index < 80; index++)
               DiffLine(
                 kind: DiffLineKind.add,
                 text: 'line $index',
@@ -6586,60 +6588,69 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
-    // One scroll view holds the whole body: no separate file or diff scrollers.
-    final preview = find.byKey(const Key('preview-panel'));
+    final filesScrollable = find.byKey(const Key('preview-files-scroll'));
+    final diffScrollable = find.byKey(const Key('preview-diff-scroll'));
+    expect(filesScrollable, findsOneWidget);
+    expect(diffScrollable, findsOneWidget);
+
+    final filesPosition = tester
+        .state<ScrollableState>(
+          find.descendant(
+            of: filesScrollable,
+            matching: find.byType(Scrollable),
+          ),
+        )
+        .position;
+    final diffPosition = tester
+        .state<ScrollableState>(
+          find.descendant(
+            of: diffScrollable,
+            matching: find.byType(Scrollable),
+          ),
+        )
+        .position;
+
+    await tester.drag(filesScrollable, const Offset(0, -120));
+    await tester.pump();
+    expect(filesPosition.pixels, greaterThan(0));
+    expect(diffPosition.pixels, 0);
+
+    await tester.drag(diffScrollable, const Offset(0, -120));
+    await tester.pump();
+    expect(filesPosition.pixels, greaterThan(0));
+    expect(diffPosition.pixels, greaterThan(0));
+
+    Future<void> pageDown() async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+    }
+
+    filesPosition.jumpTo(0);
+    final filesBeforeSelection = filesPosition.pixels;
+    await tester.tap(find.byKey(const Key('preview-state-lib/file0.dart')));
+    await tester.pumpAndSettle();
+    expect(filesPosition.pixels, filesBeforeSelection);
+    expect(diffPosition.pixels, 0);
+
+    await pageDown();
     expect(
-      find.descendant(of: preview, matching: find.byType(Scrollable)),
-      findsOneWidget,
+      filesPosition.pixels,
+      moreOrLessEquals(filesPosition.viewportDimension * 0.5),
     );
-    expect(find.byKey(const Key('preview-scroll')), findsOneWidget);
+    expect(diffPosition.pixels, 0);
 
-    // Dragging with a mouse across the title selects it.
-    final title = find.descendant(
-      of: preview,
-      matching: find.text('first commit'),
+    filesPosition.jumpTo(0);
+    await tester.tap(find.text('+line 5'));
+    await pageDown();
+    expect(filesPosition.pixels, 0);
+    expect(
+      diffPosition.pixels,
+      moreOrLessEquals(diffPosition.viewportDimension * 0.5),
     );
-    final paragraph = tester.renderObject<RenderParagraph>(
-      find.descendant(of: title, matching: find.byType(RichText)),
-    );
-    Offset glyph(int offset) => paragraph.localToGlobal(
-      paragraph.getOffsetForCaret(TextPosition(offset: offset), Rect.zero) +
-          const Offset(0, 8),
-    );
-    // Drag from the title all the way down into a diff line: with one scroll view
-    // the selection spans the whole body, which is what users actually want.
-    final line = find.descendant(of: preview, matching: find.text('+line 3'));
-    final gesture = await tester.startGesture(
-      glyph(0),
-      kind: PointerDeviceKind.mouse,
-    );
-    addTearDown(gesture.removePointer);
-    await tester.pump();
-    await gesture.moveTo(glyph(5));
-    await tester.pump();
-    await gesture.moveTo(tester.getCenter(line));
-    await tester.pump();
-    await gesture.up();
-    await tester.pumpAndSettle();
-
-    final screen = tester.state<State<TimelineScreen>>(
-      find.byType(TimelineScreen),
-    );
-    final selection = (screen as dynamic).debugPreviewSelection as String?;
-    expect(selection, isNotNull);
-    expect(selection, startsWith('first commit'));
-    expect(selection, contains('lib/file0.dart'));
-    expect(selection, contains('line 3'));
-
-    // The diff sits below the file list in that one scroll view, and scrolling
-    // the body moves both together.
-    final before = tester.getRect(title).top;
-    await tester.drag(
-      find.byKey(const Key('preview-scroll')),
-      const Offset(0, -80),
-    );
-    await tester.pumpAndSettle();
-    expect(tester.getRect(title).top, lessThan(before));
   });
 
   // ------------------------------------------------------------------ C3/H2
@@ -7342,6 +7353,7 @@ void main() {
         .controller!;
     final selectedCommit = session.state.selectedCommit;
     final selectedFile = session.state.selectedFile;
+    final pageDistance = scroll.position.viewportDimension * 0.5;
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
@@ -7349,20 +7361,30 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
-    expect(scroll.offset, 48);
+    expect(scroll.offset, pageDistance);
     expect(session.state.selectedCommit, selectedCommit);
     expect(session.state.selectedFile, selectedFile);
 
+    scroll.jumpTo(0);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 40));
-    final duringAnimation = scroll.offset;
-    expect(duringAnimation, greaterThan(48));
-    expect(duringAnimation, lessThan(96));
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    expect(scroll.offset, closeTo(duringAnimation + 48, 0.001));
+    await tester.pump(const Duration(milliseconds: 120));
+    final beforeRepeat = scroll.offset;
+    expect(beforeRepeat, pageDistance);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowDown);
+    expect(
+      scroll.offset,
+      closeTo(
+        (beforeRepeat + pageDistance).clamp(
+          scroll.position.minScrollExtent,
+          scroll.position.maxScrollExtent,
+        ),
+        0.001,
+      ),
+    );
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump();
@@ -7484,7 +7506,7 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
 
-    expect(detailScroll.offset, 48);
+    expect(detailScroll.offset, detailScroll.position.viewportDimension * 0.5);
     expect(historyScroll.offset, 0);
   });
 
@@ -7983,7 +8005,10 @@ void main() {
     expect(find.text('Committer · Cam Committer'), findsNothing);
 
     final scrollable = tester.state<ScrollableState>(
-      find.descendant(of: preview, matching: find.byType(Scrollable)),
+      find.descendant(
+        of: find.byKey(const Key('preview-diff-scroll')),
+        matching: find.byType(Scrollable),
+      ),
     );
     expect(scrollable.position.pixels, 0);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
@@ -7991,7 +8016,12 @@ void main() {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
     final beforeRepeat = scrollable.position.pixels;
     await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowDown);
-    expect(scrollable.position.pixels, moreOrLessEquals(beforeRepeat + 48));
+    expect(
+      scrollable.position.pixels,
+      moreOrLessEquals(
+        beforeRepeat + scrollable.position.viewportDimension * 0.5,
+      ),
+    );
     await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);

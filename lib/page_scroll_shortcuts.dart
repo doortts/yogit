@@ -3,8 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-const pageScrollStep = 48.0;
-
 class PageScrollIntent extends Intent {
   const PageScrollIntent(this.direction);
 
@@ -32,7 +30,8 @@ void applyPageScroll(
 }) {
   if (!controller.hasClients) return;
   final position = controller.position;
-  final target = (position.pixels + direction * pageScrollStep)
+  final distance = position.viewportDimension * 0.5;
+  final target = (position.pixels + direction * distance)
       .clamp(position.minScrollExtent, position.maxScrollExtent)
       .toDouble();
   if (target == position.pixels) return;

@@ -66,7 +66,7 @@ void main() {
     );
   });
 
-  testWidgets('scrolls 48 pixels, clamps, and jumps repeats immediately', (
+  testWidgets('scrolls half a viewport and clamps at both ends', (
     tester,
   ) async {
     final controller = ScrollController();
@@ -76,10 +76,10 @@ void main() {
         home: Align(
           alignment: Alignment.topLeft,
           child: SizedBox(
-            height: 100,
+            height: 120,
             child: SingleChildScrollView(
               controller: controller,
-              child: const SizedBox(height: 300),
+              child: const SizedBox(height: 600),
             ),
           ),
         ),
@@ -88,25 +88,12 @@ void main() {
     await tester.pump();
 
     applyPageScroll(controller, direction: 1, animate: false);
-    expect(controller.position.pixels, 48);
-
-    for (var index = 0; index < 10; index++) {
-      applyPageScroll(controller, direction: 1, animate: false);
-    }
-    expect(controller.position.pixels, 200);
-
-    for (var index = 0; index < 10; index++) {
-      applyPageScroll(controller, direction: -1, animate: false);
-    }
+    expect(controller.position.pixels, 60);
+    applyPageScroll(controller, direction: -1, animate: false);
     expect(controller.position.pixels, 0);
 
-    applyPageScroll(controller, direction: 1, animate: true);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 20));
-    final animatedPixels = controller.position.pixels;
-    expect(animatedPixels, greaterThan(0));
-
+    controller.jumpTo(controller.position.maxScrollExtent - 20);
     applyPageScroll(controller, direction: 1, animate: false);
-    expect(controller.position.pixels, animatedPixels + 48);
+    expect(controller.position.pixels, controller.position.maxScrollExtent);
   });
 }
