@@ -91,47 +91,71 @@ void main() {
   distantChangeFixture(FullDiffPreferences initialPreferences) async {
     final repository = FakeFullDiffRepository();
     final source = [
-      for (var line = 1; line <= 180; line++) 'source line $line',
+      for (var line = 1; line <= 240; line++) 'source line $line',
     ].join('\n');
     repository.files = (_, _) async => const [fileA];
-    repository.scopedDiff = (_, _, _, _, _, scope) async => [
-      DiffLine(
-        kind: DiffLineKind.hunk,
-        text: scope == DiffScope.fullFile
-            ? '@@ -1,180 +1,180 @@ distant'
-            : '@@ -120 +120 @@ distant',
-      ),
-      if (scope == DiffScope.fullFile)
-        for (var line = 1; line < 120; line++)
-          DiffLine(
-            kind: DiffLineKind.context,
-            text: 'source line $line',
-            oldNumber: line,
-            newNumber: line,
-          ),
-      const DiffLine(
-        kind: DiffLineKind.delete,
-        text: 'old source line 120',
-        oldNumber: 120,
-      ),
-      const DiffLine(
-        kind: DiffLineKind.add,
-        text: 'source line 120',
-        newNumber: 120,
-      ),
-      if (scope == DiffScope.fullFile)
-        for (var line = 121; line <= 180; line++)
-          DiffLine(
-            kind: DiffLineKind.context,
-            text: 'source line $line',
-            oldNumber: line,
-            newNumber: line,
-          ),
-    ];
+    repository.scopedDiff = (_, _, _, _, _, scope) async =>
+        scope == DiffScope.hunks
+        ? const [
+            DiffLine(
+              kind: DiffLineKind.hunk,
+              text: '@@ -120 +120 @@ first distant',
+            ),
+            DiffLine(
+              kind: DiffLineKind.delete,
+              text: 'old source line 120',
+              oldNumber: 120,
+            ),
+            DiffLine(
+              kind: DiffLineKind.add,
+              text: 'source line 120',
+              newNumber: 120,
+            ),
+            DiffLine(
+              kind: DiffLineKind.hunk,
+              text: '@@ -200 +200 @@ second distant',
+            ),
+            DiffLine(
+              kind: DiffLineKind.delete,
+              text: 'old source line 200',
+              oldNumber: 200,
+            ),
+            DiffLine(
+              kind: DiffLineKind.add,
+              text: 'source line 200',
+              newNumber: 200,
+            ),
+          ]
+        : [
+            const DiffLine(
+              kind: DiffLineKind.hunk,
+              text: '@@ -1,240 +1,240 @@ merged full file',
+            ),
+            for (var line = 1; line <= 240; line++) ...[
+              if (line == 120 || line == 200) ...[
+                DiffLine(
+                  kind: DiffLineKind.delete,
+                  text: 'old source line $line',
+                  oldNumber: line,
+                ),
+                DiffLine(
+                  kind: DiffLineKind.add,
+                  text: 'source line $line',
+                  newNumber: line,
+                ),
+              ] else
+                DiffLine(
+                  kind: DiffLineKind.context,
+                  text: 'source line $line',
+                  oldNumber: line,
+                  newNumber: line,
+                ),
+            ],
+          ];
     repository.content = (_, _, _) async =>
         Uint8List.fromList(utf8.encode('$source\n'));
     repository.blame = (_, _, _, _) async => [
-      for (var line = 1; line <= 180; line++)
+      for (var line = 1; line <= 240; line++)
         GitBlameLine(
           lineNumber: line,
           sha: commitA.sha,
@@ -472,6 +496,45 @@ void main() {
     expect(targetRect.top, greaterThanOrEqualTo(viewport.top));
     expect(targetRect.bottom, lessThanOrEqualTo(viewport.bottom));
   });
+
+  for (final layout in DiffLayout.values) {
+    testWidgets('turning Hunk off preserves a later change in ${layout.name}', (
+      tester,
+    ) async {
+      final fixture = await distantChangeFixture(
+        FullDiffPreferences(layout: layout),
+      );
+      addTearDown(fixture.controller.dispose);
+      fixture.controller.selectAnchor(
+        fixture.controller.state.patch.data!.hunks.last.anchor,
+      );
+      await pumpWorkspace(
+        tester,
+        controller: fixture.controller,
+        size: const Size(1070, 520),
+      );
+
+      await tester.tap(find.byKey(const Key('hunk-toggle-on')));
+      await tester.pumpAndSettle();
+
+      expect(fixture.controller.state.patch.data!.hunks, hasLength(1));
+      expect(fixture.controller.state.activeAnchor?.hunkIndex, 0);
+      expect(fixture.controller.state.activeAnchor?.newLine, 120);
+      expect(fixture.controller.state.fullFileScrollTarget, (
+        oldLine: 200,
+        newLine: 200,
+      ));
+      final laterChange = find.text('old source line 200');
+      expect(laterChange, findsOneWidget);
+      final viewport = tester.getRect(
+        find.byKey(const Key('content-scrollable')),
+      );
+      final laterRect = tester.getRect(laterChange);
+      expect(laterRect.top, greaterThanOrEqualTo(viewport.top));
+      expect(laterRect.bottom, lessThanOrEqualTo(viewport.bottom));
+      expect(find.text('old source line 120'), findsNothing);
+    });
+  }
 
   for (final view in [FullDiffView.blame]) {
     testWidgets('switching into ${view.name} aligns the active change', (

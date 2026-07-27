@@ -84,6 +84,7 @@ class FullDiffSessionState {
     required this.view,
     required this.layout,
     required this.activeAnchor,
+    required this.fullFileScrollTarget,
     required this.requestedScope,
     required this.appliedScope,
     required this.requestedAlgorithm,
@@ -112,6 +113,7 @@ class FullDiffSessionState {
   final FullDiffView view;
   final DiffLayout layout;
   final DiffAnchor? activeAnchor;
+  final DiffSourceTarget? fullFileScrollTarget;
   final DiffScope requestedScope;
   final DiffScope appliedScope;
   final DiffAlgorithm requestedAlgorithm;
@@ -162,6 +164,7 @@ class FullDiffSessionState {
     FullDiffView? view,
     DiffLayout? layout,
     Object? activeAnchor = _unset,
+    Object? fullFileScrollTarget = _unset,
     DiffScope? requestedScope,
     DiffScope? appliedScope,
     DiffAlgorithm? requestedAlgorithm,
@@ -193,6 +196,9 @@ class FullDiffSessionState {
     activeAnchor: identical(activeAnchor, _unset)
         ? this.activeAnchor
         : activeAnchor as DiffAnchor?,
+    fullFileScrollTarget: identical(fullFileScrollTarget, _unset)
+        ? this.fullFileScrollTarget
+        : fullFileScrollTarget as DiffSourceTarget?,
     requestedScope: requestedScope ?? this.requestedScope,
     appliedScope: appliedScope ?? this.appliedScope,
     requestedAlgorithm: requestedAlgorithm ?? this.requestedAlgorithm,
@@ -306,6 +312,7 @@ FullDiffSessionState _initialState(
     view: initialPreferences.view,
     layout: initialPreferences.layout,
     activeAnchor: null,
+    fullFileScrollTarget: null,
     requestedScope: initialPreferences.scope,
     appliedScope: initialPreferences.scope,
     requestedAlgorithm: initialPreferences.algorithm,
@@ -565,7 +572,8 @@ class FullDiffSessionController extends ChangeNotifier {
 
   Future<void> setScope(DiffScope scope) async {
     if (_disposed || state.requestedScope == scope) return;
-    final sourceLine = _anchorSourceLine(state.activeAnchor);
+    final sourceTarget = _anchorSourceTarget(state.activeAnchor);
+    final sourceLine = _sourceLine(sourceTarget);
     if (state.selectedFile == null) {
       _replace(state.copyWith(requestedScope: scope));
       return;
@@ -579,6 +587,7 @@ class FullDiffSessionController extends ChangeNotifier {
     await _loadPatch(
       preserveDataOnFailure: true,
       sourceLine: sourceLine,
+      fullFileScrollTarget: scope == DiffScope.fullFile ? sourceTarget : null,
       propagateError: true,
     );
   }
@@ -642,6 +651,7 @@ class FullDiffSessionController extends ChangeNotifier {
     _replace(
       state.copyWith(
         activeAnchor: selected,
+        fullFileScrollTarget: null,
         navigationSerial: state.navigationSerial + 1,
       ),
     );
@@ -657,6 +667,7 @@ class FullDiffSessionController extends ChangeNotifier {
     _replace(
       state.copyWith(
         activeAnchor: document.hunks[next].anchor,
+        fullFileScrollTarget: null,
         navigationSerial: state.navigationSerial + 1,
       ),
     );
@@ -666,7 +677,9 @@ class FullDiffSessionController extends ChangeNotifier {
     if (_disposed) return;
     final selected = _anchorInDocument(anchor);
     if (selected == null || _sameAnchor(state.activeAnchor, selected)) return;
-    _replace(state.copyWith(activeAnchor: selected));
+    _replace(
+      state.copyWith(activeAnchor: selected, fullFileScrollTarget: null),
+    );
   }
 
   void _beginSelection({
@@ -688,6 +701,7 @@ class FullDiffSessionController extends ChangeNotifier {
         files: files,
         selectedFile: selectedFile,
         activeAnchor: null,
+        fullFileScrollTarget: null,
         filesResource: filesResource,
         patch: const AsyncResource(),
         file: const AsyncResource(),
@@ -713,6 +727,7 @@ class FullDiffSessionController extends ChangeNotifier {
         files: const [],
         selectedFile: null,
         activeAnchor: null,
+        fullFileScrollTarget: null,
         filesResource: const AsyncResource(loading: true),
         patch: const AsyncResource(),
         file: const AsyncResource(),
@@ -770,6 +785,7 @@ class FullDiffSessionController extends ChangeNotifier {
   Future<void> _loadPatch({
     bool preserveDataOnFailure = false,
     int? sourceLine,
+    DiffSourceTarget? fullFileScrollTarget,
     bool propagateError = false,
   }) async {
     if (_disposed) return;
@@ -815,6 +831,9 @@ class FullDiffSessionController extends ChangeNotifier {
         state.copyWith(
           patch: AsyncResource(data: document),
           activeAnchor: nearestAnchor(document, sourceLine),
+          fullFileScrollTarget: scope == DiffScope.fullFile
+              ? fullFileScrollTarget
+              : null,
           appliedScope: scope,
           appliedAlgorithm: algorithm,
           appliedIgnoreWhitespace: ignoreWhitespace,
@@ -1235,6 +1254,12 @@ int _patchSize(DiffDocument document) => [
 
 int? _anchorSourceLine(DiffAnchor? anchor) =>
     anchor?.newLine ?? anchor?.oldLine;
+
+DiffSourceTarget? _anchorSourceTarget(DiffAnchor? anchor) =>
+    anchor == null ? null : (oldLine: anchor.oldLine, newLine: anchor.newLine);
+
+int? _sourceLine(DiffSourceTarget? target) =>
+    target?.newLine ?? target?.oldLine;
 
 bool _sameFile(GitFileChange? left, GitFileChange right) =>
     left?.path == right.path && left?.oldPath == right.oldPath;

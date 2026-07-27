@@ -22,6 +22,8 @@ class UnifiedPresentationView extends StatelessWidget {
     this.onAnchorProbeAttached,
     this.onAnchorProbeDetached,
     this.controller,
+    this.scrollTarget,
+    this.scrollTargetKey,
     super.key,
   });
 
@@ -36,6 +38,8 @@ class UnifiedPresentationView extends StatelessWidget {
   final FullDiffAnchorProbeCallback? onAnchorProbeAttached;
   final FullDiffAnchorProbeCallback? onAnchorProbeDetached;
   final ScrollController? controller;
+  final DiffSourceTarget? scrollTarget;
+  final GlobalKey? scrollTargetKey;
 
   @override
   Widget build(BuildContext context) {
@@ -49,6 +53,7 @@ class UnifiedPresentationView extends StatelessWidget {
     }
 
     final items = _unifiedItems(document);
+    final scrollTargetIndex = _unifiedScrollTargetIndex(items, scrollTarget);
     final allSourceText = [
       for (final item in items)
         if (item.line case final line?) line.text,
@@ -102,6 +107,9 @@ class UnifiedPresentationView extends StatelessWidget {
               ),
             );
           }
+          if (itemIndex == scrollTargetIndex && scrollTargetKey != null) {
+            child = KeyedSubtree(key: scrollTargetKey, child: child);
+          }
           return FullDiffAnchorProbe(
             anchor: hunk.anchor,
             onAttached: onAnchorProbeAttached,
@@ -116,6 +124,36 @@ class UnifiedPresentationView extends StatelessWidget {
   GlobalKey _anchorKey(DiffAnchor anchor) =>
       anchorKeys[anchor.id] ??
       (throw StateError('Missing GlobalKey for ${anchor.id}'));
+}
+
+int _unifiedScrollTargetIndex(
+  List<_UnifiedItem> items,
+  DiffSourceTarget? target,
+) {
+  if (target == null) return -1;
+  final oldLine = target.oldLine;
+  if (oldLine != null) {
+    final deleted = items.indexWhere(
+      (item) =>
+          item.line?.kind == DiffLineKind.delete &&
+          item.line?.oldNumber == oldLine,
+    );
+    if (deleted >= 0) return deleted;
+  }
+  final newLine = target.newLine;
+  if (newLine != null) {
+    final added = items.indexWhere(
+      (item) =>
+          item.line?.kind == DiffLineKind.add &&
+          item.line?.newNumber == newLine,
+    );
+    if (added >= 0) return added;
+  }
+  return items.indexWhere(
+    (item) =>
+        (newLine != null && item.line?.newNumber == newLine) ||
+        (oldLine != null && item.line?.oldNumber == oldLine),
+  );
 }
 
 List<_UnifiedItem> _unifiedItems(DiffDocument document) {

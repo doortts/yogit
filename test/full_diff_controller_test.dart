@@ -353,6 +353,7 @@ void main() {
     );
     addTearDown(controller.dispose);
     await controller.initialize();
+    controller.selectAnchor(controller.state.patch.data!.hunks.last.anchor);
 
     await expectLater(
       controller.setScope(DiffScope.fullFile),
@@ -362,6 +363,7 @@ void main() {
     expect(controller.state.requestedScope, DiffScope.hunks);
     expect(controller.state.appliedScope, DiffScope.hunks);
     expect(controller.state.preferences.scope, DiffScope.hunks);
+    expect(controller.state.fullFileScrollTarget, isNull);
   });
 
   test('scope selection without a file does not leave patch loading', () async {

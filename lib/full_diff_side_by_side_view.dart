@@ -24,6 +24,8 @@ class SideBySidePresentationView extends StatelessWidget {
     this.onAnchorProbeAttached,
     this.onAnchorProbeDetached,
     this.controller,
+    this.scrollTarget,
+    this.scrollTargetKey,
     super.key,
   });
 
@@ -40,6 +42,8 @@ class SideBySidePresentationView extends StatelessWidget {
   final FullDiffAnchorProbeCallback? onAnchorProbeAttached;
   final FullDiffAnchorProbeCallback? onAnchorProbeDetached;
   final ScrollController? controller;
+  final DiffSourceTarget? scrollTarget;
+  final GlobalKey? scrollTargetKey;
 
   @override
   Widget build(BuildContext context) {
@@ -53,6 +57,7 @@ class SideBySidePresentationView extends StatelessWidget {
     }
 
     final items = _sideBySideItems(document);
+    final scrollTargetIndex = _sideBySideScrollTargetIndex(items, scrollTarget);
     final allSourceText = [
       for (final item in items)
         if (item.pair case final pair?) _pairSourceText(pair, showOldSide),
@@ -101,6 +106,9 @@ class SideBySidePresentationView extends StatelessWidget {
               ),
             );
           }
+          if (itemIndex == scrollTargetIndex && scrollTargetKey != null) {
+            child = KeyedSubtree(key: scrollTargetKey, child: child);
+          }
           return FullDiffAnchorProbe(
             anchor: hunk.anchor,
             onAttached: onAnchorProbeAttached,
@@ -118,6 +126,36 @@ class SideBySidePresentationView extends StatelessWidget {
   GlobalKey _anchorKey(DiffAnchor anchor) =>
       anchorKeys[anchor.id] ??
       (throw StateError('Missing GlobalKey for ${anchor.id}'));
+}
+
+int _sideBySideScrollTargetIndex(
+  List<_SideBySideItem> items,
+  DiffSourceTarget? target,
+) {
+  if (target == null) return -1;
+  final newLine = target.newLine;
+  if (newLine != null) {
+    final added = items.indexWhere(
+      (item) =>
+          item.pair?.right?.kind == DiffLineKind.add &&
+          item.pair?.right?.newNumber == newLine,
+    );
+    if (added >= 0) return added;
+  }
+  final oldLine = target.oldLine;
+  if (oldLine != null) {
+    final deleted = items.indexWhere(
+      (item) =>
+          item.pair?.left?.kind == DiffLineKind.delete &&
+          item.pair?.left?.oldNumber == oldLine,
+    );
+    if (deleted >= 0) return deleted;
+  }
+  return items.indexWhere(
+    (item) =>
+        (newLine != null && item.pair?.right?.newNumber == newLine) ||
+        (oldLine != null && item.pair?.left?.oldNumber == oldLine),
+  );
 }
 
 List<_SideBySideItem> _sideBySideItems(DiffDocument document) {

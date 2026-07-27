@@ -91,6 +91,9 @@ class _DiffScreenState extends State<DiffScreen> {
   final _fileListFocus = FocusNode(debugLabel: 'full diff files');
   final _historyListFocus = FocusNode(debugLabel: 'full diff history');
   final _contentViewportKey = GlobalKey();
+  final _fullFileScrollTargetKey = GlobalKey(
+    debugLabel: 'full file scroll target',
+  );
   final _highlighter = HighlightJsSyntaxHighlighter();
   Map<String, GlobalKey> _anchorKeys = <String, GlobalKey>{};
   final Map<String, Set<BuildContext>> _anchorProbeContexts = {};
@@ -107,6 +110,7 @@ class _DiffScreenState extends State<DiffScreen> {
   bool _pendingScrollToTop = false;
   bool _pendingHistoryScrollToTop = false;
   String? _pendingAnchorId;
+  DiffSourceTarget? _pendingFullFileScrollTarget;
   int _pendingAnchorDirection = 0;
   String? _editorError;
   bool _openingEditor = false;
@@ -177,8 +181,11 @@ class _DiffScreenState extends State<DiffScreen> {
     _pendingScrollToTop = true;
     _pendingHistoryScrollToTop = true;
     _pendingAnchorId = null;
+    _pendingFullFileScrollTarget = null;
     _queueAttachedAnchorScroll();
-    if (_pendingAnchorId == null) _scheduleScrollEffect();
+    if (_pendingAnchorId == null && _pendingFullFileScrollTarget == null) {
+      _scheduleScrollEffect();
+    }
     if (_ownsController) unawaited(_controller.initialize());
   }
 
@@ -231,23 +238,36 @@ class _DiffScreenState extends State<DiffScreen> {
       _invalidateEditorRequest();
       _pendingScrollToTop = true;
       _pendingAnchorId = null;
+      _pendingFullFileScrollTarget = null;
     }
     if (nextAnchor != null &&
         (enteredSourceView ||
-            (changedDocument && next.view == FullDiffView.blame) ||
-            alignFullFileDocument)) {
+            (changedDocument && next.view == FullDiffView.blame))) {
       _pendingAnchorId = nextAnchor.id;
-      _pendingAnchorDirection =
-          alignFullFileDocument && nextIndex == previousIndex
-          ? 1
-          : nextIndex.compareTo(previousIndex);
+      _pendingAnchorDirection = nextIndex.compareTo(previousIndex);
     }
-    if (!_pendingScrollToTop && navigationRequested && nextAnchor != null) {
+    if (alignFullFileDocument) {
+      final sourceTarget = next.fullFileScrollTarget;
+      if (sourceTarget != null) {
+        _pendingFullFileScrollTarget = sourceTarget;
+        _pendingAnchorId = null;
+        _pendingScrollToTop = true;
+      } else if (nextAnchor != null) {
+        _pendingAnchorId = nextAnchor.id;
+        _pendingAnchorDirection = nextIndex == previousIndex
+            ? 1
+            : nextIndex.compareTo(previousIndex);
+      }
+    }
+    if (navigationRequested && nextAnchor != null && !movedContext) {
+      _pendingFullFileScrollTarget = null;
+      _pendingScrollToTop = false;
       _pendingAnchorId = nextAnchor.id;
       _pendingAnchorDirection = nextIndex.compareTo(previousIndex);
     }
     if (_pendingScrollToTop ||
         _pendingHistoryScrollToTop ||
+        _pendingFullFileScrollTarget != null ||
         _pendingAnchorId != null) {
       _scheduleScrollEffect();
     }
@@ -276,6 +296,15 @@ class _DiffScreenState extends State<DiffScreen> {
 
   void _queueAttachedAnchorScroll() {
     final state = _controller.state;
+    final sourceTarget = state.fullFileScrollTarget;
+    if (state.view == FullDiffView.diff &&
+        state.appliedScope == DiffScope.fullFile &&
+        sourceTarget != null) {
+      _pendingFullFileScrollTarget = sourceTarget;
+      _pendingScrollToTop = true;
+      _scheduleScrollEffect();
+      return;
+    }
     final anchor = state.activeAnchor;
     if (state.view == FullDiffView.history ||
         anchor == null ||
@@ -303,6 +332,52 @@ class _DiffScreenState extends State<DiffScreen> {
       if (_pendingHistoryScrollToTop && _historyScroll.hasClients) {
         _historyScroll.jumpTo(_historyScroll.position.minScrollExtent);
         _pendingHistoryScrollToTop = false;
+      }
+
+      final sourceTarget = _pendingFullFileScrollTarget;
+      if (sourceTarget != null) {
+        final state = _controller.state;
+        if (state.view != FullDiffView.diff ||
+            state.appliedScope != DiffScope.fullFile ||
+            state.fullFileScrollTarget != sourceTarget) {
+          _pendingFullFileScrollTarget = null;
+          return;
+        }
+        final targetContext = _fullFileScrollTargetKey.currentContext;
+        if (targetContext != null) {
+          final targetRenderObject = targetContext.findRenderObject();
+          if (targetRenderObject == null || !_contentScroll.hasClients) {
+            _pendingFullFileScrollTarget = null;
+            return;
+          }
+          _pendingFullFileScrollTarget = null;
+          _programmaticAnchorScroll = true;
+          unawaited(
+            _contentScroll.position
+                .ensureVisible(
+                  targetRenderObject,
+                  alignment: 0,
+                  duration: const Duration(milliseconds: 100),
+                )
+                .whenComplete(() {
+                  if (mounted) _programmaticAnchorScroll = false;
+                }),
+          );
+          return;
+        }
+        if (!_contentScroll.hasClients) return;
+        final position = _contentScroll.position;
+        final nextOffset = (position.pixels + position.viewportDimension).clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        );
+        if ((nextOffset - position.pixels).abs() < 0.5) {
+          _pendingFullFileScrollTarget = null;
+          return;
+        }
+        position.jumpTo(nextOffset);
+        _scheduleScrollEffect();
+        return;
       }
 
       final anchorId = _pendingAnchorId;
@@ -391,6 +466,7 @@ class _DiffScreenState extends State<DiffScreen> {
   void _handleContentScrolled() {
     if (_scrollSyncScheduled ||
         _pendingAnchorId != null ||
+        _pendingFullFileScrollTarget != null ||
         _programmaticAnchorScroll) {
       return;
     }
@@ -1079,6 +1155,8 @@ class _DiffScreenState extends State<DiffScreen> {
         onAnchorProbeAttached: _attachAnchorProbe,
         onAnchorProbeDetached: _detachAnchorProbe,
         controller: _contentScroll,
+        scrollTarget: state.fullFileScrollTarget,
+        scrollTargetKey: _fullFileScrollTargetKey,
       ),
       DiffLayout.sideBySide => SideBySidePresentationView(
         document: patch,
@@ -1093,6 +1171,8 @@ class _DiffScreenState extends State<DiffScreen> {
         onAnchorProbeAttached: _attachAnchorProbe,
         onAnchorProbeDetached: _detachAnchorProbe,
         controller: _contentScroll,
+        scrollTarget: state.fullFileScrollTarget,
+        scrollTargetKey: _fullFileScrollTargetKey,
       ),
     };
     return _withRefreshError(presentation, state.patch.error);

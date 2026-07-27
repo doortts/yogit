@@ -11,6 +11,8 @@ enum FullDiffView { diff, blame, history }
 
 enum DiffLayout { unified, sideBySide }
 
+typedef DiffSourceTarget = ({int? oldLine, int? newLine});
+
 @immutable
 class FullDiffPreferences {
   const FullDiffPreferences({
