@@ -287,7 +287,7 @@ void main() {
     );
     expect(
       tester.getCenter(find.text('집중 모드')).dy,
-      closeTo(tester.getCenter(find.text('diff 알고리즘')).dy, 0.5),
+      closeTo(tester.getCenter(find.text('diff 알고리즘 · Git setting')).dy, 0.5),
     );
     expect(find.text('주변 커밋'), findsOneWidget);
     expect(find.text('변경 파일'), findsOneWidget);

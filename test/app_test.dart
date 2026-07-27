@@ -3027,7 +3027,7 @@ void main() {
     expect(find.text('1 / 1'), findsWidgets);
     expect(find.text('Unified'), findsNothing);
     expect(find.text('Side-by-side'), findsNothing);
-    expect(find.text('diff 알고리즘'), findsOneWidget);
+    expect(find.text('diff 알고리즘 · Git setting'), findsOneWidget);
     expect(find.text('Git setting'), findsNothing);
     expect(
       tester.getTopLeft(find.byKey(const Key('changed-files-list'))).dx,
@@ -7081,7 +7081,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('lib/a.dart'), findsWidgets);
-    expect(find.text('diff 알고리즘'), findsOneWidget);
+    expect(find.text('diff 알고리즘 · Git setting'), findsOneWidget);
     expect(find.byKey(const Key('hunk-list')), findsOneWidget);
     expect(find.textContaining('change 1 of 1'), findsOneWidget);
     expect(find.text('diff --git a/x b/x'), findsNothing);
