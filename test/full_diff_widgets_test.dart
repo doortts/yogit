@@ -400,6 +400,122 @@ void main() {
     );
   });
 
+  final scrollTargetCases = [
+    (
+      name: 'separated mixed edit',
+      document: DiffDocument.fromLines(const [
+        DiffLine(kind: DiffLineKind.hunk, text: '@@ -5,3 +9,3 @@ mixed'),
+        DiffLine(
+          kind: DiffLineKind.delete,
+          text: 'mixed old target',
+          oldNumber: 5,
+        ),
+        DiffLine(
+          kind: DiffLineKind.context,
+          text: 'separator',
+          oldNumber: 6,
+          newNumber: 9,
+        ),
+        DiffLine(
+          kind: DiffLineKind.add,
+          text: 'mixed result target',
+          newNumber: 10,
+        ),
+      ]),
+      target: (oldLine: 5, newLine: 10),
+      expectedText: 'mixed result target',
+    ),
+    (
+      name: 'addition-only edit',
+      document: DiffDocument.fromLines(const [
+        DiffLine(kind: DiffLineKind.hunk, text: '@@ -0,0 +11 @@ added'),
+        DiffLine(
+          kind: DiffLineKind.add,
+          text: 'addition target',
+          newNumber: 11,
+        ),
+      ]),
+      target: (oldLine: null, newLine: 11),
+      expectedText: 'addition target',
+    ),
+    (
+      name: 'deletion-only edit',
+      document: DiffDocument.fromLines(const [
+        DiffLine(kind: DiffLineKind.hunk, text: '@@ -12 +11,0 @@ deleted'),
+        DiffLine(
+          kind: DiffLineKind.delete,
+          text: 'deletion target',
+          oldNumber: 12,
+        ),
+      ]),
+      target: (oldLine: 12, newLine: null),
+      expectedText: 'deletion target',
+    ),
+    (
+      name: 'context fallback',
+      document: DiffDocument.fromLines(const [
+        DiffLine(kind: DiffLineKind.hunk, text: '@@ -30,2 +31,2 @@ context'),
+        DiffLine(
+          kind: DiffLineKind.context,
+          text: 'context target',
+          oldNumber: 30,
+          newNumber: 31,
+        ),
+        DiffLine(kind: DiffLineKind.add, text: 'other change', newNumber: 32),
+      ]),
+      target: (oldLine: 30, newLine: 31),
+      expectedText: 'context target',
+    ),
+    (
+      name: 'paired replacement',
+      document: DiffDocument.fromLines(const [
+        DiffLine(kind: DiffLineKind.hunk, text: '@@ -40 +40 @@ paired'),
+        DiffLine(
+          kind: DiffLineKind.delete,
+          text: 'paired old target',
+          oldNumber: 40,
+        ),
+        DiffLine(
+          kind: DiffLineKind.add,
+          text: 'paired result target',
+          newNumber: 40,
+        ),
+      ]),
+      target: (oldLine: 40, newLine: 40),
+      expectedText: 'paired result target',
+    ),
+  ];
+
+  for (final layout in DiffLayout.values) {
+    for (final scenario in scrollTargetCases) {
+      testWidgets(
+        '${layout.name} resolves ${scenario.name} to the shared source target',
+        (tester) async {
+          final scrollTargetKey = GlobalKey(
+            debugLabel: '${layout.name}-${scenario.name}',
+          );
+          await pumpPresentation(
+            tester,
+            layout: layout,
+            document: scenario.document,
+            scrollTarget: scenario.target,
+            scrollTargetKey: scrollTargetKey,
+          );
+
+          final keyedTarget = find.byKey(scrollTargetKey);
+          expect(keyedTarget, findsOneWidget);
+          expect(
+            find.descendant(
+              of: keyedTarget,
+              matching: find.text(scenario.expectedText),
+            ),
+            findsWidgets,
+          );
+        },
+      );
+    }
+  }
+
   testWidgets('unwrapped unified rows keep their source horizontally movable', (
     tester,
   ) async {
@@ -1230,6 +1346,8 @@ Future<void> pumpPresentation(
   required DiffDocument document,
   DiffAnchor? activeAnchor,
   Map<String, GlobalKey>? anchorKeys,
+  DiffSourceTarget? scrollTarget,
+  GlobalKey? scrollTargetKey,
 }) async {
   final resolvedAnchorKeys =
       anchorKeys ??
@@ -1244,6 +1362,8 @@ Future<void> pumpPresentation(
       wrapLines: false,
       highlighter: fakeHighlighter,
       anchorKeys: resolvedAnchorKeys,
+      scrollTarget: scrollTarget,
+      scrollTargetKey: scrollTargetKey,
     ),
     DiffLayout.sideBySide => SideBySidePresentationView(
       document: document,
@@ -1256,6 +1376,8 @@ Future<void> pumpPresentation(
       showOldSide: true,
       highlighter: fakeHighlighter,
       anchorKeys: resolvedAnchorKeys,
+      scrollTarget: scrollTarget,
+      scrollTargetKey: scrollTargetKey,
     ),
   };
   await tester.pumpWidget(qaApp(SizedBox(width: 800, child: child)));

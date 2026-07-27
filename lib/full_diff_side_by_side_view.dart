@@ -57,7 +57,12 @@ class SideBySidePresentationView extends StatelessWidget {
     }
 
     final items = _sideBySideItems(document);
-    final scrollTargetIndex = _sideBySideScrollTargetIndex(items, scrollTarget);
+    final scrollTargetIndex = diffSourceTargetIndex(
+      rows: items,
+      target: scrollTarget,
+      oldLineOf: (item) => item.pair?.left,
+      newLineOf: (item) => item.pair?.right,
+    );
     final allSourceText = [
       for (final item in items)
         if (item.pair case final pair?) _pairSourceText(pair, showOldSide),
@@ -126,36 +131,6 @@ class SideBySidePresentationView extends StatelessWidget {
   GlobalKey _anchorKey(DiffAnchor anchor) =>
       anchorKeys[anchor.id] ??
       (throw StateError('Missing GlobalKey for ${anchor.id}'));
-}
-
-int _sideBySideScrollTargetIndex(
-  List<_SideBySideItem> items,
-  DiffSourceTarget? target,
-) {
-  if (target == null) return -1;
-  final newLine = target.newLine;
-  if (newLine != null) {
-    final added = items.indexWhere(
-      (item) =>
-          item.pair?.right?.kind == DiffLineKind.add &&
-          item.pair?.right?.newNumber == newLine,
-    );
-    if (added >= 0) return added;
-  }
-  final oldLine = target.oldLine;
-  if (oldLine != null) {
-    final deleted = items.indexWhere(
-      (item) =>
-          item.pair?.left?.kind == DiffLineKind.delete &&
-          item.pair?.left?.oldNumber == oldLine,
-    );
-    if (deleted >= 0) return deleted;
-  }
-  return items.indexWhere(
-    (item) =>
-        (newLine != null && item.pair?.right?.newNumber == newLine) ||
-        (oldLine != null && item.pair?.left?.oldNumber == oldLine),
-  );
 }
 
 List<_SideBySideItem> _sideBySideItems(DiffDocument document) {

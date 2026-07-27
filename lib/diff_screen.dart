@@ -109,6 +109,7 @@ class _DiffScreenState extends State<DiffScreen> {
   bool _programmaticAnchorScroll = false;
   bool _pendingScrollToTop = false;
   bool _pendingHistoryScrollToTop = false;
+  bool _pendingFullFileScrollToTop = false;
   String? _pendingAnchorId;
   DiffSourceTarget? _pendingFullFileScrollTarget;
   int _pendingAnchorDirection = 0;
@@ -182,6 +183,7 @@ class _DiffScreenState extends State<DiffScreen> {
     _pendingHistoryScrollToTop = true;
     _pendingAnchorId = null;
     _pendingFullFileScrollTarget = null;
+    _pendingFullFileScrollToTop = false;
     _queueAttachedAnchorScroll();
     if (_pendingAnchorId == null && _pendingFullFileScrollTarget == null) {
       _scheduleScrollEffect();
@@ -228,7 +230,8 @@ class _DiffScreenState extends State<DiffScreen> {
     final alignFullFileDocument =
         changedDocument &&
         next.view == FullDiffView.diff &&
-        next.appliedScope == DiffScope.fullFile;
+        next.appliedScope == DiffScope.fullFile &&
+        (next.fullFileScrollTarget != null || previous.patch.data == null);
 
     if (changedDocument) _reconcileAnchorKeys(next.patch.data);
     if (previous.historyContext != next.historyContext) {
@@ -238,7 +241,12 @@ class _DiffScreenState extends State<DiffScreen> {
       _invalidateEditorRequest();
       _pendingScrollToTop = true;
       _pendingAnchorId = null;
-      _pendingFullFileScrollTarget = null;
+      _clearPendingFullFileScroll();
+    }
+    final pendingSourceTarget = _pendingFullFileScrollTarget;
+    if (pendingSourceTarget != null &&
+        !_isCurrentFullFileScrollTarget(next, pendingSourceTarget)) {
+      _clearPendingFullFileScroll();
     }
     if (nextAnchor != null &&
         (enteredSourceView ||
@@ -250,8 +258,8 @@ class _DiffScreenState extends State<DiffScreen> {
       final sourceTarget = next.fullFileScrollTarget;
       if (sourceTarget != null) {
         _pendingFullFileScrollTarget = sourceTarget;
+        _pendingFullFileScrollToTop = true;
         _pendingAnchorId = null;
-        _pendingScrollToTop = true;
       } else if (nextAnchor != null) {
         _pendingAnchorId = nextAnchor.id;
         _pendingAnchorDirection = nextIndex == previousIndex
@@ -260,7 +268,7 @@ class _DiffScreenState extends State<DiffScreen> {
       }
     }
     if (navigationRequested && nextAnchor != null && !movedContext) {
-      _pendingFullFileScrollTarget = null;
+      _clearPendingFullFileScroll();
       _pendingScrollToTop = false;
       _pendingAnchorId = nextAnchor.id;
       _pendingAnchorDirection = nextIndex.compareTo(previousIndex);
@@ -301,7 +309,7 @@ class _DiffScreenState extends State<DiffScreen> {
         state.appliedScope == DiffScope.fullFile &&
         sourceTarget != null) {
       _pendingFullFileScrollTarget = sourceTarget;
-      _pendingScrollToTop = true;
+      _pendingFullFileScrollToTop = true;
       _scheduleScrollEffect();
       return;
     }
@@ -325,6 +333,16 @@ class _DiffScreenState extends State<DiffScreen> {
       _effectScheduled = false;
       if (!mounted) return;
 
+      var sourceTarget = _pendingFullFileScrollTarget;
+      if (sourceTarget != null &&
+          !_isCurrentFullFileScrollTarget(_controller.state, sourceTarget)) {
+        _clearPendingFullFileScroll();
+        sourceTarget = null;
+      }
+      if (_pendingFullFileScrollToTop && _contentScroll.hasClients) {
+        _contentScroll.jumpTo(_contentScroll.position.minScrollExtent);
+        _pendingFullFileScrollToTop = false;
+      }
       if (_pendingScrollToTop && _contentScroll.hasClients) {
         _contentScroll.jumpTo(_contentScroll.position.minScrollExtent);
         _pendingScrollToTop = false;
@@ -334,23 +352,15 @@ class _DiffScreenState extends State<DiffScreen> {
         _pendingHistoryScrollToTop = false;
       }
 
-      final sourceTarget = _pendingFullFileScrollTarget;
       if (sourceTarget != null) {
-        final state = _controller.state;
-        if (state.view != FullDiffView.diff ||
-            state.appliedScope != DiffScope.fullFile ||
-            state.fullFileScrollTarget != sourceTarget) {
-          _pendingFullFileScrollTarget = null;
-          return;
-        }
         final targetContext = _fullFileScrollTargetKey.currentContext;
         if (targetContext != null) {
           final targetRenderObject = targetContext.findRenderObject();
           if (targetRenderObject == null || !_contentScroll.hasClients) {
-            _pendingFullFileScrollTarget = null;
+            _clearPendingFullFileScroll();
             return;
           }
-          _pendingFullFileScrollTarget = null;
+          _clearPendingFullFileScroll();
           _programmaticAnchorScroll = true;
           unawaited(
             _contentScroll.position
@@ -372,7 +382,7 @@ class _DiffScreenState extends State<DiffScreen> {
           position.maxScrollExtent,
         );
         if ((nextOffset - position.pixels).abs() < 0.5) {
-          _pendingFullFileScrollTarget = null;
+          _clearPendingFullFileScroll();
           return;
         }
         position.jumpTo(nextOffset);
@@ -433,6 +443,20 @@ class _DiffScreenState extends State<DiffScreen> {
       _scheduleScrollEffect();
     });
     WidgetsBinding.instance.scheduleFrame();
+  }
+
+  bool _isCurrentFullFileScrollTarget(
+    FullDiffSessionState state,
+    DiffSourceTarget target,
+  ) =>
+      state.view == FullDiffView.diff &&
+      state.requestedScope == DiffScope.fullFile &&
+      state.appliedScope == DiffScope.fullFile &&
+      state.fullFileScrollTarget == target;
+
+  void _clearPendingFullFileScroll() {
+    _pendingFullFileScrollTarget = null;
+    _pendingFullFileScrollToTop = false;
   }
 
   double _nextAnchorSearchOffset(

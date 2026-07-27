@@ -385,6 +385,7 @@ class FullDiffSessionController extends ChangeNotifier {
 
   int _cacheClock = 0;
   int _selectionGeneration = 0;
+  int _fullFileScrollGeneration = 0;
   int _filesRequest = 0;
   int _patchRequest = 0;
   int _fileRequest = 0;
@@ -559,8 +560,9 @@ class FullDiffSessionController extends ChangeNotifier {
   }
 
   void setView(FullDiffView view) {
-    if (_disposed) return;
-    _replace(state.copyWith(view: view));
+    if (_disposed || state.view == view) return;
+    _fullFileScrollGeneration++;
+    _replace(state.copyWith(view: view, fullFileScrollTarget: null));
     if (view == FullDiffView.blame) unawaited(_ensureBlame());
     if (view == FullDiffView.history) unawaited(_ensureHistory());
   }
@@ -574,13 +576,17 @@ class FullDiffSessionController extends ChangeNotifier {
     if (_disposed || state.requestedScope == scope) return;
     final sourceTarget = _anchorSourceTarget(state.activeAnchor);
     final sourceLine = _sourceLine(sourceTarget);
+    final scrollTargetGeneration = ++_fullFileScrollGeneration;
     if (state.selectedFile == null) {
-      _replace(state.copyWith(requestedScope: scope));
+      _replace(
+        state.copyWith(requestedScope: scope, fullFileScrollTarget: null),
+      );
       return;
     }
     _replace(
       state.copyWith(
         requestedScope: scope,
+        fullFileScrollTarget: null,
         patch: state.patch.copyWith(loading: true, error: null),
       ),
     );
@@ -588,6 +594,7 @@ class FullDiffSessionController extends ChangeNotifier {
       preserveDataOnFailure: true,
       sourceLine: sourceLine,
       fullFileScrollTarget: scope == DiffScope.fullFile ? sourceTarget : null,
+      scrollTargetGeneration: scrollTargetGeneration,
       propagateError: true,
     );
   }
@@ -595,19 +602,27 @@ class FullDiffSessionController extends ChangeNotifier {
   Future<void> selectAlgorithm(DiffAlgorithm algorithm) async {
     if (_disposed || state.requestedAlgorithm == algorithm) return;
     final sourceLine = _anchorSourceLine(state.activeAnchor);
+    final scrollTargetGeneration = ++_fullFileScrollGeneration;
     if (state.selectedFile == null) {
-      _replace(state.copyWith(requestedAlgorithm: algorithm));
+      _replace(
+        state.copyWith(
+          requestedAlgorithm: algorithm,
+          fullFileScrollTarget: null,
+        ),
+      );
       return;
     }
     _replace(
       state.copyWith(
         requestedAlgorithm: algorithm,
+        fullFileScrollTarget: null,
         patch: state.patch.copyWith(loading: true, error: null),
       ),
     );
     await _loadPatch(
       preserveDataOnFailure: true,
       sourceLine: sourceLine,
+      scrollTargetGeneration: scrollTargetGeneration,
       propagateError: true,
     );
   }
@@ -617,19 +632,27 @@ class FullDiffSessionController extends ChangeNotifier {
       return;
     }
     final sourceLine = _anchorSourceLine(state.activeAnchor);
+    final scrollTargetGeneration = ++_fullFileScrollGeneration;
     if (state.selectedFile == null) {
-      _replace(state.copyWith(requestedIgnoreWhitespace: ignoreWhitespace));
+      _replace(
+        state.copyWith(
+          requestedIgnoreWhitespace: ignoreWhitespace,
+          fullFileScrollTarget: null,
+        ),
+      );
       return;
     }
     _replace(
       state.copyWith(
         requestedIgnoreWhitespace: ignoreWhitespace,
+        fullFileScrollTarget: null,
         patch: state.patch.copyWith(loading: true, error: null),
       ),
     );
     await _loadPatch(
       preserveDataOnFailure: true,
       sourceLine: sourceLine,
+      scrollTargetGeneration: scrollTargetGeneration,
       propagateError: true,
     );
   }
@@ -648,6 +671,7 @@ class FullDiffSessionController extends ChangeNotifier {
     if (_disposed) return;
     final selected = _anchorInDocument(anchor);
     if (selected == null || _sameAnchor(state.activeAnchor, selected)) return;
+    _fullFileScrollGeneration++;
     _replace(
       state.copyWith(
         activeAnchor: selected,
@@ -664,6 +688,7 @@ class FullDiffSessionController extends ChangeNotifier {
     final current = state.activeAnchor?.hunkIndex ?? 0;
     final next = (current + delta).clamp(0, document.hunks.length - 1);
     if (next == current) return;
+    _fullFileScrollGeneration++;
     _replace(
       state.copyWith(
         activeAnchor: document.hunks[next].anchor,
@@ -677,6 +702,7 @@ class FullDiffSessionController extends ChangeNotifier {
     if (_disposed) return;
     final selected = _anchorInDocument(anchor);
     if (selected == null || _sameAnchor(state.activeAnchor, selected)) return;
+    _fullFileScrollGeneration++;
     _replace(
       state.copyWith(activeAnchor: selected, fullFileScrollTarget: null),
     );
@@ -786,6 +812,7 @@ class FullDiffSessionController extends ChangeNotifier {
     bool preserveDataOnFailure = false,
     int? sourceLine,
     DiffSourceTarget? fullFileScrollTarget,
+    int? scrollTargetGeneration,
     bool propagateError = false,
   }) async {
     if (_disposed) return;
@@ -793,6 +820,8 @@ class FullDiffSessionController extends ChangeNotifier {
     if (file == null) return;
     final generation = _selectionGeneration;
     final request = ++_patchRequest;
+    final acceptedScrollTargetGeneration =
+        scrollTargetGeneration ?? ++_fullFileScrollGeneration;
     final commit = state.selectedCommit;
     final parent = state.parent;
     final scope = state.requestedScope;
@@ -800,6 +829,7 @@ class FullDiffSessionController extends ChangeNotifier {
     final ignoreWhitespace = state.requestedIgnoreWhitespace;
     _replace(
       state.copyWith(
+        fullFileScrollTarget: null,
         patch: state.patch.copyWith(
           data: preserveDataOnFailure ? state.patch.data : null,
           loading: true,
@@ -831,7 +861,10 @@ class FullDiffSessionController extends ChangeNotifier {
         state.copyWith(
           patch: AsyncResource(data: document),
           activeAnchor: nearestAnchor(document, sourceLine),
-          fullFileScrollTarget: scope == DiffScope.fullFile
+          fullFileScrollTarget:
+              scope == DiffScope.fullFile &&
+                  fullFileScrollTarget != null &&
+                  acceptedScrollTargetGeneration == _fullFileScrollGeneration
               ? fullFileScrollTarget
               : null,
           appliedScope: scope,

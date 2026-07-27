@@ -49,6 +49,33 @@ class _CompletingEditorService extends ExternalEditorService {
       completer.future;
 }
 
+List<DiffLine> _distantFullFileLines() => [
+  const DiffLine(
+    kind: DiffLineKind.hunk,
+    text: '@@ -1,240 +1,240 @@ merged full file',
+  ),
+  for (var line = 1; line <= 240; line++) ...[
+    if (line == 120 || line == 200) ...[
+      DiffLine(
+        kind: DiffLineKind.delete,
+        text: 'old source line $line',
+        oldNumber: line,
+      ),
+      DiffLine(
+        kind: DiffLineKind.add,
+        text: 'source line $line',
+        newNumber: line,
+      ),
+    ] else
+      DiffLine(
+        kind: DiffLineKind.context,
+        text: 'source line $line',
+        oldNumber: line,
+        newNumber: line,
+      ),
+  ],
+];
+
 void main() {
   Future<
     ({FullDiffSessionController controller, FakeFullDiffRepository repository})
@@ -88,70 +115,51 @@ void main() {
   Future<
     ({FullDiffSessionController controller, FakeFullDiffRepository repository})
   >
-  distantChangeFixture(FullDiffPreferences initialPreferences) async {
+  distantChangeFixture(
+    FullDiffPreferences initialPreferences, {
+    Future<List<DiffLine>>? delayedFullFilePatch,
+  }) async {
     final repository = FakeFullDiffRepository();
     final source = [
       for (var line = 1; line <= 240; line++) 'source line $line',
     ].join('\n');
     repository.files = (_, _) async => const [fileA];
-    repository.scopedDiff = (_, _, _, _, _, scope) async =>
-        scope == DiffScope.hunks
-        ? const [
-            DiffLine(
-              kind: DiffLineKind.hunk,
-              text: '@@ -120 +120 @@ first distant',
-            ),
-            DiffLine(
-              kind: DiffLineKind.delete,
-              text: 'old source line 120',
-              oldNumber: 120,
-            ),
-            DiffLine(
-              kind: DiffLineKind.add,
-              text: 'source line 120',
-              newNumber: 120,
-            ),
-            DiffLine(
-              kind: DiffLineKind.hunk,
-              text: '@@ -200 +200 @@ second distant',
-            ),
-            DiffLine(
-              kind: DiffLineKind.delete,
-              text: 'old source line 200',
-              oldNumber: 200,
-            ),
-            DiffLine(
-              kind: DiffLineKind.add,
-              text: 'source line 200',
-              newNumber: 200,
-            ),
-          ]
-        : [
-            const DiffLine(
-              kind: DiffLineKind.hunk,
-              text: '@@ -1,240 +1,240 @@ merged full file',
-            ),
-            for (var line = 1; line <= 240; line++) ...[
-              if (line == 120 || line == 200) ...[
-                DiffLine(
-                  kind: DiffLineKind.delete,
-                  text: 'old source line $line',
-                  oldNumber: line,
-                ),
-                DiffLine(
-                  kind: DiffLineKind.add,
-                  text: 'source line $line',
-                  newNumber: line,
-                ),
-              ] else
-                DiffLine(
-                  kind: DiffLineKind.context,
-                  text: 'source line $line',
-                  oldNumber: line,
-                  newNumber: line,
-                ),
-            ],
-          ];
+    repository.scopedDiff = (_, _, _, _, _, scope) async {
+      if (scope == DiffScope.hunks) {
+        return const [
+          DiffLine(
+            kind: DiffLineKind.hunk,
+            text: '@@ -120 +120 @@ first distant',
+          ),
+          DiffLine(
+            kind: DiffLineKind.delete,
+            text: 'old source line 120',
+            oldNumber: 120,
+          ),
+          DiffLine(
+            kind: DiffLineKind.add,
+            text: 'source line 120',
+            newNumber: 120,
+          ),
+          DiffLine(
+            kind: DiffLineKind.hunk,
+            text: '@@ -200 +200 @@ second distant',
+          ),
+          DiffLine(
+            kind: DiffLineKind.delete,
+            text: 'old source line 200',
+            oldNumber: 200,
+          ),
+          DiffLine(
+            kind: DiffLineKind.add,
+            text: 'source line 200',
+            newNumber: 200,
+          ),
+        ];
+      }
+      if (delayedFullFilePatch != null) return delayedFullFilePatch;
+      return _distantFullFileLines();
+    };
     repository.content = (_, _, _) async =>
         Uint8List.fromList(utf8.encode('$source\n'));
     repository.blame = (_, _, _, _) async => [
@@ -487,7 +495,7 @@ void main() {
     await tester.tap(find.byKey(const Key('hunk-toggle-on')));
     await tester.pumpAndSettle();
 
-    final target = find.byKey(const Key('unified-line-0-119'));
+    final target = find.byKey(const Key('unified-line-0-120'));
     expect(fixture.controller.state.appliedScope, DiffScope.fullFile);
     expect(position.pixels, greaterThan(0));
     expect(target, findsOneWidget);
@@ -524,7 +532,7 @@ void main() {
         oldLine: 200,
         newLine: 200,
       ));
-      final laterChange = find.text('old source line 200');
+      final laterChange = find.text('source line 200');
       expect(laterChange, findsOneWidget);
       final viewport = tester.getRect(
         find.byKey(const Key('content-scrollable')),
@@ -532,9 +540,98 @@ void main() {
       final laterRect = tester.getRect(laterChange);
       expect(laterRect.top, greaterThanOrEqualTo(viewport.top));
       expect(laterRect.bottom, lessThanOrEqualTo(viewport.bottom));
+      expect(
+        find.text('old source line 200'),
+        layout == DiffLayout.unified ? findsNothing : findsOneWidget,
+      );
       expect(find.text('old source line 120'), findsNothing);
     });
   }
+
+  testWidgets(
+    'late full-file load cannot override newer navigation or scroll',
+    (tester) async {
+      final fullFilePatch = Completer<List<DiffLine>>();
+      final fixture = await distantChangeFixture(
+        const FullDiffPreferences(),
+        delayedFullFilePatch: fullFilePatch.future,
+      );
+      final controller = fixture.controller;
+      addTearDown(controller.dispose);
+      controller.selectAnchor(controller.state.patch.data!.hunks.last.anchor);
+      await pumpWorkspace(
+        tester,
+        controller: controller,
+        size: const Size(1070, 220),
+      );
+
+      final loading = controller.setScope(DiffScope.fullFile);
+      await tester.pump();
+      controller.selectAnchor(controller.state.patch.data!.hunks.first.anchor);
+      final position = tester
+          .state<ScrollableState>(
+            find
+                .descendant(
+                  of: find.byKey(const Key('content-scrollable')),
+                  matching: find.byType(Scrollable),
+                )
+                .first,
+          )
+          .position;
+      for (var frame = 0; frame < 10; frame++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      final navigationOffset = position.pixels;
+      expect(navigationOffset, closeTo(0, 0.5));
+
+      fullFilePatch.complete(_distantFullFileLines());
+      await loading;
+      await tester.pumpAndSettle();
+
+      expect(controller.state.fullFileScrollTarget, isNull);
+      expect(position.pixels, closeTo(navigationOffset, 0.5));
+    },
+  );
+
+  testWidgets('stale queued full-file target cannot jump after scope return', (
+    tester,
+  ) async {
+    final fullFilePatch = Completer<List<DiffLine>>();
+    final fixture = await distantChangeFixture(
+      const FullDiffPreferences(),
+      delayedFullFilePatch: fullFilePatch.future,
+    );
+    final controller = fixture.controller;
+    addTearDown(controller.dispose);
+    controller.selectAnchor(controller.state.patch.data!.hunks.last.anchor);
+    await pumpWorkspace(
+      tester,
+      controller: controller,
+      size: const Size(1070, 220),
+    );
+    final position = tester
+        .state<ScrollableState>(
+          find
+              .descendant(
+                of: find.byKey(const Key('content-scrollable')),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        )
+        .position;
+    final laterHunkOffset = position.pixels;
+    expect(laterHunkOffset, greaterThan(0));
+
+    final fullFileLoading = controller.setScope(DiffScope.fullFile);
+    fullFilePatch.complete(_distantFullFileLines());
+    await fullFileLoading;
+    await controller.setScope(DiffScope.hunks);
+    await tester.pump();
+
+    expect(controller.state.appliedScope, DiffScope.hunks);
+    expect(controller.state.fullFileScrollTarget, isNull);
+    expect(position.pixels, closeTo(laterHunkOffset, 0.5));
+  });
 
   for (final view in [FullDiffView.blame]) {
     testWidgets('switching into ${view.name} aligns the active change', (

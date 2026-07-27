@@ -53,7 +53,14 @@ class UnifiedPresentationView extends StatelessWidget {
     }
 
     final items = _unifiedItems(document);
-    final scrollTargetIndex = _unifiedScrollTargetIndex(items, scrollTarget);
+    final scrollTargetIndex = diffSourceTargetIndex(
+      rows: items,
+      target: scrollTarget,
+      oldLineOf: (item) =>
+          item.line?.kind == DiffLineKind.add ? null : item.line,
+      newLineOf: (item) =>
+          item.line?.kind == DiffLineKind.delete ? null : item.line,
+    );
     final allSourceText = [
       for (final item in items)
         if (item.line case final line?) line.text,
@@ -124,36 +131,6 @@ class UnifiedPresentationView extends StatelessWidget {
   GlobalKey _anchorKey(DiffAnchor anchor) =>
       anchorKeys[anchor.id] ??
       (throw StateError('Missing GlobalKey for ${anchor.id}'));
-}
-
-int _unifiedScrollTargetIndex(
-  List<_UnifiedItem> items,
-  DiffSourceTarget? target,
-) {
-  if (target == null) return -1;
-  final oldLine = target.oldLine;
-  if (oldLine != null) {
-    final deleted = items.indexWhere(
-      (item) =>
-          item.line?.kind == DiffLineKind.delete &&
-          item.line?.oldNumber == oldLine,
-    );
-    if (deleted >= 0) return deleted;
-  }
-  final newLine = target.newLine;
-  if (newLine != null) {
-    final added = items.indexWhere(
-      (item) =>
-          item.line?.kind == DiffLineKind.add &&
-          item.line?.newNumber == newLine,
-    );
-    if (added >= 0) return added;
-  }
-  return items.indexWhere(
-    (item) =>
-        (newLine != null && item.line?.newNumber == newLine) ||
-        (oldLine != null && item.line?.oldNumber == oldLine),
-  );
 }
 
 List<_UnifiedItem> _unifiedItems(DiffDocument document) {

@@ -10,6 +10,50 @@ import 'package:yogit/git.dart';
 import 'support/full_diff_fixtures.dart';
 
 void main() {
+  const mergedTwoHunkLines = <DiffLine>[
+    DiffLine(kind: DiffLineKind.hunk, text: '@@ -10,12 +10,12 @@ merged'),
+    DiffLine(
+      kind: DiffLineKind.context,
+      text: 'before',
+      oldNumber: 10,
+      newNumber: 10,
+    ),
+    DiffLine(kind: DiffLineKind.delete, text: 'first old', oldNumber: 13),
+    DiffLine(kind: DiffLineKind.add, text: 'first new', newNumber: 13),
+    DiffLine(
+      kind: DiffLineKind.context,
+      text: 'middle',
+      oldNumber: 17,
+      newNumber: 17,
+    ),
+    DiffLine(kind: DiffLineKind.delete, text: 'second old', oldNumber: 21),
+    DiffLine(kind: DiffLineKind.add, text: 'second new', newNumber: 21),
+  ];
+
+  Future<
+    ({
+      FullDiffSessionController controller,
+      Completer<List<DiffLine>> fullFilePatch,
+    })
+  >
+  delayedFullFileController() async {
+    final fullFilePatch = Completer<List<DiffLine>>();
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..content = ((_, _, _) async =>
+          Uint8List.fromList(utf8.encode('current\n')))
+      ..scopedDiff = ((_, _, _, _, _, scope) => scope == DiffScope.hunks
+          ? Future.value(twoHunkLines)
+          : fullFilePatch.future);
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+    );
+    await controller.initialize();
+    return (controller: controller, fullFilePatch: fullFilePatch);
+  }
+
   test(
     'loads patch and content together and keeps views independent',
     () async {
@@ -365,6 +409,105 @@ void main() {
     expect(controller.state.preferences.scope, DiffScope.hunks);
     expect(controller.state.fullFileScrollTarget, isNull);
   });
+
+  test('late full-file target cannot override newer hunk navigation', () async {
+    final fixture = await delayedFullFileController();
+    final controller = fixture.controller;
+    addTearDown(controller.dispose);
+    controller.selectAnchor(controller.state.patch.data!.hunks.last.anchor);
+
+    final loading = controller.setScope(DiffScope.fullFile);
+    await Future<void>.delayed(Duration.zero);
+    controller.selectAnchor(controller.state.patch.data!.hunks.first.anchor);
+    fixture.fullFilePatch.complete(mergedTwoHunkLines);
+    await loading;
+
+    expect(controller.state.appliedScope, DiffScope.fullFile);
+    expect(controller.state.fullFileScrollTarget, isNull);
+  });
+
+  test('late full-file target cannot survive a view change', () async {
+    final fixture = await delayedFullFileController();
+    final controller = fixture.controller;
+    addTearDown(controller.dispose);
+    controller.selectAnchor(controller.state.patch.data!.hunks.last.anchor);
+
+    final loading = controller.setScope(DiffScope.fullFile);
+    await Future<void>.delayed(Duration.zero);
+    controller.setView(FullDiffView.blame);
+    fixture.fullFilePatch.complete(mergedTwoHunkLines);
+    await loading;
+
+    expect(controller.state.view, FullDiffView.blame);
+    expect(controller.state.appliedScope, DiffScope.fullFile);
+    expect(controller.state.fullFileScrollTarget, isNull);
+  });
+
+  test('late full-file target cannot survive a return to hunk scope', () async {
+    final fixture = await delayedFullFileController();
+    final controller = fixture.controller;
+    addTearDown(controller.dispose);
+    controller.selectAnchor(controller.state.patch.data!.hunks.last.anchor);
+
+    final staleLoading = controller.setScope(DiffScope.fullFile);
+    await Future<void>.delayed(Duration.zero);
+    await controller.setScope(DiffScope.hunks);
+    fixture.fullFilePatch.complete(mergedTwoHunkLines);
+    await staleLoading;
+
+    expect(controller.state.requestedScope, DiffScope.hunks);
+    expect(controller.state.appliedScope, DiffScope.hunks);
+    expect(controller.state.fullFileScrollTarget, isNull);
+  });
+
+  for (final reload in [
+    (
+      name: 'algorithm reload',
+      start: (FullDiffSessionController controller) =>
+          controller.selectAlgorithm(DiffAlgorithm.histogram),
+    ),
+    (
+      name: 'whitespace reload',
+      start: (FullDiffSessionController controller) =>
+          controller.setIgnoreWhitespace(true),
+    ),
+  ]) {
+    test(
+      '${reload.name} clears an existing full-file target at start',
+      () async {
+        final reloadPatch = Completer<List<DiffLine>>();
+        final repository = FakeFullDiffRepository()
+          ..files = ((_, _) async => const [fileA])
+          ..content = ((_, _, _) async =>
+              Uint8List.fromList(utf8.encode('current\n')))
+          ..scopedDiff = ((_, _, _, algorithm, whitespace, scope) {
+            if (scope == DiffScope.hunks) return Future.value(twoHunkLines);
+            if (algorithm == DiffAlgorithm.gitSetting && !whitespace) {
+              return Future.value(mergedTwoHunkLines);
+            }
+            return reloadPatch.future;
+          });
+        final controller = FullDiffSessionController(
+          repository: repository,
+          commits: const [commitA],
+          initialIndex: 0,
+        );
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        controller.selectAnchor(controller.state.patch.data!.hunks.last.anchor);
+        await controller.setScope(DiffScope.fullFile);
+        expect(controller.state.fullFileScrollTarget, isNotNull);
+
+        final loading = reload.start(controller);
+
+        expect(controller.state.patch.loading, isTrue);
+        expect(controller.state.fullFileScrollTarget, isNull);
+        reloadPatch.complete(mergedTwoHunkLines);
+        await loading;
+        expect(controller.state.fullFileScrollTarget, isNull);
+      },
+    );
+  }
 
   test('scope selection without a file does not leave patch loading', () async {
     final controller = FullDiffSessionController(

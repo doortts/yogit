@@ -13,6 +13,41 @@ enum DiffLayout { unified, sideBySide }
 
 typedef DiffSourceTarget = ({int? oldLine, int? newLine});
 
+int diffSourceTargetIndex<T>({
+  required List<T> rows,
+  required DiffSourceTarget? target,
+  required DiffLine? Function(T row) oldLineOf,
+  required DiffLine? Function(T row) newLineOf,
+}) {
+  if (target == null) return -1;
+  final newNumber = target.newLine;
+  if (newNumber != null) {
+    final added = rows.indexWhere((row) {
+      final line = newLineOf(row);
+      return line?.kind == DiffLineKind.add && line?.newNumber == newNumber;
+    });
+    if (added >= 0) return added;
+  }
+  final oldNumber = target.oldLine;
+  if (oldNumber != null) {
+    final deleted = rows.indexWhere((row) {
+      final line = oldLineOf(row);
+      return line?.kind == DiffLineKind.delete && line?.oldNumber == oldNumber;
+    });
+    if (deleted >= 0) return deleted;
+  }
+  if (newNumber != null) {
+    final resultContext = rows.indexWhere(
+      (row) => newLineOf(row)?.newNumber == newNumber,
+    );
+    if (resultContext >= 0) return resultContext;
+  }
+  if (oldNumber != null) {
+    return rows.indexWhere((row) => oldLineOf(row)?.oldNumber == oldNumber);
+  }
+  return -1;
+}
+
 @immutable
 class FullDiffPreferences {
   const FullDiffPreferences({
