@@ -2118,6 +2118,102 @@ void main() {
     );
   });
 
+  testWidgets(
+    'enter key up during a successful algorithm request re-enables keyboard open',
+    (tester) async {
+      final pending = Completer<List<DiffLine>>();
+      final repository = FakeFullDiffRepository()
+        ..files = ((_, _) async => const [fileA])
+        ..diff = ((_, _, _, algorithm, _) {
+          if (algorithm == DiffAlgorithm.myers) return pending.future;
+          return Future.value(twoHunkLines);
+        })
+        ..content = ((_, _, _) async => resultFile.bytes);
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [commitA],
+        initialIndex: 0,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await pumpWorkspace(
+        tester,
+        controller: controller,
+        size: const Size(1070, 842),
+      );
+
+      await sendChord(tester, LogicalKeyboardKey.keyA, meta: true, shift: true);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(controller.state.requestedAlgorithm, DiffAlgorithm.myers);
+      expect(controller.state.appliedAlgorithm, DiffAlgorithm.gitSetting);
+
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
+      pending.complete(twoHunkLines);
+      await tester.pumpAndSettle();
+
+      await sendChord(tester, LogicalKeyboardKey.keyA, meta: true, shift: true);
+      expect(find.byKey(const Key('algorithm-details-myers')), findsOneWidget);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(controller.state.appliedAlgorithm, DiffAlgorithm.minimal);
+    },
+  );
+
+  testWidgets(
+    'enter key up during a failed algorithm request re-enables pointer apply',
+    (tester) async {
+      final pending = Completer<List<DiffLine>>();
+      var myersRequests = 0;
+      final repository = FakeFullDiffRepository()
+        ..files = ((_, _) async => const [fileA])
+        ..diff = ((_, _, _, algorithm, _) {
+          if (algorithm == DiffAlgorithm.myers && myersRequests++ == 0) {
+            return pending.future;
+          }
+          return Future.value(twoHunkLines);
+        })
+        ..content = ((_, _, _) async => resultFile.bytes);
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [commitA],
+        initialIndex: 0,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await pumpWorkspace(
+        tester,
+        controller: controller,
+        size: const Size(1070, 842),
+      );
+
+      await sendChord(tester, LogicalKeyboardKey.keyA, meta: true, shift: true);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
+
+      pending.completeError(
+        const GitRepositoryException('/repo', 'algorithm failed'),
+      );
+      await tester.pumpAndSettle();
+      expect(controller.state.appliedAlgorithm, DiffAlgorithm.gitSetting);
+
+      await tester.tap(find.byKey(const Key('diff-algorithm')));
+      await tester.pump();
+      expect(
+        find.byKey(const Key('algorithm-details-gitSetting')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const Key('algorithm-option-myers')));
+      await tester.pumpAndSettle();
+      expect(controller.state.appliedAlgorithm, DiffAlgorithm.myers);
+    },
+  );
+
   testWidgets('escape cancels algorithm preview and restores toolbar focus', (
     tester,
   ) async {

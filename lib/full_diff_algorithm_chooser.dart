@@ -76,7 +76,14 @@ class FullDiffAlgorithmChooserState extends State<FullDiffAlgorithmChooser> {
   bool _menuOpen = false;
 
   @override
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_handleHardwareKey);
+  }
+
+  @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
     _buttonFocus.dispose();
     super.dispose();
   }
@@ -122,12 +129,15 @@ class FullDiffAlgorithmChooserState extends State<FullDiffAlgorithmChooser> {
     }
   }
 
-  KeyEventResult _handleButtonKey(FocusNode _, KeyEvent event) {
+  bool _handleHardwareKey(KeyEvent event) {
     if (event.logicalKey != _suppressedApplyKey) {
-      return KeyEventResult.ignored;
+      return false;
     }
-    if (event is KeyUpEvent) _suppressedApplyKey = null;
-    return KeyEventResult.handled;
+    if (event is KeyUpEvent) {
+      _suppressedApplyKey = null;
+      return false;
+    }
+    return event is KeyDownEvent || event is KeyRepeatEvent;
   }
 
   @override
@@ -145,32 +155,29 @@ class FullDiffAlgorithmChooserState extends State<FullDiffAlgorithmChooser> {
       onTap: widget.enabled ? show : null,
       child: Material(
         color: Colors.transparent,
-        child: Focus(
-          onKeyEvent: _handleButtonKey,
-          child: InkWell(
-            key: _buttonKey,
-            focusNode: _buttonFocus,
-            onTap: widget.enabled ? show : null,
-            borderRadius: BorderRadius.circular(fullDiffControlRadius),
-            child: Container(
-              key: const Key('diff-algorithm-value'),
-              height: fullDiffControlHeight,
-              padding: EdgeInsets.symmetric(
-                horizontal: widget.compact || widget.dense ? 4 : 8,
-              ),
-              decoration: BoxDecoration(
-                color: fullDiffControl,
-                borderRadius: BorderRadius.circular(fullDiffControlRadius),
-                border: Border.all(color: const Color(0x1A000000)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(widget.algorithm.label),
-                  SizedBox(width: widget.compact ? 2 : 4),
-                  const Icon(Icons.arrow_drop_down, size: 16),
-                ],
-              ),
+        child: InkWell(
+          key: _buttonKey,
+          focusNode: _buttonFocus,
+          onTap: widget.enabled ? show : null,
+          borderRadius: BorderRadius.circular(fullDiffControlRadius),
+          child: Container(
+            key: const Key('diff-algorithm-value'),
+            height: fullDiffControlHeight,
+            padding: EdgeInsets.symmetric(
+              horizontal: widget.compact || widget.dense ? 4 : 8,
+            ),
+            decoration: BoxDecoration(
+              color: fullDiffControl,
+              borderRadius: BorderRadius.circular(fullDiffControlRadius),
+              border: Border.all(color: const Color(0x1A000000)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(widget.algorithm.label),
+                SizedBox(width: widget.compact ? 2 : 4),
+                const Icon(Icons.arrow_drop_down, size: 16),
+              ],
             ),
           ),
         ),
