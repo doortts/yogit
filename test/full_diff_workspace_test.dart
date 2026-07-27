@@ -80,6 +80,7 @@ void main() {
     required FullDiffSessionController controller,
     required Size size,
     ExternalEditorService? editorService,
+    bool routeBacked = false,
   }) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = size;
@@ -87,19 +88,35 @@ void main() {
       tester.view.resetDevicePixelRatio();
       tester.view.resetPhysicalSize();
     });
+    Widget diffScreen() => DiffScreen(
+      repository: controller.repository,
+      commits: controller.state.nearbyCommits,
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+      controller: controller,
+      editorService: editorService,
+    );
     await tester.pumpWidget(
       MaterialApp(
         theme: ThemeData.dark(),
-        home: DiffScreen(
-          repository: controller.repository,
-          commits: controller.state.nearbyCommits,
-          initialIndex: 0,
-          initialView: FullDiffInitialView.hunk,
-          controller: controller,
-          editorService: editorService,
-        ),
+        home: routeBacked
+            ? Builder(
+                builder: (context) => Center(
+                  child: TextButton(
+                    key: const Key('launch-full-diff'),
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(builder: (_) => diffScreen()),
+                    ),
+                    child: const Text('Timeline'),
+                  ),
+                ),
+              )
+            : diffScreen(),
       ),
     );
+    if (routeBacked) {
+      await tester.tap(find.byKey(const Key('launch-full-diff')));
+    }
     await tester.pumpAndSettle();
   }
 
@@ -511,9 +528,42 @@ void main() {
     expect(controller.state.activeAnchor?.hunkIndex, 1);
     await sendChord(tester, LogicalKeyboardKey.keyF, meta: true, shift: true);
     expect(controller.state.focusMode, isTrue);
-    await sendChord(tester, LogicalKeyboardKey.escape);
-    expect(controller.state.focusMode, isFalse);
   });
+
+  testWidgets(
+    'escape returns from focus mode and lets an open menu close first',
+    (tester) async {
+      final fixture = await workspaceFixture();
+      addTearDown(fixture.controller.dispose);
+      fixture.controller.setFocusMode(true);
+      await pumpWorkspace(
+        tester,
+        controller: fixture.controller,
+        size: const Size(1070, 842),
+        routeBacked: true,
+      );
+
+      await sendChord(tester, LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('launch-full-diff')), findsOneWidget);
+      expect(fixture.controller.state.focusMode, isTrue);
+
+      await tester.tap(find.byKey(const Key('launch-full-diff')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('diff-algorithm')));
+      await tester.pumpAndSettle();
+      expect(find.text('Histogram'), findsOneWidget);
+
+      await sendChord(tester, LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.text('Histogram'), findsNothing);
+      expect(find.byKey(const Key('content-scrollable')), findsOneWidget);
+
+      await sendChord(tester, LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('launch-full-diff')), findsOneWidget);
+    },
+  );
 
   testWidgets('page scroll moves 48px and an open menu consumes its keys', (
     tester,

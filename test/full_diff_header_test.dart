@@ -11,6 +11,18 @@ import 'package:yogit/typography.dart';
 import 'support/full_diff_fixtures.dart';
 
 void main() {
+  testWidgets('file bar leads with an accessible return button', (
+    tester,
+  ) async {
+    var calls = 0;
+    await pumpHeaders(tester, onBack: () => calls++);
+
+    expect(find.byKey(const Key('full-diff-back')), findsOneWidget);
+    expect(find.semantics.byLabel('타임라인으로 돌아가기'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('full-diff-back')));
+    expect(calls, 1);
+  });
+
   testWidgets('global bars keep the approved labels in exact order', (
     tester,
   ) async {
@@ -264,6 +276,7 @@ Future<void> pumpHeaders(
   FullDiffView view = FullDiffView.diff,
   bool focusMode = false,
   bool ignoreWhitespace = false,
+  VoidCallback? onBack,
   ValueChanged<DiffAlgorithm>? onAlgorithmSelected,
 }) => tester.pumpWidget(
   qaApp(
@@ -275,6 +288,7 @@ Future<void> pumpHeaders(
           view: view,
           encodingLabel: 'UTF-8',
           canOpenEditor: true,
+          onBack: onBack ?? () {},
           onOpenEditor: () {},
           onViewSelected: (_) {},
         ),

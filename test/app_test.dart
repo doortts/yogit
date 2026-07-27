@@ -3081,9 +3081,16 @@ void main() {
     expect(calls.last.algorithm, DiffAlgorithm.histogram);
     expect(find.byKey(const Key('diff-algorithm-value')), findsNothing);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.tap(find.byKey(const Key('full-diff-back')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-merge')), findsOneWidget);
+    expect(find.text('Commit & Diff'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('preview-full-diff')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('code-row-source-text')).first);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
     expect(find.text('Commit & Diff'), findsOneWidget);
   });
 

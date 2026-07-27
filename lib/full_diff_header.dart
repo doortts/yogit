@@ -18,6 +18,7 @@ class GlobalFileBar extends StatelessWidget {
     required this.view,
     required this.encodingLabel,
     required this.canOpenEditor,
+    required this.onBack,
     required this.onOpenEditor,
     required this.onViewSelected,
     this.editorError,
@@ -29,6 +30,7 @@ class GlobalFileBar extends StatelessWidget {
   final FullDiffView view;
   final String encodingLabel;
   final bool canOpenEditor;
+  final VoidCallback onBack;
   final VoidCallback onOpenEditor;
   final ValueChanged<FullDiffView> onViewSelected;
   final String? editorError;
@@ -47,6 +49,22 @@ class GlobalFileBar extends StatelessWidget {
             runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
+              Semantics(
+                label: '타임라인으로 돌아가기',
+                button: true,
+                child: IconButton(
+                  key: const Key('full-diff-back'),
+                  tooltip: '타임라인으로 돌아가기 (Esc)',
+                  onPressed: onBack,
+                  icon: const Icon(Icons.arrow_back, size: 18),
+                  color: fullDiffMuted,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 32,
+                    height: 32,
+                  ),
+                  padding: EdgeInsets.zero,
+                ),
+              ),
               if (path != null)
                 const Icon(Icons.code, size: 18, color: Colors.white),
               if (path case final path?)

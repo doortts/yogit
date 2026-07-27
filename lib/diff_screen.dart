@@ -434,13 +434,7 @@ class _DiffScreenState extends State<DiffScreen> {
     }
   }
 
-  void _handleEscape() {
-    if (_controller.state.focusMode) {
-      _controller.setFocusMode(false);
-    } else {
-      Navigator.of(context).maybePop();
-    }
-  }
+  void _returnToTimeline() => Navigator.of(context).maybePop();
 
   bool _canOpenEditor(FullDiffSessionState state) {
     final file = state.selectedFile;
@@ -533,7 +527,7 @@ class _DiffScreenState extends State<DiffScreen> {
             actions: <Type, Action<Intent>>{
               _ReturnToTimelineIntent: CallbackAction<_ReturnToTimelineIntent>(
                 onInvoke: (_) {
-                  _handleEscape();
+                  _returnToTimeline();
                   return null;
                 },
               ),
@@ -593,6 +587,7 @@ class _DiffScreenState extends State<DiffScreen> {
                           encodingLabel: state.encodingLabel,
                           canOpenEditor: _canOpenEditor(state),
                           editorError: _editorError,
+                          onBack: _returnToTimeline,
                           onOpenEditor: _openEditor,
                           onViewSelected: _controller.setView,
                         ),
