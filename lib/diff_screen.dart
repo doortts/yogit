@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'avatars.dart';
 import 'external_editor.dart';
 import 'full_blame_view.dart';
 import 'full_diff_controller.dart';
@@ -59,6 +60,8 @@ class DiffScreen extends StatefulWidget {
     this.columnWidths = const FullDiffColumnWidths(),
     this.onColumnWidthsChanged,
     this.editorService,
+    this.avatarService,
+    this.showRemoteAvatars = true,
     super.key,
   });
 
@@ -70,6 +73,8 @@ class DiffScreen extends StatefulWidget {
   final FullDiffColumnWidths columnWidths;
   final ValueChanged<FullDiffColumnWidths>? onColumnWidthsChanged;
   final ExternalEditorService? editorService;
+  final AvatarService? avatarService;
+  final bool showRemoteAvatars;
 
   @override
   State<DiffScreen> createState() => _DiffScreenState();
@@ -1167,6 +1172,8 @@ class _DiffScreenState extends State<DiffScreen> {
       onAnchorProbeAttached: _attachAnchorProbe,
       onAnchorProbeDetached: _detachAnchorProbe,
       controller: _contentScroll,
+      avatarService: widget.avatarService,
+      showRemoteAvatars: widget.showRemoteAvatars,
     );
   }
 

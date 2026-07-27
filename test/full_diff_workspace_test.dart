@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/diff_screen.dart';
 import 'package:yogit/external_editor.dart';
+import 'package:yogit/full_diff_hunk_header.dart';
 import 'package:yogit/full_diff_controller.dart';
 import 'package:yogit/full_diff_minimap.dart';
 import 'package:yogit/full_diff_model.dart';
@@ -1949,6 +1950,14 @@ void main() {
           )
           .first;
       final position = tester.state<ScrollableState>(scrollable).position;
+      if (view == FullDiffView.blame) {
+        final list = tester.widget<ListView>(find.byKey(listKey));
+        expect(
+          (list.childrenDelegate as SliverChildBuilderDelegate).childCount,
+          130,
+        );
+        expect(find.byType(FullDiffHunkHeader), findsNothing);
+      }
 
       while (position.pixels < position.maxScrollExtent - 0.5) {
         await tester.drag(scrollable, const Offset(0, -240));

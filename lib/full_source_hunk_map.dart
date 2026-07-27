@@ -65,7 +65,10 @@ class FullSourceHunkMap {
     for (final hunk in activeHunks) {
       final sideLines = _sideLines(hunk, side, lineCount);
       _activeLines[hunk.index] = sideLines.isEmpty
-          ? null
+          ? switch (side) {
+              FileDocumentSide.old => hunk.oldStart,
+              FileDocumentSide.result => hunk.newStart,
+            }.clamp(1, lineCount)
           : sideLines.first.number;
       for (final line in sideLines) {
         _lineKinds[line.number] = line.kind;
@@ -93,6 +96,11 @@ class FullSourceHunkMap {
       lineNumber: lineNumber,
       kind: _lineKinds[lineNumber] ?? DiffLineKind.context,
     );
+  }
+
+  DiffLineKind kindForLine(int lineNumber) {
+    RangeError.checkValueInInterval(lineNumber, 1, lineCount, 'lineNumber');
+    return _lineKinds[lineNumber] ?? DiffLineKind.context;
   }
 
   int? activeLine(DiffAnchor? anchor) {

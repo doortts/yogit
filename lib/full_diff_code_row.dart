@@ -230,6 +230,7 @@ class FullDiffCodeRow extends StatelessWidget {
     this.current = false,
     this.wordRanges = const [],
     this.compactGutter = false,
+    this.showGutter = true,
     this.leadingMetadata,
     this.horizontalScroll = true,
     this.richRenderingEnabled = true,
@@ -244,6 +245,7 @@ class FullDiffCodeRow extends StatelessWidget {
   final bool current;
   final List<WordRange> wordRanges;
   final bool compactGutter;
+  final bool showGutter;
   final Widget? leadingMetadata;
   final bool horizontalScroll;
   final bool richRenderingEnabled;
@@ -289,7 +291,7 @@ class FullDiffCodeRow extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(width: fullDiffLineNumberWidth),
+              if (showGutter) const SizedBox(width: fullDiffLineNumberWidth),
               if (leadingMetadata case final Widget metadata)
                 SelectionContainer.disabled(child: metadata),
               Expanded(
@@ -321,44 +323,45 @@ class FullDiffCodeRow extends StatelessWidget {
               ),
             ],
           ),
-          Positioned(
-            left: 0,
-            top: 0,
-            child: SelectionContainer.disabled(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (compactGutter)
-                    _GutterCell(
-                      number: line.newNumber ?? line.oldNumber,
-                      width: fullDiffLineNumberWidth - 18,
+          if (showGutter)
+            Positioned(
+              left: 0,
+              top: 0,
+              child: SelectionContainer.disabled(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (compactGutter)
+                      _GutterCell(
+                        number: line.newNumber ?? line.oldNumber,
+                        width: fullDiffLineNumberWidth - 18,
+                        color: gutterColor,
+                      )
+                    else ...[
+                      _GutterCell(
+                        number: line.oldNumber,
+                        width: (fullDiffLineNumberWidth - 18) / 2,
+                        color: gutterColor,
+                      ),
+                      _GutterCell(
+                        number: line.newNumber,
+                        width: (fullDiffLineNumberWidth - 18) / 2,
+                        color: gutterColor,
+                      ),
+                    ],
+                    Container(
+                      width: 18,
+                      constraints: const BoxConstraints(minHeight: 27),
+                      alignment: Alignment.topCenter,
                       color: gutterColor,
-                    )
-                  else ...[
-                    _GutterCell(
-                      number: line.oldNumber,
-                      width: (fullDiffLineNumberWidth - 18) / 2,
-                      color: gutterColor,
-                    ),
-                    _GutterCell(
-                      number: line.newNumber,
-                      width: (fullDiffLineNumberWidth - 18) / 2,
-                      color: gutterColor,
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Text(marker, style: _gutterStyle),
                     ),
                   ],
-                  Container(
-                    width: 18,
-                    constraints: const BoxConstraints(minHeight: 27),
-                    alignment: Alignment.topCenter,
-                    color: gutterColor,
-                    padding: const EdgeInsets.symmetric(vertical: 3),
-                    child: Text(marker, style: _gutterStyle),
-                  ),
-                ],
+                ),
               ),
             ),
-          ),
         ],
       ),
     );

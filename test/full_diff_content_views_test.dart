@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yogit/avatars.dart';
+import 'package:yogit/full_diff_anchor_probe.dart';
 import 'package:yogit/full_blame_view.dart';
 import 'package:yogit/full_diff_code_row.dart';
 import 'package:yogit/full_diff_model.dart';
@@ -829,12 +831,22 @@ void main() {
     );
   });
 
-  testWidgets('blame keeps metadata and source rows aligned', (tester) async {
+  testWidgets('blame aligns one complete metadata row with every source line', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1000, 600);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
     final file = FileDocument.fromBytes(
       revision: commitA.sha,
       path: 'two.txt',
       side: FileDocumentSide.result,
-      bytes: Uint8List.fromList(utf8.encode('alpha\nbeta\n')),
+      bytes: Uint8List.fromList(
+        utf8.encode('const alpha = false;\nconst beta = true;\n'),
+      ),
       gitMarkedBinary: false,
     );
     final blame = BlameDocument.fromGitLines(file, const [
@@ -845,13 +857,34 @@ void main() {
         uncommitted: true,
       ),
       GitBlameLine(
-        lineNumber: 2,
+        lineNumber: 99,
         sha: '40aff6d123456789',
         author: 'Suwon Chae',
+        authorEmail: 'suwon@example.com',
+        authorTimestamp: 1704067200,
+        summary:
+            'Keep this deliberately long summary on one ellipsized metadata line',
         uncommitted: false,
       ),
     ]);
-    const anchor = DiffAnchor(hunkIndex: 0, oldLine: 1, newLine: 1);
+    const anchor = DiffAnchor(hunkIndex: 0, oldLine: 2, newLine: 2);
+    const hunk = DiffHunk(
+      index: 0,
+      oldStart: 2,
+      oldCount: 1,
+      newStart: 2,
+      newCount: 1,
+      context: 'replace beta',
+      lines: [
+        DiffLine(kind: DiffLineKind.delete, text: 'old beta', oldNumber: 2),
+        DiffLine(
+          kind: DiffLineKind.add,
+          text: 'const beta = true;',
+          newNumber: 2,
+        ),
+      ],
+      anchor: anchor,
+    );
     final anchorKey = GlobalKey(debugLabel: anchor.id);
     final controller = ScrollController();
     addTearDown(controller.dispose);
@@ -860,21 +893,10 @@ void main() {
       qaApp(
         FullBlameView(
           document: blame,
-          hunks: const [
-            DiffHunk(
-              index: 0,
-              oldStart: 1,
-              oldCount: 1,
-              newStart: 1,
-              newCount: 1,
-              context: '',
-              lines: [],
-              anchor: anchor,
-            ),
-          ],
+          hunks: const [hunk],
           activeAnchor: anchor,
           wrapLines: false,
-          highlighter: fakeHighlighter,
+          highlighter: const _TokenSyntaxHighlighter(),
           anchorKeys: {anchor.id: anchorKey},
           controller: controller,
         ),
@@ -882,117 +904,305 @@ void main() {
     );
 
     expect(find.byKey(const Key('blame-list')), findsOneWidget);
-    expect(find.text('·······'), findsOneWidget);
-    expect(find.text('U'), findsOneWidget);
-    expect(find.text('40aff6d'), findsOneWidget);
+    expect(find.byKey(Key('blame-hunk-header-${anchor.id}')), findsNothing);
+    expect(find.byType(BlameSourceRow), findsNWidgets(file.lines.length));
+    expect(find.byKey(const Key('blame-line-1')), findsOneWidget);
+    expect(find.byKey(const Key('blame-line-2')), findsOneWidget);
+    expect(find.byKey(const Key('blame-avatar-2')), findsOneWidget);
+    expect(find.byKey(const Key('blame-line-number-2')), findsOneWidget);
+    expect(find.byKey(const Key('blame-summary-2')), findsOneWidget);
+    expect(find.byKey(const Key('blame-date-2')), findsOneWidget);
+    expect(find.byKey(const Key('blame-rail-2')), findsOneWidget);
     expect(find.text('SC'), findsOneWidget);
-    expect(find.text('alpha'), findsOneWidget);
-    expect(find.text('beta'), findsOneWidget);
+    expect(find.text('2024-01-01'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('blame-date-1')),
+        matching: find.text('—'),
+      ),
+      findsOneWidget,
+    );
     expect(anchorKey.currentContext, isNotNull);
     expect(
       tester.widget<ListView>(find.byKey(const Key('blame-list'))).controller,
       same(controller),
     );
+    final avatar = tester.widget<IdentityAvatar>(
+      find.byKey(const Key('blame-avatar-2')),
+    );
+    expect(avatar.identity.name, 'Suwon Chae');
+    expect(avatar.identity.email, 'suwon@example.com');
+    expect(
+      tester.widget<Text>(find.byKey(const Key('blame-summary-2'))).overflow,
+      TextOverflow.ellipsis,
+    );
+    expect(
+      tester.getSize(find.byKey(const Key('blame-metadata-2'))).width,
+      360,
+    );
+    expect(tester.getSize(find.byKey(const Key('blame-rail-2'))).width, 4);
+    final orderedColumns = [
+      find.byKey(const Key('blame-avatar-2')),
+      find.byKey(const Key('blame-line-number-2')),
+      find.byKey(const Key('blame-summary-2')),
+      find.byKey(const Key('blame-date-2')),
+      find.byKey(const Key('blame-rail-2')),
+      find.text('const beta = true;'),
+    ];
+    for (var index = 1; index < orderedColumns.length; index++) {
+      expect(
+        tester.getTopLeft(orderedColumns[index - 1]).dx,
+        lessThan(tester.getTopLeft(orderedColumns[index]).dx),
+      );
+    }
+    final sourceText = tester.widget<RichText>(
+      find.descendant(
+        of: find.byKey(const Key('blame-line-2')),
+        matching: find.byKey(const Key('code-row-source-text')),
+      ),
+    );
+    final sourceSpan = sourceText.text as TextSpan;
+    expect(
+      sourceSpan.children!.whereType<TextSpan>().first.style?.color,
+      const Color(0xFFABCDEF),
+    );
+    final rail = tester.widget<ColoredBox>(
+      find.descendant(
+        of: find.byKey(const Key('blame-rail-2')),
+        matching: find.byType(ColoredBox),
+      ),
+    );
+    expect(rail.color, const Color(0xFFFF2D95));
+    final uncommittedRail = tester.widget<ColoredBox>(
+      find.descendant(
+        of: find.byKey(const Key('blame-rail-1')),
+        matching: find.byType(ColoredBox),
+      ),
+    );
+    expect(uncommittedRail.color, fullDiffMuted);
+    expect(
+      tester
+          .widget<FullDiffCodeRow>(
+            find.descendant(
+              of: find.byKey(const Key('blame-line-2')),
+              matching: find.byType(FullDiffCodeRow),
+            ),
+          )
+          .showGutter,
+      isFalse,
+    );
   });
 
   testWidgets(
-    'blame old side orders hunk header metadata gutter and deleted source',
+    'blame moves the only current row and anchor between source hunks',
     (tester) async {
       final file = FileDocument.fromBytes(
-        revision: commitA.parents.single,
-        path: 'old.txt',
-        side: FileDocumentSide.old,
-        bytes: Uint8List.fromList(utf8.encode('alpha\nold value\n')),
+        revision: commitA.sha,
+        path: 'result.txt',
+        side: FileDocumentSide.result,
+        bytes: Uint8List.fromList(
+          utf8.encode('zero\nfirst changed\nmiddle\nsecond changed\n'),
+        ),
         gitMarkedBinary: false,
       );
       final blame = BlameDocument.fromGitLines(file, const [
         GitBlameLine(
           lineNumber: 1,
           sha: '1111111',
-          author: 'Alpha Author',
+          author: 'First',
           uncommitted: false,
         ),
         GitBlameLine(
           lineNumber: 2,
+          sha: '1111111',
+          author: 'First',
+          uncommitted: false,
+        ),
+        GitBlameLine(
+          lineNumber: 3,
           sha: '2222222',
-          author: 'Beta Author',
+          author: 'Second',
+          uncommitted: false,
+        ),
+        GitBlameLine(
+          lineNumber: 4,
+          sha: '2222222',
+          author: 'Second',
           uncommitted: false,
         ),
       ]);
-      const anchor = DiffAnchor(hunkIndex: 0, oldLine: 2, newLine: 2);
-      const hunk = DiffHunk(
-        index: 0,
-        oldStart: 2,
-        oldCount: 1,
-        newStart: 2,
-        newCount: 1,
-        context: 'replace value',
-        lines: [
-          DiffLine(kind: DiffLineKind.delete, text: 'old value', oldNumber: 2),
-          DiffLine(kind: DiffLineKind.add, text: 'new value', newNumber: 2),
-        ],
-        anchor: anchor,
-      );
+      const firstAnchor = DiffAnchor(hunkIndex: 0, oldLine: 2, newLine: 2);
+      const secondAnchor = DiffAnchor(hunkIndex: 1, oldLine: 4, newLine: 4);
+      const hunks = [
+        DiffHunk(
+          index: 0,
+          oldStart: 2,
+          oldCount: 1,
+          newStart: 2,
+          newCount: 1,
+          context: 'first change',
+          lines: [
+            DiffLine(
+              kind: DiffLineKind.delete,
+              text: 'first old',
+              oldNumber: 2,
+            ),
+            DiffLine(
+              kind: DiffLineKind.add,
+              text: 'first changed',
+              newNumber: 2,
+            ),
+          ],
+          anchor: firstAnchor,
+        ),
+        DiffHunk(
+          index: 1,
+          oldStart: 4,
+          oldCount: 1,
+          newStart: 4,
+          newCount: 1,
+          context: 'second change',
+          lines: [
+            DiffLine(
+              kind: DiffLineKind.delete,
+              text: 'second old',
+              oldNumber: 4,
+            ),
+            DiffLine(
+              kind: DiffLineKind.add,
+              text: 'second changed',
+              newNumber: 4,
+            ),
+          ],
+          anchor: secondAnchor,
+        ),
+      ];
+      final firstKey = GlobalKey(debugLabel: firstAnchor.id);
+      final secondKey = GlobalKey(debugLabel: secondAnchor.id);
+      final attached = <String>{};
 
       await tester.pumpWidget(
         qaApp(
           FullBlameView(
             document: blame,
-            hunks: const [hunk],
-            activeAnchor: anchor,
+            hunks: hunks,
+            activeAnchor: secondAnchor,
             wrapLines: false,
             highlighter: fakeHighlighter,
-            anchorKeys: {anchor.id: GlobalKey(debugLabel: anchor.id)},
+            anchorKeys: {firstAnchor.id: firstKey, secondAnchor.id: secondKey},
+            onAnchorProbeAttached: (anchor, _) => attached.add(anchor.id),
           ),
         ),
       );
 
-      final header = find.byKey(Key('blame-hunk-header-${anchor.id}'));
-      final changedRow = find.byKey(const Key('blame-line-2'));
-      final metadata = find.byKey(const Key('blame-metadata-2'));
-      final lineNumber = find.descendant(
-        of: changedRow,
-        matching: find.text('2'),
-      );
-      expect(header, findsOneWidget);
-      expect(tester.getBottomLeft(header).dy, tester.getTopLeft(changedRow).dy);
-      final renderedLine = tester.widget<FullDiffCodeRow>(
-        find.descendant(of: changedRow, matching: find.byType(FullDiffCodeRow)),
-      );
-      expect(renderedLine.line.kind, DiffLineKind.delete);
-      expect(renderedLine.line.oldNumber, 2);
-      expect(renderedLine.line.newNumber, isNull);
+      expect(find.byType(BlameSourceRow), findsNWidgets(file.lines.length));
       expect(
-        tester.getTopLeft(lineNumber).dx,
-        lessThan(tester.getTopLeft(metadata).dx),
+        find.byType(FullDiffAnchorProbe),
+        findsNWidgets(file.lines.length),
       );
+      expect(find.text('first change'), findsNothing);
+      expect(find.text('second change'), findsNothing);
+      expect(find.byKey(const Key('blame-current-line-4')), findsOneWidget);
       expect(
-        tester.getTopLeft(metadata).dx,
-        lessThan(tester.getTopLeft(find.text('old value')).dx),
-      );
-      expect(
-        find.descendant(
-          of: changedRow,
-          matching: find.byWidgetPredicate(
-            (widget) =>
-                widget is ColoredBox && widget.color == fullDiffDeletedSource,
-          ),
+        find.byWidgetPredicate(
+          (widget) =>
+              widget.key is ValueKey<String> &&
+              (widget.key! as ValueKey<String>).value.startsWith(
+                'blame-current-line-',
+              ),
         ),
         findsOneWidget,
       );
+      expect(firstKey.currentContext, isNull);
+      expect(secondKey.currentContext, isNotNull);
+      expect(
+        tester.getRect(find.byKey(secondKey)),
+        tester.getRect(find.byKey(const Key('blame-line-4'))),
+      );
+      expect(attached, {firstAnchor.id, secondAnchor.id});
+      expect(
+        tester
+            .widget<FullDiffCodeRow>(
+              find.descendant(
+                of: find.byKey(const Key('blame-line-2')),
+                matching: find.byType(FullDiffCodeRow),
+              ),
+            )
+            .line
+            .kind,
+        DiffLineKind.context,
+      );
+      expect(
+        tester
+            .widget<FullDiffCodeRow>(
+              find.descendant(
+                of: find.byKey(const Key('blame-line-4')),
+                matching: find.byType(FullDiffCodeRow),
+              ),
+            )
+            .line
+            .kind,
+        DiffLineKind.add,
+      );
+
+      attached.clear();
+      await tester.pumpWidget(
+        qaApp(
+          FullBlameView(
+            document: blame,
+            hunks: hunks,
+            activeAnchor: firstAnchor,
+            wrapLines: false,
+            highlighter: fakeHighlighter,
+            anchorKeys: {firstAnchor.id: firstKey, secondAnchor.id: secondKey},
+            onAnchorProbeAttached: (anchor, _) => attached.add(anchor.id),
+          ),
+        ),
+      );
+
+      expect(find.byKey(const Key('blame-current-line-2')), findsOneWidget);
+      expect(firstKey.currentContext, isNotNull);
+      expect(secondKey.currentContext, isNull);
+      expect(
+        tester.getRect(find.byKey(firstKey)),
+        tester.getRect(find.byKey(const Key('blame-line-2'))),
+      );
+      expect(
+        tester
+            .widget<FullDiffCodeRow>(
+              find.descendant(
+                of: find.byKey(const Key('blame-line-2')),
+                matching: find.byType(FullDiffCodeRow),
+              ),
+            )
+            .line
+            .kind,
+        DiffLineKind.add,
+      );
+      expect(
+        tester
+            .widget<FullDiffCodeRow>(
+              find.descendant(
+                of: find.byKey(const Key('blame-line-4')),
+                matching: find.byType(FullDiffCodeRow),
+              ),
+            )
+            .line
+            .kind,
+        DiffLineKind.context,
+      );
+      expect(attached, {firstAnchor.id, secondAnchor.id});
     },
   );
 
-  testWidgets('blame projects only the active hunk header and decoration', (
+  testWidgets('deletion-only result blame anchors its last source boundary', (
     tester,
   ) async {
     final file = FileDocument.fromBytes(
       revision: commitA.sha,
       path: 'result.txt',
       side: FileDocumentSide.result,
-      bytes: Uint8List.fromList(
-        utf8.encode('zero\nfirst changed\nmiddle\nsecond changed\n'),
-      ),
+      bytes: Uint8List.fromList(utf8.encode('one\ntwo\n')),
       gitMarkedBinary: false,
     );
     final blame = BlameDocument.fromGitLines(file, const [
@@ -1004,83 +1214,45 @@ void main() {
       ),
       GitBlameLine(
         lineNumber: 2,
-        sha: '1111111',
-        author: 'First',
-        uncommitted: false,
-      ),
-      GitBlameLine(
-        lineNumber: 3,
-        sha: '2222222',
-        author: 'Second',
-        uncommitted: false,
-      ),
-      GitBlameLine(
-        lineNumber: 4,
         sha: '2222222',
         author: 'Second',
         uncommitted: false,
       ),
     ]);
-    const firstAnchor = DiffAnchor(hunkIndex: 0, oldLine: 2, newLine: 2);
-    const secondAnchor = DiffAnchor(hunkIndex: 1, oldLine: 4, newLine: 4);
-    const hunks = [
-      DiffHunk(
-        index: 0,
-        oldStart: 2,
-        oldCount: 1,
-        newStart: 2,
-        newCount: 1,
-        context: 'first change',
-        lines: [
-          DiffLine(kind: DiffLineKind.delete, text: 'first old', oldNumber: 2),
-          DiffLine(kind: DiffLineKind.add, text: 'first changed', newNumber: 2),
-        ],
-        anchor: firstAnchor,
-      ),
-      DiffHunk(
-        index: 1,
-        oldStart: 4,
-        oldCount: 1,
-        newStart: 4,
-        newCount: 1,
-        context: 'second change',
-        lines: [
-          DiffLine(kind: DiffLineKind.delete, text: 'second old', oldNumber: 4),
-          DiffLine(
-            kind: DiffLineKind.add,
-            text: 'second changed',
-            newNumber: 4,
-          ),
-        ],
-        anchor: secondAnchor,
-      ),
-    ];
-    final firstKey = GlobalKey(debugLabel: firstAnchor.id);
-    final secondKey = GlobalKey(debugLabel: secondAnchor.id);
+    const anchor = DiffAnchor(hunkIndex: 0, oldLine: 3, newLine: null);
+    const hunk = DiffHunk(
+      index: 0,
+      oldStart: 3,
+      oldCount: 1,
+      newStart: 3,
+      newCount: 0,
+      context: 'delete at eof',
+      lines: [
+        DiffLine(kind: DiffLineKind.delete, text: 'removed', oldNumber: 3),
+      ],
+      anchor: anchor,
+    );
+    final anchorKey = GlobalKey(debugLabel: anchor.id);
 
     await tester.pumpWidget(
       qaApp(
         FullBlameView(
           document: blame,
-          hunks: hunks,
-          activeAnchor: secondAnchor,
+          hunks: const [hunk],
+          activeAnchor: anchor,
           wrapLines: false,
           highlighter: fakeHighlighter,
-          anchorKeys: {firstAnchor.id: firstKey, secondAnchor.id: secondKey},
+          anchorKeys: {anchor.id: anchorKey},
         ),
       ),
     );
 
+    expect(find.byKey(const Key('blame-current-line-2')), findsOneWidget);
+    expect(anchorKey.currentContext, isNotNull);
     expect(
-      find.byKey(Key('blame-hunk-header-${firstAnchor.id}')),
-      findsNothing,
+      tester.getRect(find.byKey(anchorKey)),
+      tester.getRect(find.byKey(const Key('blame-line-2'))),
     );
-    expect(
-      find.byKey(Key('blame-hunk-header-${secondAnchor.id}')),
-      findsOneWidget,
-    );
-    expect(firstKey.currentContext, isNull);
-    expect(secondKey.currentContext, isNotNull);
     expect(
       tester
           .widget<FullDiffCodeRow>(
@@ -1093,21 +1265,151 @@ void main() {
           .kind,
       DiffLineKind.context,
     );
+  });
+
+  testWidgets('addition-only old blame anchors its last source boundary', (
+    tester,
+  ) async {
+    final file = FileDocument.fromBytes(
+      revision: commitA.parents.single,
+      path: 'old.txt',
+      side: FileDocumentSide.old,
+      bytes: Uint8List.fromList(utf8.encode('one\ntwo\n')),
+      gitMarkedBinary: false,
+    );
+    final blame = BlameDocument.fromGitLines(file, const [
+      GitBlameLine(
+        lineNumber: 1,
+        sha: '1111111',
+        author: 'First',
+        uncommitted: false,
+      ),
+      GitBlameLine(
+        lineNumber: 2,
+        sha: '2222222',
+        author: 'Second',
+        uncommitted: false,
+      ),
+    ]);
+    const anchor = DiffAnchor(hunkIndex: 0, oldLine: null, newLine: 3);
+    const hunk = DiffHunk(
+      index: 0,
+      oldStart: 3,
+      oldCount: 0,
+      newStart: 3,
+      newCount: 1,
+      context: 'add at eof',
+      lines: [DiffLine(kind: DiffLineKind.add, text: 'added', newNumber: 3)],
+      anchor: anchor,
+    );
+    final anchorKey = GlobalKey(debugLabel: anchor.id);
+
+    await tester.pumpWidget(
+      qaApp(
+        FullBlameView(
+          document: blame,
+          hunks: const [hunk],
+          activeAnchor: anchor,
+          wrapLines: false,
+          highlighter: fakeHighlighter,
+          anchorKeys: {anchor.id: anchorKey},
+        ),
+      ),
+    );
+
+    expect(find.byKey(const Key('blame-current-line-2')), findsOneWidget);
+    expect(anchorKey.currentContext, isNotNull);
+    expect(
+      tester.getRect(find.byKey(anchorKey)),
+      tester.getRect(find.byKey(const Key('blame-line-2'))),
+    );
     expect(
       tester
           .widget<FullDiffCodeRow>(
             find.descendant(
-              of: find.byKey(const Key('blame-line-4')),
+              of: find.byKey(const Key('blame-line-2')),
               matching: find.byType(FullDiffCodeRow),
             ),
           )
           .line
           .kind,
-      DiffLineKind.add,
+      DiffLineKind.context,
     );
   });
 
-  testWidgets('blame keeps the selected hunk header for an empty file', (
+  testWidgets('old blame marks only its active deleted source line', (
+    tester,
+  ) async {
+    final file = FileDocument.fromBytes(
+      revision: commitA.parents.single,
+      path: 'old.txt',
+      side: FileDocumentSide.old,
+      bytes: Uint8List.fromList(utf8.encode('one\nold value\n')),
+      gitMarkedBinary: false,
+    );
+    final blame = BlameDocument.fromGitLines(file, const [
+      GitBlameLine(
+        lineNumber: 1,
+        sha: '1111111',
+        author: 'First',
+        uncommitted: false,
+      ),
+      GitBlameLine(
+        lineNumber: 2,
+        sha: '2222222',
+        author: 'Second',
+        uncommitted: false,
+      ),
+    ]);
+    const anchor = DiffAnchor(hunkIndex: 0, oldLine: 2, newLine: 2);
+    const hunk = DiffHunk(
+      index: 0,
+      oldStart: 2,
+      oldCount: 1,
+      newStart: 2,
+      newCount: 1,
+      context: 'replace value',
+      lines: [
+        DiffLine(kind: DiffLineKind.delete, text: 'old value', oldNumber: 2),
+        DiffLine(kind: DiffLineKind.add, text: 'new value', newNumber: 2),
+      ],
+      anchor: anchor,
+    );
+
+    await tester.pumpWidget(
+      qaApp(
+        FullBlameView(
+          document: blame,
+          hunks: const [hunk],
+          activeAnchor: anchor,
+          wrapLines: false,
+          highlighter: fakeHighlighter,
+          anchorKeys: {anchor.id: GlobalKey(debugLabel: anchor.id)},
+        ),
+      ),
+    );
+
+    final firstRow = tester.widget<FullDiffCodeRow>(
+      find.descendant(
+        of: find.byKey(const Key('blame-line-1')),
+        matching: find.byType(FullDiffCodeRow),
+      ),
+    );
+    final secondRow = tester.widget<FullDiffCodeRow>(
+      find.descendant(
+        of: find.byKey(const Key('blame-line-2')),
+        matching: find.byType(FullDiffCodeRow),
+      ),
+    );
+    expect(find.byKey(const Key('blame-current-line-2')), findsOneWidget);
+    expect(firstRow.line.kind, DiffLineKind.context);
+    expect(secondRow.line.kind, DiffLineKind.delete);
+    expect(secondRow.line.oldNumber, 2);
+    expect(secondRow.line.newNumber, isNull);
+    expect(find.byKey(Key('blame-hunk-header-${anchor.id}')), findsNothing);
+  });
+
+  testWidgets('empty blame keeps zero source rows without a scroll exception', (
     tester,
   ) async {
     final file = FileDocument.fromBytes(
@@ -1132,6 +1434,8 @@ void main() {
       anchor: anchor,
     );
     final anchorKey = GlobalKey(debugLabel: anchor.id);
+    final controller = ScrollController();
+    addTearDown(controller.dispose);
 
     await tester.pumpWidget(
       qaApp(
@@ -1142,14 +1446,18 @@ void main() {
           wrapLines: false,
           highlighter: fakeHighlighter,
           anchorKeys: {anchor.id: anchorKey},
+          controller: controller,
         ),
       ),
     );
 
-    expect(find.byKey(Key('blame-hunk-header-${anchor.id}')), findsOneWidget);
-    expect(find.textContaining('empty deletion'), findsOneWidget);
+    expect(find.byKey(Key('blame-hunk-header-${anchor.id}')), findsNothing);
     expect(find.byKey(const Key('blame-line-1')), findsNothing);
-    expect(anchorKey.currentContext, isNotNull);
+    expect(find.byType(BlameSourceRow), findsNothing);
+    expect(anchorKey.currentContext, isNull);
+    controller.jumpTo(0);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('blame skips rich rendering when the file disables it', (
@@ -1238,6 +1546,18 @@ class _ThrowingSyntaxHighlighter implements FullDiffSyntaxHighlighter {
   @override
   List<CodeTokenSpan> highlightLine(String path, String source) =>
       throw StateError('rich rendering must stay disabled');
+
+  @override
+  String? languageForPath(String path) => 'test';
+}
+
+class _TokenSyntaxHighlighter implements FullDiffSyntaxHighlighter {
+  const _TokenSyntaxHighlighter();
+
+  @override
+  List<CodeTokenSpan> highlightLine(String path, String source) => const [
+    CodeTokenSpan(start: 0, end: 5, style: TextStyle(color: Color(0xFFABCDEF))),
+  ];
 
   @override
   String? languageForPath(String path) => 'test';

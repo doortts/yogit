@@ -2991,6 +2991,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
           editorService: ExternalEditorService(
             repositoryRoot: widget.repository.root,
           ),
+          avatarService: widget.avatarService,
+          showRemoteAvatars: widget.showRemoteAvatars,
         ),
       ),
     );

@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/avatars.dart';
 import 'package:yogit/diff_screen.dart';
+import 'package:yogit/full_blame_view.dart';
 import 'package:yogit/full_diff_controller.dart';
 import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/git.dart';
@@ -2851,6 +2852,93 @@ void main() {
 
     expect(requested, isNotEmpty);
     expect(requested, everyElement(lessThan(12)));
+  });
+
+  testWidgets('timeline passes avatar settings into full diff blame', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    var requests = 0;
+    final service = AvatarService(
+      remote: const RemoteRepository(
+        host: 'github.com',
+        owner: 'team',
+        repository: 'yogit',
+      ),
+      runner: (executable, arguments, {workingDirectory}) async {
+        requests++;
+        return ProcessResult(1, 1, '', 'offline');
+      },
+    );
+    final repository = FakeGitRepository(
+      (_, _) async => [
+        commit('40aff6d1', 'aligned blame', parents: const ['parent']),
+      ],
+      files: (_, _) async => const [
+        GitFileChange(
+          path: 'lib/aligned.dart',
+          status: 'M',
+          additions: 1,
+          deletions: 1,
+        ),
+      ],
+      diff: (_, _, _, _, _) async => const [
+        DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+        DiffLine(kind: DiffLineKind.delete, text: 'old line', oldNumber: 1),
+        DiffLine(kind: DiffLineKind.add, text: 'new line', newNumber: 1),
+      ],
+      content: (_, _, _) async => Uint8List.fromList('new line\n'.codeUnits),
+      blame: (_, _, _, _) async => const [
+        GitBlameLine(
+          lineNumber: 1,
+          sha: '40aff6d1',
+          author: 'Suwon Chae',
+          authorEmail: 'suwon@example.com',
+          authorTimestamp: 1704067200,
+          summary: 'Align blame metadata',
+          uncommitted: false,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: repository,
+          controller: controller,
+          avatarService: service,
+          showRemoteAvatars: false,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('preview-full-diff')));
+    await tester.pumpAndSettle();
+
+    final diffScreen = tester.widget<DiffScreen>(find.byType(DiffScreen));
+    expect(diffScreen.avatarService, same(service));
+    expect(diffScreen.showRemoteAvatars, isFalse);
+
+    await tester.tap(find.text('Blame').last);
+    await tester.pumpAndSettle();
+
+    final blameView = tester.widget<FullBlameView>(find.byType(FullBlameView));
+    expect(blameView.avatarService, same(service));
+    expect(blameView.showRemoteAvatars, isFalse);
+    final avatar = tester.widget<IdentityAvatar>(
+      find.byKey(const Key('blame-avatar-1')),
+    );
+    expect(avatar.identity.name, 'Suwon Chae');
+    expect(avatar.identity.email, 'suwon@example.com');
+    expect(find.text('SC'), findsOneWidget);
+    expect(requests, 0);
   });
 
   testWidgets('paging keeps one request in flight and shows end state', (
@@ -7863,6 +7951,8 @@ class FakeGitRepository extends GitRepository {
     this.loader, {
     this.files,
     this.diff,
+    this.content,
+    this.blame,
     this.history,
     this.workingTree,
     this.refs = const RepoRefs(local: ['main'], current: 'main'),
@@ -7883,6 +7973,19 @@ class FakeGitRepository extends GitRepository {
     bool ignoreWhitespace,
   )?
   diff;
+  final Future<Uint8List> Function(
+    GitCommit commit,
+    GitFileChange file,
+    String? parent,
+  )?
+  content;
+  final Future<List<GitBlameLine>> Function(
+    GitCommit commit,
+    GitFileChange file,
+    String? parent,
+    Uint8List? workingTreeBytes,
+  )?
+  blame;
   final Future<List<GitFileHistoryRecord>> Function(
     GitCommit commit,
     GitFileChange file,
@@ -7926,7 +8029,17 @@ class FakeGitRepository extends GitRepository {
     GitCommit commit,
     GitFileChange file, {
     String? parent,
-  }) async => Uint8List(0);
+  }) => content?.call(commit, file, parent) ?? Future.value(Uint8List(0));
+
+  @override
+  Future<List<GitBlameLine>> loadBlame(
+    GitCommit commit,
+    GitFileChange file, {
+    String? parent,
+    Uint8List? workingTreeBytes,
+  }) =>
+      blame?.call(commit, file, parent, workingTreeBytes) ??
+      Future.value(const []);
 }
 
 class DelayedSettingsStore extends SettingsStore {
