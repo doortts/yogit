@@ -73,6 +73,7 @@ class GlobalFileBar extends StatelessWidget {
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           Wrap(
+            key: const Key('file-info-controls'),
             spacing: 8,
             runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
@@ -121,13 +122,22 @@ class GlobalFileBar extends StatelessWidget {
                 ),
               if (file case final file?)
                 _HeaderBadge(
+                  controlKey: const Key('file-summary-badge'),
                   label: fileSummary(file),
+                  foreground: fullDiffAccent,
+                  background: fullDiffSelection,
+                ),
+              if (encodingLabel.isNotEmpty)
+                _HeaderBadge(
+                  controlKey: const Key('encoding-badge'),
+                  label: encodingLabel,
                   foreground: fullDiffAccent,
                   background: fullDiffSelection,
                 ),
             ],
           ),
           Wrap(
+            key: const Key('file-actions-controls'),
             spacing: 6,
             runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
@@ -152,6 +162,7 @@ class GlobalFileBar extends StatelessWidget {
                 ),
               ),
               FullDiffSegmentedControl<FullDiffView>(
+                key: const Key('main-view-controls'),
                 groupLabel: '주 화면',
                 values: FullDiffView.values,
                 selected: view,
@@ -159,11 +170,6 @@ class GlobalFileBar extends StatelessWidget {
                 onSelected: onViewSelected,
                 tooltipFor: (value) =>
                     value == FullDiffView.history ? '파일의 변경 이력을 보여줍니다' : null,
-              ),
-              _HeaderBadge(
-                label: encodingLabel,
-                foreground: fullDiffAccent,
-                background: fullDiffSelection,
               ),
             ],
           ),
@@ -503,14 +509,17 @@ class _HeaderBadge extends StatelessWidget {
     required this.label,
     required this.foreground,
     required this.background,
+    this.controlKey,
   });
 
   final String label;
   final Color foreground;
   final Color background;
+  final Key? controlKey;
 
   @override
   Widget build(BuildContext context) => Container(
+    key: controlKey,
     height: fullDiffControlHeight,
     padding: const EdgeInsets.symmetric(horizontal: 9),
     decoration: BoxDecoration(

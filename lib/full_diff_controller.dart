@@ -23,12 +23,35 @@ typedef FileCacheKey = ({
   FileDocumentSide side,
 });
 
+typedef EncodingCacheKey = ({
+  String repositoryRoot,
+  String revision,
+  String path,
+  String? oldPath,
+  String? parent,
+  FileDocumentSide side,
+});
+
 typedef BlameCacheKey = ({String revision, String path});
 typedef HistoryCacheKey = ({String startRevision, String path});
 
 const _unset = Object();
 const _cacheCapacity = 32;
 const _rawCacheByteLimit = 64 * 1024 * 1024;
+
+class FullDiffEncodingCache {
+  FullDiffEncodingCache();
+
+  static final FullDiffEncodingCache shared = FullDiffEncodingCache();
+
+  final _entries = <EncodingCacheKey, FileContentKind>{};
+
+  FileContentKind? read(EncodingCacheKey key) => _entries[key];
+
+  void write(EncodingCacheKey key, FileContentKind kind) {
+    _entries[key] = kind;
+  }
+}
 
 @immutable
 class AsyncResource<T> {
@@ -69,6 +92,7 @@ class FullDiffSessionState {
     required this.filesResource,
     required this.patch,
     required this.file,
+    required this.cachedEncodingKind,
     required this.blame,
     required this.history,
     required this.selectedHistoryEntry,
@@ -94,6 +118,7 @@ class FullDiffSessionState {
   final AsyncResource<List<GitFileChange>> filesResource;
   final AsyncResource<DiffDocument> patch;
   final AsyncResource<FileDocument> file;
+  final FileContentKind? cachedEncodingKind;
   final AsyncResource<BlameDocument> blame;
   final AsyncResource<List<FileHistoryEntry>> history;
   final FileHistoryEntry? selectedHistoryEntry;
@@ -101,12 +126,12 @@ class FullDiffSessionState {
   final int selectionGeneration;
   final int navigationSerial;
 
-  String get encodingLabel => switch (file.data?.kind) {
+  String get encodingLabel => switch (file.data?.kind ?? cachedEncodingKind) {
     FileContentKind.utf8 => 'UTF-8',
     FileContentKind.binary => 'Binary',
     FileContentKind.unsupportedEncoding => 'Unsupported encoding',
     FileContentKind.tooLarge => 'Too large',
-    null => file.loading ? 'Loading' : '—',
+    null => '',
   };
 
   bool get richRenderingEnabled {
@@ -132,6 +157,7 @@ class FullDiffSessionState {
     AsyncResource<List<GitFileChange>>? filesResource,
     AsyncResource<DiffDocument>? patch,
     AsyncResource<FileDocument>? file,
+    Object? cachedEncodingKind = _unset,
     AsyncResource<BlameDocument>? blame,
     AsyncResource<List<FileHistoryEntry>>? history,
     Object? selectedHistoryEntry = _unset,
@@ -162,6 +188,9 @@ class FullDiffSessionState {
     filesResource: filesResource ?? this.filesResource,
     patch: patch ?? this.patch,
     file: file ?? this.file,
+    cachedEncodingKind: identical(cachedEncodingKind, _unset)
+        ? this.cachedEncodingKind
+        : cachedEncodingKind as FileContentKind?,
     blame: blame ?? this.blame,
     history: history ?? this.history,
     selectedHistoryEntry: identical(selectedHistoryEntry, _unset)
@@ -270,6 +299,7 @@ FullDiffSessionState _initialState(
     filesResource: const AsyncResource(),
     patch: const AsyncResource(),
     file: const AsyncResource(),
+    cachedEncodingKind: null,
     blame: const AsyncResource(),
     history: const AsyncResource(),
     selectedHistoryEntry: null,
@@ -295,7 +325,9 @@ class FullDiffSessionController extends ChangeNotifier {
     required List<GitCommit> commits,
     required int initialIndex,
     required FullDiffInitialView initialView,
-  }) : state = _initialState(commits, initialIndex, initialView) {
+    FullDiffEncodingCache? encodingCache,
+  }) : _encodingCache = encodingCache ?? FullDiffEncodingCache.shared,
+       state = _initialState(commits, initialIndex, initialView) {
     _patchCache = _LruFutureCache(
       capacity: _cacheCapacity,
       sizeOf: _patchSize,
@@ -319,6 +351,7 @@ class FullDiffSessionController extends ChangeNotifier {
   }
 
   final FullDiffRepository repository;
+  final FullDiffEncodingCache _encodingCache;
   late final _LruFutureCache<PatchCacheKey, DiffDocument> _patchCache;
   late final _LruFutureCache<FileCacheKey, FileDocument> _fileCache;
   late final _LruFutureCache<BlameCacheKey, BlameDocument> _blameCache;
@@ -477,6 +510,7 @@ class FullDiffSessionController extends ChangeNotifier {
       state.copyWith(
         files: immutableFiles,
         selectedFile: file,
+        cachedEncodingKind: _cachedEncodingKind(entry.commit, parent, file),
         filesResource: AsyncResource(data: immutableFiles),
       ),
     );
@@ -619,6 +653,7 @@ class FullDiffSessionController extends ChangeNotifier {
         filesResource: filesResource,
         patch: const AsyncResource(),
         file: const AsyncResource(),
+        cachedEncodingKind: _cachedEncodingKind(commit, parent, selectedFile),
         blame: const AsyncResource(),
         history: preserveHistory ? state.history : const AsyncResource(),
         selectedHistoryEntry: preserveHistory ? selectedHistoryEntry : null,
@@ -643,6 +678,7 @@ class FullDiffSessionController extends ChangeNotifier {
         filesResource: const AsyncResource(loading: true),
         patch: const AsyncResource(),
         file: const AsyncResource(),
+        cachedEncodingKind: null,
         blame: const AsyncResource(),
         history: const AsyncResource(),
         selectedHistoryEntry: null,
@@ -679,6 +715,7 @@ class FullDiffSessionController extends ChangeNotifier {
       state.copyWith(
         files: immutableFiles,
         selectedFile: selectedFile,
+        cachedEncodingKind: _cachedEncodingKind(commit, parent, selectedFile),
         filesResource: AsyncResource(data: immutableFiles),
       ),
     );
@@ -771,6 +808,35 @@ class FullDiffSessionController extends ChangeNotifier {
     }
   }
 
+  FileContentKind? _cachedEncodingKind(
+    GitCommit commit,
+    String? parent,
+    GitFileChange? file,
+  ) {
+    if (file == null) return null;
+    return _encodingCache.read(_encodingCacheKey(commit, parent, file));
+  }
+
+  EncodingCacheKey _encodingCacheKey(
+    GitCommit commit,
+    String? parent,
+    GitFileChange file,
+  ) {
+    final deleted = file.status.startsWith('D');
+    return (
+      repositoryRoot: repository.root,
+      revision: commit.isWorkingTree && !deleted
+          ? '<working-tree>'
+          : deleted
+          ? parent ?? commit.parents.first
+          : commit.sha,
+      path: file.path,
+      oldPath: file.oldPath,
+      parent: parent,
+      side: deleted ? FileDocumentSide.old : FileDocumentSide.result,
+    );
+  }
+
   Future<void> _loadFile() async {
     if (_disposed) return;
     final file = state.selectedFile;
@@ -787,7 +853,15 @@ class FullDiffSessionController extends ChangeNotifier {
         ? parent ?? commit.parents.first
         : commit.sha;
     final path = deleted ? file.oldPath ?? file.path : file.path;
-    _replace(state.copyWith(file: const AsyncResource(loading: true)));
+    final encodingKey = _encodingCacheKey(commit, parent, file);
+    final cachedEncodingKind =
+        _encodingCache.read(encodingKey) ?? state.cachedEncodingKind;
+    _replace(
+      state.copyWith(
+        file: const AsyncResource(loading: true),
+        cachedEncodingKind: cachedEncodingKind,
+      ),
+    );
 
     try {
       final document = await _loadFileDocument(
@@ -810,7 +884,13 @@ class FullDiffSessionController extends ChangeNotifier {
       }
       final shouldEnsureBlame =
           state.blame.loading || state.view == FullDiffView.blame;
-      _replace(state.copyWith(file: AsyncResource(data: document)));
+      _encodingCache.write(encodingKey, document.kind);
+      _replace(
+        state.copyWith(
+          file: AsyncResource(data: document),
+          cachedEncodingKind: document.kind,
+        ),
+      );
       if (shouldEnsureBlame) await _ensureBlame();
     } catch (error) {
       if (_accepts(

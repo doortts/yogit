@@ -55,13 +55,13 @@ void main() {
       containsAllInOrder([
         'src/drlua.pas',
         'M · +12 −4 · 1.5 KB',
+        'UTF-8',
         '집중 모드',
         '편집기로 열기',
         'File',
         'Diff',
         'Blame',
         'History',
-        'UTF-8',
         'diff 알고리즘',
         'Histogram',
         '공백 무시',
@@ -398,6 +398,56 @@ void main() {
     }
   });
 
+  testWidgets(
+    'encoding appears after file details and never in view controls',
+    (tester) async {
+      await pumpHeaders(tester);
+
+      final fileInfo = find.byKey(const Key('file-info-controls'));
+      final actions = find.byKey(const Key('file-actions-controls'));
+      final summary = find.byKey(const Key('file-summary-badge'));
+      final encoding = find.byKey(const Key('encoding-badge'));
+
+      expect(find.descendant(of: fileInfo, matching: summary), findsOneWidget);
+      expect(find.descendant(of: fileInfo, matching: encoding), findsOneWidget);
+      expect(
+        tester.getTopRight(summary).dx,
+        lessThan(tester.getTopLeft(encoding).dx),
+      );
+      expect(
+        find.descendant(
+          of: actions,
+          matching: find.byKey(const Key('focus-mode')),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: actions,
+          matching: find.byKey(const Key('open-editor')),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: actions,
+          matching: find.byKey(const Key('main-view-controls')),
+        ),
+        findsOneWidget,
+      );
+      expect(find.descendant(of: actions, matching: encoding), findsNothing);
+    },
+  );
+
+  testWidgets('encoding badge stays hidden until a value is available', (
+    tester,
+  ) async {
+    await pumpHeaders(tester, encodingLabel: '');
+
+    expect(find.byKey(const Key('encoding-badge')), findsNothing);
+    expect(find.text('Loading'), findsNothing);
+  });
+
   testWidgets('toggle semantics explicitly expose their enabled state', (
     tester,
   ) async {
@@ -422,6 +472,7 @@ Future<void> pumpHeaders(
   bool focusMode = false,
   bool ignoreWhitespace = false,
   DiffAlgorithm algorithm = DiffAlgorithm.histogram,
+  String encodingLabel = 'UTF-8',
   VoidCallback? onBack,
   ValueChanged<DiffAlgorithm>? onAlgorithmSelected,
 }) => tester.pumpWidget(
@@ -432,7 +483,7 @@ Future<void> pumpHeaders(
           file: _sizedFile,
           path: _sizedFile.path,
           view: view,
-          encodingLabel: 'UTF-8',
+          encodingLabel: encodingLabel,
           canOpenEditor: true,
           focusMode: focusMode,
           onBack: onBack ?? () {},

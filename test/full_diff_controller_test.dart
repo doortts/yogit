@@ -24,6 +24,7 @@ void main() {
         commits: const [commitA],
         initialIndex: 0,
         initialView: FullDiffInitialView.hunk,
+        encodingCache: FullDiffEncodingCache(),
       );
 
       final loading = controller.initialize();
@@ -31,7 +32,7 @@ void main() {
 
       expect(controller.state.patch.loading, isTrue);
       expect(controller.state.file.loading, isTrue);
-      expect(controller.state.encodingLabel, 'Loading');
+      expect(controller.state.encodingLabel, '');
       expect(controller.state.richRenderingEnabled, isFalse);
       controller
         ..setView(FullDiffView.file)
@@ -55,6 +56,135 @@ void main() {
       expect(controller.state.activeAnchor?.hunkIndex, 0);
     },
   );
+
+  test('shares a committed file encoding across controllers', () async {
+    final encodingCache = FullDiffEncodingCache();
+    final firstRepository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..diff = ((_, _, _, _, _) async => twoHunkLines)
+      ..content = ((_, _, _) async =>
+          Uint8List.fromList(utf8.encode('committed\n')));
+    final first = FullDiffSessionController(
+      repository: firstRepository,
+      commits: const [commitA],
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+      encodingCache: encodingCache,
+    );
+    addTearDown(first.dispose);
+    await first.initialize();
+    expect(first.state.encodingLabel, 'UTF-8');
+
+    final contentStarted = Completer<void>();
+    final content = Completer<Uint8List>();
+    final secondRepository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..diff = ((_, _, _, _, _) async => twoHunkLines)
+      ..content = ((_, _, _) {
+        contentStarted.complete();
+        return content.future;
+      });
+    final second = FullDiffSessionController(
+      repository: secondRepository,
+      commits: const [commitA],
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+      encodingCache: encodingCache,
+    );
+    addTearDown(second.dispose);
+
+    final loading = second.initialize();
+    await contentStarted.future;
+    expect(second.state.file.loading, isTrue);
+    expect(second.state.encodingLabel, 'UTF-8');
+
+    content.complete(Uint8List.fromList(utf8.encode('committed again\n')));
+    await loading;
+    expect(second.state.encodingLabel, 'UTF-8');
+  });
+
+  test('refreshes a cached working-tree encoding in the background', () async {
+    final encodingCache = FullDiffEncodingCache();
+    final firstRepository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..diff = ((_, _, _, _, _) async => twoHunkLines)
+      ..content = ((_, _, _) async =>
+          Uint8List.fromList(utf8.encode('working tree\n')));
+    final first = FullDiffSessionController(
+      repository: firstRepository,
+      commits: const [_workingTreeCommit],
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+      encodingCache: encodingCache,
+    );
+    addTearDown(first.dispose);
+    await first.initialize();
+    expect(first.state.encodingLabel, 'UTF-8');
+
+    final contentStarted = Completer<void>();
+    final content = Completer<Uint8List>();
+    final secondRepository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..diff = ((_, _, _, _, _) async => twoHunkLines)
+      ..content = ((_, _, _) {
+        contentStarted.complete();
+        return content.future;
+      });
+    final second = FullDiffSessionController(
+      repository: secondRepository,
+      commits: const [_workingTreeCommit],
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+      encodingCache: encodingCache,
+    );
+    addTearDown(second.dispose);
+
+    final loading = second.initialize();
+    await contentStarted.future;
+    expect(second.state.encodingLabel, 'UTF-8');
+
+    content.complete(Uint8List.fromList([0, 1, 2]));
+    await loading;
+    expect(second.state.encodingLabel, 'Binary');
+  });
+
+  test('keeps a cached working-tree encoding when refresh fails', () async {
+    final encodingCache = FullDiffEncodingCache();
+    final firstRepository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..diff = ((_, _, _, _, _) async => twoHunkLines)
+      ..content = ((_, _, _) async =>
+          Uint8List.fromList(utf8.encode('working tree\n')));
+    final first = FullDiffSessionController(
+      repository: firstRepository,
+      commits: const [_workingTreeCommit],
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+      encodingCache: encodingCache,
+    );
+    addTearDown(first.dispose);
+    await first.initialize();
+
+    final secondRepository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..diff = ((_, _, _, _, _) async => twoHunkLines)
+      ..content = ((_, _, _) async => throw const GitRepositoryException(
+        '/repo',
+        'working tree read failed',
+      ));
+    final second = FullDiffSessionController(
+      repository: secondRepository,
+      commits: const [_workingTreeCommit],
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+      encodingCache: encodingCache,
+    );
+    addTearDown(second.dispose);
+
+    await second.initialize();
+    expect(second.state.file.error, isA<GitRepositoryException>());
+    expect(second.state.encodingLabel, 'UTF-8');
+  });
 
   test('a late file cannot replace the current four resources', () async {
     const fileB = GitFileChange(
@@ -1012,6 +1142,18 @@ const historyCommitB = GitCommit(
   committerTimestamp: 1720486800,
   refs: [],
   subject: 'Historical revision B',
+);
+
+const _workingTreeCommit = GitCommit(
+  sha: '',
+  shortSha: '',
+  parents: ['head'],
+  author: fixtureIdentity,
+  authorTimestamp: 1720573200,
+  committer: fixtureIdentity,
+  committerTimestamp: 1720573200,
+  refs: [],
+  subject: 'Working tree',
 );
 
 const historyCommitC = GitCommit(

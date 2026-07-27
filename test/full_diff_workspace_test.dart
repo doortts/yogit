@@ -533,6 +533,61 @@ void main() {
     );
   });
 
+  testWidgets('encoding appears without moving file details or actions', (
+    tester,
+  ) async {
+    final contentStarted = Completer<void>();
+    final content = Completer<Uint8List>();
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [_sizedFile])
+      ..diff = ((_, _, _, _, _) async => twoHunkLines)
+      ..content = ((_, _, _) {
+        contentStarted.complete();
+        return content.future;
+      });
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+      encodingCache: FullDiffEncodingCache(),
+    );
+    addTearDown(controller.dispose);
+    final loading = controller.initialize();
+    await contentStarted.future;
+    await pumpWorkspace(
+      tester,
+      controller: controller,
+      size: const Size(1400, 842),
+    );
+
+    const stableKeys = [
+      Key('file-path-chip'),
+      Key('file-summary-badge'),
+      Key('focus-mode'),
+      Key('main-view-controls'),
+    ];
+    final before = {
+      for (final key in stableKeys) key: tester.getTopLeft(find.byKey(key)),
+    };
+    expect(find.byKey(const Key('encoding-badge')), findsNothing);
+
+    content.complete(Uint8List.fromList(utf8.encode('source\n')));
+    await loading;
+    await tester.pumpAndSettle();
+
+    for (final key in stableKeys) {
+      expect(tester.getTopLeft(find.byKey(key)), before[key]);
+    }
+    expect(find.byKey(const Key('encoding-badge')), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.byKey(const Key('encoding-badge'))).dx,
+      greaterThan(
+        tester.getTopRight(find.byKey(const Key('file-summary-badge'))).dx,
+      ),
+    );
+  });
+
   testWidgets('the 480px toolbar uses the compact algorithm label', (
     tester,
   ) async {
