@@ -317,11 +317,17 @@ class BlameLine {
     required this.sha,
     required this.author,
     required this.uncommitted,
+    this.authorEmail = '',
+    this.authorTimestamp,
+    this.summary = '',
   });
 
   final int lineNumber;
   final String sha;
   final String author;
+  final String authorEmail;
+  final int? authorTimestamp;
+  final String summary;
   final bool uncommitted;
 }
 
@@ -350,6 +356,9 @@ class BlameDocument {
             lineNumber: line.lineNumber,
             sha: line.sha,
             author: line.author,
+            authorEmail: line.authorEmail,
+            authorTimestamp: line.authorTimestamp,
+            summary: line.summary,
             uncommitted: line.uncommitted,
           ),
       ]),

@@ -137,6 +137,32 @@ void main() {
     );
   });
 
+  test('preserves blame author metadata by sha', () {
+    final file = FileDocument.fromBytes(
+      revision: 'abc',
+      path: 'one.txt',
+      side: FileDocumentSide.result,
+      bytes: Uint8List.fromList(utf8.encode('one\n')),
+      gitMarkedBinary: false,
+    );
+
+    final document = BlameDocument.fromGitLines(file, const [
+      GitBlameLine(
+        lineNumber: 1,
+        sha: 'abc123',
+        author: 'Test User',
+        authorEmail: 'test@example.com',
+        authorTimestamp: 1704067200,
+        summary: 'add fixture',
+        uncommitted: false,
+      ),
+    ]);
+
+    expect(document.lines.single.authorEmail, 'test@example.com');
+    expect(document.lines.single.authorTimestamp, 1704067200);
+    expect(document.lines.single.summary, 'add fixture');
+  });
+
   test('records which hard limit stopped text materialization', () {
     final bytesOverLimit = Uint8List(fullDiffTextByteLimit + 1)
       ..fillRange(0, fullDiffTextByteLimit + 1, 0x61);

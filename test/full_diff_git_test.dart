@@ -7,11 +7,16 @@ import 'package:yogit/git.dart';
 const _textByteLimit = 10 * 1024 * 1024;
 const _largeFileLength = 32 * 1024 * 1024;
 
-Future<String> runGit(Directory root, List<String> arguments) async {
+Future<String> runGit(
+  Directory root,
+  List<String> arguments, {
+  Map<String, String>? environment,
+}) async {
   final result = await Process.run(
     'git',
     arguments,
     workingDirectory: root.path,
+    environment: environment,
   );
   expect(result.exitCode, 0, reason: result.stderr.toString());
   return result.stdout.toString();
@@ -29,13 +34,14 @@ Future<void> writeAndCommit(
   Directory root,
   String path,
   String contents,
-  String subject,
-) async {
+  String subject, {
+  Map<String, String>? environment,
+}) async {
   final file = File('${root.path}/$path');
   await file.parent.create(recursive: true);
   await file.writeAsString(contents);
   await runGit(root, ['add', '--', path]);
-  await runGit(root, ['commit', '-m', subject]);
+  await runGit(root, ['commit', '-m', subject], environment: environment);
 }
 
 Future<void> writeSparseLargeFile(Directory root, String path) async {
@@ -375,6 +381,109 @@ void main() {
     expect(calls.map((arguments) => arguments.last), [
       for (final value in cases) value.expected,
     ]);
+  });
+
+  test('preserves blame author metadata by sha', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    const firstTimestamp = '1704067200 +0000';
+    await writeAndCommit(
+      root,
+      'fixture.txt',
+      'first\nsecond\n',
+      'add fixture',
+      environment: {
+        'GIT_AUTHOR_DATE': firstTimestamp,
+        'GIT_COMMITTER_DATE': firstTimestamp,
+      },
+    );
+    await writeAndCommit(
+      root,
+      'other.txt',
+      'unrelated\n',
+      'add unrelated',
+      environment: {
+        'GIT_AUTHOR_DATE': '1704067201 +0000',
+        'GIT_COMMITTER_DATE': '1704067201 +0000',
+      },
+    );
+
+    final repository = GitRepository(root.path);
+    final commit = (await repository.loadHistory()).firstWhere(
+      (entry) => entry.subject == 'add fixture',
+    );
+    final file = (await repository.loadFiles(
+      commit,
+    )).singleWhere((entry) => entry.path == 'fixture.txt');
+    final lines = await repository.loadBlame(commit, file);
+
+    expect(lines.first.authorEmail, 'test@example.com');
+    expect(lines.first.authorTimestamp, 1704067200);
+    expect(lines.first.summary, 'add fixture');
+    expect(lines[1].authorEmail, lines.first.authorEmail);
+    expect(lines[1].authorTimestamp, lines.first.authorTimestamp);
+    expect(lines[1].summary, lines.first.summary);
+
+    const sha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const missingSha = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const uncommittedSha = '0000000000000000000000000000000000000000';
+    const porcelain =
+        '''$sha 1 1 2
+author Test User
+author-mail <test@example.com>
+author-time 1704067200
+summary add fixture
+filename fixture.txt
+\tfirst
+$sha 2 2
+\tsecond
+$missingSha 3 3
+\tmissing
+$uncommittedSha 4 4
+\tuncommitted
+''';
+    const identity = GitIdentity(name: 'Test User', email: 'test@example.com');
+    const fixtureCommit = GitCommit(
+      sha: 'head',
+      shortSha: 'head',
+      parents: ['base'],
+      author: identity,
+      authorTimestamp: 0,
+      committer: identity,
+      committerTimestamp: 0,
+      refs: [],
+      subject: 'head',
+    );
+    const fixtureFile = GitFileChange(
+      path: 'fixture.txt',
+      status: 'M',
+      additions: 0,
+      deletions: 0,
+    );
+    final fixtureRepository = GitRepository(
+      '/repo',
+      runner: (executable, arguments, {workingDirectory}) async =>
+          ProcessResult(0, 0, porcelain, ''),
+    );
+
+    final fixtureLines = await fixtureRepository.loadBlame(
+      fixtureCommit,
+      fixtureFile,
+    );
+
+    expect(fixtureLines[1].authorEmail, 'test@example.com');
+    expect(fixtureLines[1].authorTimestamp, 1704067200);
+    expect(fixtureLines[1].summary, 'add fixture');
+    expect(fixtureLines[2].author, '');
+    expect(fixtureLines[2].authorEmail, '');
+    expect(fixtureLines[2].authorTimestamp, isNull);
+    expect(fixtureLines[2].summary, '');
+    expect(fixtureLines[2].uncommitted, isFalse);
+    expect(fixtureLines[3].author, '');
+    expect(fixtureLines[3].authorEmail, '');
+    expect(fixtureLines[3].authorTimestamp, isNull);
+    expect(fixtureLines[3].summary, '');
+    expect(fixtureLines[3].uncommitted, isTrue);
   });
 
   test('blames tracked and untracked working tree contents', () async {

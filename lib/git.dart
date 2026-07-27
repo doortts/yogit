@@ -441,11 +441,17 @@ class GitBlameLine {
     required this.sha,
     required this.author,
     required this.uncommitted,
+    this.authorEmail = '',
+    this.authorTimestamp,
+    this.summary = '',
   });
 
   final int lineNumber;
   final String sha;
   final String author;
+  final String authorEmail;
+  final int? authorTimestamp;
+  final String summary;
   final bool uncommitted;
 }
 
@@ -1307,22 +1313,41 @@ void _verifyWorktreeSnapshot(
   }
 }
 
+typedef _BlameMetadata = ({
+  String author,
+  String email,
+  int? timestamp,
+  String summary,
+});
+
+const _emptyBlameMetadata = (
+  author: '',
+  email: '',
+  timestamp: null,
+  summary: '',
+);
+
 List<GitBlameLine> _parseBlamePorcelain(String output) {
   final lines = <GitBlameLine>[];
-  final authors = <String, String>{};
+  final metadataBySha = <String, _BlameMetadata>{};
   String? sha;
-  String? author;
+  _BlameMetadata? metadata;
   int? lineNumber;
 
   for (final line in output.split('\n')) {
     if (line.startsWith('\t')) {
       if (sha != null && lineNumber != null) {
         final normalizedSha = sha.startsWith('^') ? sha.substring(1) : sha;
+        final completedMetadata = metadata ?? _emptyBlameMetadata;
+        metadataBySha[normalizedSha] = completedMetadata;
         lines.add(
           GitBlameLine(
             lineNumber: lineNumber,
             sha: normalizedSha,
-            author: author ?? authors[normalizedSha] ?? '',
+            author: completedMetadata.author,
+            authorEmail: completedMetadata.email,
+            authorTimestamp: completedMetadata.timestamp,
+            summary: completedMetadata.summary,
             uncommitted:
                 normalizedSha.isNotEmpty &&
                 normalizedSha.codeUnits.every((unit) => unit == 0x30),
@@ -1330,7 +1355,7 @@ List<GitBlameLine> _parseBlamePorcelain(String output) {
         );
       }
       sha = null;
-      author = null;
+      metadata = null;
       lineNumber = null;
       continue;
     }
@@ -1344,13 +1369,46 @@ List<GitBlameLine> _parseBlamePorcelain(String output) {
       sha = fields[0];
       lineNumber = parsedLine;
       final normalizedSha = sha.startsWith('^') ? sha.substring(1) : sha;
-      author = authors[normalizedSha];
+      metadata = metadataBySha[normalizedSha] ?? _emptyBlameMetadata;
       continue;
     }
     if (line.startsWith('author ') && sha != null) {
-      author = line.substring('author '.length);
-      final normalizedSha = sha.startsWith('^') ? sha.substring(1) : sha;
-      authors[normalizedSha] = author;
+      metadata = (
+        author: line.substring('author '.length),
+        email: metadata!.email,
+        timestamp: metadata!.timestamp,
+        summary: metadata!.summary,
+      );
+      continue;
+    }
+    if (line.startsWith('author-mail ') && sha != null) {
+      final email = line.substring('author-mail '.length);
+      metadata = (
+        author: metadata!.author,
+        email: email.startsWith('<') && email.endsWith('>')
+            ? email.substring(1, email.length - 1)
+            : email,
+        timestamp: metadata!.timestamp,
+        summary: metadata!.summary,
+      );
+      continue;
+    }
+    if (line.startsWith('author-time ') && sha != null) {
+      metadata = (
+        author: metadata!.author,
+        email: metadata!.email,
+        timestamp: int.tryParse(line.substring('author-time '.length)),
+        summary: metadata!.summary,
+      );
+      continue;
+    }
+    if (line.startsWith('summary ') && sha != null) {
+      metadata = (
+        author: metadata!.author,
+        email: metadata!.email,
+        timestamp: metadata!.timestamp,
+        summary: line.substring('summary '.length),
+      );
     }
   }
   return lines;
