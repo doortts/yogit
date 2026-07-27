@@ -148,12 +148,15 @@ class HistoryRow extends StatelessWidget {
                       ' · ',
                       style: TextStyle(color: fullDiffMuted, fontSize: 10),
                     ),
-                    Text(
-                      _relativeTime(entry.commit.committerTimestamp),
-                      maxLines: 1,
-                      style: const TextStyle(
-                        color: fullDiffMuted,
-                        fontSize: 10,
+                    Flexible(
+                      child: Text(
+                        _relativeTime(entry.commit.committerTimestamp),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: fullDiffMuted,
+                          fontSize: 10,
+                        ),
                       ),
                     ),
                   ],

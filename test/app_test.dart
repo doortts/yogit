@@ -6848,6 +6848,106 @@ void main() {
     expect(scroll.offset, lessThanOrEqualTo(maximum));
   });
 
+  testWidgets('history page scrolling targets the detail diff, not its list', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 700);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final commits = [
+      commit('current', 'current commit', parents: const ['previous']),
+    ];
+    final historyCommits = [
+      commits.single,
+      for (var index = 1; index <= 30; index++)
+        commit(
+          'history-$index',
+          'history commit $index',
+          parents: ['history-${index + 1}'],
+        ),
+    ];
+    final repository = FakeGitRepository(
+      (_, _) async => commits,
+      files: (_, _) async => const [
+        GitFileChange(
+          path: 'lib/a.dart',
+          status: 'M',
+          additions: 1,
+          deletions: 1,
+        ),
+      ],
+      diff: (_, _, path, _, _) async => [
+        const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,80 +1,80 @@'),
+        for (var index = 1; index <= 80; index++)
+          DiffLine(
+            kind: DiffLineKind.context,
+            text: '$path line $index',
+            oldNumber: index,
+            newNumber: index,
+          ),
+      ],
+      history: (_, file) async => [
+        for (final historyCommit in historyCommits)
+          GitFileHistoryRecord(
+            commit: historyCommit,
+            path: file.path,
+            oldPath: null,
+            status: 'M',
+          ),
+      ],
+    );
+    final session = FullDiffSessionController(
+      repository: repository,
+      commits: commits,
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+    );
+    addTearDown(session.dispose);
+    await session.initialize();
+    session
+      ..setView(FullDiffView.history)
+      ..setPresentation(DiffPresentation.inline)
+      ..setFocusMode(true);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: repository,
+          commits: commits,
+          initialIndex: 0,
+          controller: session,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final historyScroll = tester
+        .widget<ListView>(find.byKey(const Key('history-list')))
+        .controller!;
+    final detailScroll = tester
+        .widget<ListView>(
+          find
+              .descendant(
+                of: find.byKey(const Key('history-detail-pane')),
+                matching: find.byType(ListView),
+              )
+              .first,
+        )
+        .controller!;
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+
+    expect(detailScroll.offset, 48);
+    expect(historyScroll.offset, 0);
+  });
+
   testWidgets('full diff popup handles arrows before screen shortcuts', (
     tester,
   ) async {
@@ -7752,6 +7852,7 @@ class FakeGitRepository extends GitRepository {
     this.loader, {
     this.files,
     this.diff,
+    this.history,
     this.workingTree,
     this.refs = const RepoRefs(local: ['main'], current: 'main'),
     String root = '.',
@@ -7771,6 +7872,11 @@ class FakeGitRepository extends GitRepository {
     bool ignoreWhitespace,
   )?
   diff;
+  final Future<List<GitFileHistoryRecord>> Function(
+    GitCommit commit,
+    GitFileChange file,
+  )?
+  history;
 
   @override
   Future<List<GitCommit>> loadHistory({int limit = 500, int skip = 0}) =>
@@ -7797,6 +7903,12 @@ class FakeGitRepository extends GitRepository {
   }) =>
       diff?.call(commit, parent, file.path, algorithm, ignoreWhitespace) ??
       Future.value(const []);
+
+  @override
+  Future<List<GitFileHistoryRecord>> loadFileHistory(
+    GitCommit commit,
+    GitFileChange file,
+  ) => history?.call(commit, file) ?? Future.value(const []);
 
   @override
   Future<Uint8List> loadFileBytes(

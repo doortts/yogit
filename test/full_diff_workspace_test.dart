@@ -11,6 +11,7 @@ import 'package:yogit/full_diff_controller.dart';
 import 'package:yogit/full_diff_minimap.dart';
 import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/full_diff_theme.dart';
+import 'package:yogit/full_history_workspace.dart';
 import 'package:yogit/git.dart';
 
 import 'support/full_diff_fixtures.dart';
@@ -75,6 +76,55 @@ void main() {
     return (controller: controller, repository: repository);
   }
 
+  Future<
+    ({FullDiffSessionController controller, FakeFullDiffRepository repository})
+  >
+  historyWorkspaceFixture({
+    Future<List<DiffLine>> Function(
+      GitCommit,
+      GitFileChange,
+      String?,
+      DiffAlgorithm,
+      bool,
+    )?
+    diff,
+  }) async {
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..diff =
+          diff ??
+          ((commit, _, _, _, _) async => commit.sha == commitA.sha
+              ? twoHunkLines
+              : const [
+                  DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+                  DiffLine(
+                    kind: DiffLineKind.add,
+                    text: 'historical change',
+                    newNumber: 1,
+                  ),
+                ])
+      ..content = ((_, _, _) async =>
+          Uint8List.fromList(utf8.encode('current\n')))
+      ..history = ((_, _) async => [
+        for (final entry in historyEntries)
+          GitFileHistoryRecord(
+            commit: entry.commit,
+            path: entry.path,
+            oldPath: entry.oldPath,
+            status: entry.status,
+          ),
+      ]);
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+    );
+    await controller.initialize();
+    controller.setView(FullDiffView.history);
+    return (controller: controller, repository: repository);
+  }
+
   Future<void> pumpWorkspace(
     WidgetTester tester, {
     required FullDiffSessionController controller,
@@ -135,6 +185,14 @@ void main() {
     if (alt) await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
     if (meta) await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump();
+  }
+
+  Future<void> pumpUntil(WidgetTester tester, bool Function() condition) async {
+    for (var attempt = 0; attempt < 50; attempt++) {
+      if (condition()) return;
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    expect(condition(), isTrue, reason: 'condition did not become true');
   }
 
   InkWell editorButton(WidgetTester tester) => tester.widget<InkWell>(
@@ -425,6 +483,199 @@ void main() {
       semantics.dispose();
     },
   );
+
+  testWidgets('history keeps a responsive list beside its detail pane', (
+    tester,
+  ) async {
+    const scenarios = [
+      (workspaceWidth: 760.0, listWidth: 280.0),
+      (workspaceWidth: 600.0, listWidth: 210.0),
+      (workspaceWidth: 480.0, listWidth: 180.0),
+    ];
+    for (final scenario in scenarios) {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: scenario.workspaceWidth,
+              height: 400,
+              child: const FullHistoryWorkspace(
+                history: SizedBox(),
+                detail: SizedBox(),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final listPane = find.byKey(const Key('history-list-pane'));
+      final detailPane = find.byKey(const Key('history-detail-pane'));
+      expect(tester.getSize(listPane).width, scenario.listWidth);
+      expect(
+        tester.getTopLeft(listPane).dx,
+        lessThan(tester.getTopLeft(detailPane).dx),
+      );
+      expect(find.byKey(const Key('history-detail-divider')), findsOneWidget);
+    }
+  });
+
+  testWidgets('clicking history keeps the list and shows its patch', (
+    tester,
+  ) async {
+    final fixture = await historyWorkspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    fixture.controller.setFocusMode(true);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1070, 842),
+    );
+    final historicalEntry = historyEntries.last;
+
+    await tester.tap(
+      find.byKey(Key('history-row-${historicalEntry.commit.sha}')),
+    );
+    await pumpUntil(
+      tester,
+      () =>
+          fixture.controller.state.selectedCommit.sha ==
+              historicalEntry.commit.sha &&
+          fixture.controller.state.patch.data != null &&
+          fixture.controller.state.file.data != null,
+    );
+    await tester.pump();
+
+    expect(find.byKey(const Key('history-list')), findsOneWidget);
+    expect(find.byKey(const Key('history-detail-pane')), findsOneWidget);
+    expect(find.text('historical change'), findsOneWidget);
+  });
+
+  testWidgets('history focus alone does not change the detail patch', (
+    tester,
+  ) async {
+    final fixture = await historyWorkspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    fixture.controller.setFocusMode(true);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1070, 842),
+    );
+    final historicalRow = find.byKey(
+      Key('history-row-${historyEntries.last.commit.sha}'),
+    );
+
+    Focus.of(tester.element(historicalRow)).requestFocus();
+    await tester.pump();
+
+    expect(Focus.of(tester.element(historicalRow)).hasPrimaryFocus, isTrue);
+    expect(fixture.controller.state.selectedCommit.sha, commitA.sha);
+    expect(find.text('first new'), findsOneWidget);
+    expect(find.text('historical change'), findsNothing);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await pumpUntil(
+      tester,
+      () =>
+          fixture.controller.state.selectedCommit.sha ==
+              historyEntries.last.commit.sha &&
+          fixture.controller.state.patch.data != null &&
+          fixture.controller.state.file.data != null,
+    );
+    await tester.pump();
+
+    expect(
+      fixture.controller.state.selectedCommit.sha,
+      historyEntries.last.commit.sha,
+    );
+    expect(find.text('historical change'), findsOneWidget);
+  });
+
+  testWidgets('history detail supports inline and split presentations', (
+    tester,
+  ) async {
+    final fixture = await historyWorkspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    fixture.controller.setFocusMode(true);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1070, 842),
+    );
+
+    await tester.tap(find.text('Inline'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('inline-hunk-0')), findsOneWidget);
+
+    await tester.tap(find.text('Split'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('split-old-pane')), findsOneWidget);
+  });
+
+  testWidgets('history keeps its list while detail loading fails and retries', (
+    tester,
+  ) async {
+    final historicalPatch = Completer<List<DiffLine>>();
+    var historicalAttempts = 0;
+    final fixture = await historyWorkspaceFixture(
+      diff: (commit, _, _, _, _) {
+        if (commit.sha == commitA.sha) return Future.value(twoHunkLines);
+        historicalAttempts++;
+        if (historicalAttempts == 1) return historicalPatch.future;
+        return Future.value(const [
+          DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+          DiffLine(
+            kind: DiffLineKind.add,
+            text: 'historical change',
+            newNumber: 1,
+          ),
+        ]);
+      },
+    );
+    addTearDown(fixture.controller.dispose);
+    fixture.controller.setFocusMode(true);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1070, 842),
+    );
+
+    await tester.tap(
+      find.byKey(Key('history-row-${historyEntries.last.commit.sha}')),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(historicalAttempts, 1);
+    expect(find.byKey(const Key('history-list')), findsOneWidget);
+    expect(find.byKey(const Key('history-detail-pane')), findsOneWidget);
+    expect(find.byKey(const Key('diff-pending-first-diff')), findsOneWidget);
+
+    historicalPatch.completeError(
+      const GitRepositoryException('/repo', 'historical failed'),
+    );
+    await pumpUntil(tester, () => fixture.controller.state.patch.error != null);
+    await tester.pump();
+
+    expect(find.byKey(const Key('history-list')), findsOneWidget);
+    expect(find.byKey(const Key('full-diff-unavailable')), findsOneWidget);
+    expect(find.text('다시 시도'), findsOneWidget);
+
+    await tester.tap(find.text('다시 시도'));
+    await pumpUntil(
+      tester,
+      () =>
+          historicalAttempts == 2 &&
+          fixture.controller.state.patch.data != null &&
+          fixture.controller.state.file.data != null,
+    );
+    await tester.pump();
+
+    expect(historicalAttempts, 2);
+    expect(find.byKey(const Key('history-list')), findsOneWidget);
+    expect(find.text('historical change'), findsOneWidget);
+  });
 
   testWidgets('uses compact typography in commit and file lists', (
     tester,

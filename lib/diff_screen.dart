@@ -18,6 +18,7 @@ import 'full_diff_theme.dart';
 import 'full_diff_unavailable_panel.dart';
 import 'full_file_view.dart';
 import 'full_history_view.dart';
+import 'full_history_workspace.dart';
 import 'git.dart';
 import 'page_scroll_shortcuts.dart';
 import 'settings.dart';
@@ -82,6 +83,7 @@ class DiffScreen extends StatefulWidget {
 
 class _DiffScreenState extends State<DiffScreen> {
   final _contentScroll = ScrollController();
+  final _historyScroll = ScrollController();
   final _contentViewportKey = GlobalKey();
   final _highlighter = HighlightJsSyntaxHighlighter();
   Map<String, GlobalKey> _anchorKeys = <String, GlobalKey>{};
@@ -181,6 +183,7 @@ class _DiffScreenState extends State<DiffScreen> {
     _contentScroll
       ..removeListener(_handleContentScrolled)
       ..dispose();
+    _historyScroll.dispose();
     if (_ownsController) _controller.dispose();
     super.dispose();
   }
@@ -1056,7 +1059,7 @@ class _DiffScreenState extends State<DiffScreen> {
         FullDiffView.file => _fileContent(state),
         FullDiffView.diff => _diffContent(state, viewportWidth),
         FullDiffView.blame => _blameContent(state),
-        FullDiffView.history => _historyContent(state),
+        FullDiffView.history => _historyContent(state, viewportWidth),
       };
 
   Widget _fileContent(FullDiffSessionState state) {
@@ -1095,7 +1098,11 @@ class _DiffScreenState extends State<DiffScreen> {
           reason: FullDiffUnavailableReason.gitError,
           path: state.file.data?.path ?? selectedFile.path,
           error: state.patch.error,
-          onRetry: () => unawaited(_controller.retryPatch()),
+          onRetry: () => unawaited(
+            state.view == FullDiffView.history
+                ? _controller.retryHistorySelection()
+                : _controller.retryPatch(),
+          ),
         ),
       );
     }
@@ -1109,6 +1116,15 @@ class _DiffScreenState extends State<DiffScreen> {
     }
     final fileDocument = state.file.data;
     if (fileDocument == null) {
+      if (state.view == FullDiffView.history && state.file.error != null) {
+        return _unavailablePanel(
+          state,
+          reason: FullDiffUnavailableReason.gitError,
+          path: selectedFile.path,
+          error: state.file.error,
+          onRetry: () => unawaited(_controller.retryHistorySelection()),
+        );
+      }
       return _resourceStatus(state.file, '파일을 읽는 중입니다');
     }
     final unavailableReason = _unavailableReasonFor(fileDocument);
@@ -1242,24 +1258,46 @@ class _DiffScreenState extends State<DiffScreen> {
     );
   }
 
-  Widget _historyContent(FullDiffSessionState state) {
+  Widget _historyContent(FullDiffSessionState state, double viewportWidth) {
     final history = state.history.data;
     if (history == null) {
       return _resourceStatus(state.history, 'History를 읽는 중입니다');
     }
-    FileHistoryEntry? selected;
-    for (final entry in history) {
-      if (entry.commit.sha == state.selectedCommit.sha) {
-        selected = entry;
-        break;
-      }
-    }
-    return FullHistoryView(
-      entries: history,
-      selected: selected,
-      onSelected: (entry) => unawaited(_controller.selectHistoryEntry(entry)),
-      controller: _contentScroll,
+    return FullHistoryWorkspace(
+      history: FullHistoryView(
+        entries: history,
+        selected: state.selectedHistoryEntry,
+        onSelected: (entry) => unawaited(_controller.selectHistoryEntry(entry)),
+        controller: _historyScroll,
+      ),
+      detail: _historyDetailContent(state, viewportWidth),
     );
+  }
+
+  Widget _historyDetailContent(
+    FullDiffSessionState state,
+    double viewportWidth,
+  ) {
+    final entry = state.selectedHistoryEntry;
+    final error = state.filesResource.error;
+    if (entry != null && state.selectedFile == null && error != null) {
+      return FullDiffUnavailablePanel(
+        file: GitFileChange(
+          path: entry.path,
+          oldPath: entry.oldPath,
+          status: entry.status,
+          additions: null,
+          deletions: null,
+        ),
+        path: entry.path,
+        reason: FullDiffUnavailableReason.gitError,
+        algorithm: state.requestedAlgorithm,
+        ignoreWhitespace: state.requestedIgnoreWhitespace,
+        error: error,
+        onRetry: () => unawaited(_controller.retryHistorySelection()),
+      );
+    }
+    return _diffContent(state, viewportWidth);
   }
 
   Widget _resourceStatus<T>(
