@@ -12,6 +12,7 @@ import 'full_diff_controller.dart';
 import 'full_diff_header.dart';
 import 'full_diff_minimap.dart';
 import 'full_diff_model.dart';
+import 'full_diff_resizable_pane.dart';
 import 'full_diff_selectable_row.dart';
 import 'full_diff_side_by_side_view.dart';
 import 'full_diff_syntax.dart';
@@ -144,6 +145,7 @@ class _DiffScreenState extends State<DiffScreen> {
   late FullDiffSessionState _observedState;
   late FullDiffPreferences _lastReportedPreferences;
   late double _filesWidth;
+  late double _historyWidth;
 
   bool _effectScheduled = false;
   bool _scrollSyncScheduled = false;
@@ -167,6 +169,7 @@ class _DiffScreenState extends State<DiffScreen> {
       onAttach: (_) => _handleContentScrollAttached(),
     );
     _filesWidth = widget.columnWidths.files;
+    _historyWidth = widget.columnWidths.history;
     _editorService =
         widget.editorService ??
         ExternalEditorService(repositoryRoot: widget.repository.root);
@@ -199,6 +202,10 @@ class _DiffScreenState extends State<DiffScreen> {
   @override
   void didUpdateWidget(covariant DiffScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.columnWidths != oldWidget.columnWidths) {
+      _filesWidth = widget.columnWidths.files;
+      _historyWidth = widget.columnWidths.history;
+    }
     final editorContextChanged =
         widget.editorService != oldWidget.editorService ||
         widget.repository.root != oldWidget.repository.root;
@@ -1010,14 +1017,24 @@ class _DiffScreenState extends State<DiffScreen> {
                             final viewportWidth = MediaQuery.sizeOf(
                               context,
                             ).width;
+                            final showFiles =
+                                !state.focusMode &&
+                                viewportWidth > 480 &&
+                                (state.view != FullDiffView.history ||
+                                    constraints.maxWidth >=
+                                        FullDiffColumnWidths.minFiles +
+                                            FullDiffColumnWidths.minHistory +
+                                            320);
                             return _ResponsiveDiffBody(
-                              showFiles:
-                                  !state.focusMode && viewportWidth > 480,
+                              showFiles: showFiles,
                               filesWidth: _filesWidth,
+                              minimumContentWidth:
+                                  state.view == FullDiffView.history
+                                  ? FullDiffColumnWidths.minHistory + 320
+                                  : 320,
                               commitFiles: _commitFiles(state),
                               content: _content(state, viewportWidth),
-                              onFilesResized: (delta) =>
-                                  _resizeFiles(delta, constraints.maxWidth),
+                              onFilesResized: _resizeFiles,
                               onResizeEnd: _saveColumnWidths,
                             );
                           },
@@ -1503,6 +1520,9 @@ class _DiffScreenState extends State<DiffScreen> {
       return _resourceStatus(state.history, 'History를 읽는 중입니다');
     }
     return FullHistoryWorkspace(
+      historyWidth: _historyWidth,
+      onHistoryResized: _resizeHistory,
+      onHistoryResizeEnd: _saveColumnWidths,
       history: FullHistoryView(
         entries: history,
         selected: state.selectedHistoryEntry,
@@ -1576,21 +1596,26 @@ class _DiffScreenState extends State<DiffScreen> {
     );
   }
 
-  void _resizeFiles(double delta, double bodyWidth) {
-    final max = math.max(FullDiffColumnWidths.minFiles, bodyWidth - 280);
+  void _resizeFiles(double width) {
     setState(() {
-      _filesWidth = (_filesWidth + delta).clamp(
+      _filesWidth = width.clamp(
         FullDiffColumnWidths.minFiles,
-        max,
+        FullDiffColumnWidths.maxFiles,
+      );
+    });
+  }
+
+  void _resizeHistory(double width) {
+    setState(() {
+      _historyWidth = width.clamp(
+        FullDiffColumnWidths.minHistory,
+        FullDiffColumnWidths.maxHistory,
       );
     });
   }
 
   void _saveColumnWidths() => widget.onColumnWidthsChanged?.call(
-    FullDiffColumnWidths(
-      commits: widget.columnWidths.commits,
-      files: _filesWidth,
-    ),
+    FullDiffColumnWidths(history: _historyWidth, files: _filesWidth),
   );
 
   Widget _sectionHeader(Widget child) => Container(
@@ -1616,6 +1641,7 @@ class _ResponsiveDiffBody extends StatelessWidget {
   const _ResponsiveDiffBody({
     required this.showFiles,
     required this.filesWidth,
+    required this.minimumContentWidth,
     required this.commitFiles,
     required this.content,
     required this.onFilesResized,
@@ -1624,6 +1650,7 @@ class _ResponsiveDiffBody extends StatelessWidget {
 
   final bool showFiles;
   final double filesWidth;
+  final double minimumContentWidth;
   final Widget commitFiles;
   final Widget content;
   final ValueChanged<double> onFilesResized;
@@ -1633,21 +1660,27 @@ class _ResponsiveDiffBody extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       const minFiles = FullDiffColumnWidths.minFiles;
-      const minContent = 280.0;
-      final maxFiles = math.max(minFiles, constraints.maxWidth - minContent);
+      final maxFiles = math
+          .max(minFiles, constraints.maxWidth - minimumContentWidth)
+          .clamp(minFiles, FullDiffColumnWidths.maxFiles)
+          .toDouble();
       final effectiveFiles = filesWidth.clamp(minFiles, maxFiles);
       return Row(
         children: [
           if (showFiles)
-            SizedBox(
-              key: const Key('commit-files-pane'),
-              width: effectiveFiles,
-              child: KeyedSubtree(
-                key: const Key('details-files-column'),
-                child: _ResizablePane(
-                  resizerKey: const Key('details-files-column-resizer'),
-                  onUpdate: onFilesResized,
-                  onEnd: onResizeEnd,
+            KeyedSubtree(
+              key: const Key('details-files-column'),
+              child: FullDiffResizablePane(
+                width: effectiveFiles,
+                minWidth: minFiles,
+                maxWidth: maxFiles,
+                label: 'Files pane width',
+                resizerKey: const Key('details-files-column-resizer'),
+                dividerKey: const Key('files-detail-divider'),
+                onChanged: onFilesResized,
+                onChangeEnd: onResizeEnd,
+                child: KeyedSubtree(
+                  key: const Key('commit-files-pane'),
                   child: commitFiles,
                 ),
               ),
@@ -1656,57 +1689,6 @@ class _ResponsiveDiffBody extends StatelessWidget {
         ],
       );
     },
-  );
-}
-
-class _ResizablePane extends StatelessWidget {
-  const _ResizablePane({
-    required this.resizerKey,
-    required this.onUpdate,
-    required this.onEnd,
-    required this.child,
-  });
-
-  final Key resizerKey;
-  final ValueChanged<double> onUpdate;
-  final VoidCallback onEnd;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) => Stack(
-    children: [
-      Positioned.fill(child: child),
-      Positioned(
-        right: 0,
-        top: 0,
-        bottom: 0,
-        width: 8,
-        child: Focus(
-          onKeyEvent: (_, event) {
-            if (event is KeyUpEvent) return KeyEventResult.ignored;
-            final delta = switch (event.logicalKey) {
-              LogicalKeyboardKey.arrowLeft => -8.0,
-              LogicalKeyboardKey.arrowRight => 8.0,
-              _ => null,
-            };
-            if (delta == null) return KeyEventResult.ignored;
-            onUpdate(delta);
-            onEnd();
-            return KeyEventResult.handled;
-          },
-          child: MouseRegion(
-            cursor: SystemMouseCursors.resizeColumn,
-            child: GestureDetector(
-              key: resizerKey,
-              behavior: HitTestBehavior.opaque,
-              onHorizontalDragUpdate: (details) => onUpdate(details.delta.dx),
-              onHorizontalDragEnd: (_) => onEnd(),
-              onHorizontalDragCancel: onEnd,
-            ),
-          ),
-        ),
-      ),
-    ],
   );
 }
 

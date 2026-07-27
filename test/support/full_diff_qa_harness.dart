@@ -752,7 +752,7 @@ FullDiffColumnWidths _qaColumnWidths(double? surfaceWidth) {
   final mainWidth = surfaceWidth - 56;
   final unit = mainWidth / 6.02;
   return FullDiffColumnWidths(
-    commits: math.max(FullDiffColumnWidths.minCommits, unit * 0.82),
+    history: math.max(FullDiffColumnWidths.minHistory, unit * 0.82),
     files: math.max(FullDiffColumnWidths.minFiles, unit),
   );
 }

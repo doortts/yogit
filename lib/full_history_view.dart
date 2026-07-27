@@ -137,7 +137,7 @@ class _FullHistoryViewState extends State<FullHistoryView> {
           key: const Key('history-list'),
           controller: _scrollController,
           primary: false,
-          padding: const EdgeInsets.all(12),
+          padding: EdgeInsets.zero,
           itemCount: widget.entries.length,
           itemBuilder: (context, index) {
             final entry = widget.entries[index];
@@ -197,7 +197,7 @@ class HistoryRow extends StatelessWidget {
     selected: selected,
     focused: focused,
     child: Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

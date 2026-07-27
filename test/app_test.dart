@@ -2513,7 +2513,7 @@ void main() {
   );
 
   test('full diff column widths round-trip and clamp damaged settings', () {
-    const widths = FullDiffColumnWidths(commits: 240, files: 330);
+    const widths = FullDiffColumnWidths(history: 240, files: 330);
     final decoded = AppSettings.fromJson(
       const AppSettings(fullDiffColumnWidths: widths).toJson(),
     );
@@ -2521,16 +2521,27 @@ void main() {
     expect(decoded.fullDiffColumnWidths, widths);
     expect(
       AppSettings.fromJson({
-        'fullDiffColumnWidths': {'commits': 1, 'files': 9999},
+        'fullDiffColumnWidths': {'history': 1, 'files': 9999},
       }).fullDiffColumnWidths,
-      const FullDiffColumnWidths(commits: 126, files: 520),
+      const FullDiffColumnWidths(history: 180, files: 520),
     );
     expect(
       FullDiffColumnWidths.fromJson(
-        const FullDiffColumnWidths(commits: 126, files: 158).toJson(),
+        const FullDiffColumnWidths(history: 180, files: 158).toJson(),
       ),
-      const FullDiffColumnWidths(commits: 126, files: 158),
+      const FullDiffColumnWidths(history: 180, files: 158),
     );
+  });
+
+  test('legacy full diff commits width migrates to history width', () {
+    final widths = FullDiffColumnWidths.fromJson({
+      'commits': 244,
+      'files': 318,
+    });
+
+    expect(widths.history, 244);
+    expect(widths.files, 318);
+    expect(widths.toJson(), {'history': 244.0, 'files': 318.0});
   });
 
   test('legacy full diff initial view is ignored', () {
@@ -3510,10 +3521,7 @@ void main() {
 
     await tester.tap(find.byKey(const Key('diff-algorithm')));
     await tester.pumpAndSettle();
-    final histogramItem = find.ancestor(
-      of: find.text('Histogram').last,
-      matching: find.byType(CheckedPopupMenuItem<DiffAlgorithm>),
-    );
+    final histogramItem = find.byKey(const Key('algorithm-option-histogram'));
     await tester.ensureVisible(histogramItem);
     await tester.pump();
     await tester.tap(histogramItem);
@@ -3524,7 +3532,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byKey(const Key('diff-algorithm-value')),
-        matching: find.text('Histogram'),
+        matching: find.text('Git setting'),
       ),
       findsOneWidget,
     );
@@ -3579,7 +3587,7 @@ void main() {
           repository: repository,
           commits: [commit('1', 'commit')],
           initialIndex: 0,
-          columnWidths: const FullDiffColumnWidths(commits: 240, files: 330),
+          columnWidths: const FullDiffColumnWidths(history: 240, files: 330),
         ),
       ),
     );
@@ -3634,7 +3642,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(saved, const FullDiffColumnWidths(commits: 126, files: 158));
+    expect(saved, const FullDiffColumnWidths(history: 180, files: 158));
   });
 
   testWidgets('focus mode hides navigation and restores saved widths', (
@@ -3657,7 +3665,7 @@ void main() {
           repository: repository,
           commits: [commit('1', 'commit')],
           initialIndex: 0,
-          columnWidths: const FullDiffColumnWidths(commits: 240, files: 330),
+          columnWidths: const FullDiffColumnWidths(history: 240, files: 330),
           onColumnWidthsChanged: (value) => saved = value,
         ),
       ),
@@ -3682,43 +3690,44 @@ void main() {
     expect(saved, isNull);
   });
 
-  testWidgets('full diff resizes files and preserves the stored commit width', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1200, 800);
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    final repository = FakeGitRepository(
-      (_, _) async => [commit('1', 'commit')],
-      files: (_, _) async => const [],
-    );
-    FullDiffColumnWidths? saved;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: [commit('1', 'commit')],
-          initialIndex: 0,
-          onColumnWidthsChanged: (value) => saved = value,
+  testWidgets(
+    'full diff resizes files and preserves the stored History width',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1200, 800);
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+      final repository = FakeGitRepository(
+        (_, _) async => [commit('1', 'commit')],
+        files: (_, _) async => const [],
+      );
+      FullDiffColumnWidths? saved;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DiffScreen(
+            repository: repository,
+            commits: [commit('1', 'commit')],
+            initialIndex: 0,
+            onColumnWidthsChanged: (value) => saved = value,
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    await tester.drag(
-      find.byKey(const Key('details-files-column-resizer')),
-      const Offset(40, 0),
-    );
-    await tester.pumpAndSettle();
-    expect(
-      tester.getSize(find.byKey(const Key('details-files-column'))).width,
-      330,
-    );
-    expect(saved, const FullDiffColumnWidths(commits: 210, files: 330));
-  });
+      await tester.drag(
+        find.byKey(const Key('details-files-column-resizer')),
+        const Offset(40, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSize(find.byKey(const Key('details-files-column'))).width,
+        330,
+      );
+      expect(saved, const FullDiffColumnWidths(history: 280, files: 330));
+    },
+  );
 
   testWidgets('narrow full diff uses exact pane thresholds without saving', (
     tester,
@@ -3740,7 +3749,7 @@ void main() {
           repository: repository,
           commits: [commit('1', 'commit')],
           initialIndex: 0,
-          columnWidths: const FullDiffColumnWidths(commits: 240, files: 330),
+          columnWidths: const FullDiffColumnWidths(history: 240, files: 330),
           onColumnWidthsChanged: (value) => saved = value,
         ),
       ),
@@ -3794,7 +3803,7 @@ void main() {
     });
     final store = MemorySettingsStore()
       ..current = const AppSettings(
-        fullDiffColumnWidths: FullDiffColumnWidths(commits: 240, files: 330),
+        fullDiffColumnWidths: FullDiffColumnWidths(history: 240, files: 330),
       );
     await tester.pumpWidget(
       YogitApp(
@@ -3824,7 +3833,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       store.current.fullDiffColumnWidths,
-      const FullDiffColumnWidths(commits: 240, files: 360),
+      const FullDiffColumnWidths(history: 240, files: 360),
     );
   });
 
@@ -3870,10 +3879,7 @@ void main() {
 
     await tester.tap(find.byKey(const Key('diff-algorithm')));
     await tester.pumpAndSettle();
-    final minimalItem = find.ancestor(
-      of: find.text('Minimal').last,
-      matching: find.byType(CheckedPopupMenuItem<DiffAlgorithm>),
-    );
+    final minimalItem = find.byKey(const Key('algorithm-option-minimal'));
     await tester.ensureVisible(minimalItem);
     await tester.tap(minimalItem);
     await tester.pumpAndSettle();

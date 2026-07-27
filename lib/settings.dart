@@ -124,14 +124,14 @@ class TimelineColumnWidths {
 }
 
 class FullDiffColumnWidths {
-  const FullDiffColumnWidths({this.commits = 210, this.files = 290});
+  const FullDiffColumnWidths({this.history = 280, this.files = 290});
 
-  static const minCommits = 126.0;
-  static const maxCommits = 420.0;
+  static const minHistory = 180.0;
+  static const maxHistory = 420.0;
   static const minFiles = 158.0;
   static const maxFiles = 520.0;
 
-  final double commits;
+  final double history;
   final double files;
 
   factory FullDiffColumnWidths.fromJson(Object? value) {
@@ -144,21 +144,26 @@ class FullDiffColumnWidths {
           max,
         );
     return FullDiffColumnWidths(
-      commits: width('commits', 210, minCommits, maxCommits),
+      history: width(
+        json.containsKey('history') ? 'history' : 'commits',
+        280,
+        minHistory,
+        maxHistory,
+      ),
       files: width('files', 290, minFiles, maxFiles),
     );
   }
 
-  Map<String, Object> toJson() => {'commits': commits, 'files': files};
+  Map<String, Object> toJson() => {'history': history, 'files': files};
 
   @override
   bool operator ==(Object other) =>
       other is FullDiffColumnWidths &&
-      commits == other.commits &&
+      history == other.history &&
       files == other.files;
 
   @override
-  int get hashCode => Object.hash(commits, files);
+  int get hashCode => Object.hash(history, files);
 }
 
 /// `#RRGGBB` (or bare `RRGGBB`) to a color, or null when malformed.

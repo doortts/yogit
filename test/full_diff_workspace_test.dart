@@ -15,6 +15,7 @@ import 'package:yogit/full_diff_selectable_row.dart';
 import 'package:yogit/full_history_view.dart';
 import 'package:yogit/full_history_workspace.dart';
 import 'package:yogit/git.dart';
+import 'package:yogit/settings.dart';
 
 import 'support/full_diff_fixtures.dart';
 
@@ -326,6 +327,8 @@ void main() {
     required Size size,
     ExternalEditorService? editorService,
     ValueChanged<FullDiffPreferences>? onPreferencesChanged,
+    FullDiffColumnWidths columnWidths = const FullDiffColumnWidths(),
+    ValueChanged<FullDiffColumnWidths>? onColumnWidthsChanged,
     bool routeBacked = false,
   }) async {
     tester.view.devicePixelRatio = 1;
@@ -341,6 +344,8 @@ void main() {
       controller: controller,
       editorService: editorService,
       onPreferencesChanged: onPreferencesChanged,
+      columnWidths: columnWidths,
+      onColumnWidthsChanged: onColumnWidthsChanged,
     );
     await tester.pumpWidget(
       MaterialApp(
@@ -1239,7 +1244,9 @@ void main() {
     },
   );
 
-  testWidgets('focus mode restores pane widths and selection', (tester) async {
+  testWidgets('focus mode restores resized pane widths and selection', (
+    tester,
+  ) async {
     final fixture = await workspaceFixture();
     addTearDown(fixture.controller.dispose);
     await pumpWorkspace(
@@ -1247,8 +1254,22 @@ void main() {
       controller: fixture.controller,
       size: const Size(1070, 842),
     );
+    await tester.drag(
+      find.byKey(const Key('details-files-column-resizer')),
+      const Offset(24, 0),
+    );
+    fixture.controller.setView(FullDiffView.history);
+    await tester.pumpAndSettle();
+    await tester.drag(
+      find.byKey(const Key('history-list-column-resizer')),
+      const Offset(20, 0),
+    );
+    await tester.pump();
     final fileWidth = tester
         .getSize(find.byKey(const Key('commit-files-pane')))
+        .width;
+    final historyWidth = tester
+        .getSize(find.byKey(const Key('history-list-pane')))
         .width;
     final commit = fixture.controller.state.selectedCommit;
     final file = fixture.controller.state.selectedFile;
@@ -1259,6 +1280,10 @@ void main() {
     expect(find.byKey(const Key('nearby-commits-list')), findsNothing);
     expect(find.byKey(const Key('nearby-column-resizer')), findsNothing);
     expect(find.byKey(const Key('commit-files-pane')), findsNothing);
+    expect(
+      tester.getSize(find.byKey(const Key('history-list-pane'))).width,
+      historyWidth,
+    );
     expect(find.byKey(const Key('diff-column')), findsOneWidget);
     expect(find.text('탐색 패널'), findsOneWidget);
 
@@ -1268,6 +1293,10 @@ void main() {
     expect(
       tester.getSize(find.byKey(const Key('commit-files-pane'))).width,
       fileWidth,
+    );
+    expect(
+      tester.getSize(find.byKey(const Key('history-list-pane'))).width,
+      historyWidth,
     );
     expect(fixture.controller.state.selectedCommit, same(commit));
     expect(fixture.controller.state.selectedFile, same(file));
@@ -1376,12 +1405,12 @@ void main() {
     },
   );
 
-  testWidgets('history keeps a responsive list beside its detail pane', (
+  testWidgets('history keeps a clamped list beside its detail pane', (
     tester,
   ) async {
     const scenarios = [
       (workspaceWidth: 760.0, listWidth: 280.0),
-      (workspaceWidth: 600.0, listWidth: 210.0),
+      (workspaceWidth: 600.0, listWidth: 244.0),
       (workspaceWidth: 480.0, listWidth: 180.0),
     ];
     for (final scenario in scenarios) {
@@ -1392,9 +1421,12 @@ void main() {
             child: SizedBox(
               width: scenario.workspaceWidth,
               height: 400,
-              child: const FullHistoryWorkspace(
-                history: SizedBox(),
-                detail: SizedBox(),
+              child: FullHistoryWorkspace(
+                historyWidth: scenario.listWidth,
+                onHistoryResized: (_) {},
+                onHistoryResizeEnd: () {},
+                history: const SizedBox(),
+                detail: const SizedBox(),
               ),
             ),
           ),
@@ -1409,7 +1441,273 @@ void main() {
         lessThan(tester.getTopLeft(detailPane).dx),
       );
       expect(find.byKey(const Key('history-detail-divider')), findsOneWidget);
+      expect(
+        tester
+            .getSize(find.byKey(const Key('history-list-column-resizer')))
+            .width,
+        8,
+      );
     }
+  });
+
+  testWidgets(
+    'file and History resizers expose dividers, resize, and save on drag end',
+    (tester) async {
+      final fixture = await historyWorkspaceFixture();
+      addTearDown(fixture.controller.dispose);
+      FullDiffColumnWidths? saved;
+      await pumpWorkspace(
+        tester,
+        controller: fixture.controller,
+        size: const Size(1200, 842),
+        columnWidths: const FullDiffColumnWidths(history: 244, files: 318),
+        onColumnWidthsChanged: (value) => saved = value,
+      );
+
+      expect(find.byKey(const Key('files-detail-divider')), findsOneWidget);
+      expect(find.byKey(const Key('history-detail-divider')), findsOneWidget);
+      expect(
+        tester.getSize(find.byKey(const Key('files-detail-divider'))).width,
+        1,
+      );
+      expect(
+        tester.getSize(find.byKey(const Key('history-detail-divider'))).width,
+        1,
+      );
+      expect(
+        tester
+            .getSize(find.byKey(const Key('details-files-column-resizer')))
+            .width,
+        8,
+      );
+      expect(
+        tester
+            .getSize(find.byKey(const Key('history-list-column-resizer')))
+            .width,
+        8,
+      );
+
+      final filesBefore = tester
+          .getSize(find.byKey(const Key('details-files-column')))
+          .width;
+      await tester.drag(
+        find.byKey(const Key('details-files-column-resizer')),
+        const Offset(24, 0),
+      );
+      await tester.pump();
+      expect(
+        tester.getSize(find.byKey(const Key('details-files-column'))).width,
+        filesBefore + 24,
+      );
+      saved = null;
+
+      final historyBefore = tester
+          .getSize(find.byKey(const Key('history-list-pane')))
+          .width;
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(const Key('history-list-column-resizer'))),
+      );
+      await gesture.moveBy(const Offset(16, 0));
+      await tester.pump();
+      expect(saved, isNull);
+      await gesture.up();
+      await tester.pump();
+      expect(saved, const FullDiffColumnWidths(history: 260, files: 342));
+      expect(
+        tester.getSize(find.byKey(const Key('history-list-pane'))).width,
+        historyBefore + 16,
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await pumpWorkspace(
+        tester,
+        controller: fixture.controller,
+        size: const Size(1200, 842),
+        columnWidths: saved!,
+      );
+      expect(
+        tester.getSize(find.byKey(const Key('history-list-pane'))).width,
+        260,
+      );
+      expect(
+        tester.getSize(find.byKey(const Key('details-files-column'))).width,
+        342,
+      );
+    },
+  );
+
+  testWidgets('pane resizers support 8px keyboard steps', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final fixture = await historyWorkspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1200, 842),
+      columnWidths: const FullDiffColumnWidths(history: 244, files: 318),
+    );
+
+    final filesResizer = find.byKey(const Key('details-files-column-resizer'));
+    Focus.of(tester.element(filesResizer)).requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(
+      find.semantics
+          .byLabel('Files pane width')
+          .evaluate()
+          .single
+          .getSemanticsData()
+          .value,
+      '326 px',
+    );
+    expect(
+      tester.getSize(find.byKey(const Key('details-files-column'))).width,
+      326,
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+    expect(
+      tester.getSize(find.byKey(const Key('details-files-column'))).width,
+      318,
+    );
+
+    final historyResizer = find.byKey(const Key('history-list-column-resizer'));
+    Focus.of(tester.element(historyResizer)).requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(
+      find.semantics
+          .byLabel('History pane width')
+          .evaluate()
+          .single
+          .getSemanticsData()
+          .value,
+      '252 px',
+    );
+    expect(
+      tester.getSize(find.byKey(const Key('history-list-pane'))).width,
+      252,
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+    expect(
+      tester.getSize(find.byKey(const Key('history-list-pane'))).width,
+      244,
+    );
+    semantics.dispose();
+  });
+
+  testWidgets(
+    'narrow History layout clamps navigation before the detail pane',
+    (tester) async {
+      final fixture = await historyWorkspaceFixture();
+      addTearDown(fixture.controller.dispose);
+      await pumpWorkspace(
+        tester,
+        controller: fixture.controller,
+        size: const Size(700, 842),
+        columnWidths: const FullDiffColumnWidths(history: 244, files: 318),
+      );
+
+      expect(
+        tester.getSize(find.byKey(const Key('full-diff-detail-pane'))).width,
+        greaterThanOrEqualTo(320),
+      );
+      expect(
+        tester.getSize(find.byKey(const Key('details-files-column'))).width,
+        greaterThanOrEqualTo(FullDiffColumnWidths.minFiles),
+      );
+      expect(
+        tester.getSize(find.byKey(const Key('history-list-pane'))).width,
+        greaterThanOrEqualTo(FullDiffColumnWidths.minHistory),
+      );
+
+      tester.view.physicalSize = const Size(650, 842);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('details-files-column')), findsNothing);
+      expect(
+        tester.getSize(find.byKey(const Key('full-diff-detail-pane'))).width,
+        greaterThanOrEqualTo(320),
+      );
+    },
+  );
+
+  testWidgets('constrained pane drags resize from their visible widths', (
+    tester,
+  ) async {
+    final filesFixture = await historyWorkspaceFixture();
+    addTearDown(filesFixture.controller.dispose);
+    FullDiffColumnWidths? saved;
+    await pumpWorkspace(
+      tester,
+      controller: filesFixture.controller,
+      size: const Size(700, 842),
+      columnWidths: const FullDiffColumnWidths(history: 244, files: 318),
+      onColumnWidthsChanged: (value) => saved = value,
+    );
+    expect(
+      tester.getSize(find.byKey(const Key('details-files-column'))).width,
+      200,
+    );
+
+    await tester.drag(
+      find.byKey(const Key('details-files-column-resizer')),
+      const Offset(-24, 0),
+    );
+    await tester.pump();
+    expect(
+      tester.getSize(find.byKey(const Key('details-files-column'))).width,
+      176,
+    );
+    expect(saved, const FullDiffColumnWidths(history: 244, files: 176));
+
+    final historyFixture = await historyWorkspaceFixture();
+    addTearDown(historyFixture.controller.dispose);
+    saved = null;
+    await pumpWorkspace(
+      tester,
+      controller: historyFixture.controller,
+      size: const Size(700, 842),
+      columnWidths: const FullDiffColumnWidths(history: 244, files: 158),
+      onColumnWidthsChanged: (value) => saved = value,
+    );
+    expect(
+      tester.getSize(find.byKey(const Key('history-list-pane'))).width,
+      222,
+    );
+
+    await tester.drag(
+      find.byKey(const Key('history-list-column-resizer')),
+      const Offset(-24, 0),
+    );
+    await tester.pump();
+    expect(
+      tester.getSize(find.byKey(const Key('history-list-pane'))).width,
+      198,
+    );
+    expect(saved, const FullDiffColumnWidths(history: 198, files: 158));
+  });
+
+  testWidgets('selected History row reaches all three list edges', (
+    tester,
+  ) async {
+    final fixture = await historyWorkspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1200, 842),
+    );
+
+    final listRect = tester.getRect(find.byKey(const Key('history-list-pane')));
+    final selectedRect = tester.getRect(
+      find.byKey(Key('history-row-${commitA.sha}')),
+    );
+    expect(selectedRect.top, listRect.top);
+    expect(selectedRect.left, listRect.left);
+    expect(selectedRect.right, listRect.right);
   });
 
   testWidgets(
