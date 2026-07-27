@@ -63,7 +63,6 @@ class DiffScreen extends StatefulWidget {
     this.columnWidths = const FullDiffColumnWidths(),
     this.onColumnWidthsChanged,
     this.editorService,
-    this.editorEnabledOverride,
     super.key,
   });
 
@@ -75,7 +74,6 @@ class DiffScreen extends StatefulWidget {
   final FullDiffColumnWidths columnWidths;
   final ValueChanged<FullDiffColumnWidths>? onColumnWidthsChanged;
   final ExternalEditorService? editorService;
-  final bool? editorEnabledOverride;
 
   @override
   State<DiffScreen> createState() => _DiffScreenState();
@@ -263,6 +261,11 @@ class _DiffScreenState extends State<DiffScreen> {
       }
       final anchorContext = _anchorKeys[anchorId]?.currentContext;
       if (anchorContext != null) {
+        final anchorRenderObject = anchorContext.findRenderObject();
+        if (anchorRenderObject == null || !_contentScroll.hasClients) {
+          _pendingAnchorId = null;
+          return;
+        }
         _pendingAnchorId = null;
         _programmaticAnchorScroll = true;
         final state = _controller.state;
@@ -273,13 +276,15 @@ class _DiffScreenState extends State<DiffScreen> {
           _ => 0.1,
         };
         unawaited(
-          Scrollable.ensureVisible(
-            anchorContext,
-            alignment: alignment,
-            duration: const Duration(milliseconds: 100),
-          ).whenComplete(() {
-            if (mounted) _programmaticAnchorScroll = false;
-          }),
+          _contentScroll.position
+              .ensureVisible(
+                anchorRenderObject,
+                alignment: alignment,
+                duration: const Duration(milliseconds: 100),
+              )
+              .whenComplete(() {
+                if (mounted) _programmaticAnchorScroll = false;
+              }),
         );
         return;
       }
@@ -402,9 +407,6 @@ class _DiffScreenState extends State<DiffScreen> {
   }
 
   bool _canOpenEditor(FullDiffSessionState state) {
-    if (widget.editorEnabledOverride case final enabled?) {
-      return !_openingEditor && enabled;
-    }
     final file = state.selectedFile;
     return !_openingEditor &&
         state.selectedCommit.isWorkingTree &&
@@ -686,9 +688,7 @@ class _DiffScreenState extends State<DiffScreen> {
                           ),
                           const SizedBox(height: 3),
                           Text(
-                            commit.isWorkingTree
-                                ? 'working tree'
-                                : commit.shortSha,
+                            _displayRevision(commit),
                             maxLines: 1,
                             overflow: TextOverflow.clip,
                             style: technicalTextStyle.copyWith(
@@ -733,9 +733,7 @@ class _DiffScreenState extends State<DiffScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  commit.isWorkingTree
-                      ? 'working tree'
-                      : '${commit.shortSha} · ${commit.author.name}',
+                  _displayRevision(commit, includeAuthor: true),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: technicalTextStyle.copyWith(
@@ -1113,8 +1111,16 @@ class _DiffScreenState extends State<DiffScreen> {
     if (history == null) {
       return _resourceStatus(state.history, 'History를 읽는 중입니다');
     }
+    FileHistoryEntry? selected;
+    for (final entry in history) {
+      if (entry.commit.sha == state.selectedCommit.sha) {
+        selected = entry;
+        break;
+      }
+    }
     return FullHistoryView(
       entries: history,
+      selected: selected,
       onSelected: (entry) => unawaited(_controller.selectHistoryEntry(entry)),
       controller: _contentScroll,
     );
@@ -1356,3 +1362,10 @@ String _statusLetter(String status) =>
     status.characters.isEmpty ? '' : status.characters.first;
 
 String _shortSha(String sha) => sha.length <= 7 ? sha : sha.substring(0, 7);
+
+String _displayRevision(GitCommit commit, {bool includeAuthor = false}) {
+  if (commit.shortSha.isEmpty) return 'working tree';
+  return includeAuthor
+      ? '${commit.shortSha} · ${commit.author.name}'
+      : commit.shortSha;
+}

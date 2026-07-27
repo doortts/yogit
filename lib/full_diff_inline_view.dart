@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
 import 'full_diff_code_row.dart';
+import 'full_diff_hunk_header.dart';
 import 'full_diff_model.dart';
 import 'full_diff_syntax.dart';
 import 'full_diff_syntax_contract.dart';
 import 'full_diff_theme.dart';
 import 'git.dart';
-import 'typography.dart';
 
 class InlinePresentationView extends StatelessWidget {
   const InlinePresentationView({
@@ -73,7 +73,7 @@ class InlinePresentationView extends StatelessWidget {
               children: [
                 for (final line in hunk.lines.take(leadingContextCount))
                   codeRow(line),
-                _InlineHunkHeader(
+                FullDiffHunkHeader(
                   hunk: hunk,
                   path: path,
                   hunkCount: document.hunks.length,
@@ -91,42 +91,6 @@ class InlinePresentationView extends StatelessWidget {
   GlobalKey _anchorKey(DiffAnchor anchor) =>
       anchorKeys[anchor.id] ??
       (throw StateError('Missing GlobalKey for ${anchor.id}'));
-}
-
-class _InlineHunkHeader extends StatelessWidget {
-  const _InlineHunkHeader({
-    required this.hunk,
-    required this.path,
-    required this.hunkCount,
-  });
-
-  final DiffHunk hunk;
-  final String path;
-  final int hunkCount;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-    decoration: const BoxDecoration(
-      color: fullDiffHunkHeader,
-      border: Border(
-        top: BorderSide(color: fullDiffDivider),
-        bottom: BorderSide(color: fullDiffDivider),
-      ),
-    ),
-    child: Text(
-      '${hunk.context.isEmpty ? path : hunk.context} · '
-      'lines ${hunk.displayRange} · '
-      'change ${hunk.index + 1} of $hunkCount',
-      style: const TextStyle(
-        fontFamily: technicalFontFamily,
-        fontFamilyFallback: technicalFontFallback,
-        fontSize: 14,
-        height: 21 / 14,
-        color: fullDiffMuted,
-      ),
-    ),
-  );
 }
 
 Map<DiffLine, List<WordRange>> _wordRangesByLine(List<DiffLine> lines) {

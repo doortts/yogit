@@ -13,24 +13,27 @@ HTML은 고정된 예시 행을 그리지만 구현 캡처는 검수용 데이�
 
 좌우 비교 이미지는 왼쪽이 기준, 오른쪽이 구현이다. 캡처 크기와 카드
 영역은 기준 이미지와 같다. 일반 화면의 641px 카드 높이와 상세 화면의
-596px 높이는 검수용 하네스에만 적용했다. 실제 앱은 창에서 쓸 수 있는
-높이를 모두 사용한다.
+596px 높이는 검수용 하네스에만 적용했다. 00–08·11–12의 16px 바깥
+여백도 승인 이미지와 나란히 비교하기 위한 캔버스에만 있다. 제품 셸에는
+이 여백을 넣지 않았으며 782px와 480px에서 제품 셸의 왼쪽 좌표가 모두
+0인지 별도 자동 테스트로 확인했다. 상세 화면인 09·10도 x=0에서
+캡처한다. 실제 앱은 창에서 쓸 수 있는 높이를 모두 사용한다.
 
 | 상태 | 기준 | 구현 | 차이 | 메뉴·순서 | 색·테두리 | 크기·배치 | 판정 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 00 Hunk | [기준](../../specs/assets/full-diff-qa/00-overview-hunk.png) | [구현](actual/00-overview-hunk.png) | [차이](diff/00-overview-hunk.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 탐색 2열과 두 번째 Hunk 배치 확인 |
 | 01 Inline | [기준](../../specs/assets/full-diff-qa/01-diff-inline.png) | [구현](actual/01-diff-inline.png) | [차이](diff/01-diff-inline.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 선행 문맥, Hunk 제목, 활성 구간 순서 확인 |
 | 02 Split | [기준](../../specs/assets/full-diff-qa/02-diff-split.png) | [구현](actual/02-diff-split.png) | [차이](diff/02-diff-split.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 이전·이후 행 두 열과 가운데 경계 확인 |
-| 03 File | [기준](../../specs/assets/full-diff-qa/03-file-view.png) | [구현](actual/03-file-view.png) | [차이](diff/03-file-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 전체 파일과 활성 변경 위치 확인 |
-| 04 Blame | [기준](../../specs/assets/full-diff-qa/04-blame-view.png) | [구현](actual/04-blame-view.png) | [차이](diff/04-blame-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 줄 번호, 80px 메타데이터, 소스 순서 확인 |
-| 05 History | [기준](../../specs/assets/full-diff-qa/05-history-view.png) | [구현](actual/05-history-view.png) | [차이](diff/05-history-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 제목 아래 작성자·경과 시간 배치 확인 |
+| 03 File | [기준](../../specs/assets/full-diff-qa/03-file-view.png) | [구현](actual/03-file-view.png) | [차이](diff/03-file-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 선택 Hunk 제목 다음에 결과 쪽 추가 행이 이어지는지 확인 |
+| 04 Blame | [기준](../../specs/assets/full-diff-qa/04-blame-view.png) | [구현](actual/04-blame-view.png) | [차이](diff/04-blame-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — Hunk 제목, 줄 번호, 80px 메타데이터, 변경 소스 순서 확인 |
+| 05 History | [기준](../../specs/assets/full-diff-qa/05-history-view.png) | [구현](actual/05-history-view.png) | [차이](diff/05-history-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 현재 커밋 선택 배경과 제목 아래 작성자·경과 시간 배치 확인 |
 | 06 집중 모드 | [기준](../../specs/assets/full-diff-qa/06-focus-mode.png) | [구현](actual/06-focus-mode.png) | [차이](diff/06-focus-mode.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 탐색 열 제거, 머리글 정렬, 본문 확장 확인 |
 | 07 공백 무시 | [기준](../../specs/assets/full-diff-qa/07-ignore-whitespace.png) | [구현](actual/07-ignore-whitespace.png) | [차이](diff/07-ignore-whitespace.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 선택 상태와 공백 행 제거 확인 |
 | 08 줄바꿈 | [기준](../../specs/assets/full-diff-qa/08-wrap-lines.png) | [구현](actual/08-wrap-lines.png) | [차이](diff/08-wrap-lines.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 선택 상태, 한 개의 줄 번호, 긴 소스 줄바꿈 확인 |
 | 09 다음 변경 | [기준](../../specs/assets/full-diff-qa/09-next-change.png) | [구현](actual/09-next-change.png) | [차이](diff/09-next-change.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 상세 화면 `3 / 7`, 한 줄 조작부, 미니맵 확인 |
 | 10 Histogram | [기준](../../specs/assets/full-diff-qa/10-algorithm-histogram.png) | [구현](actual/10-algorithm-histogram.png) | [차이](diff/10-algorithm-histogram.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — Histogram 상태, 두 번째 Hunk, 미니맵 확인 |
 | 11 650px | [기준](../../specs/assets/full-diff-qa/11-responsive-650.png) | [구현](actual/11-responsive-650.png) | [차이](diff/11-responsive-650.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 파일 경로와 통계를 두 줄로 배치하고 파일 열 유지 |
-| 12 480px | [기준](../../specs/assets/full-diff-qa/12-responsive-480.png) | [구현](actual/12-responsive-480.png) | [차이](diff/12-responsive-480.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 두 탐색 열 제거, 한 줄 조작부, 본문 전폭 사용 확인 |
+| 12 480px | [기준](../../specs/assets/full-diff-qa/12-responsive-480.png) | [구현](actual/12-responsive-480.png) | [차이](diff/12-responsive-480.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 두 탐색 열 제거, 한 줄 조작부, 초기 가로 이동값 0, Hunk 제목과 313행의 왼쪽 정렬 확인 |
 
 승인 이미지가 작업 표보다 우선한다. 승인 이미지에서 Split이 선택된
 03·04·05·07·08은 Split 상태로 캡처했다. 검수 하네스는 Flutter SDK의
@@ -45,30 +48,40 @@ JPEG라서 넓고 단색인 배경도 미세한 차이로 집계된다.
 
 | 이미지 | 크기 | changed | changed % | mean RGB | max RGB |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 00-overview-hunk | 782×842 | 253,788 | 38.5436 | 9.0307 | 255 |
+| 00-overview-hunk | 782×842 | 253,755 | 38.5386 | 8.9651 | 255 |
 | 01-diff-inline | 782×842 | 339,916 | 51.6241 | 15.8542 | 255 |
 | 02-diff-split | 1070×842 | 442,279 | 49.0908 | 15.0808 | 255 |
-| 03-file-view | 1070×842 | 329,664 | 36.5911 | 11.1614 | 255 |
-| 04-blame-view | 1070×842 | 350,900 | 38.9482 | 12.5168 | 255 |
-| 05-history-view | 1070×842 | 273,172 | 30.3208 | 7.4224 | 255 |
+| 03-file-view | 1070×842 | 403,574 | 44.7948 | 12.9542 | 255 |
+| 04-blame-view | 1070×842 | 419,078 | 46.5156 | 14.0174 | 255 |
+| 05-history-view | 1070×842 | 300,124 | 33.3123 | 8.2163 | 255 |
 | 06-focus-mode | 1070×842 | 183,644 | 20.3836 | 3.3508 | 255 |
 | 07-ignore-whitespace | 1070×842 | 447,836 | 49.7076 | 15.5643 | 255 |
 | 08-wrap-lines | 1070×842 | 475,223 | 52.7475 | 16.3073 | 255 |
 | 09-next-change | 1280×720 | 654,846 | 71.0553 | 8.9486 | 240 |
 | 10-algorithm-histogram | 1280×720 | 654,612 | 71.0299 | 8.8465 | 248 |
-| 11-responsive-650 | 650×549 | 158,025 | 44.2833 | 11.4639 | 255 |
-| 12-responsive-480 | 480×549 | 105,341 | 39.9746 | 9.8100 | 255 |
+| 11-responsive-650 | 650×549 | 158,025 | 44.2833 | 11.4902 | 255 |
+| 12-responsive-480 | 480×549 | 105,379 | 39.9890 | 9.7327 | 255 |
 
 ## 구문 강조 성능과 앱 크기
 
-DRL 첫 Hunk의 12줄을 30번 강조했다. 첫 실행은 16,136µs, p95는
-2,706µs로 50ms 기준을 통과했다.
+일반 테스트는 benchmark 태그를 제외해 병렬 부하가 성능 판정을
+흔들지 않게 했다. 성능 기준은 다음과 같이 한 파일만 동시 실행 수 1로
+검사한다.
+
+```sh
+flutter test --exclude-tags=benchmark
+flutter test --tags=benchmark --concurrency=1 \
+  test/full_diff_syntax_benchmark_test.dart --reporter expanded
+```
+
+DRL 첫 Hunk의 12줄을 30번 강조했다. 격리 실행의 첫 실행은 15,486µs,
+p95는 2,854µs로 50ms 기준을 통과했다.
 
 | 빌드 | 압축 크기 |
 | --- | ---: |
-| `YOGIT_EXTENDED_SYNTAX=false` | 23,138,651 bytes |
-| `YOGIT_EXTENDED_SYNTAX=true` | 23,315,244 bytes |
-| 증가량 | 176,593 bytes |
+| `YOGIT_EXTENDED_SYNTAX=false` | 23,142,471 bytes |
+| `YOGIT_EXTENDED_SYNTAX=true` | 23,321,818 bytes |
+| 증가량 | 179,347 bytes |
 
 증가량은 1,048,576바이트 기준보다 작다. 두 기준을 모두 통과했으므로
 `extendedSyntaxEnabled`의 기본값은 `true`로 유지했다. 포함한 확장

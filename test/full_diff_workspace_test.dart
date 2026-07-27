@@ -10,6 +10,7 @@ import 'package:yogit/external_editor.dart';
 import 'package:yogit/full_diff_controller.dart';
 import 'package:yogit/full_diff_minimap.dart';
 import 'package:yogit/full_diff_model.dart';
+import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/git.dart';
 
 import 'support/full_diff_fixtures.dart';
@@ -316,6 +317,34 @@ void main() {
     expect(find.text('+'), findsWidgets);
     expect(find.text('−'), findsWidgets);
     expect(find.byKey(const Key('code-row-current-marker')), findsOneWidget);
+  });
+
+  testWidgets('history marks the current commit as selected', (tester) async {
+    final fixture = await workspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    fixture.controller.setView(FullDiffView.history);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1070, 842),
+    );
+    final semantics = tester.ensureSemantics();
+    final row = find.byKey(Key('history-row-${commitA.sha}'));
+
+    expect(tester.widget<ColoredBox>(row).color, fullDiffSelection);
+    final selectedSemantics = find.ancestor(
+      of: row,
+      matching: find.byWidgetPredicate(
+        (widget) => widget is Semantics && widget.properties.selected == true,
+      ),
+    );
+    expect(selectedSemantics, findsOneWidget);
+    expect(
+      tester.getSemantics(selectedSemantics).flagsCollection.isSelected,
+      ui.Tristate.isTrue,
+    );
+
+    semantics.dispose();
   });
 
   testWidgets('parent chooser changes all selected resources', (tester) async {
@@ -918,10 +947,21 @@ void main() {
         refs: [],
         subject: 'working tree',
       );
+      const loadingFile = GitFileChange(
+        path: 'src/loading.pas',
+        status: 'M',
+        additions: 1,
+        deletions: 1,
+      );
+      final loadingPatch = Completer<List<DiffLine>>();
+      final loadingContent = Completer<Uint8List>();
       final workingRepository = FakeFullDiffRepository();
-      workingRepository.files = (_, _) async => const [fileA];
-      workingRepository.diff = (_, _, _, _, _) async => twoHunkLines;
-      workingRepository.content = (_, _, _) async => resultFile.bytes;
+      workingRepository.files = (_, _) async => const [fileA, loadingFile];
+      workingRepository.diff = (_, file, _, _, _) =>
+          file == fileA ? Future.value(twoHunkLines) : loadingPatch.future;
+      workingRepository.content = (_, file, _) => file == fileA
+          ? Future.value(resultFile.bytes)
+          : loadingContent.future;
       final workingController = FullDiffSessionController(
         repository: workingRepository,
         commits: const [workingTree],
@@ -942,6 +982,15 @@ void main() {
       await tester.pump();
       expect(editorService.relativePath, fileA.path);
       expect(editorService.line, twoHunkDocument.hunks.first.anchor.newLine);
+
+      unawaited(workingController.selectFile(loadingFile));
+      await tester.pump();
+      expect(workingController.state.selectedFile, loadingFile);
+      expect(workingController.state.file.loading, isTrue);
+      expect(editorButton(tester).onTap, isNull);
+      loadingPatch.complete(twoHunkLines);
+      loadingContent.complete(resultFile.bytes);
+      await tester.pumpAndSettle();
 
       final deletedRepository = FakeFullDiffRepository();
       deletedRepository.files = (_, _) async => const [

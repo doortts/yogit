@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import 'full_diff_code_row.dart';
+import 'full_diff_hunk_header.dart';
 import 'full_diff_model.dart';
 import 'full_diff_syntax_contract.dart';
+import 'full_source_hunk_map.dart';
 import 'git.dart';
 import 'typography.dart';
 
@@ -29,30 +31,46 @@ class FullBlameView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final lineCount = document.file.lines.length;
-    final sourceLine = _sourceLine(
-      activeAnchor,
-      document.file.side,
-      hunks,
-      lineCount,
+    final sourceMap = FullSourceHunkMap(
+      hunks: hunks,
+      side: document.file.side,
+      lineCount: lineCount,
     );
-    final anchorHunks = _hunksByLine(hunks, document.file.side, lineCount);
+    final sourceLine = sourceMap.activeLine(activeAnchor);
     return FullDiffSelectionArea(
       child: ListView.builder(
         key: const Key('blame-list'),
         controller: controller,
         primary: controller == null,
-        itemCount: document.file.lines.length,
+        itemCount: sourceMap.itemCount,
         itemBuilder: (context, index) {
-          final lineNumber = index + 1;
+          final item = sourceMap.itemAt(index);
+          if (item case FullSourceHunkHeaderItem(:final hunk)) {
+            return KeyedSubtree(
+              key: Key('blame-hunk-header-${hunk.anchor.id}'),
+              child: KeyedSubtree(
+                key: _anchorKey(hunk.anchor),
+                child: FullDiffHunkHeader(
+                  hunk: hunk,
+                  path: document.file.path,
+                  hunkCount: hunks.length,
+                ),
+              ),
+            );
+          }
+          final sourceItem = item as FullSourceLineItem;
+          final lineNumber = sourceItem.lineNumber;
           final current = lineNumber == sourceLine;
-          Widget row = KeyedSubtree(
+          return KeyedSubtree(
             key: Key('blame-line-$lineNumber'),
             child: KeyedSubtree(
               key: current ? Key('blame-current-line-$lineNumber') : null,
               child: BlameSourceRow(
-                blame: document.lines[index],
-                source: document.file.lines[index],
+                blame: document.lines[lineNumber - 1],
+                source: document.file.lines[lineNumber - 1],
                 path: document.file.path,
+                side: document.file.side,
+                kind: sourceItem.kind,
                 wrapLines: wrapLines,
                 highlighter: document.file.disableRichRendering
                     ? const _NoopSyntaxHighlighter()
@@ -61,10 +79,6 @@ class FullBlameView extends StatelessWidget {
               ),
             ),
           );
-          for (final hunk in anchorHunks[lineNumber] ?? const <DiffHunk>[]) {
-            row = KeyedSubtree(key: _anchorKey(hunk.anchor), child: row);
-          }
-          return row;
         },
       ),
     );
@@ -75,48 +89,13 @@ class FullBlameView extends StatelessWidget {
       (throw StateError('Missing GlobalKey for ${anchor.id}'));
 }
 
-int? _sourceLine(
-  DiffAnchor? anchor,
-  FileDocumentSide side,
-  List<DiffHunk> hunks,
-  int lineCount,
-) {
-  if (anchor == null || lineCount == 0) return null;
-  final direct = switch (side) {
-    FileDocumentSide.old => anchor.oldLine,
-    FileDocumentSide.result => anchor.newLine,
-  };
-  if (direct != null) return direct.clamp(1, lineCount);
-  if (anchor.hunkIndex < 0 || anchor.hunkIndex >= hunks.length) return null;
-  return _hunkLine(hunks[anchor.hunkIndex], side, lineCount);
-}
-
-Map<int, List<DiffHunk>> _hunksByLine(
-  List<DiffHunk> hunks,
-  FileDocumentSide side,
-  int lineCount,
-) {
-  final result = <int, List<DiffHunk>>{};
-  if (lineCount == 0) return result;
-  for (final hunk in hunks) {
-    (result[_hunkLine(hunk, side, lineCount)] ??= []).add(hunk);
-  }
-  return result;
-}
-
-int _hunkLine(DiffHunk hunk, FileDocumentSide side, int lineCount) {
-  final line = switch (side) {
-    FileDocumentSide.old => hunk.anchor.oldLine ?? hunk.oldStart,
-    FileDocumentSide.result => hunk.anchor.newLine ?? hunk.newStart,
-  };
-  return line.clamp(1, lineCount);
-}
-
 class BlameSourceRow extends StatelessWidget {
   const BlameSourceRow({
     required this.blame,
     required this.source,
     required this.path,
+    required this.side,
+    required this.kind,
     required this.wrapLines,
     required this.highlighter,
     required this.current,
@@ -126,6 +105,8 @@ class BlameSourceRow extends StatelessWidget {
   final BlameLine blame;
   final String source;
   final String path;
+  final FileDocumentSide side;
+  final DiffLineKind kind;
   final bool wrapLines;
   final FullDiffSyntaxHighlighter highlighter;
   final bool current;
@@ -133,10 +114,10 @@ class BlameSourceRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) => FullDiffCodeRow(
     line: DiffLine(
-      kind: DiffLineKind.context,
+      kind: kind,
       text: source,
-      oldNumber: null,
-      newNumber: blame.lineNumber,
+      oldNumber: side == FileDocumentSide.old ? blame.lineNumber : null,
+      newNumber: side == FileDocumentSide.result ? blame.lineNumber : null,
     ),
     path: path,
     wrapLines: wrapLines,

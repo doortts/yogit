@@ -211,7 +211,7 @@ Future<void> capture(
   await tester.pump(const Duration(milliseconds: 100));
   await tester.pump();
   await expectLater(
-    find.byKey(const Key('full-diff-qa-root')),
+    find.byKey(const Key('full-diff-comparison-canvas')),
     matchesGoldenFile(
       '../docs/superpowers/verification/full-diff-qa/actual/$name.png',
     ),
@@ -273,7 +273,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: fullDiffQaTheme(),
-        home: FullDiffQaHarness(
+        home: FullDiffQaComparisonCanvas(
           controller: controller,
           surfaceSize: const Size(782, 842),
         ),
@@ -300,7 +300,76 @@ void main() {
     expect(tester.widget<InkWell>(openEditorInk).onTap, isNotNull);
   });
 
-  testWidgets('workspace card uses its 12px as inner padding', (tester) async {
+  testWidgets(
+    'QA workspace enables the editor through a loaded worktree file',
+    (tester) async {
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+      final controller = await qaControllerFor();
+      addTearDown(controller.dispose);
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(782, 842);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: fullDiffQaTheme(),
+          home: FullDiffQaProductShell(controller: controller),
+        ),
+      );
+      await tester.pump();
+
+      expect(controller.state.selectedCommit.isWorkingTree, isTrue);
+      expect(controller.state.selectedCommit.shortSha, '40aff6d');
+      expect(controller.state.selectedFile?.status.startsWith('D'), isFalse);
+      expect(controller.state.file.data, isNotNull);
+      final openEditorInk = find
+          .ancestor(
+            of: find.byKey(const Key('open-editor')),
+            matching: find.byType(InkWell),
+          )
+          .first;
+      expect(tester.widget<InkWell>(openEditorInk).onTap, isNotNull);
+      expect(find.text('working tree'), findsNothing);
+      expect(find.text('40aff6d'), findsWidgets);
+    },
+  );
+
+  testWidgets('product shell begins at x=0 without comparison canvas inset', (
+    tester,
+  ) async {
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final controller = await qaControllerFor();
+    addTearDown(controller.dispose);
+    tester.view.devicePixelRatio = 1;
+    for (final width in [782.0, 480.0]) {
+      tester.view.physicalSize = Size(width, 842);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: fullDiffQaTheme(),
+          home: FullDiffQaProductShell(controller: controller),
+        ),
+      );
+      await tester.pump();
+
+      expect(
+        tester.getRect(find.byKey(const Key('full-diff-product-shell'))).left,
+        0,
+        reason: '${width}px product shell',
+      );
+      expect(
+        tester.getRect(find.byKey(const Key('file-path-chip'))).left,
+        greaterThanOrEqualTo(fullDiffOuterPadding + 10),
+      );
+    }
+  });
+
+  testWidgets('comparison canvas owns the 16px workspace inset', (
+    tester,
+  ) async {
     addTearDown(() {
       tester.view.resetDevicePixelRatio();
       tester.view.resetPhysicalSize();
@@ -312,21 +381,17 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: fullDiffQaTheme(),
-        home: FullDiffQaHarness(controller: controller),
+        home: FullDiffQaComparisonCanvas(
+          controller: controller,
+          surfaceSize: const Size(782, 842),
+        ),
       ),
     );
     await tester.pump();
 
-    final card = find
-        .ancestor(
-          of: find.byKey(const Key('file-path-chip')),
-          matching: find.byType(ClipRRect),
-        )
-        .first;
-    expect(tester.getRect(card).left, 0);
     expect(
-      tester.getRect(find.byKey(const Key('file-path-chip'))).left,
-      greaterThanOrEqualTo(fullDiffOuterPadding + 10),
+      tester.getRect(find.byKey(const Key('full-diff-product-shell'))).left,
+      16,
     );
   });
 
@@ -344,7 +409,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: fullDiffQaTheme(),
-        home: FullDiffQaHarness(
+        home: FullDiffQaComparisonCanvas(
           controller: controller,
           surfaceSize: const Size(650, 549),
         ),
@@ -386,7 +451,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: fullDiffQaTheme(),
-        home: FullDiffQaHarness(
+        home: FullDiffQaComparisonCanvas(
           controller: controller,
           surfaceSize: const Size(480, 549),
         ),
@@ -406,6 +471,56 @@ void main() {
     }
   });
 
+  testWidgets('480px initial hunk keeps the unwrapped source at x=0', (
+    tester,
+  ) async {
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final controller = await qaControllerFor(activeHunkIndex: 1);
+    addTearDown(controller.dispose);
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(480, 549);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: fullDiffQaTheme(),
+        home: FullDiffQaProductShell(controller: controller),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump();
+
+    final anchor = controller.state.activeAnchor!;
+    final content = find.byKey(const Key('content-scrollable'));
+    final horizontal = find.descendant(
+      of: content,
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is SingleChildScrollView &&
+            widget.scrollDirection == Axis.horizontal,
+      ),
+    );
+    final horizontalScrollable = find
+        .descendant(of: horizontal, matching: find.byType(Scrollable))
+        .first;
+    final horizontalPosition = tester
+        .state<ScrollableState>(horizontalScrollable)
+        .position;
+    final header = find.byKey(Key('hunk-card-surface-${anchor.id}'));
+    final line313 = find.byKey(Key('hunk-line-${anchor.id}-0'));
+    final left = tester.getRect(content).left;
+
+    expect(horizontalPosition.pixels, 0);
+    expect(tester.getRect(header).left, left);
+    expect(tester.getRect(line313).left, left);
+    expect(
+      find.descendant(of: line313, matching: find.text('313')),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('focus mode stretches both global headers to the content edge', (
     tester,
   ) async {
@@ -420,7 +535,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: fullDiffQaTheme(),
-        home: FullDiffQaHarness(
+        home: FullDiffQaComparisonCanvas(
           controller: controller,
           surfaceSize: const Size(1070, 842),
         ),
@@ -453,7 +568,7 @@ void main() {
         await tester.pumpWidget(
           MaterialApp(
             theme: fullDiffQaTheme(),
-            home: FullDiffQaHarness(
+            home: FullDiffQaComparisonCanvas(
               controller: controller,
               surfaceSize: const Size(782, 842),
             ),
@@ -501,7 +616,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           theme: fullDiffQaTheme(),
-          home: FullDiffQaHarness(
+          home: FullDiffQaComparisonCanvas(
             controller: controller,
             surfaceSize: const Size(1070, 842),
           ),
@@ -516,12 +631,25 @@ void main() {
       final viewport = tester.getRect(
         find.byKey(const Key('content-scrollable')),
       );
+      final activeAnchor = controller.state.activeAnchor!;
+      final header = find.byKey(
+        Key('$linePrefix-hunk-header-${activeAnchor.id}'),
+      );
       final line309 = find.byKey(Key('$linePrefix-line-309'));
+      final changedRow = find.byKey(Key('$linePrefix-line-313'));
+      expect(header, findsOneWidget);
+      expect(changedRow, findsOneWidget);
       expect(line309, findsOneWidget);
       expect(
         tester.getTopLeft(line309).dy,
         inInclusiveRange(viewport.top - 27, viewport.top + 27),
       );
+      expect(
+        tester.getRect(header).overlaps(viewport),
+        isTrue,
+        reason: '${view.name} selected Hunk header',
+      );
+      expect(tester.getBottomLeft(header).dy, tester.getTopLeft(changedRow).dy);
       expect(find.byKey(Key('$linePrefix-current-line-313')), findsOneWidget);
     });
   }
@@ -540,7 +668,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: fullDiffQaTheme(),
-        home: FullDiffQaHarness(
+        home: FullDiffQaComparisonCanvas(
           controller: controller,
           surfaceSize: const Size(1070, 842),
         ),
@@ -590,7 +718,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: fullDiffQaTheme(),
-        home: FullDiffQaHarness(
+        home: FullDiffQaComparisonCanvas(
           controller: controller,
           detailOnly: true,
           surfaceSize: const Size(1280, 720),
@@ -624,7 +752,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: fullDiffQaTheme(),
-        home: FullDiffQaHarness(
+        home: FullDiffQaComparisonCanvas(
           controller: controller,
           surfaceSize: const Size(1070, 842),
         ),
@@ -685,7 +813,7 @@ void main() {
         tester,
         name: scenario.name,
         size: scenario.size,
-        child: FullDiffQaHarness(
+        child: FullDiffQaComparisonCanvas(
           controller: controller,
           detailOnly: scenario.detailOnly,
           surfaceSize: scenario.size,

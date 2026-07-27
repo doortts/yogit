@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import 'full_diff_code_row.dart';
+import 'full_diff_hunk_header.dart';
 import 'full_diff_model.dart';
 import 'full_diff_syntax_contract.dart';
 import 'full_diff_theme.dart';
+import 'full_source_hunk_map.dart';
 import 'git.dart';
 
 class FullFileView extends StatelessWidget {
@@ -34,7 +36,6 @@ class FullFileView extends StatelessWidget {
       FileContentKind.binary => 'Binary file',
       FileContentKind.unsupportedEncoding => 'Unsupported encoding',
       FileContentKind.tooLarge => 'File too large',
-      FileContentKind.utf8 when document.lines.isEmpty => 'Empty file',
       FileContentKind.utf8 => null,
     };
     if (status != null) {
@@ -48,34 +49,55 @@ class FullFileView extends StatelessWidget {
       );
     }
 
-    final sourceLine = _sourceLine(
-      activeAnchor,
-      document.side,
-      hunks,
-      document.lines.length,
+    final sourceMap = FullSourceHunkMap(
+      hunks: hunks,
+      side: document.side,
+      lineCount: document.lines.length,
     );
-    final anchorHunks = _hunksByLine(
-      hunks,
-      document.side,
-      document.lines.length,
-    );
+    final sourceLine = sourceMap.activeLine(activeAnchor);
     final list = ListView.builder(
       key: const Key('file-list'),
       controller: controller,
       primary: controller == null,
-      itemCount: document.lines.length,
+      itemCount: sourceMap.itemCount + (document.lines.isEmpty ? 1 : 0),
       itemBuilder: (context, index) {
-        final lineNumber = index + 1;
+        if (index == sourceMap.itemCount) {
+          return const SizedBox(
+            height: 180,
+            child: Center(
+              child: Text(
+                'Empty file',
+                style: TextStyle(color: fullDiffMuted, fontSize: 14),
+              ),
+            ),
+          );
+        }
+        final item = sourceMap.itemAt(index);
+        if (item case FullSourceHunkHeaderItem(:final hunk)) {
+          return KeyedSubtree(
+            key: Key('file-hunk-header-${hunk.anchor.id}'),
+            child: KeyedSubtree(
+              key: _anchorKey(hunk.anchor),
+              child: FullDiffHunkHeader(
+                hunk: hunk,
+                path: path,
+                hunkCount: hunks.length,
+              ),
+            ),
+          );
+        }
+        final sourceItem = item as FullSourceLineItem;
+        final lineNumber = sourceItem.lineNumber;
         final current = lineNumber == sourceLine;
         final line = DiffLine(
-          kind: DiffLineKind.context,
-          text: document.lines[index],
+          kind: sourceItem.kind,
+          text: document.lines[lineNumber - 1],
           oldNumber: document.side == FileDocumentSide.old ? lineNumber : null,
           newNumber: document.side == FileDocumentSide.result
               ? lineNumber
               : null,
         );
-        Widget row = KeyedSubtree(
+        return KeyedSubtree(
           key: Key('file-line-$lineNumber'),
           child: KeyedSubtree(
             key: current ? Key('file-current-line-$lineNumber') : null,
@@ -90,10 +112,6 @@ class FullFileView extends StatelessWidget {
             ),
           ),
         );
-        for (final hunk in anchorHunks[lineNumber] ?? const <DiffHunk>[]) {
-          row = KeyedSubtree(key: _anchorKey(hunk.anchor), child: row);
-        }
-        return row;
       },
     );
 
@@ -123,43 +141,6 @@ class FullFileView extends StatelessWidget {
   GlobalKey _anchorKey(DiffAnchor anchor) =>
       anchorKeys[anchor.id] ??
       (throw StateError('Missing GlobalKey for ${anchor.id}'));
-}
-
-int? _sourceLine(
-  DiffAnchor? anchor,
-  FileDocumentSide side,
-  List<DiffHunk> hunks,
-  int lineCount,
-) {
-  if (anchor == null || lineCount == 0) return null;
-  final direct = switch (side) {
-    FileDocumentSide.old => anchor.oldLine,
-    FileDocumentSide.result => anchor.newLine,
-  };
-  if (direct != null) return direct.clamp(1, lineCount);
-  if (anchor.hunkIndex < 0 || anchor.hunkIndex >= hunks.length) return null;
-  return _hunkLine(hunks[anchor.hunkIndex], side, lineCount);
-}
-
-Map<int, List<DiffHunk>> _hunksByLine(
-  List<DiffHunk> hunks,
-  FileDocumentSide side,
-  int lineCount,
-) {
-  final result = <int, List<DiffHunk>>{};
-  if (lineCount == 0) return result;
-  for (final hunk in hunks) {
-    (result[_hunkLine(hunk, side, lineCount)] ??= []).add(hunk);
-  }
-  return result;
-}
-
-int _hunkLine(DiffHunk hunk, FileDocumentSide side, int lineCount) {
-  final line = switch (side) {
-    FileDocumentSide.old => hunk.anchor.oldLine ?? hunk.oldStart,
-    FileDocumentSide.result => hunk.anchor.newLine ?? hunk.newStart,
-  };
-  return line.clamp(1, lineCount);
 }
 
 class _NoopSyntaxHighlighter implements FullDiffSyntaxHighlighter {

@@ -29,6 +29,7 @@ final qaCommits = <GitCommit>[
     parent: '62874a0',
     subject: 'Make Retina windows pixel-aware',
     daysAgo: 16,
+    workingTree: true,
   ),
   _qaCommit(
     sha: '65f4c80',
@@ -439,8 +440,38 @@ Future<FullDiffSessionController> qaControllerFor({
   return controller;
 }
 
-class FullDiffQaHarness extends StatelessWidget {
-  const FullDiffQaHarness({
+const fullDiffComparisonCanvasInset = 16.0;
+
+class FullDiffQaProductShell extends StatelessWidget {
+  const FullDiffQaProductShell({
+    required this.controller,
+    this.detailOnly = false,
+    this.viewportWidth,
+    super.key,
+  });
+
+  final FullDiffSessionController controller;
+  final bool detailOnly;
+  final double? viewportWidth;
+
+  @override
+  Widget build(BuildContext context) => RepaintBoundary(
+    key: const Key('full-diff-product-shell'),
+    child: detailOnly
+        ? FullDiffQaDetail(controller: controller)
+        : DiffScreen(
+            repository: controller.repository,
+            commits: controller.state.nearbyCommits,
+            initialIndex: 0,
+            initialView: FullDiffInitialView.hunk,
+            controller: controller,
+            columnWidths: _qaColumnWidths(viewportWidth),
+          ),
+  );
+}
+
+class FullDiffQaComparisonCanvas extends StatelessWidget {
+  const FullDiffQaComparisonCanvas({
     required this.controller,
     this.detailOnly = false,
     this.surfaceSize,
@@ -453,37 +484,36 @@ class FullDiffQaHarness extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final workspace = detailOnly
-        ? FullDiffQaDetail(controller: controller)
-        : DiffScreen(
-            repository: controller.repository,
-            commits: controller.state.nearbyCommits,
-            initialIndex: 0,
-            initialView: FullDiffInitialView.hunk,
-            controller: controller,
-            columnWidths: _qaColumnWidths(surfaceSize?.width),
-            editorEnabledOverride: true,
-          );
+    final productShell = FullDiffQaProductShell(
+      controller: controller,
+      detailOnly: detailOnly,
+      viewportWidth: surfaceSize?.width,
+    );
     final sizedWorkspace = switch ((surfaceSize, detailOnly)) {
       (final Size size, false) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+        padding: const EdgeInsets.fromLTRB(
+          fullDiffComparisonCanvasInset,
+          fullDiffComparisonCanvasInset,
+          fullDiffComparisonCanvasInset,
+          0,
+        ),
         child: Align(
           alignment: Alignment.topCenter,
           child: SizedBox(
-            width: size.width - 32,
+            width: size.width - fullDiffComparisonCanvasInset * 2,
             height: 641,
-            child: workspace,
+            child: productShell,
           ),
         ),
       ),
       (final Size size, true) => Align(
         alignment: Alignment.topCenter,
-        child: SizedBox(width: size.width, height: 596, child: workspace),
+        child: SizedBox(width: size.width, height: 596, child: productShell),
       ),
-      _ => workspace,
+      _ => productShell,
     };
     return RepaintBoundary(
-      key: const Key('full-diff-qa-root'),
+      key: const Key('full-diff-comparison-canvas'),
       child: ColoredBox(color: fullDiffCanvas, child: sizedWorkspace),
     );
   }
@@ -610,6 +640,7 @@ GitCommit _qaCommit({
   required String subject,
   required int daysAgo,
   GitIdentity author = fixtureIdentity,
+  bool workingTree = false,
 }) {
   final timestamp =
       DateTime.now()
@@ -617,7 +648,7 @@ GitCommit _qaCommit({
           .millisecondsSinceEpoch ~/
       1000;
   return GitCommit(
-    sha: sha,
+    sha: workingTree ? '' : sha,
     shortSha: sha,
     parents: [parent],
     author: author,
