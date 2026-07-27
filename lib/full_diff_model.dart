@@ -15,6 +15,8 @@ enum FullDiffInitialView { hunk, fullFile }
 
 enum FileContentKind { utf8, binary, unsupportedEncoding, tooLarge }
 
+enum FileContentLimitReason { byteLimit, lineLimit }
+
 enum FileDocumentSide { old, result }
 
 const fullDiffLargeByteLimit = 2 * 1024 * 1024;
@@ -210,6 +212,7 @@ class FileDocument {
     required this.hasTrailingNewline,
     required this.disableRichRendering,
     required this.fingerprint,
+    this.limitReason,
   });
 
   final String revision;
@@ -221,6 +224,7 @@ class FileDocument {
   final bool hasTrailingNewline;
   final bool disableRichRendering;
   final String fingerprint;
+  final FileContentLimitReason? limitReason;
 
   factory FileDocument.fromBytes({
     required String revision,
@@ -243,8 +247,7 @@ class FileDocument {
         fingerprint: fingerprint,
       );
     }
-    if (bytes.length > fullDiffTextByteLimit ||
-        _exceedsFullDiffTextLineLimit(bytes)) {
+    if (bytes.length > fullDiffTextByteLimit) {
       return FileDocument(
         revision: revision,
         path: path,
@@ -255,6 +258,21 @@ class FileDocument {
         hasTrailingNewline: false,
         disableRichRendering: true,
         fingerprint: fingerprint,
+        limitReason: FileContentLimitReason.byteLimit,
+      );
+    }
+    if (_exceedsFullDiffTextLineLimit(bytes)) {
+      return FileDocument(
+        revision: revision,
+        path: path,
+        side: side,
+        bytes: bytes,
+        kind: FileContentKind.tooLarge,
+        lines: const [],
+        hasTrailingNewline: false,
+        disableRichRendering: true,
+        fingerprint: fingerprint,
+        limitReason: FileContentLimitReason.lineLimit,
       );
     }
     late final String text;

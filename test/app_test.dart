@@ -3552,7 +3552,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('현재 옵션으로 표시할 변경이 없습니다'), findsOneWidget);
+    expect(find.text('현재 옵션으로 표시할 변경이 없습니다.'), findsOneWidget);
     expect(find.byKey(const Key('diff-pending-files')), findsNothing);
     expect(find.byKey(const Key('diff-pending-first-diff')), findsNothing);
     expect(find.byKey(const Key('diff-error-without-document')), findsNothing);

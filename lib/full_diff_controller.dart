@@ -333,6 +333,8 @@ class FullDiffSessionController extends ChangeNotifier {
 
   Future<void> retryFiles() => _loadFiles();
 
+  Future<void> retryPatch() => _loadPatch();
+
   Future<void> selectCommit(GitCommit commit) async {
     if (_disposed || state.selectedCommit.sha == commit.sha) return;
     final commits =

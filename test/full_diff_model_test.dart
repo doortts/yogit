@@ -114,10 +114,13 @@ void main() {
     );
 
     expect(utf8File.kind, FileContentKind.utf8);
+    expect(utf8File.limitReason, isNull);
     expect(utf8File.lines, ['begin', 'end;']);
     expect(utf8File.hasTrailingNewline, isTrue);
     expect(unsupported.kind, FileContentKind.unsupportedEncoding);
+    expect(unsupported.limitReason, isNull);
     expect(binary.kind, FileContentKind.binary);
+    expect(binary.limitReason, isNull);
   });
 
   test('rejects blame rows that do not match the file', () {
@@ -134,25 +137,36 @@ void main() {
     );
   });
 
-  test('stops materializing text beyond either hard limit', () {
+  test('records which hard limit stopped text materialization', () {
     final bytesOverLimit = Uint8List(fullDiffTextByteLimit + 1)
       ..fillRange(0, fullDiffTextByteLimit + 1, 0x61);
     final linesOverLimit = Uint8List.fromList(
       utf8.encode(List.filled(fullDiffTextLineLimit + 1, 'x').join('\n')),
     );
 
-    for (final bytes in [bytesOverLimit, linesOverLimit]) {
-      final file = FileDocument.fromBytes(
-        revision: 'abc',
-        path: 'large.txt',
-        side: FileDocumentSide.result,
-        bytes: bytes,
-        gitMarkedBinary: false,
-      );
-      expect(file.kind, FileContentKind.tooLarge);
-      expect(file.lines, isEmpty);
-      expect(file.disableRichRendering, isTrue);
-    }
+    final bytesFile = FileDocument.fromBytes(
+      revision: 'abc',
+      path: 'large-bytes.txt',
+      side: FileDocumentSide.result,
+      bytes: bytesOverLimit,
+      gitMarkedBinary: false,
+    );
+    final linesFile = FileDocument.fromBytes(
+      revision: 'abc',
+      path: 'many-lines.txt',
+      side: FileDocumentSide.result,
+      bytes: linesOverLimit,
+      gitMarkedBinary: false,
+    );
+
+    expect(bytesFile.kind, FileContentKind.tooLarge);
+    expect(bytesFile.limitReason, FileContentLimitReason.byteLimit);
+    expect(bytesFile.lines, isEmpty);
+    expect(bytesFile.disableRichRendering, isTrue);
+    expect(linesFile.kind, FileContentKind.tooLarge);
+    expect(linesFile.limitReason, FileContentLimitReason.lineLimit);
+    expect(linesFile.lines, isEmpty);
+    expect(linesFile.disableRichRendering, isTrue);
   });
 
   test('applies the byte hard limit before decoding invalid UTF-8', () {

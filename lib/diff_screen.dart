@@ -15,6 +15,7 @@ import 'full_diff_model.dart';
 import 'full_diff_split_view.dart';
 import 'full_diff_syntax.dart';
 import 'full_diff_theme.dart';
+import 'full_diff_unavailable_panel.dart';
 import 'full_file_view.dart';
 import 'full_history_view.dart';
 import 'git.dart';
@@ -1061,6 +1062,14 @@ class _DiffScreenState extends State<DiffScreen> {
   Widget _fileContent(FullDiffSessionState state) {
     final file = state.file.data;
     if (file == null) return _resourceStatus(state.file, '파일을 읽는 중입니다');
+    final unavailableReason = _unavailableReasonFor(file);
+    if (unavailableReason != null) {
+      return _unavailablePanel(
+        state,
+        reason: unavailableReason,
+        path: file.path,
+      );
+    }
     return FullFileView(
       document: file,
       hunks: state.patch.data?.hunks ?? const [],
@@ -1077,20 +1086,51 @@ class _DiffScreenState extends State<DiffScreen> {
 
   Widget _diffContent(FullDiffSessionState state, double viewportWidth) {
     final patch = state.patch.data;
-    final file = state.selectedFile;
-    if (patch == null || file == null) {
+    final selectedFile = state.selectedFile;
+    if (selectedFile != null && patch == null && state.patch.error != null) {
+      return KeyedSubtree(
+        key: const Key('diff-error-without-document'),
+        child: _unavailablePanel(
+          state,
+          reason: FullDiffUnavailableReason.gitError,
+          path: state.file.data?.path ?? selectedFile.path,
+          error: state.patch.error,
+          onRetry: () => unawaited(_controller.retryPatch()),
+        ),
+      );
+    }
+    if (patch == null || selectedFile == null) {
       return _resourceStatus(
         state.patch,
-        'Diff를 읽는 중입니다',
+        state.file.loading ? '파일을 읽는 중입니다' : 'Diff를 읽는 중입니다',
         loadingKey: const Key('diff-pending-first-diff'),
         errorKey: const Key('diff-error-without-document'),
+      );
+    }
+    final fileDocument = state.file.data;
+    if (fileDocument == null) {
+      return _resourceStatus(state.file, '파일을 읽는 중입니다');
+    }
+    final unavailableReason = _unavailableReasonFor(fileDocument);
+    if (unavailableReason != null) {
+      return _unavailablePanel(
+        state,
+        reason: unavailableReason,
+        path: fileDocument.path,
+      );
+    }
+    if (patch.hunks.isEmpty) {
+      return _unavailablePanel(
+        state,
+        reason: FullDiffUnavailableReason.noChanges,
+        path: fileDocument.path,
       );
     }
     final presentation = switch (state.presentation) {
       DiffPresentation.hunk => HunkPresentationView(
         document: patch,
         activeAnchor: state.activeAnchor,
-        path: file.path,
+        path: selectedFile.path,
         wrapLines: state.wrapLines,
         highlighter: _highlighter,
         anchorKeys: _anchorKeys,
@@ -1102,7 +1142,7 @@ class _DiffScreenState extends State<DiffScreen> {
       DiffPresentation.inline => InlinePresentationView(
         document: patch,
         activeAnchor: state.activeAnchor,
-        path: file.path,
+        path: selectedFile.path,
         wrapLines: state.wrapLines,
         highlighter: _highlighter,
         anchorKeys: _anchorKeys,
@@ -1114,8 +1154,8 @@ class _DiffScreenState extends State<DiffScreen> {
       DiffPresentation.split => SplitPresentationView(
         document: patch,
         activeAnchor: state.activeAnchor,
-        oldPath: file.oldPath ?? file.path,
-        newPath: file.path,
+        oldPath: selectedFile.oldPath ?? selectedFile.path,
+        newPath: selectedFile.path,
         wrapLines: state.wrapLines,
         showOldSide: viewportWidth > 480,
         highlighter: _highlighter,
@@ -1145,6 +1185,42 @@ class _DiffScreenState extends State<DiffScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  FullDiffUnavailableReason? _unavailableReasonFor(
+    FileDocument file,
+  ) => switch (file.kind) {
+    FileContentKind.utf8 => null,
+    FileContentKind.binary => FullDiffUnavailableReason.binary,
+    FileContentKind.unsupportedEncoding =>
+      FullDiffUnavailableReason.unsupportedEncoding,
+    FileContentKind.tooLarge => switch (file.limitReason) {
+      FileContentLimitReason.byteLimit => FullDiffUnavailableReason.byteLimit,
+      FileContentLimitReason.lineLimit => FullDiffUnavailableReason.lineLimit,
+      null => null,
+    },
+  };
+
+  Widget _unavailablePanel(
+    FullDiffSessionState state, {
+    required FullDiffUnavailableReason reason,
+    required String path,
+    Object? error,
+    VoidCallback? onRetry,
+  }) {
+    final file = state.selectedFile;
+    if (file == null) {
+      return _resourceStatus(state.patch, 'Diff를 읽는 중입니다');
+    }
+    return FullDiffUnavailablePanel(
+      file: file,
+      path: path,
+      reason: reason,
+      algorithm: state.requestedAlgorithm,
+      ignoreWhitespace: state.requestedIgnoreWhitespace,
+      error: error,
+      onRetry: onRetry,
     );
   }
 

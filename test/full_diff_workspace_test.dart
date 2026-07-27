@@ -638,6 +638,154 @@ void main() {
     );
   });
 
+  Future<FullDiffSessionController> unavailableController({
+    required Uint8List bytes,
+    Future<List<DiffLine>> Function(
+      GitCommit,
+      GitFileChange,
+      String?,
+      DiffAlgorithm,
+      bool,
+    )?
+    diff,
+    FullDiffInitialView initialView = FullDiffInitialView.hunk,
+  }) async {
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..diff = diff ?? ((_, _, _, _, _) async => const [])
+      ..content = ((_, _, _) async => bytes);
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+      initialView: initialView,
+    );
+    await controller.initialize();
+    return controller;
+  }
+
+  final lineLimitedBytes = Uint8List((fullDiffTextLineLimit + 1) * 2);
+  for (var index = 0; index < lineLimitedBytes.length; index += 2) {
+    lineLimitedBytes[index] = 0x78;
+    lineLimitedBytes[index + 1] = 0x0A;
+  }
+  final byteLimitedBytes = Uint8List(fullDiffTextByteLimit + 1)
+    ..fillRange(0, fullDiffTextByteLimit + 1, 0x78);
+  final unavailableCases = [
+    (
+      label: 'empty patch',
+      bytes: Uint8List.fromList(utf8.encode('unchanged\n')),
+      attribute: 'UTF-8',
+      message: '현재 옵션으로 표시할 변경이 없습니다.',
+      patch: <DiffLine>[],
+    ),
+    (
+      label: 'binary content',
+      bytes: Uint8List.fromList([0x78, 0x00]),
+      attribute: 'Binary',
+      message: '바이너리 파일이라 텍스트 diff를 표시할 수 없습니다.',
+      patch: twoHunkLines,
+    ),
+    (
+      label: 'unsupported encoding',
+      bytes: Uint8List.fromList([0x80, 0x81]),
+      attribute: 'Unsupported encoding',
+      message: 'UTF-8로 해석할 수 없는 파일이라 텍스트 diff를 표시할 수 없습니다.',
+      patch: twoHunkLines,
+    ),
+    (
+      label: 'byte-limited content',
+      bytes: byteLimitedBytes,
+      attribute: '10 MiB 초과',
+      message: '파일이 10 MiB 제한을 초과해 내용을 표시하지 않습니다.',
+      patch: twoHunkLines,
+    ),
+    (
+      label: 'line-limited content',
+      bytes: lineLimitedBytes,
+      attribute: '200,000줄 초과',
+      message: '파일이 200,000줄 제한을 초과해 내용을 표시하지 않습니다.',
+      patch: twoHunkLines,
+    ),
+  ];
+  for (final scenario in unavailableCases) {
+    testWidgets('${scenario.label} explains why diff content is unavailable', (
+      tester,
+    ) async {
+      final controller = await unavailableController(
+        bytes: scenario.bytes,
+        diff: (_, _, _, _, _) async => scenario.patch,
+      );
+      addTearDown(controller.dispose);
+      await pumpWorkspace(
+        tester,
+        controller: controller,
+        size: const Size(1070, 650),
+      );
+
+      expect(find.byKey(const Key('full-diff-unavailable')), findsOneWidget);
+      expect(find.text(fileA.path), findsWidgets);
+      expect(find.text(scenario.attribute), findsWidgets);
+      expect(find.text(scenario.message), findsOneWidget);
+      expect(find.text('다시 시도'), findsNothing);
+    });
+  }
+
+  testWidgets('File view keeps unsupported content out of FullFileView', (
+    tester,
+  ) async {
+    final controller = await unavailableController(
+      bytes: Uint8List.fromList([0x80, 0x81]),
+      diff: (_, _, _, _, _) async => twoHunkLines,
+      initialView: FullDiffInitialView.fullFile,
+    );
+    addTearDown(controller.dispose);
+    await pumpWorkspace(
+      tester,
+      controller: controller,
+      size: const Size(1070, 650),
+    );
+
+    expect(find.byKey(const Key('full-diff-unavailable')), findsOneWidget);
+    expect(find.text('Unsupported encoding'), findsWidgets);
+    expect(
+      find.text('UTF-8로 해석할 수 없는 파일이라 텍스트 diff를 표시할 수 없습니다.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('a failed first patch request can retry into a diff', (
+    tester,
+  ) async {
+    var attempts = 0;
+    final controller = await unavailableController(
+      bytes: Uint8List.fromList(utf8.encode('current\n')),
+      diff: (_, _, _, _, _) async {
+        if (attempts++ == 0) throw const FormatException('bad patch');
+        return twoHunkLines;
+      },
+    );
+    addTearDown(controller.dispose);
+    final repository = controller.repository as FakeFullDiffRepository;
+    await pumpWorkspace(
+      tester,
+      controller: controller,
+      size: const Size(1070, 650),
+    );
+
+    expect(find.byKey(const Key('full-diff-unavailable')), findsOneWidget);
+    expect(find.text('Git에서 이 파일의 변경 내용을 읽지 못했습니다.'), findsOneWidget);
+    expect(find.textContaining('bad patch'), findsOneWidget);
+    expect(repository.diffRequests, hasLength(1));
+
+    await tester.tap(find.text('다시 시도'));
+    await tester.pumpAndSettle();
+
+    expect(repository.diffRequests, hasLength(2));
+    expect(find.byKey(const Key('full-diff-unavailable')), findsNothing);
+    expect(find.text('first new'), findsOneWidget);
+  });
+
   final tooManyLines = Uint8List((fullDiffTextLineLimit + 1) * 2);
   for (var index = 0; index < tooManyLines.length; index += 2) {
     tooManyLines[index] = 0x78;

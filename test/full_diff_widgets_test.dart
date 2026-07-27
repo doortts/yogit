@@ -14,11 +14,115 @@ import 'package:yogit/full_diff_split_view.dart';
 import 'package:yogit/full_diff_syntax.dart';
 import 'package:yogit/full_diff_syntax_contract.dart';
 import 'package:yogit/full_diff_theme.dart';
+import 'package:yogit/full_diff_unavailable_panel.dart';
 import 'package:yogit/git.dart';
+import 'package:yogit/typography.dart';
 
 import 'support/full_diff_fixtures.dart';
 
 void main() {
+  final unavailableScenarios = [
+    (
+      reason: FullDiffUnavailableReason.noChanges,
+      attribute: 'UTF-8',
+      message: '현재 옵션으로 표시할 변경이 없습니다.',
+    ),
+    (
+      reason: FullDiffUnavailableReason.binary,
+      attribute: 'Binary',
+      message: '바이너리 파일이라 텍스트 diff를 표시할 수 없습니다.',
+    ),
+    (
+      reason: FullDiffUnavailableReason.unsupportedEncoding,
+      attribute: 'Unsupported encoding',
+      message: 'UTF-8로 해석할 수 없는 파일이라 텍스트 diff를 표시할 수 없습니다.',
+    ),
+    (
+      reason: FullDiffUnavailableReason.byteLimit,
+      attribute: '10 MiB 초과',
+      message: '파일이 10 MiB 제한을 초과해 내용을 표시하지 않습니다.',
+    ),
+    (
+      reason: FullDiffUnavailableReason.lineLimit,
+      attribute: '200,000줄 초과',
+      message: '파일이 200,000줄 제한을 초과해 내용을 표시하지 않습니다.',
+    ),
+    (
+      reason: FullDiffUnavailableReason.gitError,
+      attribute: 'Git error',
+      message: 'Git에서 이 파일의 변경 내용을 읽지 못했습니다.',
+    ),
+  ];
+
+  for (final scenario in unavailableScenarios) {
+    testWidgets(
+      'unavailable panel explains ${scenario.reason.name} in information order',
+      (tester) async {
+        var retries = 0;
+        await tester.pumpWidget(
+          qaApp(
+            FullDiffUnavailablePanel(
+              file: fileA,
+              path: fileA.path,
+              reason: scenario.reason,
+              algorithm: DiffAlgorithm.gitSetting,
+              ignoreWhitespace: false,
+              error: const FormatException('fixture failure'),
+              onRetry: () => retries++,
+            ),
+          ),
+        );
+
+        final path = find.text(fileA.path);
+        final summary = find.text('M · +12 −4');
+        final attribute = find.text(scenario.attribute);
+        final message = find.text(scenario.message);
+        expect(find.byKey(const Key('full-diff-unavailable')), findsOneWidget);
+        expect(path, findsOneWidget);
+        expect(summary, findsOneWidget);
+        expect(attribute, findsOneWidget);
+        expect(message, findsOneWidget);
+        expect(
+          tester.getTopLeft(path).dy,
+          lessThan(tester.getTopLeft(summary).dy),
+        );
+        expect(
+          tester.getTopLeft(summary).dy,
+          lessThan(tester.getTopLeft(attribute).dy),
+        );
+        expect(
+          tester.getTopLeft(attribute).dy,
+          lessThan(tester.getTopLeft(message).dy),
+        );
+        expect(
+          tester.widget<Text>(path).style?.fontFamily,
+          technicalTextStyle.fontFamily,
+        );
+        expect(
+          tester.widget<Text>(summary).style?.fontFamily,
+          technicalTextStyle.fontFamily,
+        );
+
+        if (scenario.reason == FullDiffUnavailableReason.noChanges) {
+          expect(find.textContaining('Git setting'), findsOneWidget);
+          expect(find.textContaining('공백 포함'), findsOneWidget);
+        } else {
+          expect(find.textContaining('공백 포함'), findsNothing);
+        }
+
+        if (scenario.reason == FullDiffUnavailableReason.gitError) {
+          expect(find.textContaining('fixture failure'), findsOneWidget);
+          expect(find.text('다시 시도'), findsOneWidget);
+          await tester.tap(find.text('다시 시도'));
+          expect(retries, 1);
+        } else {
+          expect(find.textContaining('fixture failure'), findsNothing);
+          expect(find.text('다시 시도'), findsNothing);
+        }
+      },
+    );
+  }
+
   testWidgets('keeps the algorithm name fixed beside its selected value', (
     tester,
   ) async {
