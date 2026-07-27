@@ -26,6 +26,11 @@ void main() {
     bool emptyThirdSummary = false,
     int lineCount = 8,
     Size size = const Size(1000, 600),
+    ScrollController? controller,
+    FocusOnKeyEventCallback? onOuterKeyEvent,
+    Key? viewKey,
+    bool wrapLines = false,
+    String Function(int line)? sourceForLine,
   }) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = size;
@@ -39,7 +44,7 @@ void main() {
       side: FileDocumentSide.result,
       bytes: Uint8List.fromList(
         utf8.encode(
-          '${[for (var line = 1; line <= lineCount; line++) 'source $line'].join('\n')}\n',
+          '${[for (var line = 1; line <= lineCount; line++) sourceForLine?.call(line) ?? 'source $line'].join('\n')}\n',
         ),
       ),
       gitMarkedBinary: false,
@@ -57,19 +62,21 @@ void main() {
         ),
     ]);
 
-    await tester.pumpWidget(
-      qaApp(
-        FullBlameView(
-          document: blame,
-          hunks: const [],
-          activeAnchor: null,
-          wrapLines: false,
-          highlighter: fakeHighlighter,
-          anchorKeys: const {},
-          showRemoteAvatars: false,
-        ),
-      ),
+    Widget view = FullBlameView(
+      key: viewKey,
+      document: blame,
+      hunks: const [],
+      activeAnchor: null,
+      wrapLines: wrapLines,
+      highlighter: fakeHighlighter,
+      anchorKeys: const {},
+      controller: controller,
+      showRemoteAvatars: false,
     );
+    if (onOuterKeyEvent != null) {
+      view = Focus(onKeyEvent: onOuterKeyEvent, child: view);
+    }
+    await tester.pumpWidget(qaApp(view));
     return blame;
   }
 
@@ -1764,6 +1771,221 @@ void main() {
     expect(find.byKey(const Key('blame-selected-21')), findsOneWidget);
     expect(tester.getRect(row21).top, greaterThanOrEqualTo(viewport.top));
     expect(tester.getRect(row21).bottom, lessThanOrEqualTo(viewport.bottom));
+  });
+
+  testWidgets('blame ignores every modified Up and Down key', (tester) async {
+    var escapedArrowEvents = 0;
+    await pumpInteractiveBlameView(
+      tester,
+      onOuterKeyEvent: (_, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.arrowUp ||
+                event.logicalKey == LogicalKeyboardKey.arrowDown)) {
+          escapedArrowEvents++;
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+    );
+    await tester.tap(find.byKey(const Key('blame-line-4')));
+    await tester.pump();
+
+    for (final modifier in [
+      LogicalKeyboardKey.shiftLeft,
+      LogicalKeyboardKey.controlLeft,
+      LogicalKeyboardKey.metaLeft,
+      LogicalKeyboardKey.altLeft,
+    ]) {
+      for (final arrow in [
+        LogicalKeyboardKey.arrowUp,
+        LogicalKeyboardKey.arrowDown,
+      ]) {
+        await tester.sendKeyDownEvent(modifier);
+        await tester.sendKeyEvent(arrow);
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pump();
+        expect(
+          find.byKey(const Key('blame-selected-4')),
+          findsOneWidget,
+          reason: '$modifier + $arrow must not move the Blame selection',
+        );
+      }
+    }
+    expect(escapedArrowEvents, 8);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(find.byKey(const Key('blame-selected-5')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+    expect(find.byKey(const Key('blame-selected-4')), findsOneWidget);
+    expect(escapedArrowEvents, 8);
+  });
+
+  testWidgets('blame semantics tap selects the row and gives it key focus', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await pumpInteractiveBlameView(tester);
+    final row = find.semantics.byLabel(RegExp(r'^Line 3, Commit summary 3'));
+
+    expect(
+      row.evaluate().single.getSemanticsData().hasAction(
+        ui.SemanticsAction.tap,
+      ),
+      isTrue,
+    );
+    tester.semantics.tap(row);
+    await tester.pump();
+    expect(find.byKey(const Key('blame-selected-3')), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(find.byKey(const Key('blame-selected-4')), findsOneWidget);
+    semantics.dispose();
+  });
+
+  testWidgets(
+    'blame arrows recover a selected row far outside the lazy cache',
+    (tester) async {
+      final controller = ScrollController();
+      addTearDown(controller.dispose);
+      await pumpInteractiveBlameView(
+        tester,
+        lineCount: 500,
+        size: const Size(1000, 220),
+        controller: controller,
+      );
+      final row20 = find.byKey(const Key('blame-line-20'));
+      await tester.scrollUntilVisible(
+        row20,
+        200,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const Key('blame-list')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      await Scrollable.ensureVisible(
+        tester.element(row20),
+        alignment: 0.5,
+        duration: Duration.zero,
+      );
+      await tester.pump();
+      await tester.tap(row20);
+      await tester.pump();
+
+      controller.jumpTo(controller.position.maxScrollExtent);
+      await tester.pump();
+      expect(row20, findsNothing);
+
+      for (var count = 0; count < 3; count++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      }
+      await tester.pumpAndSettle();
+
+      final row23 = find.byKey(const Key('blame-line-23'));
+      final viewport = tester.getRect(find.byKey(const Key('blame-list')));
+      expect(find.byKey(const Key('blame-selected-23')), findsOneWidget);
+      expect(find.byKey(const Key('blame-commit-details-23')), findsOneWidget);
+      expect(tester.getRect(row23).top, greaterThanOrEqualTo(viewport.top));
+      expect(tester.getRect(row23).bottom, lessThanOrEqualTo(viewport.bottom));
+      expect(
+        tester.getTopLeft(find.byKey(const Key('blame-commit-details-23'))).dy,
+        closeTo(tester.getTopLeft(row23).dy + fullDiffSourceRowHeight * 2, 1),
+      );
+
+      controller.jumpTo(controller.position.maxScrollExtent);
+      await tester.pump();
+      expect(row23, findsNothing);
+
+      for (var count = 0; count < 2; count++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      }
+      await tester.pumpAndSettle();
+
+      final row21 = find.byKey(const Key('blame-line-21'));
+      expect(find.byKey(const Key('blame-selected-21')), findsOneWidget);
+      expect(find.byKey(const Key('blame-commit-details-21')), findsOneWidget);
+      expect(tester.getRect(row21).top, greaterThanOrEqualTo(viewport.top));
+      expect(tester.getRect(row21).bottom, lessThanOrEqualTo(viewport.bottom));
+    },
+  );
+
+  testWidgets('blame retains a constant number of row GlobalKeys', (
+    tester,
+  ) async {
+    final controller = ScrollController();
+    final viewKey = GlobalKey<FullBlameViewState>();
+    addTearDown(controller.dispose);
+    await pumpInteractiveBlameView(
+      tester,
+      lineCount: 500,
+      size: const Size(1000, 220),
+      controller: controller,
+      viewKey: viewKey,
+    );
+
+    for (final fraction in [0.2, 0.4, 0.6, 0.8, 1.0, 0.0]) {
+      controller.jumpTo(controller.position.maxScrollExtent * fraction);
+      await tester.pump();
+    }
+
+    expect(viewKey.currentState, isNotNull);
+    expect(viewKey.currentState!.debugRetainedRowGlobalKeyCount, 1);
+    expect(
+      tester
+          .widget<ListView>(find.byKey(const Key('blame-list')))
+          .childrenDelegate,
+      isA<SliverChildBuilderDelegate>(),
+    );
+  });
+
+  testWidgets('wrapped blame arrows use a fraction fallback off cache', (
+    tester,
+  ) async {
+    final controller = ScrollController();
+    addTearDown(controller.dispose);
+    await pumpInteractiveBlameView(
+      tester,
+      lineCount: 200,
+      size: const Size(700, 220),
+      controller: controller,
+      wrapLines: true,
+      sourceForLine: (line) =>
+          'line $line ${List.filled(6, 'wrapped source').join(' ')}',
+    );
+    final row10 = find.byKey(const Key('blame-line-10'));
+    final wrappedRowHeight = tester
+        .getSize(find.byKey(const Key('blame-line-1')))
+        .height;
+    controller.jumpTo(wrappedRowHeight * 9);
+    await tester.pump();
+    expect(row10, findsOneWidget);
+    await Scrollable.ensureVisible(
+      tester.element(row10),
+      alignment: 0.5,
+      duration: Duration.zero,
+    );
+    await tester.pump();
+    expect(wrappedRowHeight, greaterThan(fullDiffSourceRowHeight));
+    await tester.tap(row10);
+    await tester.pump();
+
+    controller.jumpTo(controller.position.maxScrollExtent);
+    await tester.pump();
+    expect(row10, findsNothing);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+
+    final row11 = find.byKey(const Key('blame-line-11'));
+    final viewport = tester.getRect(find.byKey(const Key('blame-list')));
+    expect(find.byKey(const Key('blame-selected-11')), findsOneWidget);
+    expect(find.byKey(const Key('blame-commit-details-11')), findsOneWidget);
+    expect(tester.getRect(row11).top, greaterThanOrEqualTo(viewport.top));
+    expect(tester.getRect(row11).bottom, lessThanOrEqualTo(viewport.bottom));
   });
 
   testWidgets(

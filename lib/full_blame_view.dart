@@ -40,18 +40,23 @@ class FullBlameView extends StatefulWidget {
   final bool showRemoteAvatars;
 
   @override
-  State<FullBlameView> createState() => _FullBlameViewState();
+  FullBlameViewState createState() => FullBlameViewState();
 }
 
-class _FullBlameViewState extends State<FullBlameView> {
+class FullBlameViewState extends State<FullBlameView> {
   final _focusNode = FocusNode(debugLabel: 'full blame lines');
   final _selectedLink = LayerLink();
-  final _lineKeys = <int, GlobalKey>{};
+  final _selectedRowKey = GlobalKey(debugLabel: 'selected blame row');
   int? _selectedLine;
   int? _hoveredLine;
+  int _navigationSerial = 0;
+
+  @visibleForTesting
+  int get debugRetainedRowGlobalKeyCount => 1;
 
   @override
   void dispose() {
+    _navigationSerial++;
     _focusNode.dispose();
     super.dispose();
   }
@@ -91,6 +96,7 @@ class _FullBlameViewState extends State<FullBlameView> {
                     label: _semanticsLabel(lineNumber, blame),
                     selected: selected,
                     button: true,
+                    onTap: () => _selectLine(lineNumber),
                     child: MouseRegion(
                       onEnter: (_) => _setHoveredLine(lineNumber),
                       onExit: (_) => _clearHoveredLine(lineNumber),
@@ -119,22 +125,17 @@ class _FullBlameViewState extends State<FullBlameView> {
                     ),
                   );
                   if (selected) {
-                    interactive = CompositedTransformTarget(
-                      link: _selectedLink,
-                      child: interactive,
+                    interactive = KeyedSubtree(
+                      key: _selectedRowKey,
+                      child: CompositedTransformTarget(
+                        link: _selectedLink,
+                        child: interactive,
+                      ),
                     );
                   }
                   final row = KeyedSubtree(
-                    key: _lineKeys.putIfAbsent(
-                      lineNumber,
-                      () => GlobalKey(debugLabel: 'blame row $lineNumber'),
-                    ),
-                    child: KeyedSubtree(
-                      key: current
-                          ? Key('blame-current-line-$lineNumber')
-                          : null,
-                      child: interactive,
-                    ),
+                    key: current ? Key('blame-current-line-$lineNumber') : null,
+                    child: interactive,
                   );
                   return _probe(
                     nearestHunkAnchorForSourceLine(
@@ -191,6 +192,7 @@ class _FullBlameViewState extends State<FullBlameView> {
   }
 
   void _selectLine(int lineNumber) {
+    _navigationSerial++;
     if (_selectedLine != lineNumber) {
       setState(() => _selectedLine = lineNumber);
     }
@@ -202,7 +204,9 @@ class _FullBlameViewState extends State<FullBlameView> {
       return KeyEventResult.ignored;
     }
     if (HardwareKeyboard.instance.isMetaPressed ||
-        HardwareKeyboard.instance.isAltPressed) {
+        HardwareKeyboard.instance.isAltPressed ||
+        HardwareKeyboard.instance.isShiftPressed ||
+        HardwareKeyboard.instance.isControlPressed) {
       return KeyEventResult.ignored;
     }
     final delta = event.logicalKey == LogicalKeyboardKey.arrowUp
@@ -217,21 +221,71 @@ class _FullBlameViewState extends State<FullBlameView> {
     if (current == null) return KeyEventResult.ignored;
     final next = (current + delta).clamp(1, widget.document.lines.length);
     if (next != current) {
+      final navigationSerial = ++_navigationSerial;
       setState(() => _selectedLine = next);
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || _selectedLine != next) return;
-        final rowContext = _lineKeys[next]?.currentContext;
-        if (rowContext != null) {
-          Scrollable.ensureVisible(
-            rowContext,
-            alignmentPolicy: delta < 0
-                ? ScrollPositionAlignmentPolicy.keepVisibleAtStart
-                : ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
-          );
-        }
+        _revealSelectedLine(next, delta, navigationSerial);
       });
     }
     return KeyEventResult.handled;
+  }
+
+  void _revealSelectedLine(
+    int lineNumber,
+    int delta,
+    int navigationSerial, {
+    int attempt = 0,
+  }) {
+    if (!mounted ||
+        navigationSerial != _navigationSerial ||
+        _selectedLine != lineNumber) {
+      return;
+    }
+    final selectedContext = _selectedRowKey.currentContext;
+    if (selectedContext != null) {
+      Scrollable.ensureVisible(
+        selectedContext,
+        alignmentPolicy: delta < 0
+            ? ScrollPositionAlignmentPolicy.keepVisibleAtStart
+            : ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+      );
+      return;
+    }
+    if (attempt >= 2) return;
+
+    final controller =
+        widget.controller ?? PrimaryScrollController.maybeOf(context);
+    if (controller == null || !controller.hasClients) return;
+    final position = controller.position;
+    final target = _estimatedOffset(position, lineNumber, delta);
+    if ((position.pixels - target).abs() > 0.5) {
+      controller.jumpTo(target);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _revealSelectedLine(
+        lineNumber,
+        delta,
+        navigationSerial,
+        attempt: attempt + 1,
+      );
+    });
+  }
+
+  double _estimatedOffset(ScrollPosition position, int lineNumber, int delta) {
+    final min = position.minScrollExtent;
+    final max = position.maxScrollExtent;
+    if (max <= min) return min;
+    if (!widget.wrapLines) {
+      final rowTop = (lineNumber - 1) * fullDiffSourceRowHeight;
+      final alignmentOffset = delta < 0
+          ? rowTop
+          : rowTop - position.viewportDimension + fullDiffSourceRowHeight;
+      return alignmentOffset.clamp(min, max);
+    }
+    final lastIndex = widget.document.lines.length - 1;
+    if (lastIndex <= 0) return min;
+    final fraction = (lineNumber - 1) / lastIndex;
+    return (min + (max - min) * fraction).clamp(min, max);
   }
 
   String _semanticsLabel(int lineNumber, BlameLine blame) {
