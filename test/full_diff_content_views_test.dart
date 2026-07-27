@@ -9,6 +9,7 @@ import 'package:yogit/full_diff_anchor_probe.dart';
 import 'package:yogit/full_blame_view.dart';
 import 'package:yogit/full_diff_code_row.dart';
 import 'package:yogit/full_diff_model.dart';
+import 'package:yogit/full_diff_selectable_row.dart';
 import 'package:yogit/full_diff_split_view.dart';
 import 'package:yogit/full_diff_syntax_contract.dart';
 import 'package:yogit/full_diff_theme.dart';
@@ -863,14 +864,25 @@ void main() {
       ),
     );
 
+    FullDiffSelectableRowSurface rowSurface(FileHistoryEntry entry) =>
+        tester.widget<FullDiffSelectableRowSurface>(
+          find.byKey(Key('history-row-${entry.commit.sha}')),
+        );
     BoxDecoration rowDecoration(FileHistoryEntry entry) =>
         tester
-                .widget<Container>(
-                  find.byKey(Key('history-row-${entry.commit.sha}')),
+                .widget<DecoratedBox>(
+                  find
+                      .descendant(
+                        of: find.byKey(Key('history-row-${entry.commit.sha}')),
+                        matching: find.byType(DecoratedBox),
+                      )
+                      .first,
                 )
                 .decoration
             as BoxDecoration;
 
+    expect(rowSurface(historyEntries.first).selected, isTrue);
+    expect(rowSurface(historyEntries.first).focused, isFalse);
     expect(rowDecoration(historyEntries.first).color, fullDiffSelection);
     expect(rowDecoration(historyEntries[1]).color, fullDiffCanvas);
     expect(
@@ -890,6 +902,7 @@ void main() {
         .focusNode!
         .requestFocus();
     await tester.pump();
+    expect(rowSurface(historyEntries.first).focused, isTrue);
     final focusedBorder = rowDecoration(historyEntries.first).border as Border;
     expect(focusedBorder.top.width, 1);
     expect(focusedBorder.top.color, fullDiffAccent);
@@ -898,6 +911,8 @@ void main() {
     filesFocus.requestFocus();
     await tester.pump();
     expect(selected, same(historyEntries[1]));
+    expect(rowSurface(historyEntries[1]).selected, isTrue);
+    expect(rowSurface(historyEntries[1]).focused, isFalse);
     expect(rowDecoration(historyEntries[1]).color, fullDiffSelection);
     expect(rowDecoration(historyEntries[1]).border, isNull);
     expect(rowDecoration(historyEntries.first).color, fullDiffCanvas);

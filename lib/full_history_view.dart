@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'full_diff_model.dart';
+import 'full_diff_selectable_row.dart';
 import 'full_diff_theme.dart';
 import 'typography.dart';
 
@@ -191,12 +192,10 @@ class HistoryRow extends StatelessWidget {
   final bool focused;
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) => FullDiffSelectableRowSurface(
     key: Key('history-row-${entry.commit.sha}'),
-    decoration: BoxDecoration(
-      color: selected ? fullDiffSelection : fullDiffCanvas,
-      border: focused ? Border.all(color: fullDiffAccent) : null,
-    ),
+    selected: selected,
+    focused: focused,
     child: Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
