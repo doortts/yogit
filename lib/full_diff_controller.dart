@@ -71,6 +71,8 @@ class FullDiffSessionState {
     required this.file,
     required this.blame,
     required this.history,
+    required this.selectedHistoryEntry,
+    required this.historyContext,
     required this.selectionGeneration,
     required this.navigationSerial,
   });
@@ -94,6 +96,8 @@ class FullDiffSessionState {
   final AsyncResource<FileDocument> file;
   final AsyncResource<BlameDocument> blame;
   final AsyncResource<List<FileHistoryEntry>> history;
+  final FileHistoryEntry? selectedHistoryEntry;
+  final HistoryCacheKey? historyContext;
   final int selectionGeneration;
   final int navigationSerial;
 
@@ -130,6 +134,8 @@ class FullDiffSessionState {
     AsyncResource<FileDocument>? file,
     AsyncResource<BlameDocument>? blame,
     AsyncResource<List<FileHistoryEntry>>? history,
+    Object? selectedHistoryEntry = _unset,
+    Object? historyContext = _unset,
     int? selectionGeneration,
     int? navigationSerial,
   }) => FullDiffSessionState(
@@ -158,6 +164,12 @@ class FullDiffSessionState {
     file: file ?? this.file,
     blame: blame ?? this.blame,
     history: history ?? this.history,
+    selectedHistoryEntry: identical(selectedHistoryEntry, _unset)
+        ? this.selectedHistoryEntry
+        : selectedHistoryEntry as FileHistoryEntry?,
+    historyContext: identical(historyContext, _unset)
+        ? this.historyContext
+        : historyContext as HistoryCacheKey?,
     selectionGeneration: selectionGeneration ?? this.selectionGeneration,
     navigationSerial: navigationSerial ?? this.navigationSerial,
   );
@@ -260,6 +272,8 @@ FullDiffSessionState _initialState(
     file: const AsyncResource(),
     blame: const AsyncResource(),
     history: const AsyncResource(),
+    selectedHistoryEntry: null,
+    historyContext: null,
     selectionGeneration: 0,
     navigationSerial: 0,
   );
@@ -335,6 +349,12 @@ class FullDiffSessionController extends ChangeNotifier {
 
   Future<void> retryPatch() => _loadPatch();
 
+  Future<void> retryHistorySelection() async {
+    final entry = state.selectedHistoryEntry;
+    if (_disposed || entry == null) return;
+    await selectHistoryEntry(entry);
+  }
+
   Future<void> selectCommit(GitCommit commit) async {
     if (_disposed || state.selectedCommit.sha == commit.sha) return;
     final commits =
@@ -395,6 +415,8 @@ class FullDiffSessionController extends ChangeNotifier {
       files: const [],
       selectedFile: null,
       filesResource: const AsyncResource(),
+      preserveHistory: true,
+      selectedHistoryEntry: entry,
     );
     final generation = _selectionGeneration;
     final request = ++_filesRequest;
@@ -430,7 +452,8 @@ class FullDiffSessionController extends ChangeNotifier {
         (candidate) =>
             candidate.path == entry.path ||
             candidate.oldPath == entry.path ||
-            candidate.path == entry.oldPath,
+            candidate.path == entry.oldPath ||
+            candidate.oldPath == entry.oldPath,
       );
     } catch (error) {
       _replace(
@@ -572,6 +595,8 @@ class FullDiffSessionController extends ChangeNotifier {
     required List<GitFileChange> files,
     required GitFileChange? selectedFile,
     required AsyncResource<List<GitFileChange>> filesResource,
+    bool preserveHistory = false,
+    FileHistoryEntry? selectedHistoryEntry,
   }) {
     _selectionGeneration++;
     _replace(
@@ -586,7 +611,9 @@ class FullDiffSessionController extends ChangeNotifier {
         patch: const AsyncResource(),
         file: const AsyncResource(),
         blame: const AsyncResource(),
-        history: const AsyncResource(),
+        history: preserveHistory ? state.history : const AsyncResource(),
+        selectedHistoryEntry: preserveHistory ? selectedHistoryEntry : null,
+        historyContext: preserveHistory ? state.historyContext : null,
         selectionGeneration: _selectionGeneration,
       ),
     );
@@ -598,6 +625,7 @@ class FullDiffSessionController extends ChangeNotifier {
     final request = ++_filesRequest;
     final commit = state.selectedCommit;
     final parent = state.parent;
+    _historyRequest++;
     _replace(
       state.copyWith(
         files: const [],
@@ -608,6 +636,8 @@ class FullDiffSessionController extends ChangeNotifier {
         file: const AsyncResource(),
         blame: const AsyncResource(),
         history: const AsyncResource(),
+        selectedHistoryEntry: null,
+        historyContext: null,
       ),
     );
 
@@ -858,6 +888,7 @@ class FullDiffSessionController extends ChangeNotifier {
     final generation = _selectionGeneration;
     final request = ++_historyRequest;
     final commit = state.selectedCommit;
+    final context = (startRevision: commit.sha, path: file.path);
     _replace(state.copyWith(history: const AsyncResource(loading: true)));
     try {
       final entries = await _loadHistoryEntries(commit, file);
@@ -870,7 +901,15 @@ class FullDiffSessionController extends ChangeNotifier {
       )) {
         return;
       }
-      _replace(state.copyWith(history: AsyncResource(data: entries)));
+      _replace(
+        state.copyWith(
+          history: AsyncResource(data: entries),
+          selectedHistoryEntry: entries
+              .where((entry) => entry.commit.sha == commit.sha)
+              .firstOrNull,
+          historyContext: context,
+        ),
+      );
     } catch (error) {
       if (_accepts(
         generation: generation,
