@@ -182,6 +182,7 @@ class AppSettings {
     this.columnWidths = const TimelineColumnWidths(),
     this.fullDiffColumnWidths = const FullDiffColumnWidths(),
     this.fullDiffInitialView = FullDiffInitialView.hunk,
+    this.fullDiffPreferences = const FullDiffPreferences(),
     this.laneColors = defaultLaneColors,
     this.previewWidth = 288,
     this.previewHeight = 280,
@@ -218,6 +219,7 @@ class AppSettings {
   final TimelineColumnWidths columnWidths;
   final FullDiffColumnWidths fullDiffColumnWidths;
   final FullDiffInitialView fullDiffInitialView;
+  final FullDiffPreferences fullDiffPreferences;
   final List<String> laneColors;
 
   /// The detail panel's size, per placement axis.
@@ -239,6 +241,7 @@ class AppSettings {
     TimelineColumnWidths? columnWidths,
     FullDiffColumnWidths? fullDiffColumnWidths,
     FullDiffInitialView? fullDiffInitialView,
+    FullDiffPreferences? fullDiffPreferences,
     List<String>? laneColors,
     double? previewWidth,
     double? previewHeight,
@@ -248,6 +251,7 @@ class AppSettings {
     columnWidths: columnWidths ?? this.columnWidths,
     fullDiffColumnWidths: fullDiffColumnWidths ?? this.fullDiffColumnWidths,
     fullDiffInitialView: fullDiffInitialView ?? this.fullDiffInitialView,
+    fullDiffPreferences: fullDiffPreferences ?? this.fullDiffPreferences,
     laneColors: laneColors ?? this.laneColors,
     previewWidth: previewWidth ?? this.previewWidth,
     previewHeight: previewHeight ?? this.previewHeight,
@@ -281,6 +285,9 @@ class AppSettings {
         'fullFile' => FullDiffInitialView.fullFile,
         _ => FullDiffInitialView.hunk,
       },
+      fullDiffPreferences: FullDiffPreferences.fromJson(
+        value['fullDiffPreferences'],
+      ),
       laneColors: valid ? laneColors : defaultLaneColors,
       previewWidth: _clamped(value['previewWidth'], 288, 240, 560),
       previewHeight: _clamped(value['previewHeight'], 280, 200, 480),
@@ -293,6 +300,7 @@ class AppSettings {
     'columnWidths': columnWidths.toJson(),
     'fullDiffColumnWidths': fullDiffColumnWidths.toJson(),
     'fullDiffInitialView': fullDiffInitialView.name,
+    'fullDiffPreferences': fullDiffPreferences.toJson(),
     'laneColors': laneColors,
     'previewWidth': previewWidth,
     'previewHeight': previewHeight,
@@ -306,6 +314,7 @@ class AppSettings {
       columnWidths == other.columnWidths &&
       fullDiffColumnWidths == other.fullDiffColumnWidths &&
       fullDiffInitialView == other.fullDiffInitialView &&
+      fullDiffPreferences == other.fullDiffPreferences &&
       listEquals(laneColors, other.laneColors) &&
       previewWidth == other.previewWidth &&
       previewHeight == other.previewHeight;
@@ -317,6 +326,7 @@ class AppSettings {
     columnWidths,
     fullDiffColumnWidths,
     fullDiffInitialView,
+    fullDiffPreferences,
     Object.hashAll(laneColors),
     previewWidth,
     previewHeight,

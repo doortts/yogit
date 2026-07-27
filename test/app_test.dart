@@ -2550,6 +2550,52 @@ void main() {
     expect(const AppSettings().fullDiffInitialView, FullDiffInitialView.hunk);
   });
 
+  test('full diff preferences survive settings JSON', () {
+    const preferences = FullDiffPreferences(
+      view: FullDiffView.history,
+      layout: DiffLayout.sideBySide,
+      scope: DiffScope.fullFile,
+      algorithm: DiffAlgorithm.patience,
+      ignoreWhitespace: true,
+      wrapLines: false,
+    );
+
+    final restored = AppSettings.fromJson(
+      const AppSettings(fullDiffPreferences: preferences).toJson(),
+    );
+
+    expect(restored.fullDiffPreferences, preferences);
+    expect(
+      (const AppSettings(
+            fullDiffPreferences: preferences,
+          ).toJson()['fullDiffPreferences']
+          as Map<String, Object>),
+      const {
+        'view': 'history',
+        'layout': 'sideBySide',
+        'scope': 'fullFile',
+        'algorithm': 'patience',
+        'ignoreWhitespace': true,
+        'wrapLines': false,
+      },
+    );
+  });
+
+  test('removed and malformed full diff options fall back safely', () {
+    final preferences = AppSettings.fromJson({
+      'fullDiffPreferences': {
+        'view': 'file',
+        'layout': 'unknown',
+        'scope': 'unknown',
+        'algorithm': 'unknown',
+        'ignoreWhitespace': 'yes',
+        'wrapLines': 1,
+      },
+    }).fullDiffPreferences;
+
+    expect(preferences, const FullDiffPreferences());
+  });
+
   testWidgets('settings exposes both full diff starting views', (tester) async {
     final saved = <AppSettings>[];
     await tester.pumpWidget(

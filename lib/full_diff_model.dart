@@ -9,9 +9,94 @@ export 'package:yogit/full_diff_limits.dart';
 
 enum FullDiffView { file, diff, blame, history }
 
+enum DiffLayout { unified, sideBySide }
+
 enum DiffPresentation { hunk, inline, split }
 
 enum FullDiffInitialView { hunk, fullFile }
+
+@immutable
+class FullDiffPreferences {
+  const FullDiffPreferences({
+    this.view = FullDiffView.diff,
+    this.layout = DiffLayout.unified,
+    this.scope = DiffScope.hunks,
+    this.algorithm = DiffAlgorithm.gitSetting,
+    this.ignoreWhitespace = false,
+    this.wrapLines = true,
+  });
+
+  final FullDiffView view;
+  final DiffLayout layout;
+  final DiffScope scope;
+  final DiffAlgorithm algorithm;
+  final bool ignoreWhitespace;
+  final bool wrapLines;
+
+  FullDiffPreferences copyWith({
+    FullDiffView? view,
+    DiffLayout? layout,
+    DiffScope? scope,
+    DiffAlgorithm? algorithm,
+    bool? ignoreWhitespace,
+    bool? wrapLines,
+  }) => FullDiffPreferences(
+    view: view ?? this.view,
+    layout: layout ?? this.layout,
+    scope: scope ?? this.scope,
+    algorithm: algorithm ?? this.algorithm,
+    ignoreWhitespace: ignoreWhitespace ?? this.ignoreWhitespace,
+    wrapLines: wrapLines ?? this.wrapLines,
+  );
+
+  factory FullDiffPreferences.fromJson(Object? value) {
+    final json = value is Map<String, dynamic>
+        ? value
+        : const <String, dynamic>{};
+    return FullDiffPreferences(
+      view: switch (json['view']) {
+        'blame' => FullDiffView.blame,
+        'history' => FullDiffView.history,
+        _ => FullDiffView.diff,
+      },
+      layout: json['layout'] == 'sideBySide'
+          ? DiffLayout.sideBySide
+          : DiffLayout.unified,
+      scope: json['scope'] == 'fullFile' ? DiffScope.fullFile : DiffScope.hunks,
+      algorithm: DiffAlgorithm.values.firstWhere(
+        (value) => value.name == json['algorithm'],
+        orElse: () => DiffAlgorithm.gitSetting,
+      ),
+      ignoreWhitespace: json['ignoreWhitespace'] is bool
+          ? json['ignoreWhitespace'] as bool
+          : false,
+      wrapLines: json['wrapLines'] is bool ? json['wrapLines'] as bool : true,
+    );
+  }
+
+  Map<String, Object> toJson() => {
+    'view': view.name,
+    'layout': layout.name,
+    'scope': scope.name,
+    'algorithm': algorithm.name,
+    'ignoreWhitespace': ignoreWhitespace,
+    'wrapLines': wrapLines,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      other is FullDiffPreferences &&
+      view == other.view &&
+      layout == other.layout &&
+      scope == other.scope &&
+      algorithm == other.algorithm &&
+      ignoreWhitespace == other.ignoreWhitespace &&
+      wrapLines == other.wrapLines;
+
+  @override
+  int get hashCode =>
+      Object.hash(view, layout, scope, algorithm, ignoreWhitespace, wrapLines);
+}
 
 enum FileContentKind { utf8, binary, unsupportedEncoding, tooLarge }
 

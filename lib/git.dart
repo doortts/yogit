@@ -560,6 +560,8 @@ List<DiffPair> pairDiff(List<DiffLine> lines) {
   return pairs;
 }
 
+enum DiffScope { hunks, fullFile }
+
 enum DiffAlgorithm { gitSetting, myers, minimal, patience, histogram }
 
 extension DiffAlgorithmArguments on DiffAlgorithm {
