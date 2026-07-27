@@ -452,7 +452,9 @@ class _DiffScreenState extends State<DiffScreen> {
       state.view == FullDiffView.diff &&
       state.requestedScope == DiffScope.fullFile &&
       state.appliedScope == DiffScope.fullFile &&
-      state.fullFileScrollTarget == target;
+      state.fullFileScrollTarget == target &&
+      state.patch.data != null &&
+      diffDocumentContainsSourceTarget(state.patch.data!, target);
 
   void _clearPendingFullFileScroll() {
     _pendingFullFileScrollTarget = null;

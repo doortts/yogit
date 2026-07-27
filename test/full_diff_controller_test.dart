@@ -410,6 +410,108 @@ void main() {
     expect(controller.state.fullFileScrollTarget, isNull);
   });
 
+  test('leaving full-file scope restores the preserved later hunk', () async {
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..content = ((_, _, _) async =>
+          Uint8List.fromList(utf8.encode('current\n')))
+      ..scopedDiff = ((_, _, _, _, _, scope) async =>
+          scope == DiffScope.hunks ? twoHunkLines : mergedTwoHunkLines);
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.selectAnchor(controller.state.patch.data!.hunks.last.anchor);
+
+    await controller.setScope(DiffScope.fullFile);
+    expect(controller.state.fullFileScrollTarget, (oldLine: 21, newLine: 21));
+    expect(controller.state.activeAnchor?.hunkIndex, 0);
+
+    await controller.setScope(DiffScope.hunks);
+
+    expect(controller.state.appliedScope, DiffScope.hunks);
+    expect(controller.state.activeAnchor?.hunkIndex, 1);
+    expect(controller.state.activeAnchor?.newLine, 21);
+    expect(controller.state.fullFileScrollTarget, isNull);
+  });
+
+  test('empty accepted full-file document never publishes a target', () async {
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..content = ((_, _, _) async =>
+          Uint8List.fromList(utf8.encode('current\n')))
+      ..scopedDiff = ((_, _, _, _, _, scope) async =>
+          scope == DiffScope.hunks ? twoHunkLines : const <DiffLine>[]);
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.selectAnchor(controller.state.patch.data!.hunks.last.anchor);
+
+    await controller.setScope(DiffScope.fullFile);
+
+    expect(controller.state.patch.data?.hunks, isEmpty);
+    expect(controller.state.patch.data?.rows, isEmpty);
+    expect(controller.state.fullFileScrollTarget, isNull);
+    controller
+      ..setView(FullDiffView.blame)
+      ..setView(FullDiffView.diff);
+    expect(controller.state.fullFileScrollTarget, isNull);
+    await controller.setScope(DiffScope.hunks);
+    expect(controller.state.fullFileScrollTarget, isNull);
+  });
+
+  test(
+    'unresolvable accepted full-file document never publishes a target',
+    () async {
+      final repository = FakeFullDiffRepository()
+        ..files = ((_, _) async => const [fileA])
+        ..content = ((_, _, _) async =>
+            Uint8List.fromList(utf8.encode('current\n')))
+        ..scopedDiff = ((_, _, _, _, _, scope) async => scope == DiffScope.hunks
+            ? twoHunkLines
+            : const [
+                DiffLine(
+                  kind: DiffLineKind.hunk,
+                  text: '@@ -30 +30 @@ unrelated',
+                ),
+                DiffLine(
+                  kind: DiffLineKind.delete,
+                  text: 'unrelated old',
+                  oldNumber: 30,
+                ),
+                DiffLine(
+                  kind: DiffLineKind.add,
+                  text: 'unrelated result',
+                  newNumber: 30,
+                ),
+              ]);
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [commitA],
+        initialIndex: 0,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      controller.selectAnchor(controller.state.patch.data!.hunks.last.anchor);
+
+      await controller.setScope(DiffScope.fullFile);
+
+      expect(controller.state.activeAnchor?.newLine, 30);
+      expect(controller.state.fullFileScrollTarget, isNull);
+      controller.setLayout(DiffLayout.sideBySide);
+      expect(controller.state.fullFileScrollTarget, isNull);
+      await controller.setScope(DiffScope.hunks);
+      expect(controller.state.fullFileScrollTarget, isNull);
+    },
+  );
+
   test('late full-file target cannot override newer hunk navigation', () async {
     final fixture = await delayedFullFileController();
     final controller = fixture.controller;

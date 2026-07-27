@@ -48,6 +48,18 @@ int diffSourceTargetIndex<T>({
   return -1;
 }
 
+bool diffDocumentContainsSourceTarget(
+  DiffDocument document,
+  DiffSourceTarget? target,
+) =>
+    diffSourceTargetIndex(
+      rows: document.rows,
+      target: target,
+      oldLineOf: (line) => line.kind == DiffLineKind.add ? null : line,
+      newLineOf: (line) => line.kind == DiffLineKind.delete ? null : line,
+    ) >=
+    0;
+
 @immutable
 class FullDiffPreferences {
   const FullDiffPreferences({

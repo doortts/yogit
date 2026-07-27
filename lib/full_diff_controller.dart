@@ -574,7 +574,19 @@ class FullDiffSessionController extends ChangeNotifier {
 
   Future<void> setScope(DiffScope scope) async {
     if (_disposed || state.requestedScope == scope) return;
-    final sourceTarget = _anchorSourceTarget(state.activeAnchor);
+    final currentDocument = state.patch.data;
+    final preservedTarget =
+        scope == DiffScope.hunks &&
+            state.appliedScope == DiffScope.fullFile &&
+            currentDocument != null &&
+            diffDocumentContainsSourceTarget(
+              currentDocument,
+              state.fullFileScrollTarget,
+            )
+        ? state.fullFileScrollTarget
+        : null;
+    final sourceTarget =
+        preservedTarget ?? _anchorSourceTarget(state.activeAnchor);
     final sourceLine = _sourceLine(sourceTarget);
     final scrollTargetGeneration = ++_fullFileScrollGeneration;
     if (state.selectedFile == null) {
@@ -864,7 +876,11 @@ class FullDiffSessionController extends ChangeNotifier {
           fullFileScrollTarget:
               scope == DiffScope.fullFile &&
                   fullFileScrollTarget != null &&
-                  acceptedScrollTargetGeneration == _fullFileScrollGeneration
+                  acceptedScrollTargetGeneration == _fullFileScrollGeneration &&
+                  diffDocumentContainsSourceTarget(
+                    document,
+                    fullFileScrollTarget,
+                  )
               ? fullFileScrollTarget
               : null,
           appliedScope: scope,

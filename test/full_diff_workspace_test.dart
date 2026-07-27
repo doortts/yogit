@@ -76,6 +76,23 @@ List<DiffLine> _distantFullFileLines() => [
   ],
 ];
 
+const _distantHunkLines = <DiffLine>[
+  DiffLine(kind: DiffLineKind.hunk, text: '@@ -120 +120 @@ first distant'),
+  DiffLine(
+    kind: DiffLineKind.delete,
+    text: 'old source line 120',
+    oldNumber: 120,
+  ),
+  DiffLine(kind: DiffLineKind.add, text: 'source line 120', newNumber: 120),
+  DiffLine(kind: DiffLineKind.hunk, text: '@@ -200 +200 @@ second distant'),
+  DiffLine(
+    kind: DiffLineKind.delete,
+    text: 'old source line 200',
+    oldNumber: 200,
+  ),
+  DiffLine(kind: DiffLineKind.add, text: 'source line 200', newNumber: 200),
+];
+
 void main() {
   Future<
     ({FullDiffSessionController controller, FakeFullDiffRepository repository})
@@ -125,38 +142,7 @@ void main() {
     ].join('\n');
     repository.files = (_, _) async => const [fileA];
     repository.scopedDiff = (_, _, _, _, _, scope) async {
-      if (scope == DiffScope.hunks) {
-        return const [
-          DiffLine(
-            kind: DiffLineKind.hunk,
-            text: '@@ -120 +120 @@ first distant',
-          ),
-          DiffLine(
-            kind: DiffLineKind.delete,
-            text: 'old source line 120',
-            oldNumber: 120,
-          ),
-          DiffLine(
-            kind: DiffLineKind.add,
-            text: 'source line 120',
-            newNumber: 120,
-          ),
-          DiffLine(
-            kind: DiffLineKind.hunk,
-            text: '@@ -200 +200 @@ second distant',
-          ),
-          DiffLine(
-            kind: DiffLineKind.delete,
-            text: 'old source line 200',
-            oldNumber: 200,
-          ),
-          DiffLine(
-            kind: DiffLineKind.add,
-            text: 'source line 200',
-            newNumber: 200,
-          ),
-        ];
-      }
+      if (scope == DiffScope.hunks) return _distantHunkLines;
       if (delayedFullFilePatch != null) return delayedFullFilePatch;
       return _distantFullFileLines();
     };
@@ -545,6 +531,15 @@ void main() {
         layout == DiffLayout.unified ? findsNothing : findsOneWidget,
       );
       expect(find.text('old source line 120'), findsNothing);
+
+      await tester.tap(find.byKey(const Key('hunk-toggle-off')));
+      await tester.pumpAndSettle();
+
+      expect(fixture.controller.state.appliedScope, DiffScope.hunks);
+      expect(fixture.controller.state.patch.data!.hunks, hasLength(2));
+      expect(fixture.controller.state.activeAnchor?.hunkIndex, 1);
+      expect(fixture.controller.state.activeAnchor?.newLine, 200);
+      expect(fixture.controller.state.fullFileScrollTarget, isNull);
     });
   }
 
