@@ -600,6 +600,54 @@ void main() {
     expect(scrollCallbacks, 0);
   });
 
+  testWidgets('empty hunk minimap paints no viewport or ring', (tester) async {
+    final scrollController = ScrollController();
+    addTearDown(scrollController.dispose);
+
+    await tester.pumpWidget(
+      qaApp(
+        SizedBox(
+          height: 100,
+          child: FullDiffMinimap(
+            document: DiffDocument.empty,
+            activeAnchor: null,
+            sourceLineCount: 0,
+            sourceSide: FileDocumentSide.result,
+            view: FullDiffView.diff,
+            presentation: DiffPresentation.hunk,
+            scrollController: scrollController,
+            onAnchorSelected: (_) {},
+            onScrollFractionChanged: (_) {},
+          ),
+        ),
+      ),
+    );
+
+    final painter = _minimapPainter(tester);
+    void paint(Canvas canvas) {
+      painter.paint(canvas, const Size(fullDiffMinimapWidth, 100));
+    }
+
+    expect(painter.viewport, isNull);
+    expect(
+      paint,
+      paints
+        ..rect(color: fullDiffMinimapTrack)
+        ..line(color: fullDiffDivider, strokeWidth: 1),
+    );
+    expect(paint, isNot(paints..rect(color: fullDiffMinimapViewport)));
+    expect(
+      paint,
+      isNot(
+        paints..rect(
+          color: fullDiffMinimapRing,
+          strokeWidth: 1,
+          style: PaintingStyle.stroke,
+        ),
+      ),
+    );
+  });
+
   testWidgets('viewport drag clamps scroll requests to track boundaries', (
     tester,
   ) async {

@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'full_diff_limits.dart';
+
 typedef CommandRunner =
     Future<ProcessResult> Function(
       String executable,
@@ -792,7 +794,10 @@ class GitRepository implements FullDiffRepository {
     bool ignoreWhitespace = false,
   }) async {
     if (commit.isWorkingTree && (_untrackedFiles[file] ?? false)) {
-      return _untrackedDiff(await _readWorktreeBytes(file.path));
+      final snapshot = await _readWorktreeSnapshot(file.path);
+      return snapshot.exceeded
+          ? const <DiffLine>[]
+          : _untrackedDiff(snapshot.bytes);
     }
     return parseUnifiedDiff(
       await _run([
@@ -816,7 +821,7 @@ class GitRepository implements FullDiffRepository {
   }) async {
     final deleted = file.status.startsWith('D');
     if (commit.isWorkingTree && !deleted) {
-      return _readWorktreeBytes(file.path);
+      return (await _readWorktreeSnapshot(file.path)).bytes;
     }
     final revision = deleted ? await _baseFor(commit, parent) : commit.sha;
     final path = deleted ? file.oldPath ?? file.path : file.path;
@@ -831,8 +836,14 @@ class GitRepository implements FullDiffRepository {
     Uint8List? workingTreeBytes,
   }) async {
     if (commit.isWorkingTree && (_untrackedFiles[file] ?? false)) {
-      final bytes = workingTreeBytes ?? await _readWorktreeBytes(file.path);
-      return _uncommittedBlame(bytes);
+      final before = await _readWorktreeSnapshot(file.path);
+      final expected = workingTreeBytes == null
+          ? before
+          : _snapshotForBytes(workingTreeBytes);
+      _verifyWorktreeSnapshot(before, expected);
+      final blame = _uncommittedBlame(expected.bytes);
+      _verifyWorktreeSnapshot(await _readWorktreeSnapshot(file.path), expected);
+      return blame;
     }
 
     final base = await _baseFor(commit, parent);
@@ -841,14 +852,18 @@ class GitRepository implements FullDiffRepository {
       if (expected == null) {
         throw StateError('Working tree bytes are required');
       }
-      final before = await _readWorktreeBytes(file.path);
+      final expectedSnapshot = _snapshotForBytes(expected);
+      _verifyWorktreeSnapshot(
+        await _readWorktreeSnapshot(file.path),
+        expectedSnapshot,
+      );
       final contentsDirectory = await Directory.systemTemp.createTemp(
         'yogit_blame_',
       );
       final contents = File('${contentsDirectory.path}/contents');
       late final String output;
       try {
-        await contents.writeAsBytes(expected, flush: true);
+        await contents.writeAsBytes(expectedSnapshot.bytes, flush: true);
         output = await _run(
           blameArguments(
             commit: commit,
@@ -860,10 +875,10 @@ class GitRepository implements FullDiffRepository {
       } finally {
         await contentsDirectory.delete(recursive: true);
       }
-      final after = await _readWorktreeBytes(file.path);
-      if (!_sameBytes(before, expected) || !_sameBytes(after, expected)) {
-        throw StateError('Working tree file changed');
-      }
+      _verifyWorktreeSnapshot(
+        await _readWorktreeSnapshot(file.path),
+        expectedSnapshot,
+      );
       return _parseBlamePorcelain(output);
     }
 
@@ -872,13 +887,25 @@ class GitRepository implements FullDiffRepository {
     );
   }
 
-  Future<Uint8List> _readWorktreeBytes(String path) async {
+  Future<_WorktreeSnapshot> _readWorktreeSnapshot(String path) async {
     final absolutePath = '$root/$path';
     final type = await FileSystemEntity.type(absolutePath, followLinks: false);
     if (type == FileSystemEntityType.link) {
-      return Uint8List.fromList(utf8.encode(await Link(absolutePath).target()));
+      return (
+        bytes: Uint8List.fromList(
+          utf8.encode(await Link(absolutePath).target()),
+        ),
+        exceeded: false,
+      );
     }
-    return File(absolutePath).readAsBytes();
+    final builder = BytesBuilder(copy: false);
+    await for (final chunk in File(
+      absolutePath,
+    ).openRead(0, fullDiffTextByteLimit + 1)) {
+      builder.add(chunk);
+    }
+    final bytes = builder.takeBytes();
+    return (bytes: bytes, exceeded: bytes.length > fullDiffTextByteLimit);
   }
 
   @override
@@ -1151,6 +1178,28 @@ bool _sameBytes(List<int> left, List<int> right) {
     if (left[index] != right[index]) return false;
   }
   return true;
+}
+
+typedef _WorktreeSnapshot = ({Uint8List bytes, bool exceeded});
+
+_WorktreeSnapshot _snapshotForBytes(Uint8List bytes) {
+  final bounded = bytes.length <= fullDiffTextByteLimit + 1
+      ? bytes
+      : Uint8List.sublistView(bytes, 0, fullDiffTextByteLimit + 1);
+  return (bytes: bounded, exceeded: bytes.length > fullDiffTextByteLimit);
+}
+
+void _verifyWorktreeSnapshot(
+  _WorktreeSnapshot actual,
+  _WorktreeSnapshot expected,
+) {
+  if (actual.exceeded != expected.exceeded ||
+      !_sameBytes(actual.bytes, expected.bytes)) {
+    throw StateError('Working tree file changed');
+  }
+  if (expected.exceeded) {
+    throw StateError('Working tree file exceeds the full diff byte limit');
+  }
 }
 
 List<GitBlameLine> _parseBlamePorcelain(String output) {

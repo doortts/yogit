@@ -2,7 +2,10 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:yogit/full_diff_limits.dart';
 import 'package:yogit/git.dart';
+
+export 'package:yogit/full_diff_limits.dart';
 
 enum FullDiffView { file, diff, blame, history }
 
@@ -16,7 +19,6 @@ enum FileDocumentSide { old, result }
 
 const fullDiffLargeByteLimit = 2 * 1024 * 1024;
 const fullDiffLargeLineLimit = 50000;
-const fullDiffTextByteLimit = 10 * 1024 * 1024;
 const fullDiffTextLineLimit = 200000;
 
 bool _exceedsFullDiffTextLineLimit(Uint8List bytes) {

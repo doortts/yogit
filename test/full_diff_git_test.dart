@@ -4,6 +4,9 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/git.dart';
 
+const _textByteLimit = 10 * 1024 * 1024;
+const _largeFileLength = 32 * 1024 * 1024;
+
 Future<String> runGit(Directory root, List<String> arguments) async {
   final result = await Process.run(
     'git',
@@ -34,6 +37,30 @@ Future<void> writeAndCommit(
   await runGit(root, ['add', '--', path]);
   await runGit(root, ['commit', '-m', subject]);
 }
+
+Future<void> writeSparseLargeFile(Directory root, String path) async {
+  final file = File('${root.path}/$path');
+  await file.parent.create(recursive: true);
+  final handle = await file.open(mode: FileMode.write);
+  try {
+    await handle.setPosition(_textByteLimit);
+    await handle.writeByte(0x42);
+    await handle.setPosition(_largeFileLength - 1);
+    await handle.writeByte(0x7A);
+  } finally {
+    await handle.close();
+  }
+}
+
+Future<Set<String>> blameTemporaryDirectories() async => {
+  await for (final entity in Directory.systemTemp.list(followLinks: false))
+    if (entity is Directory &&
+        entity.uri.pathSegments
+            .where((segment) => segment.isNotEmpty)
+            .last
+            .startsWith('yogit_blame_'))
+      entity.path,
+};
 
 void main() {
   test('finds renames and passes both paths when loading its patch', () async {
@@ -103,6 +130,145 @@ void main() {
       expect(lines.last.newNumber, 2);
     },
   );
+
+  test('bounds a 32 MiB untracked file snapshot', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'base.txt', 'base\n', 'base');
+    await writeSparseLargeFile(root, 'large.bin');
+    final repository = GitRepository(root.path);
+    final working = (await repository.loadWorkingTree())!;
+    final file = (await repository.loadFiles(
+      working,
+    )).singleWhere((entry) => entry.path == 'large.bin');
+
+    final bytes = await repository.loadFileBytes(working, file);
+
+    expect(bytes, hasLength(_textByteLimit + 1));
+    expect(bytes.last, 0x42);
+  });
+
+  test('skips synthetic diff rows for a 32 MiB untracked file', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'base.txt', 'base\n', 'base');
+    await writeSparseLargeFile(root, 'large.bin');
+    final repository = GitRepository(root.path);
+    final working = (await repository.loadWorkingTree())!;
+    final file = (await repository.loadFiles(
+      working,
+    )).singleWhere((entry) => entry.path == 'large.bin');
+
+    final diff = await repository.loadDiff(working, file);
+
+    expect(diff, isEmpty);
+  });
+
+  test(
+    'rejects untracked blame after its displayed file grows to 32 MiB',
+    () async {
+      final root = await createGitFixture();
+      addTearDown(() => root.delete(recursive: true));
+      await writeAndCommit(root, 'base.txt', 'base\n', 'base');
+      await File('${root.path}/large.bin').writeAsString('displayed\n');
+      final repository = GitRepository(root.path);
+      final working = (await repository.loadWorkingTree())!;
+      final file = (await repository.loadFiles(
+        working,
+      )).singleWhere((entry) => entry.path == 'large.bin');
+      final displayedBytes = await repository.loadFileBytes(working, file);
+      await writeSparseLargeFile(root, 'large.bin');
+      final temporaryDirectoriesBefore = await blameTemporaryDirectories();
+
+      await expectLater(
+        repository.loadBlame(working, file, workingTreeBytes: displayedBytes),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(await blameTemporaryDirectories(), temporaryDirectoriesBefore);
+    },
+  );
+
+  test(
+    'rejects tracked blame after its displayed file grows to 32 MiB',
+    () async {
+      final root = await createGitFixture();
+      addTearDown(() => root.delete(recursive: true));
+      await writeAndCommit(root, 'large.bin', 'small\n', 'base');
+      await File('${root.path}/large.bin').writeAsString('displayed\n');
+      final fixtureRepository = GitRepository(root.path);
+      final working = (await fixtureRepository.loadWorkingTree())!;
+      final file = (await fixtureRepository.loadFiles(working)).single;
+      final displayedBytes = await fixtureRepository.loadFileBytes(
+        working,
+        file,
+      );
+      await writeSparseLargeFile(root, 'large.bin');
+      var blameCalls = 0;
+      final repository = GitRepository(
+        root.path,
+        runner: (executable, arguments, {workingDirectory}) {
+          if (arguments.first == 'blame') {
+            blameCalls++;
+            return Future.value(ProcessResult(1, 0, '', ''));
+          }
+          return runProcess(
+            executable,
+            arguments,
+            workingDirectory: workingDirectory,
+          );
+        },
+      );
+      final temporaryDirectoriesBefore = await blameTemporaryDirectories();
+
+      await expectLater(
+        repository.loadBlame(working, file, workingTreeBytes: displayedBytes),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(blameCalls, 0);
+      expect(await blameTemporaryDirectories(), temporaryDirectoriesBefore);
+    },
+  );
+
+  test('removes tracked blame contents when its runner fails', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'tracked.txt', 'one\n', 'base');
+    await File('${root.path}/tracked.txt').writeAsString('one\ntwo\n');
+    final fixtureRepository = GitRepository(root.path);
+    final working = (await fixtureRepository.loadWorkingTree())!;
+    final file = (await fixtureRepository.loadFiles(working)).single;
+    final displayedBytes = await fixtureRepository.loadFileBytes(working, file);
+    String? contentsPath;
+    final repository = GitRepository(
+      root.path,
+      runner: (executable, arguments, {workingDirectory}) {
+        if (arguments.first == 'blame') {
+          contentsPath = arguments[arguments.indexOf('--contents') + 1];
+          return Future.value(ProcessResult(1, 1, '', 'forced blame failure'));
+        }
+        return runProcess(
+          executable,
+          arguments,
+          workingDirectory: workingDirectory,
+        );
+      },
+    );
+    final temporaryDirectoriesBefore = await blameTemporaryDirectories();
+
+    await expectLater(
+      repository.loadBlame(working, file, workingTreeBytes: displayedBytes),
+      throwsA(isA<ProcessException>()),
+    );
+
+    expect(contentsPath, isNotNull);
+    expect(
+      FileSystemEntity.typeSync(contentsPath!, followLinks: false),
+      FileSystemEntityType.notFound,
+    );
+    expect(await blameTemporaryDirectories(), temporaryDirectoriesBefore);
+  });
 
   test(
     'loads the correct side for deleted files and follows renames',

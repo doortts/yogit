@@ -270,7 +270,7 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
   }
 
   MinimapViewport? _viewport(double height) {
-    if (_usesAnchorDrag && widget.document.hunks.isNotEmpty) {
+    if (_usesAnchorDrag) {
       final activeIndex = _activeHunkIndex;
       final activeHunk =
           activeIndex < 0 || activeIndex >= widget.document.hunks.length

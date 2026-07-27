@@ -77,14 +77,14 @@ flutter test --concurrency=1 \
   benchmark/full_diff_syntax_benchmark_test.dart --reporter expanded
 ```
 
-DRL 첫 Hunk의 12줄을 30번 강조했다. 격리 실행의 첫 실행은 16,504µs,
-p95는 2,267µs로 50ms 기준을 통과했다.
+DRL 첫 Hunk의 12줄을 30번 강조했다. 격리 실행의 첫 실행은 16,383µs,
+p95는 3,458µs로 50ms 기준을 통과했다.
 
 | 빌드 | 압축 크기 |
 | --- | ---: |
-| `YOGIT_EXTENDED_SYNTAX=false` | 23,160,330 bytes |
-| `YOGIT_EXTENDED_SYNTAX=true` | 23,336,348 bytes |
-| 증가량 | 176,018 bytes |
+| `YOGIT_EXTENDED_SYNTAX=false` | 23,174,843 bytes |
+| `YOGIT_EXTENDED_SYNTAX=true` | 23,349,322 bytes |
+| 증가량 | 174,479 bytes |
 
 증가량은 1,048,576바이트 기준보다 작다. 두 기준을 모두 통과했으므로
 `extendedSyntaxEnabled`의 기본값은 `true`로 유지했다. 포함한 확장
