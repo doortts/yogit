@@ -116,7 +116,8 @@ Result:
 - The closed control reads `diff 알고리즘 · Histogram`.
 - The visible tooltip includes the selected algorithm title and its
   description.
-- Text, popover background, and screen controls remain legible together.
+- It temporarily overlays the diff header and first source row, but its bright,
+  high-contrast surface remains readable over the dark screen.
 
 ### 15 — Unavailable panel
 
@@ -128,7 +129,9 @@ Result:
 ### 16 — History Hunk detail
 
 - Commit `65f4c80` remains selected in the left list.
-- The list is 280 px wide and separated by a one-pixel divider.
+- The History workspace is below 760 px, so the list clamps to 240 px and is
+  separated by a one-pixel divider. The 280 px width applies only when the
+  History workspace itself is at least 760 px wide.
 - The historical file context and right-side Hunk are distinct and readable.
 
 ### 17 — History Split detail
