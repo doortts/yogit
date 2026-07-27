@@ -602,10 +602,12 @@ class _DiffScreenState extends State<DiffScreen> {
                           view: state.view,
                           encodingLabel: state.encodingLabel,
                           canOpenEditor: _canOpenEditor(state),
+                          focusMode: state.focusMode,
                           editorError: _editorError,
                           onBack: _returnToTimeline,
                           onOpenEditor: _openEditor,
                           onViewSelected: _controller.setView,
+                          onFocusModeChanged: _controller.setFocusMode,
                         ),
                         GlobalDiffToolbar(
                           view: state.view,
@@ -615,7 +617,6 @@ class _DiffScreenState extends State<DiffScreen> {
                           algorithm: state.requestedAlgorithm,
                           ignoreWhitespace: state.requestedIgnoreWhitespace,
                           wrapLines: state.wrapLines,
-                          focusMode: state.focusMode,
                           loadingPatch: state.patch.loading,
                           onPresentationSelected: _controller.setPresentation,
                           onPrevious: () => _controller.stepAnchor(-1),
@@ -635,7 +636,6 @@ class _DiffScreenState extends State<DiffScreen> {
                             );
                           },
                           onWrapLinesChanged: _controller.setWrapLines,
-                          onFocusModeChanged: _controller.setFocusMode,
                         ),
                         Expanded(
                           child: LayoutBuilder(
@@ -910,38 +910,25 @@ class _DiffScreenState extends State<DiffScreen> {
                                       crossAxisAlignment:
                                           CrossAxisAlignment.stretch,
                                       children: [
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 8,
-                                            vertical: 3,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: selected
-                                                ? fullDiffSelectedChip
-                                                : fullDiffChip,
-                                            borderRadius: BorderRadius.circular(
-                                              fullDiffChipRadius,
-                                            ),
-                                          ),
-                                          child: Text(
-                                            file.path,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              fontFamily: technicalFontFamily,
-                                              fontFamilyFallback:
-                                                  technicalFontFallback,
-                                              fontSize: 11,
-                                            ),
+                                        Text(
+                                          file.path,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontFamily: technicalFontFamily,
+                                            fontFamilyFallback:
+                                                technicalFontFallback,
+                                            fontSize: 13,
                                           ),
                                         ),
                                         const SizedBox(height: 3),
                                         Text(
                                           '+${file.additions ?? '—'} '
-                                          '−${file.deletions ?? '—'}',
+                                          '−${file.deletions ?? '—'} · '
+                                          '${formatByteSize(file.sizeBytes)}',
                                           style: technicalTextStyle.copyWith(
                                             color: fullDiffMuted,
-                                            fontSize: 10,
+                                            fontSize: 12,
                                           ),
                                         ),
                                       ],

@@ -627,7 +627,6 @@ class _FullDiffQaDetailState extends State<FullDiffQaDetail> {
                   algorithm: state.requestedAlgorithm,
                   ignoreWhitespace: state.requestedIgnoreWhitespace,
                   wrapLines: state.wrapLines,
-                  focusMode: state.focusMode,
                   loadingPatch: state.patch.loading,
                   showLeadingControls: false,
                   onPresentationSelected: controller.setPresentation,
@@ -636,7 +635,6 @@ class _FullDiffQaDetailState extends State<FullDiffQaDetail> {
                   onAlgorithmSelected: controller.selectAlgorithm,
                   onIgnoreWhitespaceChanged: controller.setIgnoreWhitespace,
                   onWrapLinesChanged: controller.setWrapLines,
-                  onFocusModeChanged: controller.setFocusMode,
                 ),
                 Expanded(
                   child: Row(

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'full_diff_header.dart';
 import 'full_diff_model.dart';
 import 'full_diff_theme.dart';
 import 'git.dart';
@@ -84,7 +85,7 @@ class FullDiffUnavailablePanel extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    _fileSummary(file),
+                    fileSummary(file),
                     style: technical.copyWith(
                       color: fullDiffAccent,
                       fontSize: 11,
@@ -151,10 +152,6 @@ class FullDiffUnavailablePanel extends StatelessWidget {
     );
   }
 }
-
-String _fileSummary(GitFileChange file) =>
-    '${file.status.characters.first} · '
-    '+${file.additions ?? '—'} −${file.deletions ?? '—'}';
 
 String _formatCount(int value) {
   final digits = value.toString();

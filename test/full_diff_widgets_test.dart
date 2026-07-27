@@ -20,6 +20,14 @@ import 'package:yogit/typography.dart';
 
 import 'support/full_diff_fixtures.dart';
 
+const _sizedFile = GitFileChange(
+  path: 'src/drlua.pas',
+  status: 'M',
+  additions: 12,
+  deletions: 4,
+  sizeBytes: 1536,
+);
+
 void main() {
   final unavailableScenarios = [
     (
@@ -62,8 +70,8 @@ void main() {
         await tester.pumpWidget(
           qaApp(
             FullDiffUnavailablePanel(
-              file: fileA,
-              path: fileA.path,
+              file: _sizedFile,
+              path: _sizedFile.path,
               reason: scenario.reason,
               algorithm: DiffAlgorithm.gitSetting,
               ignoreWhitespace: false,
@@ -73,8 +81,8 @@ void main() {
           ),
         );
 
-        final path = find.text(fileA.path);
-        final summary = find.text('M · +12 −4');
+        final path = find.text(_sizedFile.path);
+        final summary = find.text('M · +12 −4 · 1.5 KB');
         final attribute = find.text(scenario.attribute);
         final message = find.text(scenario.message);
         expect(find.byKey(const Key('full-diff-unavailable')), findsOneWidget);
@@ -978,10 +986,10 @@ void main() {
     final richText = tester.widget<RichText>(
       find.byKey(const Key('code-row-source-text')),
     );
-    expect((richText.text as TextSpan).style?.fontSize, 10);
-    expect((richText.text as TextSpan).style?.height, 21 / 10);
-    expect(tester.widget<Text>(find.text('314')).style?.fontSize, 8);
-    expect(tester.widget<Text>(find.text('+')).style?.fontSize, 8);
+    expect((richText.text as TextSpan).style?.fontSize, 12);
+    expect((richText.text as TextSpan).style?.height, 21 / 12);
+    expect(tester.widget<Text>(find.text('314')).style?.fontSize, 10);
+    expect(tester.widget<Text>(find.text('+')).style?.fontSize, 10);
     final spans = (richText.text as TextSpan).children!.cast<TextSpan>();
     expect(
       spans.any(
@@ -1008,7 +1016,7 @@ void main() {
 
     expect(
       tester.widget<Text>(find.textContaining('lines')).style?.fontSize,
-      10,
+      12,
     );
   });
 

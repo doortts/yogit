@@ -10,7 +10,24 @@ import 'package:yogit/typography.dart';
 
 import 'support/full_diff_fixtures.dart';
 
+const _sizedFile = GitFileChange(
+  path: 'src/drlua.pas',
+  status: 'M',
+  additions: 12,
+  deletions: 4,
+  sizeBytes: 1536,
+);
+
 void main() {
+  test('formats file sizes with compact binary units', () {
+    expect(formatByteSize(null), '—');
+    expect(formatByteSize(0), '0 B');
+    expect(formatByteSize(1023), '1023 B');
+    expect(formatByteSize(1536), '1.5 KB');
+    expect(formatByteSize(10 * 1024), '10 KB');
+    expect(formatByteSize(3 * 1024 * 1024), '3 MB');
+  });
+
   testWidgets('file bar leads with an accessible return button', (
     tester,
   ) async {
@@ -37,24 +54,32 @@ void main() {
       labels,
       containsAllInOrder([
         'src/drlua.pas',
-        'M · +12 −4',
+        'M · +12 −4 · 1.5 KB',
+        '집중 모드',
         '편집기로 열기',
         'File',
         'Diff',
         'Blame',
         'History',
         'UTF-8',
-        '집중 모드',
+        'diff 알고리즘',
+        'Histogram',
+        '공백 무시',
+        '줄바꿈',
+        '2 / 7',
         'Hunk',
         'Inline',
         'Split',
-        '2 / 7',
-        'diff 알고리즘 · Histogram',
-        '공백 무시',
-        '줄바꿈',
       ]),
     );
-    expect(find.byKey(const Key('diff-algorithm-value')), findsNothing);
+    expect(
+      tester.getCenter(find.byKey(const Key('focus-mode'))).dx,
+      lessThan(tester.getCenter(find.byKey(const Key('open-editor'))).dx),
+    );
+    expect(
+      tester.getCenter(find.byKey(const Key('open-editor'))).dx,
+      lessThan(tester.getCenter(find.text('File')).dx),
+    );
   });
 
   testWidgets('algorithm menu shows five choices and its selected label', (
@@ -72,7 +97,13 @@ void main() {
       'Patience',
       'Histogram',
     ]) {
-      expect(find.text(label), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(CheckedPopupMenuItem<DiffAlgorithm>),
+          matching: find.text(label),
+        ),
+        findsOneWidget,
+      );
     }
     final checked = tester
         .widgetList<CheckedPopupMenuItem<DiffAlgorithm>>(
@@ -89,9 +120,27 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(selected, DiffAlgorithm.histogram);
-    expect(find.text('diff 알고리즘 · Histogram'), findsOneWidget);
-    expect(find.byKey(const Key('diff-algorithm-value')), findsNothing);
+    expect(find.text('Histogram'), findsOneWidget);
+    expect(find.byKey(const Key('diff-algorithm-value')), findsOneWidget);
   });
+
+  testWidgets(
+    'algorithm label and selected value remain separate and ordered',
+    (tester) async {
+      await pumpHeaders(tester, algorithm: DiffAlgorithm.gitSetting);
+
+      final label = find.byKey(const Key('diff-algorithm-label'));
+      final value = find.byKey(const Key('diff-algorithm-value'));
+      expect(label, findsOneWidget);
+      expect(find.text('diff 알고리즘'), findsOneWidget);
+      expect(value, findsOneWidget);
+      expect(find.text('Git setting'), findsOneWidget);
+      expect(
+        tester.getTopRight(label).dx,
+        lessThan(tester.getTopLeft(value).dx),
+      );
+    },
+  );
 
   testWidgets(
     'algorithm semantics explain the setting and open the menu on semantic tap',
@@ -114,8 +163,7 @@ void main() {
       expect(
         find.semantics.byPredicate((node) {
           final related = node.getSemanticsData();
-          return related.label.contains('diff 알고리즘') ||
-              related.value.contains('Histogram') ||
+          return related.value.contains('Histogram') ||
               related.hint.contains('Git이 변경 구간을 나누는 방식을 정합니다') ||
               related.tooltip.contains('Git이 변경 구간을 나누는 방식을 정합니다');
         }),
@@ -200,6 +248,19 @@ void main() {
       expect(find.text('집중 모드'), findsNothing);
     },
   );
+
+  testWidgets('history view explains its purpose after the hover delay', (
+    tester,
+  ) async {
+    await pumpHeaders(tester);
+
+    final mouse = await tester.createGesture(kind: ui.PointerDeviceKind.mouse);
+    await mouse.addPointer();
+    await mouse.moveTo(tester.getCenter(find.text('History')));
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.text('파일의 변경 이력을 보여줍니다'), findsOneWidget);
+  });
 
   testWidgets('global bars expose selected enabled and toggled semantics', (
     tester,
@@ -322,7 +383,7 @@ void main() {
   ) async {
     await pumpHeaders(tester);
 
-    for (final label in ['M · +12 −4', 'UTF-8']) {
+    for (final label in ['M · +12 −4 · 1.5 KB', 'UTF-8']) {
       final decoration =
           tester
                   .widget<Container>(
@@ -360,6 +421,7 @@ Future<void> pumpHeaders(
   FullDiffView view = FullDiffView.diff,
   bool focusMode = false,
   bool ignoreWhitespace = false,
+  DiffAlgorithm algorithm = DiffAlgorithm.histogram,
   VoidCallback? onBack,
   ValueChanged<DiffAlgorithm>? onAlgorithmSelected,
 }) => tester.pumpWidget(
@@ -367,24 +429,25 @@ Future<void> pumpHeaders(
     Column(
       children: [
         GlobalFileBar(
-          file: fileA,
-          path: fileA.path,
+          file: _sizedFile,
+          path: _sizedFile.path,
           view: view,
           encodingLabel: 'UTF-8',
           canOpenEditor: true,
+          focusMode: focusMode,
           onBack: onBack ?? () {},
           onOpenEditor: () {},
           onViewSelected: (_) {},
+          onFocusModeChanged: (_) {},
         ),
         GlobalDiffToolbar(
           view: view,
           presentation: DiffPresentation.hunk,
           activeIndex: 1,
           anchorCount: 7,
-          algorithm: DiffAlgorithm.histogram,
+          algorithm: algorithm,
           ignoreWhitespace: ignoreWhitespace,
           wrapLines: false,
-          focusMode: focusMode,
           loadingPatch: false,
           onPresentationSelected: (_) {},
           onPrevious: () {},
@@ -392,7 +455,6 @@ Future<void> pumpHeaders(
           onAlgorithmSelected: onAlgorithmSelected ?? (_) {},
           onIgnoreWhitespaceChanged: (_) {},
           onWrapLinesChanged: (_) {},
-          onFocusModeChanged: (_) {},
         ),
       ],
     ),

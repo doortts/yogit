@@ -17,6 +17,14 @@ import 'package:yogit/git.dart';
 
 import 'support/full_diff_fixtures.dart';
 
+const _sizedFile = GitFileChange(
+  path: 'src/drlua.pas',
+  status: 'M',
+  additions: 12,
+  deletions: 4,
+  sizeBytes: 1536,
+);
+
 class _RecordingEditorService extends ExternalEditorService {
   _RecordingEditorService() : super(repositoryRoot: '/unused');
 
@@ -46,7 +54,7 @@ void main() {
   >
   workspaceFixture() async {
     final repository = FakeFullDiffRepository();
-    repository.files = (_, _) async => const [fileA];
+    repository.files = (_, _) async => const [_sizedFile];
     repository.diff = (_, _, _, _, _) async => twoHunkLines;
     repository.content = (_, _, _) async => resultFile.bytes;
     repository.blame = (_, _, _, _) async => [
@@ -569,6 +577,17 @@ void main() {
       ui.Tristate.isTrue,
     );
     semantics.dispose();
+    final selectedRow = find.byKey(Key('selected-file-${fileA.path}'));
+    expect(tester.widget<Container>(selectedRow).color, fullDiffSelection);
+    expect(
+      find.descendant(
+        of: selectedRow,
+        matching: find.byWidgetPredicate(
+          (widget) => widget is Container && widget.decoration is BoxDecoration,
+        ),
+      ),
+      findsNothing,
+    );
     expect(find.text('+'), findsWidgets);
     expect(find.text('−'), findsWidgets);
     expect(find.byKey(const Key('code-row-current-marker')), findsOneWidget);
@@ -1148,7 +1167,7 @@ void main() {
     },
   );
 
-  testWidgets('uses compact typography in commit and file lists', (
+  testWidgets('uses approved typography in commit and file lists', (
     tester,
   ) async {
     final fixture = await workspaceFixture();
@@ -1175,16 +1194,19 @@ void main() {
           )
           .style
           ?.fontSize,
-      11,
+      13,
     );
     expect(
       tester
           .widget<Text>(
-            find.descendant(of: fileList, matching: find.text('+12 −4')),
+            find.descendant(
+              of: fileList,
+              matching: find.text('+12 −4 · 1.5 KB'),
+            ),
           )
           .style
           ?.fontSize,
-      10,
+      12,
     );
   });
 
@@ -1575,7 +1597,7 @@ void main() {
 
         expect(find.byKey(const Key('full-diff-unavailable')), findsOneWidget);
         expect(find.text(fileA.path), findsWidgets);
-        expect(find.text('M · +12 −4'), findsWidgets);
+        expect(find.text('M · +12 −4 · —'), findsWidgets);
         expect(find.text('Git error'), findsOneWidget);
         expect(find.text('Git에서 이 파일의 변경 내용을 읽지 못했습니다.'), findsOneWidget);
         expect(find.textContaining('content failed'), findsOneWidget);
