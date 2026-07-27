@@ -11,12 +11,14 @@ class HistoryEntryIntent extends Intent {
   final FileHistoryEntry entry;
 }
 
-class FullHistoryView extends StatelessWidget {
+class FullHistoryView extends StatefulWidget {
   const FullHistoryView({
     required this.entries,
     required this.onSelected,
     this.selected,
     this.controller,
+    this.focusNode,
+    this.onMoveToFiles,
     super.key,
   });
 
@@ -24,10 +26,78 @@ class FullHistoryView extends StatelessWidget {
   final ValueChanged<FileHistoryEntry> onSelected;
   final FileHistoryEntry? selected;
   final ScrollController? controller;
+  final FocusNode? focusNode;
+  final VoidCallback? onMoveToFiles;
+
+  @override
+  State<FullHistoryView> createState() => _FullHistoryViewState();
+}
+
+class _FullHistoryViewState extends State<FullHistoryView> {
+  final _ownedFocusNode = FocusNode(debugLabel: 'full history list');
+  final Map<String, GlobalKey> _rowKeys = {};
+  bool _hasFocus = false;
+
+  FocusNode get _focusNode => widget.focusNode ?? _ownedFocusNode;
+
+  @override
+  void didUpdateWidget(covariant FullHistoryView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final shas = {for (final entry in widget.entries) entry.commit.sha};
+    _rowKeys.removeWhere((sha, _) => !shas.contains(sha));
+  }
+
+  @override
+  void dispose() {
+    _ownedFocusNode.dispose();
+    super.dispose();
+  }
+
+  KeyEventResult _handleKey(FocusNode _, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isMetaPressed || keyboard.isAltPressed) {
+      return KeyEventResult.ignored;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      widget.onMoveToFiles?.call();
+      return KeyEventResult.handled;
+    }
+    final delta = switch (event.logicalKey) {
+      LogicalKeyboardKey.arrowUp => -1,
+      LogicalKeyboardKey.arrowDown => 1,
+      _ => 0,
+    };
+    if (delta == 0) return KeyEventResult.ignored;
+    _stepSelection(delta);
+    return KeyEventResult.handled;
+  }
+
+  void _stepSelection(int delta) {
+    if (widget.entries.isEmpty) return;
+    final selectedIndex = widget.entries.indexWhere(
+      (entry) => identical(entry, widget.selected),
+    );
+    final nextIndex = selectedIndex < 0
+        ? (delta > 0 ? 0 : widget.entries.length - 1)
+        : (selectedIndex + delta).clamp(0, widget.entries.length - 1);
+    final entry = widget.entries[nextIndex];
+    widget.onSelected(entry);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final rowContext = _rowKeys[entry.commit.sha]?.currentContext;
+      if (!mounted || rowContext == null) return;
+      Scrollable.ensureVisible(
+        rowContext,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+      );
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (entries.isEmpty) {
+    if (widget.entries.isEmpty) {
       return const Center(
         child: Text(
           'No file history',
@@ -35,44 +105,50 @@ class FullHistoryView extends StatelessWidget {
         ),
       );
     }
-    return Actions(
-      actions: {
-        HistoryEntryIntent: CallbackAction<HistoryEntryIntent>(
-          onInvoke: (intent) {
-            onSelected(intent.entry);
-            return null;
-          },
-        ),
+    return Focus(
+      key: const Key('history-list-focus'),
+      focusNode: _focusNode,
+      onFocusChange: (hasFocus) {
+        if (_hasFocus != hasFocus) setState(() => _hasFocus = hasFocus);
       },
+      onKeyEvent: _handleKey,
       child: FocusTraversalGroup(
         child: ListView.builder(
           key: const Key('history-list'),
-          controller: controller,
-          primary: controller == null,
+          controller: widget.controller,
+          primary: widget.controller == null,
           padding: const EdgeInsets.all(12),
-          itemCount: entries.length,
+          itemCount: widget.entries.length,
           itemBuilder: (context, index) {
-            final entry = entries[index];
-            final isSelected = identical(entry, selected);
-            void activate() =>
-                Actions.invoke(context, HistoryEntryIntent(entry));
-            return Focus(
-              autofocus: index == 0,
-              onKeyEvent: (_, event) {
-                if (event is KeyDownEvent &&
-                    event.logicalKey == LogicalKeyboardKey.enter) {
-                  activate();
-                  return KeyEventResult.handled;
-                }
-                return KeyEventResult.ignored;
-              },
-              child: Semantics(
-                selected: isSelected,
-                button: true,
-                onTap: activate,
-                child: InkWell(
+            final entry = widget.entries[index];
+            final isSelected = identical(entry, widget.selected);
+            void activate() => widget.onSelected(entry);
+            return KeyedSubtree(
+              key: _rowKeys.putIfAbsent(
+                entry.commit.sha,
+                () => GlobalKey(debugLabel: 'history ${entry.commit.sha}'),
+              ),
+              child: Focus(
+                onKeyEvent: (_, event) {
+                  if (event is KeyDownEvent &&
+                      event.logicalKey == LogicalKeyboardKey.enter) {
+                    activate();
+                    return KeyEventResult.handled;
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: Semantics(
+                  selected: isSelected,
+                  button: true,
                   onTap: activate,
-                  child: HistoryRow(entry: entry),
+                  child: InkWell(
+                    onTap: activate,
+                    child: HistoryRow(
+                      entry: entry,
+                      selected: isSelected,
+                      focused: isSelected && _hasFocus,
+                    ),
+                  ),
                 ),
               ),
             );
@@ -84,14 +160,24 @@ class FullHistoryView extends StatelessWidget {
 }
 
 class HistoryRow extends StatelessWidget {
-  const HistoryRow({required this.entry, super.key});
+  const HistoryRow({
+    required this.entry,
+    this.selected = false,
+    this.focused = false,
+    super.key,
+  });
 
   final FileHistoryEntry entry;
+  final bool selected;
+  final bool focused;
 
   @override
-  Widget build(BuildContext context) => ColoredBox(
+  Widget build(BuildContext context) => Container(
     key: Key('history-row-${entry.commit.sha}'),
-    color: fullDiffCanvas,
+    decoration: BoxDecoration(
+      color: selected ? fullDiffSelection : fullDiffCanvas,
+      border: focused ? Border.all(color: fullDiffAccent) : null,
+    ),
     child: Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
@@ -128,7 +214,10 @@ class HistoryRow extends StatelessWidget {
                   entry.commit.subject,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11),
+                  style: TextStyle(
+                    color: selected ? fullDiffAccent : Colors.white,
+                    fontSize: 11,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Row(
@@ -138,23 +227,26 @@ class HistoryRow extends StatelessWidget {
                         entry.commit.author.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: fullDiffMuted,
+                        style: TextStyle(
+                          color: selected ? Colors.white70 : fullDiffMuted,
                           fontSize: 10,
                         ),
                       ),
                     ),
-                    const Text(
+                    Text(
                       ' · ',
-                      style: TextStyle(color: fullDiffMuted, fontSize: 10),
+                      style: TextStyle(
+                        color: selected ? Colors.white70 : fullDiffMuted,
+                        fontSize: 10,
+                      ),
                     ),
                     Flexible(
                       child: Text(
                         _relativeTime(entry.commit.committerTimestamp),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: fullDiffMuted,
+                        style: TextStyle(
+                          color: selected ? Colors.white70 : fullDiffMuted,
                           fontSize: 10,
                         ),
                       ),

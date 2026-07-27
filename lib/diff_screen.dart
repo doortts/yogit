@@ -38,12 +38,6 @@ class _StepHunkIntent extends Intent {
   final int delta;
 }
 
-class _StepCommitIntent extends Intent {
-  const _StepCommitIntent(this.delta);
-
-  final int delta;
-}
-
 class _StepFileIntent extends Intent {
   const _StepFileIntent(this.delta);
 
@@ -84,6 +78,8 @@ class DiffScreen extends StatefulWidget {
 class _DiffScreenState extends State<DiffScreen> {
   final _contentScroll = ScrollController();
   final _historyScroll = ScrollController();
+  final _fileListFocus = FocusNode(debugLabel: 'full diff files');
+  final _historyListFocus = FocusNode(debugLabel: 'full diff history');
   final _contentViewportKey = GlobalKey();
   final _highlighter = HighlightJsSyntaxHighlighter();
   Map<String, GlobalKey> _anchorKeys = <String, GlobalKey>{};
@@ -93,7 +89,6 @@ class _DiffScreenState extends State<DiffScreen> {
   late ExternalEditorService _editorService;
   late bool _ownsController;
   late FullDiffSessionState _observedState;
-  late double _commitsWidth;
   late double _filesWidth;
 
   bool _effectScheduled = false;
@@ -110,7 +105,6 @@ class _DiffScreenState extends State<DiffScreen> {
   @override
   void initState() {
     super.initState();
-    _commitsWidth = widget.columnWidths.commits;
     _filesWidth = widget.columnWidths.files;
     _editorService =
         widget.editorService ??
@@ -186,6 +180,8 @@ class _DiffScreenState extends State<DiffScreen> {
       ..removeListener(_handleContentScrolled)
       ..dispose();
     _historyScroll.dispose();
+    _fileListFocus.dispose();
+    _historyListFocus.dispose();
     if (_ownsController) _controller.dispose();
     super.dispose();
   }
@@ -438,15 +434,34 @@ class _DiffScreenState extends State<DiffScreen> {
     }
   }
 
-  void _stepCommit(int delta) {
-    final state = _controller.state;
-    final index = state.nearbyCommits.indexWhere(
-      (commit) => commit.sha == state.selectedCommit.sha,
-    );
-    final next = (index + delta).clamp(0, state.nearbyCommits.length - 1);
-    if (next != index) {
-      unawaited(_controller.selectCommit(state.nearbyCommits[next]));
+  KeyEventResult _handleFileListKey(FocusNode _, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
     }
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isMetaPressed || keyboard.isAltPressed) {
+      return KeyEventResult.ignored;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      _stepFile(-1);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      _stepFile(1);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowRight &&
+        _controller.state.view == FullDiffView.history) {
+      final entries = _controller.state.history.data;
+      if (_controller.state.selectedHistoryEntry == null &&
+          entries != null &&
+          entries.isNotEmpty) {
+        unawaited(_controller.selectHistoryEntry(entries.first));
+      }
+      _historyListFocus.requestFocus();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   void _returnToTimeline() => Navigator.of(context).maybePop();
@@ -532,11 +547,9 @@ class _DiffScreenState extends State<DiffScreen> {
             SingleActivator(LogicalKeyboardKey.arrowDown, alt: true):
                 _StepHunkIntent(1),
             SingleActivator(LogicalKeyboardKey.arrowUp, meta: true):
-                _StepCommitIntent(-1),
+                _StepFileIntent(-1),
             SingleActivator(LogicalKeyboardKey.arrowDown, meta: true):
-                _StepCommitIntent(1),
-            SingleActivator(LogicalKeyboardKey.arrowUp): _StepFileIntent(-1),
-            SingleActivator(LogicalKeyboardKey.arrowDown): _StepFileIntent(1),
+                _StepFileIntent(1),
           },
           child: Actions(
             actions: <Type, Action<Intent>>{
@@ -556,12 +569,6 @@ class _DiffScreenState extends State<DiffScreen> {
               _StepHunkIntent: CallbackAction<_StepHunkIntent>(
                 onInvoke: (intent) {
                   _controller.stepAnchor(intent.delta);
-                  return null;
-                },
-              ),
-              _StepCommitIntent: CallbackAction<_StepCommitIntent>(
-                onInvoke: (intent) {
-                  _stepCommit(intent.delta);
                   return null;
                 },
               ),
@@ -644,17 +651,11 @@ class _DiffScreenState extends State<DiffScreen> {
                                 context,
                               ).width;
                               return _ResponsiveDiffBody(
-                                showCommits:
-                                    !state.focusMode && viewportWidth > 650,
                                 showFiles:
                                     !state.focusMode && viewportWidth > 480,
-                                commitsWidth: _commitsWidth,
                                 filesWidth: _filesWidth,
-                                nearbyCommits: _nearbyCommits(state),
                                 commitFiles: _commitFiles(state),
                                 content: _content(state, viewportWidth),
-                                onCommitsResized: (delta) =>
-                                    _resizeCommits(delta, constraints.maxWidth),
                                 onFilesResized: (delta) =>
                                     _resizeFiles(delta, constraints.maxWidth),
                                 onResizeEnd: _saveColumnWidths,
@@ -674,88 +675,6 @@ class _DiffScreenState extends State<DiffScreen> {
     },
   );
 
-  Widget _nearbyCommits(FullDiffSessionState state) => ColoredBox(
-    color: fullDiffCanvas,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _sectionHeader(
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  '주변 커밋',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              Text(
-                '⌘↑↓',
-                style: technicalTextStyle.copyWith(
-                  color: fullDiffMuted,
-                  fontSize: 9,
-                  fontWeight: FontWeight.normal,
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: SelectionArea(
-            child: ListView.builder(
-              key: const Key('nearby-commits-list'),
-              itemCount: state.nearbyCommits.length,
-              itemBuilder: (context, index) {
-                final commit = state.nearbyCommits[index];
-                final selected = commit.sha == state.selectedCommit.sha;
-                return Semantics(
-                  selected: selected,
-                  button: true,
-                  child: InkWell(
-                    onTap: selected
-                        ? null
-                        : () => unawaited(_controller.selectCommit(commit)),
-                    child: Container(
-                      key: selected
-                          ? Key('selected-nearby-${commit.sha}')
-                          : null,
-                      color: selected ? fullDiffSelection : Colors.transparent,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 9,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Text(
-                            commit.subject,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 11),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            _displayRevision(commit),
-                            maxLines: 1,
-                            overflow: TextOverflow.clip,
-                            style: technicalTextStyle.copyWith(
-                              color: fullDiffMuted,
-                              fontSize: 10,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
-
   Widget _commitFiles(FullDiffSessionState state) {
     final commit = state.selectedCommit;
     return ColoredBox(
@@ -763,68 +682,37 @@ class _DiffScreenState extends State<DiffScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  commit.subject,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _displayRevision(commit, includeAuthor: true),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: technicalTextStyle.copyWith(
-                    color: fullDiffMuted,
-                    fontSize: 10,
-                  ),
-                ),
-                if (commit.parents.length > 1) ...[
-                  const SizedBox(height: 8),
-                  DropdownButton<String>(
-                    key: const Key('merge-parent-chooser'),
-                    isExpanded: true,
-                    value: state.parent,
-                    items: [
-                      for (
-                        var index = 0;
-                        index < commit.parents.length;
-                        index++
-                      )
-                        DropdownMenuItem(
-                          value: commit.parents[index],
-                          child: Text.rich(
+          if (commit.parents.length > 1)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              child: DropdownButton<String>(
+                key: const Key('merge-parent-chooser'),
+                isExpanded: true,
+                value: state.parent,
+                items: [
+                  for (var index = 0; index < commit.parents.length; index++)
+                    DropdownMenuItem(
+                      value: commit.parents[index],
+                      child: Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(text: 'Parent ${index + 1} · '),
                             TextSpan(
-                              children: [
-                                TextSpan(text: 'Parent ${index + 1} · '),
-                                TextSpan(
-                                  text: _shortSha(commit.parents[index]),
-                                  style: technicalTextStyle,
-                                ),
-                              ],
+                              text: _shortSha(commit.parents[index]),
+                              style: technicalTextStyle,
                             ),
-                          ),
+                          ],
                         ),
-                    ],
-                    onChanged: (parent) {
-                      if (parent != null && parent != state.parent) {
-                        unawaited(_controller.selectParent(parent));
-                      }
-                    },
-                  ),
+                      ),
+                    ),
                 ],
-              ],
+                onChanged: (parent) {
+                  if (parent != null && parent != state.parent) {
+                    unawaited(_controller.selectParent(parent));
+                  }
+                },
+              ),
             ),
-          ),
           _sectionHeader(
             LayoutBuilder(
               builder: (context, constraints) {
@@ -868,131 +756,138 @@ class _DiffScreenState extends State<DiffScreen> {
             ),
           ),
           Expanded(
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: SelectionArea(
-                    child: ListView.builder(
-                      key: const Key('changed-files-list'),
-                      itemCount: state.files.length,
-                      itemBuilder: (context, index) {
-                        final file = state.files[index];
-                        final selected = file.path == state.selectedFile?.path;
-                        return Semantics(
-                          selected: selected,
-                          button: true,
-                          child: InkWell(
-                            onTap: selected
-                                ? null
-                                : () => unawaited(_controller.selectFile(file)),
-                            child: Container(
-                              key: selected
-                                  ? Key('selected-file-${file.path}')
-                                  : null,
-                              color: selected
-                                  ? fullDiffSelection
-                                  : Colors.transparent,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 9,
-                              ),
-                              child: Row(
-                                children: [
-                                  SizedBox(
-                                    width: 24,
-                                    child: Text(
-                                      _statusLetter(file.status),
-                                      style: const TextStyle(fontSize: 9),
+            child: Focus(
+              key: const Key('changed-files-focus'),
+              focusNode: _fileListFocus,
+              onKeyEvent: _handleFileListKey,
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: SelectionArea(
+                      child: ListView.builder(
+                        key: const Key('changed-files-list'),
+                        itemCount: state.files.length,
+                        itemBuilder: (context, index) {
+                          final file = state.files[index];
+                          final selected =
+                              file.path == state.selectedFile?.path;
+                          return Semantics(
+                            selected: selected,
+                            button: true,
+                            child: InkWell(
+                              onTap: selected
+                                  ? null
+                                  : () =>
+                                        unawaited(_controller.selectFile(file)),
+                              child: Container(
+                                key: selected
+                                    ? Key('selected-file-${file.path}')
+                                    : null,
+                                color: selected
+                                    ? fullDiffSelection
+                                    : Colors.transparent,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 9,
+                                ),
+                                child: Row(
+                                  children: [
+                                    SizedBox(
+                                      width: 24,
+                                      child: Text(
+                                        _statusLetter(file.status),
+                                        style: const TextStyle(fontSize: 9),
+                                      ),
                                     ),
-                                  ),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        Text(
-                                          file.path,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            fontFamily: technicalFontFamily,
-                                            fontFamilyFallback:
-                                                technicalFontFallback,
-                                            fontSize: 13,
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                          Text(
+                                            file.path,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontFamily: technicalFontFamily,
+                                              fontFamilyFallback:
+                                                  technicalFontFallback,
+                                              fontSize: 13,
+                                            ),
                                           ),
-                                        ),
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          '+${file.additions ?? '—'} '
-                                          '−${file.deletions ?? '—'} · '
-                                          '${formatByteSize(file.sizeBytes)}',
-                                          style: technicalTextStyle.copyWith(
-                                            color: fullDiffMuted,
-                                            fontSize: 12,
+                                          const SizedBox(height: 3),
+                                          Text(
+                                            '+${file.additions ?? '—'} '
+                                            '−${file.deletions ?? '—'} · '
+                                            '${formatByteSize(file.sizeBytes)}',
+                                            style: technicalTextStyle.copyWith(
+                                              color: fullDiffMuted,
+                                              fontSize: 12,
+                                            ),
                                           ),
-                                        ),
-                                      ],
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                if (state.filesResource.loading)
-                  const Center(
-                    child: SizedBox.square(
-                      key: Key('diff-pending-files'),
-                      dimension: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  ),
-                if (!state.filesResource.loading &&
-                    state.filesResource.error != null)
-                  Center(
-                    key: const Key('files-error'),
-                    child: Semantics(
-                      liveRegion: true,
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              state.filesResource.error.toString(),
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: fullDiffDeletedMark,
-                                fontSize: 13,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            TextButton(
-                              key: const Key('files-retry'),
-                              onPressed: () =>
-                                  unawaited(_controller.retryFiles()),
-                              child: const Text('다시 시도'),
-                            ),
-                          ],
-                        ),
+                          );
+                        },
                       ),
                     ),
                   ),
-                if (!state.filesResource.loading &&
-                    state.filesResource.error == null &&
-                    state.filesResource.data?.isEmpty == true)
-                  const Center(
-                    key: Key('files-empty'),
-                    child: Text(
-                      '변경된 파일이 없습니다',
-                      style: TextStyle(color: fullDiffMuted, fontSize: 13),
+                  if (state.filesResource.loading)
+                    const Center(
+                      child: SizedBox.square(
+                        key: Key('diff-pending-files'),
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
                     ),
-                  ),
-              ],
+                  if (!state.filesResource.loading &&
+                      state.filesResource.error != null)
+                    Center(
+                      key: const Key('files-error'),
+                      child: Semantics(
+                        liveRegion: true,
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                state.filesResource.error.toString(),
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: fullDiffDeletedMark,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              TextButton(
+                                key: const Key('files-retry'),
+                                onPressed: () =>
+                                    unawaited(_controller.retryFiles()),
+                                child: const Text('다시 시도'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (!state.filesResource.loading &&
+                      state.filesResource.error == null &&
+                      state.filesResource.data?.isEmpty == true)
+                    const Center(
+                      key: Key('files-empty'),
+                      child: Text(
+                        '변경된 파일이 없습니다',
+                        style: TextStyle(color: fullDiffMuted, fontSize: 13),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ],
@@ -1286,6 +1181,8 @@ class _DiffScreenState extends State<DiffScreen> {
         selected: state.selectedHistoryEntry,
         onSelected: (entry) => unawaited(_controller.selectHistoryEntry(entry)),
         controller: _historyScroll,
+        focusNode: _historyListFocus,
+        onMoveToFiles: _fileListFocus.requestFocus,
       ),
       detail: LayoutBuilder(
         builder: (context, constraints) =>
@@ -1352,24 +1249,8 @@ class _DiffScreenState extends State<DiffScreen> {
     );
   }
 
-  void _resizeCommits(double delta, double bodyWidth) {
-    final max = math.max(
-      FullDiffColumnWidths.minCommits,
-      bodyWidth - _filesWidth - 80,
-    );
-    setState(() {
-      _commitsWidth = (_commitsWidth + delta).clamp(
-        FullDiffColumnWidths.minCommits,
-        max,
-      );
-    });
-  }
-
   void _resizeFiles(double delta, double bodyWidth) {
-    final max = math.max(
-      FullDiffColumnWidths.minFiles,
-      bodyWidth - _commitsWidth - 80,
-    );
+    final max = math.max(FullDiffColumnWidths.minFiles, bodyWidth - 280);
     setState(() {
       _filesWidth = (_filesWidth + delta).clamp(
         FullDiffColumnWidths.minFiles,
@@ -1379,7 +1260,10 @@ class _DiffScreenState extends State<DiffScreen> {
   }
 
   void _saveColumnWidths() => widget.onColumnWidthsChanged?.call(
-    FullDiffColumnWidths(commits: _commitsWidth, files: _filesWidth),
+    FullDiffColumnWidths(
+      commits: widget.columnWidths.commits,
+      files: _filesWidth,
+    ),
   );
 
   Widget _sectionHeader(Widget child) => Container(
@@ -1403,104 +1287,44 @@ class _DiffScreenState extends State<DiffScreen> {
 
 class _ResponsiveDiffBody extends StatelessWidget {
   const _ResponsiveDiffBody({
-    required this.showCommits,
     required this.showFiles,
-    required this.commitsWidth,
     required this.filesWidth,
-    required this.nearbyCommits,
     required this.commitFiles,
     required this.content,
-    required this.onCommitsResized,
     required this.onFilesResized,
     required this.onResizeEnd,
   });
 
-  final bool showCommits;
   final bool showFiles;
-  final double commitsWidth;
   final double filesWidth;
-  final Widget nearbyCommits;
   final Widget commitFiles;
   final Widget content;
-  final ValueChanged<double> onCommitsResized;
   final ValueChanged<double> onFilesResized;
   final VoidCallback onResizeEnd;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      if (!showCommits) {
-        final fileWidth = showFiles
-            ? math.max(138.0, constraints.maxWidth * 80 / 360)
-            : 0.0;
-        return Row(
-          children: [
-            if (showFiles)
-              SizedBox(
-                key: const Key('commit-files-pane'),
-                width: fileWidth,
-                child: KeyedSubtree(
-                  key: const Key('details-files-column'),
+      const minFiles = FullDiffColumnWidths.minFiles;
+      const minContent = 280.0;
+      final maxFiles = math.max(minFiles, constraints.maxWidth - minContent);
+      final effectiveFiles = filesWidth.clamp(minFiles, maxFiles);
+      return Row(
+        children: [
+          if (showFiles)
+            SizedBox(
+              key: const Key('commit-files-pane'),
+              width: effectiveFiles,
+              child: KeyedSubtree(
+                key: const Key('details-files-column'),
+                child: _ResizablePane(
+                  resizerKey: const Key('details-files-column-resizer'),
+                  onUpdate: onFilesResized,
+                  onEnd: onResizeEnd,
                   child: commitFiles,
                 ),
               ),
-            Expanded(key: const Key('diff-column'), child: content),
-          ],
-        );
-      }
-
-      const minCommits = FullDiffColumnWidths.minCommits;
-      const minFiles = FullDiffColumnWidths.minFiles;
-      const minContent = 280.0;
-      final navigationBudget = math.max(
-        minCommits + minFiles,
-        constraints.maxWidth - minContent,
-      );
-      var effectiveCommits = math.max(minCommits, commitsWidth);
-      var effectiveFiles = math.max(minFiles, filesWidth);
-      final desiredNavigation = effectiveCommits + effectiveFiles;
-      if (desiredNavigation > navigationBudget) {
-        final commitExtra = effectiveCommits - minCommits;
-        final fileExtra = effectiveFiles - minFiles;
-        final desiredExtra = commitExtra + fileExtra;
-        final extraBudget = navigationBudget - minCommits - minFiles;
-        if (desiredExtra > 0) {
-          effectiveCommits =
-              minCommits + extraBudget * commitExtra / desiredExtra;
-          effectiveFiles = minFiles + extraBudget * fileExtra / desiredExtra;
-        } else {
-          effectiveCommits = minCommits;
-          effectiveFiles = minFiles;
-        }
-      }
-      return Row(
-        children: [
-          SizedBox(
-            key: const Key('nearby-commits-pane'),
-            width: effectiveCommits,
-            child: KeyedSubtree(
-              key: const Key('nearby-column'),
-              child: _ResizablePane(
-                resizerKey: const Key('nearby-column-resizer'),
-                onUpdate: onCommitsResized,
-                onEnd: onResizeEnd,
-                child: nearbyCommits,
-              ),
             ),
-          ),
-          SizedBox(
-            key: const Key('commit-files-pane'),
-            width: effectiveFiles,
-            child: KeyedSubtree(
-              key: const Key('details-files-column'),
-              child: _ResizablePane(
-                resizerKey: const Key('details-files-column-resizer'),
-                onUpdate: onFilesResized,
-                onEnd: onResizeEnd,
-                child: commitFiles,
-              ),
-            ),
-          ),
           Expanded(key: const Key('diff-column'), child: content),
         ],
       );
@@ -1563,10 +1387,3 @@ String _statusLetter(String status) =>
     status.characters.isEmpty ? '' : status.characters.first;
 
 String _shortSha(String sha) => sha.length <= 7 ? sha : sha.substring(0, 7);
-
-String _displayRevision(GitCommit commit, {bool includeAuthor = false}) {
-  if (commit.shortSha.isEmpty) return 'working tree';
-  return includeAuthor
-      ? '${commit.shortSha} · ${commit.author.name}'
-      : commit.shortSha;
-}

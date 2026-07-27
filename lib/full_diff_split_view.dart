@@ -272,9 +272,11 @@ class HatchedDiffCell extends StatelessWidget {
   const HatchedDiffCell({super.key});
 
   @override
-  Widget build(BuildContext context) => const CustomPaint(
-    painter: _HatchedDiffPainter(),
-    child: SizedBox(height: 27),
+  Widget build(BuildContext context) => const ClipRect(
+    child: CustomPaint(
+      painter: _HatchedDiffPainter(),
+      child: SizedBox(height: 27),
+    ),
   );
 }
 

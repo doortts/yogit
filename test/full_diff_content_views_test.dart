@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/full_blame_view.dart';
 import 'package:yogit/full_diff_code_row.dart';
 import 'package:yogit/full_diff_model.dart';
+import 'package:yogit/full_diff_split_view.dart';
 import 'package:yogit/full_diff_syntax_contract.dart';
 import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/full_file_view.dart';
@@ -667,50 +668,120 @@ void main() {
     expect(find.byKey(const Key('history-list')), findsNothing);
   });
 
-  testWidgets('history focus does not select until enter', (tester) async {
-    FileHistoryEntry? selected;
+  testWidgets('history arrows immediately commit the controlled selection', (
+    tester,
+  ) async {
+    var selected = historyEntries.first;
     await tester.pumpWidget(
       qaApp(
-        FullHistoryView(
-          entries: historyEntries,
-          onSelected: (entry) => selected = entry,
+        StatefulBuilder(
+          builder: (context, setState) => FullHistoryView(
+            entries: historyEntries,
+            selected: selected,
+            onSelected: (entry) => setState(() => selected = entry),
+          ),
+        ),
+      ),
+    );
+    tester
+        .widget<Focus>(find.byKey(const Key('history-list-focus')))
+        .focusNode!
+        .requestFocus();
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(selected, same(historyEntries[1]));
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+    expect(selected, same(historyEntries.first));
+  });
+
+  testWidgets('history selection and keyboard focus use distinct surfaces', (
+    tester,
+  ) async {
+    final filesFocus = FocusNode();
+    addTearDown(filesFocus.dispose);
+    var selected = historyEntries.first;
+    await tester.pumpWidget(
+      qaApp(
+        StatefulBuilder(
+          builder: (context, setState) => Column(
+            children: [
+              Focus(focusNode: filesFocus, child: const SizedBox(height: 1)),
+              Expanded(
+                child: FullHistoryView(
+                  entries: historyEntries,
+                  selected: selected,
+                  onSelected: (entry) => setState(() => selected = entry),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    expect(selected, isNull);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    BoxDecoration rowDecoration(FileHistoryEntry entry) =>
+        tester
+                .widget<Container>(
+                  find.byKey(Key('history-row-${entry.commit.sha}')),
+                )
+                .decoration
+            as BoxDecoration;
+
+    expect(rowDecoration(historyEntries.first).color, fullDiffSelection);
+    expect(rowDecoration(historyEntries[1]).color, fullDiffCanvas);
+    expect(
+      tester
+          .widget<Text>(find.text(historyEntries.first.commit.subject))
+          .style
+          ?.color,
+      anyOf(fullDiffAccent, Colors.white),
+    );
+    expect(
+      tester.widget<Text>(find.text(fixtureIdentity.name).first).style?.color,
+      isNot(anyOf(fullDiffMuted, fullDiffCanvas)),
+    );
+
+    tester
+        .widget<Focus>(find.byKey(const Key('history-list-focus')))
+        .focusNode!
+        .requestFocus();
+    await tester.pump();
+    final focusedBorder = rowDecoration(historyEntries.first).border as Border;
+    expect(focusedBorder.top.width, 1);
+    expect(focusedBorder.top.color, fullDiffAccent);
+
+    await tester.tap(find.text(historyEntries[1].commit.subject));
+    filesFocus.requestFocus();
+    await tester.pump();
     expect(selected, same(historyEntries[1]));
+    expect(rowDecoration(historyEntries[1]).color, fullDiffSelection);
+    expect(rowDecoration(historyEntries[1]).border, isNull);
+    expect(rowDecoration(historyEntries.first).color, fullDiffCanvas);
   });
 
-  testWidgets(
-    'history click selects while the selected row keeps a neutral background',
-    (tester) async {
-      FileHistoryEntry? selected;
-      await tester.pumpWidget(
-        qaApp(
-          FullHistoryView(
-            entries: historyEntries,
-            selected: historyEntries.first,
-            onSelected: (entry) => selected = entry,
-          ),
+  testWidgets('hatched cells clip their painter to the cell bounds', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      qaApp(
+        const SizedBox(
+          width: 80,
+          child: HatchedDiffCell(key: Key('hatched-cell')),
         ),
-      );
+      ),
+    );
 
-      expect(find.text(commitA.shortSha), findsOneWidget);
-      expect(find.text(commitA.subject), findsOneWidget);
-      expect(find.text(fixtureIdentity.name), findsNWidgets(2));
-      expect(find.textContaining('ago'), findsNWidgets(2));
-      final selectedSurface = tester.widget<ColoredBox>(
-        find.byKey(Key('history-row-${commitA.sha}')),
-      );
-      expect(selectedSurface.color, fullDiffCanvas);
-
-      await tester.tap(find.text(historyEntries[1].commit.subject));
-      expect(selected, same(historyEntries[1]));
-    },
-  );
+    final cell = find.byKey(const Key('hatched-cell'));
+    final clip = find.descendant(of: cell, matching: find.byType(ClipRect));
+    final paint = find.descendant(of: cell, matching: find.byType(CustomPaint));
+    expect(clip, findsOneWidget);
+    expect(paint, findsOneWidget);
+    expect(tester.getRect(paint), tester.getRect(clip));
+  });
 
   testWidgets('history exposes the selected row as a semantic button', (
     tester,

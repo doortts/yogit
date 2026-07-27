@@ -3015,20 +3015,28 @@ void main() {
     await tester.tap(find.byKey(const Key('preview-full-diff')));
     await tester.pumpAndSettle();
 
-    expect(tester.getSize(find.byKey(const Key('nearby-column'))).width, 210);
+    expect(find.byKey(const Key('nearby-column')), findsNothing);
+    expect(find.byKey(const Key('nearby-commits-list')), findsNothing);
+    expect(find.byKey(const Key('nearby-column-resizer')), findsNothing);
     expect(
       tester.getSize(find.byKey(const Key('details-files-column'))).width,
       290,
     );
-    expect(find.byKey(const Key('nearby-commits-list')), findsOneWidget);
+    expect(find.byKey(const Key('nearby-commits-list')), findsNothing);
     expect(find.byKey(const Key('changed-files-list')), findsOneWidget);
     expect(find.byKey(const Key('hunk-list')), findsOneWidget);
     expect(find.textContaining('change 1 of 1'), findsOneWidget);
     expect(find.text('1 / 1'), findsWidgets);
     expect(find.text('Unified'), findsNothing);
     expect(find.text('Side-by-side'), findsNothing);
-    expect(find.text('diff 알고리즘 · Git setting'), findsOneWidget);
-    expect(find.text('Git setting'), findsNothing);
+    expect(find.text('diff 알고리즘'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('diff-algorithm-value')),
+        matching: find.text('Git setting'),
+      ),
+      findsOneWidget,
+    );
     expect(
       tester.getTopLeft(find.byKey(const Key('changed-files-list'))).dx,
       lessThan(tester.getTopLeft(find.byKey(const Key('hunk-list'))).dx),
@@ -3040,13 +3048,6 @@ void main() {
     await tester.tap(find.textContaining('Parent 2').last);
     await tester.pumpAndSettle();
     expect(calls.last.parent, 'feature');
-
-    await tester.tap(find.text('main commit'));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('selected-nearby-main')), findsOneWidget);
-    expect(find.byKey(const Key('merge-parent-chooser')), findsNothing);
-    await tester.tap(find.text('merge commit'));
-    await tester.pumpAndSettle();
 
     await tester.tap(find.text('lib/b.dart'));
     await tester.pumpAndSettle();
@@ -3065,7 +3066,13 @@ void main() {
     expect(find.text('old line'), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
     expect(calls.last.algorithm, DiffAlgorithm.histogram);
-    expect(find.byKey(const Key('diff-algorithm-value')), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('diff-algorithm-value')),
+        matching: find.text('Histogram'),
+      ),
+      findsOneWidget,
+    );
     expect(find.byKey(const Key('selected-file-lib/b.dart')), findsOneWidget);
 
     histogram.complete([
@@ -3079,7 +3086,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('histogram line'), findsOneWidget);
     expect(calls.last.algorithm, DiffAlgorithm.histogram);
-    expect(find.byKey(const Key('diff-algorithm-value')), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('diff-algorithm-value')),
+        matching: find.text('Histogram'),
+      ),
+      findsOneWidget,
+    );
 
     await tester.tap(find.byKey(const Key('full-diff-back')));
     await tester.pumpAndSettle();
@@ -3117,7 +3130,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(tester.getSize(find.byKey(const Key('nearby-column'))).width, 240);
+    expect(find.byKey(const Key('nearby-column')), findsNothing);
     expect(
       tester.getSize(find.byKey(const Key('details-files-column'))).width,
       330,
@@ -3154,16 +3167,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(tester.getSize(find.byKey(const Key('nearby-column'))).width, 126);
+    expect(find.byKey(const Key('nearby-column')), findsNothing);
     expect(
       tester.getSize(find.byKey(const Key('details-files-column'))).width,
       158,
     );
 
-    await tester.drag(
-      find.byKey(const Key('nearby-column-resizer')),
-      const Offset(-80, 0),
-    );
     await tester.drag(
       find.byKey(const Key('details-files-column-resizer')),
       const Offset(-80, 0),
@@ -3200,6 +3209,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(find.byKey(const Key('nearby-column')), findsNothing);
     await tester.tap(find.byKey(const Key('focus-mode')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('nearby-column')), findsNothing);
@@ -3209,7 +3219,7 @@ void main() {
 
     await tester.tap(find.byKey(const Key('focus-mode')));
     await tester.pumpAndSettle();
-    expect(tester.getSize(find.byKey(const Key('nearby-column'))).width, 240);
+    expect(find.byKey(const Key('nearby-column')), findsNothing);
     expect(
       tester.getSize(find.byKey(const Key('details-files-column'))).width,
       330,
@@ -3217,7 +3227,7 @@ void main() {
     expect(saved, isNull);
   });
 
-  testWidgets('full diff resizes and saves both navigation columns', (
+  testWidgets('full diff resizes files and preserves the stored commit width', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -3244,14 +3254,6 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.drag(
-      find.byKey(const Key('nearby-column-resizer')),
-      const Offset(30, 0),
-    );
-    await tester.pumpAndSettle();
-    expect(tester.getSize(find.byKey(const Key('nearby-column'))).width, 240);
-    expect(saved?.commits, 240);
-
-    await tester.drag(
       find.byKey(const Key('details-files-column-resizer')),
       const Offset(40, 0),
     );
@@ -3260,7 +3262,7 @@ void main() {
       tester.getSize(find.byKey(const Key('details-files-column'))).width,
       330,
     );
-    expect(saved, const FullDiffColumnWidths(commits: 240, files: 330));
+    expect(saved, const FullDiffColumnWidths(commits: 210, files: 330));
   });
 
   testWidgets('narrow full diff uses exact pane thresholds without saving', (
@@ -3290,9 +3292,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    tester.view.physicalSize = const Size(651, 800);
+    tester.view.physicalSize = const Size(1070, 800);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-commits-pane')), findsOneWidget);
+    expect(find.byKey(const Key('nearby-commits-pane')), findsNothing);
+    expect(find.byKey(const Key('nearby-commits-list')), findsNothing);
+    expect(find.byKey(const Key('nearby-column-resizer')), findsNothing);
     expect(find.byKey(const Key('commit-files-pane')), findsOneWidget);
     expect(saved, isNull);
 
@@ -3316,7 +3320,7 @@ void main() {
 
     tester.view.physicalSize = const Size(1200, 800);
     await tester.pumpAndSettle();
-    expect(tester.getSize(find.byKey(const Key('nearby-column'))).width, 240);
+    expect(find.byKey(const Key('nearby-column')), findsNothing);
     expect(
       tester.getSize(find.byKey(const Key('details-files-column'))).width,
       330,
@@ -3352,20 +3356,20 @@ void main() {
     await tester.tap(find.byKey(const Key('toolbar-full-diff')));
     await tester.pumpAndSettle();
 
-    expect(tester.getSize(find.byKey(const Key('nearby-column'))).width, 240);
+    expect(find.byKey(const Key('nearby-column')), findsNothing);
     expect(
       tester.getSize(find.byKey(const Key('details-files-column'))).width,
       330,
     );
 
     await tester.drag(
-      find.byKey(const Key('nearby-column-resizer')),
+      find.byKey(const Key('details-files-column-resizer')),
       const Offset(30, 0),
     );
     await tester.pumpAndSettle();
     expect(
       store.current.fullDiffColumnWidths,
-      const FullDiffColumnWidths(commits: 270, files: 330),
+      const FullDiffColumnWidths(commits: 240, files: 360),
     );
   });
 
@@ -3422,7 +3426,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('displayed line'), findsOneWidget);
-    expect(find.byKey(const Key('diff-algorithm-value')), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('diff-algorithm-value')),
+        matching: find.text('Git setting'),
+      ),
+      findsOneWidget,
+    );
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(find.textContaining('minimal failed'), findsOneWidget);
   });
@@ -7027,9 +7037,7 @@ void main() {
     expect(find.text('Minimal'), findsOneWidget);
   });
 
-  testWidgets('the diff screen walks files and commits from the keyboard', (
-    tester,
-  ) async {
+  testWidgets('the diff screen walks files from the keyboard', (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1400, 900);
     addTearDown(() {
@@ -7068,6 +7076,11 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    tester
+        .widget<Focus>(find.byKey(const Key('changed-files-focus')))
+        .focusNode!
+        .requestFocus();
+    await tester.pump();
 
     // It opens on the first file of the first commit.
     expect(find.text('body of newer/one.dart'), findsOneWidget);
@@ -7098,18 +7111,22 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('body of newer/two.dart'), findsOneWidget);
 
-    // Cmd+Down moves to the next commit, back at its first file.
+    // Cmd+Down walks the same file list from any focused child.
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('selected-nearby-older')), findsOneWidget);
-    expect(find.text('body of older/one.dart'), findsOneWidget);
+    expect(find.text('body of newer/three.dart'), findsOneWidget);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('selected-nearby-newer')), findsOneWidget);
+    expect(find.text('body of newer/two.dart'), findsOneWidget);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(find.text('body of newer/one.dart'), findsOneWidget);
 
     final source = tester.widget<Text>(
       find.text('body of newer/one.dart').first,
@@ -7121,26 +7138,8 @@ void main() {
     expect(path.style?.fontFamily, technicalFontFamily);
     expect(path.style?.fontFamilyFallback, technicalFontFallback);
 
-    final nearbyHash = tester.widget<Text>(
-      find.descendant(
-        of: find.byKey(const Key('nearby-column')),
-        matching: find.text('newer'),
-      ),
-    );
-    expect(nearbyHash.style?.fontFamily, technicalFontFamily);
-    expect(nearbyHash.style?.fontFamilyFallback, technicalFontFallback);
-
-    final detailsHash = tester.widget<Text>(
-      find.descendant(
-        of: find.byKey(const Key('details-files-column')),
-        matching: find.textContaining('newer ·'),
-      ),
-    );
-    expect(detailsHash.style?.fontFamily, technicalFontFamily);
-    expect(detailsHash.style?.fontFamilyFallback, technicalFontFallback);
-
-    final commitTitle = tester.widget<Text>(find.text('newer commit').first);
-    expect(commitTitle.style?.fontFamily, isNull);
+    expect(find.text('newer commit'), findsNothing);
+    expect(find.byKey(const Key('nearby-column')), findsNothing);
   });
   // ------------------------------------------------------------------ G1/G2
   testWidgets('the narrow full diff composes the hunk workspace', (
@@ -7181,7 +7180,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('lib/a.dart'), findsWidgets);
-    expect(find.text('diff 알고리즘 · Git setting'), findsOneWidget);
+    expect(find.text('diff 알고리즘'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('diff-algorithm-value')),
+        matching: find.text('Git setting'),
+      ),
+      findsOneWidget,
+    );
     expect(find.byKey(const Key('hunk-list')), findsOneWidget);
     expect(find.textContaining('change 1 of 1'), findsOneWidget);
     expect(find.text('diff --git a/x b/x'), findsNothing);
@@ -7313,13 +7319,17 @@ void main() {
     await tester.pump();
     expect(copied, ['pha l', 'alpha lib/one.dart\nbeta lib/one.dart']);
 
-    // The Hunk card keeps selection local, and the keyboard still drives the
-    // screen after copying the drag selection.
+    // The Hunk card keeps selection local, and the global file shortcut still
+    // drives the screen after copying the drag selection.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
     expect(find.text('alpha lib/two.dart'), findsOneWidget);
     expect(find.byKey(const Key('selected-file-lib/two.dart')), findsOneWidget);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
     expect(find.text('alpha lib/one.dart'), findsOneWidget);
   });
@@ -7693,7 +7703,8 @@ void main() {
     expect(controller.previewPlacement, PreviewPlacement.bottom);
     await tester.tap(find.byKey(const Key('toolbar-full-diff')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-commits-list')), findsOneWidget);
+    expect(find.byKey(const Key('nearby-commits-list')), findsNothing);
+    expect(find.byKey(const Key('changed-files-list')), findsOneWidget);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(

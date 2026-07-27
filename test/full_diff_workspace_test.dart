@@ -382,10 +382,10 @@ void main() {
   );
 
   for (final scenario in [
-    (width: 651.0, commits: true, files: true, oldSplit: true),
-    (width: 650.0, commits: false, files: true, oldSplit: true),
-    (width: 481.0, commits: false, files: true, oldSplit: true),
-    (width: 480.0, commits: false, files: false, oldSplit: false),
+    (width: 1070.0, files: true),
+    (width: 650.0, files: true),
+    (width: 481.0, files: true),
+    (width: 480.0, files: false),
   ]) {
     testWidgets('responsive width ${scenario.width}', (tester) async {
       final fixture = await workspaceFixture();
@@ -396,20 +396,48 @@ void main() {
         controller: fixture.controller,
         size: Size(scenario.width, 549),
       );
-      expect(
-        find.byKey(const Key('nearby-commits-pane')),
-        scenario.commits ? findsOneWidget : findsNothing,
-      );
+      expect(find.byKey(const Key('nearby-commits-pane')), findsNothing);
+      expect(find.byKey(const Key('nearby-commits-list')), findsNothing);
+      expect(find.byKey(const Key('nearby-column-resizer')), findsNothing);
       expect(
         find.byKey(const Key('commit-files-pane')),
         scenario.files ? findsOneWidget : findsNothing,
       );
-      expect(
-        find.byKey(const Key('split-old-pane')),
-        scenario.oldSplit ? findsOneWidget : findsNothing,
-      );
+      expect(find.byKey(const Key('diff-column')), findsOneWidget);
     });
   }
+
+  testWidgets('regular commits start the file pane with its section header', (
+    tester,
+  ) async {
+    final fixture = await workspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1070, 842),
+    );
+
+    final filesPane = find.byKey(const Key('commit-files-pane'));
+    expect(
+      find.descendant(of: filesPane, matching: find.text(commitA.subject)),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: filesPane, matching: find.text(fixtureIdentity.name)),
+      findsNothing,
+    );
+    expect(
+      tester
+          .getTopLeft(
+            find.descendant(of: filesPane, matching: find.text('변경 파일')),
+          )
+          .dy,
+      lessThan(
+        tester.getTopLeft(find.byKey(const Key('changed-files-list'))).dy,
+      ),
+    );
+  });
 
   testWidgets('the 480px toolbar uses the compact algorithm label', (
     tester,
@@ -529,9 +557,6 @@ void main() {
       controller: fixture.controller,
       size: const Size(1070, 842),
     );
-    final commitWidth = tester
-        .getSize(find.byKey(const Key('nearby-commits-pane')))
-        .width;
     final fileWidth = tester
         .getSize(find.byKey(const Key('commit-files-pane')))
         .width;
@@ -541,15 +566,15 @@ void main() {
     await tester.tap(find.text('집중 모드'));
     await tester.pump();
     expect(find.byKey(const Key('nearby-commits-pane')), findsNothing);
+    expect(find.byKey(const Key('nearby-commits-list')), findsNothing);
+    expect(find.byKey(const Key('nearby-column-resizer')), findsNothing);
     expect(find.byKey(const Key('commit-files-pane')), findsNothing);
+    expect(find.byKey(const Key('diff-column')), findsOneWidget);
     expect(find.text('탐색 패널'), findsOneWidget);
 
     await tester.tap(find.text('탐색 패널'));
     await tester.pump();
-    expect(
-      tester.getSize(find.byKey(const Key('nearby-commits-pane'))).width,
-      commitWidth,
-    );
+    expect(find.byKey(const Key('nearby-commits-pane')), findsNothing);
     expect(
       tester.getSize(find.byKey(const Key('commit-files-pane'))).width,
       fileWidth,
@@ -594,7 +619,7 @@ void main() {
   });
 
   testWidgets(
-    'history keeps the current row neutral and semantically selected',
+    'history highlights the current row and keeps it semantically selected',
     (tester) async {
       final fixture = await workspaceFixture();
       addTearDown(fixture.controller.dispose);
@@ -607,7 +632,10 @@ void main() {
       final semantics = tester.ensureSemantics();
       final row = find.byKey(Key('history-row-${commitA.sha}'));
 
-      expect(tester.widget<ColoredBox>(row).color, fullDiffCanvas);
+      expect(
+        (tester.widget<Container>(row).decoration as BoxDecoration).color,
+        fullDiffSelection,
+      );
       final selectedSemantics = find.ancestor(
         of: row,
         matching: find.byWidgetPredicate(
@@ -1167,9 +1195,7 @@ void main() {
     },
   );
 
-  testWidgets('uses approved typography in commit and file lists', (
-    tester,
-  ) async {
+  testWidgets('uses approved typography in the file list', (tester) async {
     final fixture = await workspaceFixture();
     addTearDown(fixture.controller.dispose);
     await pumpWorkspace(
@@ -1178,14 +1204,6 @@ void main() {
       size: const Size(600, 842),
     );
 
-    expect(tester.widget<Text>(find.text(commitA.subject)).style?.fontSize, 11);
-    expect(
-      tester
-          .widget<Text>(find.textContaining(commitA.shortSha).first)
-          .style
-          ?.fontSize,
-      10,
-    );
     final fileList = find.byKey(const Key('changed-files-list'));
     expect(
       tester
@@ -1278,17 +1296,116 @@ void main() {
       size: const Size(1070, 842),
     );
 
+    final filesFocus = tester.widget<Focus>(
+      find.byKey(const Key('changed-files-focus')),
+    );
+    filesFocus.focusNode!.requestFocus();
+    await tester.pump();
+    expect(filesFocus.focusNode!.hasFocus, isTrue);
+
     await sendChord(tester, LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
     expect(controller.state.selectedFile, fileB);
+    await controller.selectFile(fileA);
+    await tester.pumpAndSettle();
+
+    Focus.of(
+      tester.element(find.byKey(const Key('content-scrollable'))),
+    ).requestFocus();
+    await tester.pump();
     await sendChord(tester, LogicalKeyboardKey.arrowDown, meta: true);
     await tester.pumpAndSettle();
-    expect(controller.state.selectedCommit, historyEntries[1].commit);
+    expect(controller.state.selectedFile, fileB);
+
     await sendChord(tester, LogicalKeyboardKey.arrowDown, alt: true);
     await tester.pumpAndSettle();
     expect(controller.state.activeAnchor?.hunkIndex, 1);
     await sendChord(tester, LogicalKeyboardKey.keyF, meta: true, shift: true);
     expect(controller.state.focusMode, isTrue);
+  });
+
+  testWidgets('file and History lists move selection and focus explicitly', (
+    tester,
+  ) async {
+    const fileB = GitFileChange(
+      path: 'src/window.pas',
+      status: 'M',
+      additions: 1,
+      deletions: 1,
+    );
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA, fileB])
+      ..diff = ((commit, _, _, _, _) async => commit.sha == commitA.sha
+          ? twoHunkLines
+          : const [
+              DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+              DiffLine(
+                kind: DiffLineKind.add,
+                text: 'historical detail',
+                newNumber: 1,
+              ),
+            ])
+      ..content = ((_, _, _) async => resultFile.bytes)
+      ..history = ((_, file) async => [
+        for (final entry in historyEntries)
+          GitFileHistoryRecord(
+            commit: entry.commit,
+            path: file.path,
+            oldPath: file.oldPath,
+            status: file.status,
+          ),
+      ]);
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.setView(FullDiffView.history);
+    await pumpWorkspace(
+      tester,
+      controller: controller,
+      size: const Size(1070, 842),
+    );
+
+    final filesFocus = tester.widget<Focus>(
+      find.byKey(const Key('changed-files-focus')),
+    );
+    filesFocus.focusNode!.requestFocus();
+    await tester.pump();
+    expect(filesFocus.focusNode!.hasFocus, isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    final historyFocus = tester.widget<Focus>(
+      find.byKey(const Key('history-list-focus')),
+    );
+    expect(historyFocus.focusNode!.hasFocus, isTrue);
+    expect(controller.state.selectedHistoryEntry, isNotNull);
+
+    await sendChord(tester, LogicalKeyboardKey.arrowDown, meta: true);
+    await tester.pumpAndSettle();
+    expect(controller.state.selectedFile, fileB);
+    await controller.selectFile(fileA);
+    await tester.pumpAndSettle();
+    historyFocus.focusNode!.requestFocus();
+    await tester.pump();
+
+    final selectedFilePath = controller.state.selectedFile!.path;
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(
+      controller.state.selectedHistoryEntry?.commit.sha,
+      historyEntries[1].commit.sha,
+    );
+    expect(controller.state.selectedFile!.path, selectedFilePath);
+    expect(find.text('historical detail'), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+    expect(filesFocus.focusNode!.hasFocus, isTrue);
   });
 
   testWidgets(
