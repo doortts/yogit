@@ -452,8 +452,9 @@ class FullDiffSessionController extends ChangeNotifier {
         (candidate) =>
             candidate.path == entry.path ||
             candidate.oldPath == entry.path ||
-            candidate.path == entry.oldPath ||
-            candidate.oldPath == entry.oldPath,
+            (entry.oldPath != null &&
+                (candidate.path == entry.oldPath ||
+                    candidate.oldPath == entry.oldPath)),
       );
     } catch (error) {
       _replace(

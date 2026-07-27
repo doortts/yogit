@@ -710,6 +710,48 @@ void main() {
   );
 
   test(
+    'history selection skips unrelated files with absent old paths',
+    () async {
+      const unrelatedFile = GitFileChange(
+        path: 'src/unrelated.pas',
+        status: 'M',
+        additions: 1,
+        deletions: 1,
+      );
+      final repository = FakeFullDiffRepository()
+        ..files = ((commit, _) async => commit.sha == commitA.sha
+            ? const [fileA]
+            : const [unrelatedFile, fileA])
+        ..diff = ((_, _, _, _, _) async => twoHunkLines)
+        ..content = ((_, _, _) async =>
+            Uint8List.fromList(utf8.encode('content\n')))
+        ..history = ((_, _) async => const [
+          GitFileHistoryRecord(
+            commit: historyCommitB,
+            path: 'src/drlua.pas',
+            oldPath: null,
+            status: 'M',
+          ),
+        ]);
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [commitA],
+        initialIndex: 0,
+        initialView: FullDiffInitialView.hunk,
+      );
+      await controller.initialize();
+      controller.setView(FullDiffView.history);
+      await Future<void>.delayed(Duration.zero);
+
+      await controller.selectHistoryEntry(
+        controller.state.history.data!.single,
+      );
+
+      expect(controller.state.selectedFile, same(fileA));
+    },
+  );
+
+  test(
     'commit and parent selections clear the history selection context',
     () async {
       final repository = FakeFullDiffRepository()
