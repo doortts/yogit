@@ -603,73 +603,70 @@ class _DiffScreenState extends State<DiffScreen> {
                 borderRadius: BorderRadius.circular(fullDiffOuterRadius),
                 child: ColoredBox(
                   color: fullDiffHeader,
-                  child: Padding(
-                    padding: const EdgeInsets.all(fullDiffOuterPadding),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        GlobalFileBar(
-                          file: state.selectedFile,
-                          path: state.selectedFile?.path,
-                          view: state.view,
-                          encodingLabel: state.encodingLabel,
-                          canOpenEditor: _canOpenEditor(state),
-                          focusMode: state.focusMode,
-                          editorError: _editorError,
-                          onBack: _returnToTimeline,
-                          onOpenEditor: _openEditor,
-                          onViewSelected: _controller.setView,
-                          onFocusModeChanged: _controller.setFocusMode,
-                        ),
-                        GlobalDiffToolbar(
-                          view: state.view,
-                          presentation: state.presentation,
-                          activeIndex: state.activeAnchor?.hunkIndex ?? 0,
-                          anchorCount: state.patch.data?.hunks.length ?? 0,
-                          algorithm: state.requestedAlgorithm,
-                          ignoreWhitespace: state.requestedIgnoreWhitespace,
-                          wrapLines: state.wrapLines,
-                          loadingPatch: state.patch.loading,
-                          onPresentationSelected: _controller.setPresentation,
-                          onPrevious: () => _controller.stepAnchor(-1),
-                          onNext: () => _controller.stepAnchor(1),
-                          onAlgorithmSelected: (algorithm) {
-                            unawaited(
-                              _controller
-                                  .selectAlgorithm(algorithm)
-                                  .catchError((_) {}),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      GlobalFileBar(
+                        file: state.selectedFile,
+                        path: state.selectedFile?.path,
+                        view: state.view,
+                        encodingLabel: state.encodingLabel,
+                        canOpenEditor: _canOpenEditor(state),
+                        focusMode: state.focusMode,
+                        editorError: _editorError,
+                        onBack: _returnToTimeline,
+                        onOpenEditor: _openEditor,
+                        onViewSelected: _controller.setView,
+                        onFocusModeChanged: _controller.setFocusMode,
+                      ),
+                      GlobalDiffToolbar(
+                        view: state.view,
+                        presentation: state.presentation,
+                        activeIndex: state.activeAnchor?.hunkIndex ?? 0,
+                        anchorCount: state.patch.data?.hunks.length ?? 0,
+                        algorithm: state.requestedAlgorithm,
+                        ignoreWhitespace: state.requestedIgnoreWhitespace,
+                        wrapLines: state.wrapLines,
+                        loadingPatch: state.patch.loading,
+                        onPresentationSelected: _controller.setPresentation,
+                        onPrevious: () => _controller.stepAnchor(-1),
+                        onNext: () => _controller.stepAnchor(1),
+                        onAlgorithmSelected: (algorithm) {
+                          unawaited(
+                            _controller
+                                .selectAlgorithm(algorithm)
+                                .catchError((_) {}),
+                          );
+                        },
+                        onIgnoreWhitespaceChanged: (value) {
+                          unawaited(
+                            _controller
+                                .setIgnoreWhitespace(value)
+                                .catchError((_) {}),
+                          );
+                        },
+                        onWrapLinesChanged: _controller.setWrapLines,
+                      ),
+                      Expanded(
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            final viewportWidth = MediaQuery.sizeOf(
+                              context,
+                            ).width;
+                            return _ResponsiveDiffBody(
+                              showFiles:
+                                  !state.focusMode && viewportWidth > 480,
+                              filesWidth: _filesWidth,
+                              commitFiles: _commitFiles(state),
+                              content: _content(state, viewportWidth),
+                              onFilesResized: (delta) =>
+                                  _resizeFiles(delta, constraints.maxWidth),
+                              onResizeEnd: _saveColumnWidths,
                             );
                           },
-                          onIgnoreWhitespaceChanged: (value) {
-                            unawaited(
-                              _controller
-                                  .setIgnoreWhitespace(value)
-                                  .catchError((_) {}),
-                            );
-                          },
-                          onWrapLinesChanged: _controller.setWrapLines,
                         ),
-                        Expanded(
-                          child: LayoutBuilder(
-                            builder: (context, constraints) {
-                              final viewportWidth = MediaQuery.sizeOf(
-                                context,
-                              ).width;
-                              return _ResponsiveDiffBody(
-                                showFiles:
-                                    !state.focusMode && viewportWidth > 480,
-                                filesWidth: _filesWidth,
-                                commitFiles: _commitFiles(state),
-                                content: _content(state, viewportWidth),
-                                onFilesResized: (delta) =>
-                                    _resizeFiles(delta, constraints.maxWidth),
-                                onResizeEnd: _saveColumnWidths,
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),

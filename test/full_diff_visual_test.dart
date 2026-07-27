@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:yogit/full_diff_minimap.dart';
 import 'package:yogit/full_diff_model.dart';
+import 'package:yogit/full_diff_split_view.dart';
 import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/git.dart';
 
@@ -776,10 +777,39 @@ void main() {
       tester.getRect(find.byKey(const Key('full-diff-product-shell'))),
       const Rect.fromLTWH(0, 0, 1070, 760),
     );
-    expect(
-      tester.getSize(find.byKey(const Key('commit-files-pane'))).width,
-      278,
+    final filePane = tester.getRect(find.byKey(const Key('commit-files-pane')));
+    expect(filePane, const Rect.fromLTRB(0, 116, 278, 760));
+  });
+
+  testWidgets('final polish Blame rows use the approved 44px height', (
+    tester,
+  ) async {
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final controller = await qaControllerFor(
+      view: FullDiffView.blame,
+      activeHunkIndex: 1,
     );
+    addTearDown(controller.dispose);
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1440, 842);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: fullDiffQaTheme(),
+        home: FullDiffQaComparisonCanvas(
+          controller: controller,
+          finalPolishGeometry: true,
+          surfaceSize: const Size(1440, 842),
+          showRemoteAvatars: false,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(tester.getSize(find.byKey(const Key('blame-line-313'))).height, 44);
   });
 
   testWidgets('blame renders aligned metadata columns and source', (
@@ -1032,6 +1062,7 @@ void main() {
     });
     final controller = await qaControllerFor(
       view: FullDiffView.history,
+      presentation: DiffPresentation.split,
       selectPastHistory: true,
       activeHunkIndex: 0,
     );
@@ -1062,6 +1093,7 @@ void main() {
           controller.state.selectedHistoryEntry?.commit.shortSha,
           '65f4c80',
         );
+        expect(find.byType(HatchedDiffCell), findsWidgets);
       },
       target: find.byType(Overlay),
     );

@@ -376,7 +376,7 @@ class _HeaderBar extends StatelessWidget {
       border: Border(bottom: BorderSide(color: fullDiffDivider)),
     ),
     child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       child: child,
     ),
   );

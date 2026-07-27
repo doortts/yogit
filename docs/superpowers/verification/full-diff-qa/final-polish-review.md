@@ -85,14 +85,14 @@ SHA별 색상선을 캡처에서 확인했습니다.
 파일 열 너비 278px을 사용합니다. 650px과 480px에서는 캡처 높이
 549px을 모두 사용합니다.
 `final polish canvas uses approved desktop geometry`가 1070px 화면에서
-제품 셸의 위치와 크기 `0, 0, 1070, 760`, 파일 열 너비 278px을
-고정합니다.
+제품 셸의 위치와 크기 `0, 0, 1070, 760`, 본문 시작점 y=116,
+파일 열 오른쪽 경계 x=278을 고정합니다.
 
 | 이미지 | 크기 | 확인 내용 | 판정 |
 | --- | ---: | --- | --- |
 | [18 기본 Diff](actual/18-final-default.png) | 1070×842 | 파일+콘텐츠 두 열, 파일 크기, 머리글 두 줄, 버튼 순서, 분리된 알고리즘 라벨 | 통과 |
-| [19 History](actual/19-final-history.png) | 1070×842 | 도움말, 선택 반전, 별도 행의 키보드 포커스, 상세 diff | 통과 |
-| [20 Blame](actual/20-final-blame.png) | 1440×842 | 이니셜, 줄 번호, 말줄임 제목, 날짜, 4px 색상선, 전체 소스 정렬 | 통과 |
+| [19 History](actual/19-final-history.png) | 1070×842 | 도움말, 선택 반전, 별도 행의 키보드 포커스, 상세 Split과 잘린 셀의 빗금 | 통과 |
+| [20 Blame](actual/20-final-blame.png) | 1440×842 | 44px 행, 이니셜, 줄 번호, 말줄임 제목, 날짜, 4px 색상선, 전체 소스 정렬 | 통과 |
 | [21 집중 모드](actual/21-final-focus.png) | 1070×842 | 파일 열 제거, 콘텐츠 확장, 탐색 패널 버튼과 편집기 버튼 순서 | 통과 |
 | [22 650px](actual/22-final-responsive-650.png) | 650×549 | 파일+콘텐츠 유지, 조작부 그룹별 줄바꿈 | 통과 |
 | [23 480px](actual/23-final-responsive-480.png) | 480×549 | 콘텐츠만 표시, 조작부와 Hunk 행 정렬 | 통과 |
@@ -109,10 +109,10 @@ SHA별 색상선을 캡처에서 확인했습니다.
 | --- | --- |
 | Dart 포맷 | 50개 파일 검사, 변경 0 |
 | 정적 분석 | 문제 0 |
-| Full Diff 시각 테스트 | 43개 통과 |
-| 기본 전체 테스트 | 451개 통과 |
-| `YOGIT_EXTENDED_SYNTAX=false` | 451개 통과 |
-| syntax benchmark | 첫 실행 15,018µs, p95 2,272µs, 기준 통과 |
+| Full Diff 시각 테스트 | 44개 통과 |
+| 기본 전체 테스트 | 452개 통과 |
+| `YOGIT_EXTENDED_SYNTAX=false` | 452개 통과 |
+| syntax benchmark | 첫 실행 17,098µs, p95 1,468µs, 기준 통과 |
 | macOS 릴리스 빌드 | 성공, `yogit.app` 55.3MB |
 | 미완성 표식 검색 | 새 표식 없음 |
 | 생성자 호환성 검사 | 선택 필드의 기본값 또는 실제 fixture 값 사용 |

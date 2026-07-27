@@ -3302,7 +3302,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('nearby-column')), findsNothing);
     expect(find.byKey(const Key('details-files-column')), findsNothing);
-    expect(tester.getSize(find.byKey(const Key('diff-column'))).width, 1176);
+    expect(tester.getSize(find.byKey(const Key('diff-column'))).width, 1200);
     expect(saved, isNull);
 
     await tester.tap(find.byKey(const Key('focus-mode')));

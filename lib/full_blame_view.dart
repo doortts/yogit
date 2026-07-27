@@ -160,7 +160,7 @@ class BlameSourceRow extends StatelessWidget {
       leadingMetadata: SizedBox(
         key: Key('blame-metadata-$lineNumber'),
         width: metadataWidth,
-        height: 27,
+        height: 44,
         child: Row(
           children: [
             SizedBox(width: 22, child: _avatar()),
@@ -209,7 +209,7 @@ class BlameSourceRow extends StatelessWidget {
             SizedBox(
               key: Key('blame-rail-$lineNumber'),
               width: 4,
-              height: 27,
+              height: 44,
               child: ColoredBox(color: _railColor(blame.sha)),
             ),
           ],
