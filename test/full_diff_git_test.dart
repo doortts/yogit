@@ -131,6 +131,51 @@ void main() {
     }
   });
 
+  test('oversized hunk diff preserves the text runner result', () async {
+    final output = StringBuffer(
+      'diff --git a/large.txt b/large.txt\n'
+      '--- a/large.txt\n'
+      '+++ b/large.txt\n'
+      '@@ -1,100001 +1,100001 @@\n',
+    );
+    for (var index = 0; index < 100001; index++) {
+      output.writeln('-old');
+    }
+    for (var index = 0; index < 100001; index++) {
+      output.writeln('+new');
+    }
+    var runnerCalls = 0;
+    var rawCalls = 0;
+    final repository = GitRepository(
+      '/unused',
+      runner: (executable, arguments, {workingDirectory}) async {
+        runnerCalls++;
+        return ProcessResult(1, 0, output.toString(), '');
+      },
+      rawRunner: (executable, arguments, {workingDirectory}) async {
+        rawCalls++;
+        throw StateError('hunk diff must not use the bounded raw runner');
+      },
+    );
+
+    final lines = await repository.loadDiff(
+      _boundedDiffCommit,
+      _boundedDiffFile,
+      scope: DiffScope.hunks,
+    );
+
+    expect(
+      lines.where((line) => line.kind == DiffLineKind.delete),
+      hasLength(100001),
+    );
+    expect(
+      lines.where((line) => line.kind == DiffLineKind.add),
+      hasLength(100001),
+    );
+    expect(runnerCalls, 1);
+    expect(rawCalls, 0);
+  });
+
   test(
     'diff scope changes context without dropping algorithm options',
     () async {

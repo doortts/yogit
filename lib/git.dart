@@ -922,7 +922,7 @@ class GitRepository implements FullDiffRepository {
           ? const <DiffLine>[]
           : _untrackedDiff(snapshot.bytes);
     }
-    final output = await _runDiff([
+    final args = [
       'diff',
       ...safeDiffArguments,
       '--unified=${scope == DiffScope.hunks ? 3 : fullDiffTextLineLimit}',
@@ -931,7 +931,11 @@ class GitRepository implements FullDiffRepository {
       ...await _revisionsFor(commit, parent),
       '--',
       ...pathspecsFor(file),
-    ]);
+    ];
+    if (scope == DiffScope.hunks) {
+      return parseUnifiedDiff(await _run(args));
+    }
+    final output = await _runDiff(args);
     return output == null ? const <DiffLine>[] : parseUnifiedDiff(output);
   }
 
