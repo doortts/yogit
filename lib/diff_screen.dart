@@ -1477,6 +1477,12 @@ class _DiffScreenState extends State<DiffScreen> {
       return _resourceStatus(state.blame, 'Blame을 읽는 중입니다');
     }
     return FullBlameView(
+      key: ValueKey((
+        blame.file.revision,
+        blame.file.path,
+        blame.file.side,
+        blame.file.fingerprint,
+      )),
       document: blame,
       hunks: state.patch.data?.hunks ?? const [],
       activeAnchor: state.activeAnchor,

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -20,6 +21,58 @@ import 'package:yogit/git.dart';
 import 'support/full_diff_fixtures.dart';
 
 void main() {
+  Future<BlameDocument> pumpInteractiveBlameView(
+    WidgetTester tester, {
+    bool emptyThirdSummary = false,
+    int lineCount = 8,
+    Size size = const Size(1000, 600),
+  }) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = size;
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final file = FileDocument.fromBytes(
+      revision: commitA.sha,
+      path: 'interactive.dart',
+      side: FileDocumentSide.result,
+      bytes: Uint8List.fromList(
+        utf8.encode(
+          '${[for (var line = 1; line <= lineCount; line++) 'source $line'].join('\n')}\n',
+        ),
+      ),
+      gitMarkedBinary: false,
+    );
+    final blame = BlameDocument.fromGitLines(file, [
+      for (var line = 1; line <= file.lines.length; line++)
+        GitBlameLine(
+          lineNumber: line,
+          sha: '40aff6d123456789',
+          author: 'Suwon Chae',
+          authorEmail: 'suwon@example.com',
+          authorTimestamp: 1704067200,
+          summary: emptyThirdSummary && line == 3 ? '' : 'Commit summary $line',
+          uncommitted: false,
+        ),
+    ]);
+
+    await tester.pumpWidget(
+      qaApp(
+        FullBlameView(
+          document: blame,
+          hunks: const [],
+          activeAnchor: null,
+          wrapLines: false,
+          highlighter: fakeHighlighter,
+          anchorKeys: const {},
+          showRemoteAvatars: false,
+        ),
+      ),
+    );
+    return blame;
+  }
+
   testWidgets(
     'full-file unified renders the complete patch with its scroll controller',
     (tester) async {
@@ -748,7 +801,7 @@ void main() {
       tester.getSize(find.byKey(const Key('blame-avatar-2'))),
       const Size(20, 20),
     );
-    expect(tester.getSize(find.byKey(const Key('blame-rail-2'))).width, 3);
+    expect(tester.getSize(find.byKey(const Key('blame-rail-2'))).width, 1);
     final orderedColumns = [
       find.byKey(const Key('blame-avatar-2')),
       find.byKey(const Key('blame-line-number-2')),
@@ -1593,6 +1646,206 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('blame hover and selection keep row geometry stable', (
+    tester,
+  ) async {
+    await pumpInteractiveBlameView(tester);
+    final row3 = find.byKey(const Key('blame-line-3'));
+    final row4 = find.byKey(const Key('blame-line-4'));
+    final row6 = find.byKey(const Key('blame-line-6'));
+    final beforeRow4 = tester.getTopLeft(row4);
+
+    final mouse = await tester.createGesture(kind: ui.PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    await mouse.addPointer();
+    await mouse.moveTo(tester.getCenter(row3));
+    await tester.pump();
+    expect(find.byKey(const Key('blame-hover-3')), findsOneWidget);
+
+    await tester.tap(row3);
+    await tester.pump();
+    expect(find.byKey(const Key('blame-selected-3')), findsOneWidget);
+    final details = find.byKey(const Key('blame-commit-details-3'));
+    expect(details, findsOneWidget);
+    expect(tester.getTopLeft(row4), beforeRow4);
+    expect(
+      tester.getTopLeft(details).dy,
+      closeTo(tester.getTopLeft(row3).dy + fullDiffSourceRowHeight * 2, 1),
+    );
+    expect(
+      find.descendant(of: details, matching: find.text('40aff6d')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: details, matching: find.text('Suwon Chae')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: details, matching: find.text('2024-01-01')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: details, matching: find.text('Commit summary 3')),
+      findsOneWidget,
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(find.byKey(const Key('blame-selected-4')), findsOneWidget);
+    expect(
+      tester
+          .getSemantics(find.byKey(const Key('blame-line-4')))
+          .flagsCollection
+          .isSelected,
+      ui.Tristate.isTrue,
+    );
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+    expect(find.byKey(const Key('blame-selected-4')), findsOneWidget);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+    await tester.pump();
+    expect(find.byKey(const Key('blame-selected-4')), findsOneWidget);
+
+    final row6Rect = tester.getRect(row6);
+    await tester.tapAt(Offset(row6Rect.left + 100, row6Rect.center.dy));
+    await tester.pump();
+    expect(find.byKey(const Key('blame-selected-6')), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+    expect(find.byKey(const Key('blame-selected-5')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('blame-line-1')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+    expect(find.byKey(const Key('blame-selected-1')), findsOneWidget);
+  });
+
+  testWidgets('blame arrow selection scrolls only the next row into view', (
+    tester,
+  ) async {
+    await pumpInteractiveBlameView(
+      tester,
+      lineCount: 40,
+      size: const Size(1000, 220),
+    );
+    final row20 = find.byKey(const Key('blame-line-20'));
+    await tester.scrollUntilVisible(
+      row20,
+      200,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const Key('blame-list')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await Scrollable.ensureVisible(
+      tester.element(row20),
+      alignment: 1,
+      duration: Duration.zero,
+    );
+    await tester.pump();
+    final viewport = tester.getRect(find.byKey(const Key('blame-list')));
+    expect(tester.getRect(row20).bottom, closeTo(viewport.bottom, 1));
+
+    await tester.tap(row20);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+
+    final row21 = find.byKey(const Key('blame-line-21'));
+    expect(find.byKey(const Key('blame-selected-21')), findsOneWidget);
+    expect(tester.getRect(row21).top, greaterThanOrEqualTo(viewport.top));
+    expect(tester.getRect(row21).bottom, lessThanOrEqualTo(viewport.bottom));
+  });
+
+  testWidgets(
+    'blame details omit an empty summary and expose fallback semantics',
+    (tester) async {
+      await pumpInteractiveBlameView(tester, emptyThirdSummary: true);
+
+      await tester.tap(find.byKey(const Key('blame-line-3')));
+      await tester.pump();
+
+      final details = find.byKey(const Key('blame-commit-details-3'));
+      expect(details, findsOneWidget);
+      expect(
+        find.descendant(
+          of: details,
+          matching: find.byKey(const Key('blame-commit-summary-3')),
+        ),
+        findsNothing,
+      );
+      expect(
+        tester.getSemantics(find.byKey(const Key('blame-line-3'))).label,
+        contains('40aff6d'),
+      );
+      expect(
+        tester.getSemantics(find.byKey(const Key('blame-line-3'))).label,
+        contains('Suwon Chae'),
+      );
+    },
+  );
+
+  testWidgets(
+    'blame row surface prioritizes selection then active hunk then hover',
+    (tester) async {
+      Future<void> pumpRow({
+        required bool selected,
+        required bool current,
+        required bool hovered,
+      }) => tester.pumpWidget(
+        qaApp(
+          SizedBox(
+            width: 600,
+            child: BlameSourceRow(
+              blame: const BlameLine(
+                lineNumber: 1,
+                sha: '40aff6d',
+                author: 'Suwon Chae',
+                uncommitted: false,
+              ),
+              lineNumber: 1,
+              source: 'changed source',
+              path: 'changed.dart',
+              side: FileDocumentSide.result,
+              kind: DiffLineKind.add,
+              wrapLines: false,
+              highlighter: fakeHighlighter,
+              current: current,
+              hovered: hovered,
+              selected: selected,
+              viewportWidth: 600,
+              showRemoteAvatars: false,
+            ),
+          ),
+        ),
+      );
+
+      await pumpRow(selected: true, current: true, hovered: true);
+      expect(find.byKey(const Key('blame-selected-1')), findsOneWidget);
+      expect(find.byKey(const Key('blame-active-1')), findsNothing);
+      expect(find.byKey(const Key('blame-hover-1')), findsNothing);
+      expect(
+        tester.widget<FullDiffCodeRow>(find.byType(FullDiffCodeRow)).line.kind,
+        DiffLineKind.add,
+      );
+
+      await pumpRow(selected: false, current: true, hovered: true);
+      expect(find.byKey(const Key('blame-active-1')), findsOneWidget);
+      expect(find.byKey(const Key('blame-hover-1')), findsNothing);
+
+      await pumpRow(selected: false, current: false, hovered: true);
+      expect(find.byKey(const Key('blame-hover-1')), findsOneWidget);
+    },
+  );
 }
 
 class _ThrowingSyntaxHighlighter implements FullDiffSyntaxHighlighter {

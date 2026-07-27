@@ -858,6 +858,80 @@ void main() {
     });
   }
 
+  testWidgets('blame selection resets when the displayed document changes', (
+    tester,
+  ) async {
+    const secondFile = GitFileChange(
+      path: 'src/second.pas',
+      status: 'M',
+      additions: 1,
+      deletions: 1,
+    );
+    final repository = FakeFullDiffRepository();
+    repository.files = (_, _) async => const [fileA, secondFile];
+    repository.diff = (_, _, _, _, _) async => const [];
+    repository.content = (_, file, _) async => Uint8List.fromList(
+      utf8.encode(
+        file.path == fileA.path
+            ? 'first one\nfirst two\nfirst three\n'
+            : 'second one\nsecond two\nsecond three\n',
+      ),
+    );
+    repository.blame = (_, file, _, _) async => [
+      for (var line = 1; line <= 3; line++)
+        GitBlameLine(
+          lineNumber: line,
+          sha: file.path == fileA.path ? commitA.sha : '62874a0',
+          author: fixtureIdentity.name,
+          summary: '${file.path} summary $line',
+          uncommitted: false,
+        ),
+    ];
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.setView(FullDiffView.blame);
+    await pumpWorkspace(
+      tester,
+      controller: controller,
+      size: const Size(1070, 650),
+    );
+
+    await tester.tap(find.byKey(const Key('blame-line-2')));
+    await tester.pump();
+    expect(find.byKey(const Key('blame-selected-2')), findsOneWidget);
+    expect(find.text('${fileA.path} summary 2'), findsWidgets);
+
+    await controller.selectFile(secondFile);
+    await tester.pumpAndSettle();
+
+    expect(controller.state.selectedFile, secondFile);
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget.key is ValueKey<String> &&
+            (widget.key! as ValueKey<String>).value.startsWith(
+              'blame-selected-',
+            ),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget.key is ValueKey<String> &&
+            (widget.key! as ValueKey<String>).value.startsWith(
+              'blame-commit-details-',
+            ),
+      ),
+      findsNothing,
+    );
+  });
+
   test(
     'navigation boundaries and scroll synchronization do not bounce',
     () async {
