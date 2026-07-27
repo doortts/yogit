@@ -1278,6 +1278,13 @@ class _DiffScreenState extends State<DiffScreen> {
     FullDiffSessionState state,
     double viewportWidth,
   ) {
+    if (state.filesResource.loading) {
+      return _resourceStatus(
+        state.filesResource,
+        '파일을 읽는 중입니다',
+        loadingKey: const Key('history-detail-loading'),
+      );
+    }
     final entry = state.selectedHistoryEntry;
     final error = state.filesResource.error;
     if (entry != null && state.selectedFile == null && error != null) {

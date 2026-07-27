@@ -11,6 +11,7 @@ import 'package:yogit/full_diff_controller.dart';
 import 'package:yogit/full_diff_minimap.dart';
 import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/full_diff_theme.dart';
+import 'package:yogit/full_history_view.dart';
 import 'package:yogit/full_history_workspace.dart';
 import 'package:yogit/git.dart';
 
@@ -80,6 +81,7 @@ void main() {
     ({FullDiffSessionController controller, FakeFullDiffRepository repository})
   >
   historyWorkspaceFixture({
+    Future<List<GitFileChange>> Function(GitCommit, String?)? files,
     Future<List<DiffLine>> Function(
       GitCommit,
       GitFileChange,
@@ -90,7 +92,7 @@ void main() {
     diff,
   }) async {
     final repository = FakeFullDiffRepository()
-      ..files = ((_, _) async => const [fileA])
+      ..files = files ?? ((_, _) async => const [fileA])
       ..diff =
           diff ??
           ((commit, _, _, _, _) async => commit.sha == commitA.sha
@@ -520,6 +522,52 @@ void main() {
     }
   });
 
+  testWidgets('history row metadata shrinks inside the narrow list pane', (
+    tester,
+  ) async {
+    const author = 'A deliberately long author name for narrow history rows';
+    const entry = FileHistoryEntry(
+      commit: GitCommit(
+        sha: 'narrow-history',
+        shortSha: 'narrow',
+        parents: ['parent'],
+        author: GitIdentity(name: author, email: 'author@example.com'),
+        authorTimestamp: -3000000000000,
+        committer: GitIdentity(name: author, email: 'author@example.com'),
+        committerTimestamp: -3000000000000,
+        refs: [],
+        subject: 'Narrow history metadata',
+      ),
+      path: 'lib/narrow.dart',
+      oldPath: null,
+      status: 'M',
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            child: SizedBox(
+              width: 180,
+              height: 160,
+              child: FullHistoryView(
+                entries: const [entry],
+                selected: entry,
+                onSelected: (_) {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final authorText = tester.widget<Text>(find.text(author));
+    final timeText = tester.widget<Text>(find.textContaining('ago'));
+    expect(authorText.overflow, TextOverflow.ellipsis);
+    expect(timeText.overflow, TextOverflow.ellipsis);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('clicking history keeps the list and shows its patch', (
     tester,
   ) async {
@@ -676,6 +724,44 @@ void main() {
     expect(find.byKey(const Key('history-list')), findsOneWidget);
     expect(find.text('historical change'), findsOneWidget);
   });
+
+  testWidgets(
+    'history keeps its list and shows loading while revision files load',
+    (tester) async {
+      final historicalFiles = Completer<List<GitFileChange>>();
+      final fixture = await historyWorkspaceFixture(
+        files: (commit, _) => commit.sha == commitA.sha
+            ? Future.value(const [fileA])
+            : historicalFiles.future,
+      );
+      addTearDown(fixture.controller.dispose);
+      fixture.controller.setFocusMode(true);
+      await pumpWorkspace(
+        tester,
+        controller: fixture.controller,
+        size: const Size(1070, 842),
+      );
+
+      await tester.tap(
+        find.byKey(Key('history-row-${historyEntries.last.commit.sha}')),
+      );
+      await tester.pump();
+
+      expect(fixture.controller.state.filesResource.loading, isTrue);
+      expect(find.byKey(const Key('history-list')), findsOneWidget);
+      expect(find.byKey(const Key('history-detail-pane')), findsOneWidget);
+      expect(find.text('파일을 읽는 중입니다'), findsOneWidget);
+      expect(find.text('표시할 데이터가 없습니다'), findsNothing);
+
+      historicalFiles.complete(const [fileA]);
+      await pumpUntil(
+        tester,
+        () =>
+            fixture.controller.state.patch.data != null &&
+            fixture.controller.state.file.data != null,
+      );
+    },
+  );
 
   testWidgets('uses compact typography in commit and file lists', (
     tester,
