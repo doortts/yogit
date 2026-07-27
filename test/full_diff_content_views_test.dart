@@ -565,32 +565,33 @@ void main() {
     expect(selected, same(historyEntries[1]));
   });
 
-  testWidgets('history click selects and selected row uses a square fill', (
-    tester,
-  ) async {
-    FileHistoryEntry? selected;
-    await tester.pumpWidget(
-      qaApp(
-        FullHistoryView(
-          entries: historyEntries,
-          selected: historyEntries.first,
-          onSelected: (entry) => selected = entry,
+  testWidgets(
+    'history click selects while the selected row keeps a neutral background',
+    (tester) async {
+      FileHistoryEntry? selected;
+      await tester.pumpWidget(
+        qaApp(
+          FullHistoryView(
+            entries: historyEntries,
+            selected: historyEntries.first,
+            onSelected: (entry) => selected = entry,
+          ),
         ),
-      ),
-    );
+      );
 
-    expect(find.text(commitA.shortSha), findsOneWidget);
-    expect(find.text(commitA.subject), findsOneWidget);
-    expect(find.text(fixtureIdentity.name), findsNWidgets(2));
-    expect(find.textContaining('ago'), findsNWidgets(2));
-    final selectedSurface = tester.widget<ColoredBox>(
-      find.byKey(Key('history-row-${commitA.sha}')),
-    );
-    expect(selectedSurface.color, fullDiffSelection);
+      expect(find.text(commitA.shortSha), findsOneWidget);
+      expect(find.text(commitA.subject), findsOneWidget);
+      expect(find.text(fixtureIdentity.name), findsNWidgets(2));
+      expect(find.textContaining('ago'), findsNWidgets(2));
+      final selectedSurface = tester.widget<ColoredBox>(
+        find.byKey(Key('history-row-${commitA.sha}')),
+      );
+      expect(selectedSurface.color, fullDiffCanvas);
 
-    await tester.tap(find.text(historyEntries[1].commit.subject));
-    expect(selected, same(historyEntries[1]));
-  });
+      await tester.tap(find.text(historyEntries[1].commit.subject));
+      expect(selected, same(historyEntries[1]));
+    },
+  );
 
   testWidgets('history exposes the selected row as a semantic button', (
     tester,

@@ -26,7 +26,7 @@ HTML은 고정된 예시 행을 그리지만 구현 캡처는 검수용 데이�
 | 02 Split | [기준](../../specs/assets/full-diff-qa/02-diff-split.png) | [구현](actual/02-diff-split.png) | [차이](diff/02-diff-split.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 이전·이후 행 두 열과 가운데 경계 확인 |
 | 03 File | [기준](../../specs/assets/full-diff-qa/03-file-view.png) | [구현](actual/03-file-view.png) | [차이](diff/03-file-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 선택 Hunk 제목 다음에 결과 쪽 추가 행이 이어지는지 확인 |
 | 04 Blame | [기준](../../specs/assets/full-diff-qa/04-blame-view.png) | [구현](actual/04-blame-view.png) | [차이](diff/04-blame-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — Hunk 제목, 줄 번호, 80px 메타데이터, 변경 소스 순서 확인 |
-| 05 History | [기준](../../specs/assets/full-diff-qa/05-history-view.png) | [구현](actual/05-history-view.png) | [차이](diff/05-history-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 현재 커밋 선택 배경과 제목 아래 작성자·경과 시간 배치 확인 |
+| 05 History | [기준](../../specs/assets/full-diff-qa/05-history-view.png) | [구현](actual/05-history-view.png) | [차이](diff/05-history-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 시각 선택 색 없이 중립 행 배경을 유지하고 현재 커밋의 접근성 selected 상태와 제목 아래 작성자·경과 시간 배치 확인 |
 | 06 집중 모드 | [기준](../../specs/assets/full-diff-qa/06-focus-mode.png) | [구현](actual/06-focus-mode.png) | [차이](diff/06-focus-mode.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 탐색 열 제거, 머리글 정렬, 본문 확장 확인 |
 | 07 공백 무시 | [기준](../../specs/assets/full-diff-qa/07-ignore-whitespace.png) | [구현](actual/07-ignore-whitespace.png) | [차이](diff/07-ignore-whitespace.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 선택 상태와 공백 행 제거 확인 |
 | 08 줄바꿈 | [기준](../../specs/assets/full-diff-qa/08-wrap-lines.png) | [구현](actual/08-wrap-lines.png) | [차이](diff/08-wrap-lines.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 선택 상태, 한 개의 줄 번호, 긴 소스 줄바꿈 확인 |
@@ -53,7 +53,7 @@ JPEG라서 넓고 단색인 배경도 미세한 차이로 집계된다.
 | 02-diff-split | 1070×842 | 442,279 | 49.0908 | 15.0808 | 255 |
 | 03-file-view | 1070×842 | 403,574 | 44.7948 | 12.9542 | 255 |
 | 04-blame-view | 1070×842 | 419,078 | 46.5156 | 14.0174 | 255 |
-| 05-history-view | 1070×842 | 300,124 | 33.3123 | 8.2163 | 255 |
+| 05-history-view | 1070×842 | 273,172 | 30.3208 | 7.4224 | 255 |
 | 06-focus-mode | 1070×842 | 183,644 | 20.3836 | 3.3508 | 255 |
 | 07-ignore-whitespace | 1070×842 | 447,836 | 49.7076 | 15.5643 | 255 |
 | 08-wrap-lines | 1070×842 | 475,223 | 52.7475 | 16.3073 | 255 |
@@ -64,24 +64,24 @@ JPEG라서 넓고 단색인 배경도 미세한 차이로 집계된다.
 
 ## 구문 강조 성능과 앱 크기
 
-일반 테스트는 benchmark 태그를 제외해 병렬 부하가 성능 판정을
-흔들지 않게 했다. 성능 기준은 다음과 같이 한 파일만 동시 실행 수 1로
-검사한다.
+성능 테스트는 기본 테스트 검색 경로 밖인 `benchmark/`에 둬
+`flutter test`에 포함되지 않게 했다. 성능 기준은 다음과 같이 한 파일만
+동시 실행 수 1로 검사한다.
 
 ```sh
-flutter test --exclude-tags=benchmark
-flutter test --tags=benchmark --concurrency=1 \
-  test/full_diff_syntax_benchmark_test.dart --reporter expanded
+flutter test
+flutter test --concurrency=1 \
+  benchmark/full_diff_syntax_benchmark_test.dart --reporter expanded
 ```
 
-DRL 첫 Hunk의 12줄을 30번 강조했다. 격리 실행의 첫 실행은 15,486µs,
-p95는 2,854µs로 50ms 기준을 통과했다.
+DRL 첫 Hunk의 12줄을 30번 강조했다. 격리 실행의 첫 실행은 15,899µs,
+p95는 2,060µs로 50ms 기준을 통과했다.
 
 | 빌드 | 압축 크기 |
 | --- | ---: |
-| `YOGIT_EXTENDED_SYNTAX=false` | 23,142,471 bytes |
-| `YOGIT_EXTENDED_SYNTAX=true` | 23,321,818 bytes |
-| 증가량 | 179,347 bytes |
+| `YOGIT_EXTENDED_SYNTAX=false` | 23,142,608 bytes |
+| `YOGIT_EXTENDED_SYNTAX=true` | 23,321,678 bytes |
+| 증가량 | 179,070 bytes |
 
 증가량은 1,048,576바이트 기준보다 작다. 두 기준을 모두 통과했으므로
 `extendedSyntaxEnabled`의 기본값은 `true`로 유지했다. 포함한 확장

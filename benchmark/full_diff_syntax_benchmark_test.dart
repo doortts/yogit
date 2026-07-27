@@ -1,6 +1,3 @@
-@Tags(['benchmark'])
-library;
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/full_diff_syntax.dart';
 

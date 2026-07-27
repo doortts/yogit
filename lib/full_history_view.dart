@@ -72,7 +72,7 @@ class FullHistoryView extends StatelessWidget {
                 onTap: activate,
                 child: InkWell(
                   onTap: activate,
-                  child: HistoryRow(entry: entry, selected: isSelected),
+                  child: HistoryRow(entry: entry),
                 ),
               ),
             );
@@ -84,15 +84,14 @@ class FullHistoryView extends StatelessWidget {
 }
 
 class HistoryRow extends StatelessWidget {
-  const HistoryRow({required this.entry, required this.selected, super.key});
+  const HistoryRow({required this.entry, super.key});
 
   final FileHistoryEntry entry;
-  final bool selected;
 
   @override
   Widget build(BuildContext context) => ColoredBox(
     key: Key('history-row-${entry.commit.sha}'),
-    color: selected ? fullDiffSelection : fullDiffCanvas,
+    color: fullDiffCanvas,
     child: Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(

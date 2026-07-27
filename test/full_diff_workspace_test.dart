@@ -319,33 +319,36 @@ void main() {
     expect(find.byKey(const Key('code-row-current-marker')), findsOneWidget);
   });
 
-  testWidgets('history marks the current commit as selected', (tester) async {
-    final fixture = await workspaceFixture();
-    addTearDown(fixture.controller.dispose);
-    fixture.controller.setView(FullDiffView.history);
-    await pumpWorkspace(
-      tester,
-      controller: fixture.controller,
-      size: const Size(1070, 842),
-    );
-    final semantics = tester.ensureSemantics();
-    final row = find.byKey(Key('history-row-${commitA.sha}'));
+  testWidgets(
+    'history keeps the current row neutral and semantically selected',
+    (tester) async {
+      final fixture = await workspaceFixture();
+      addTearDown(fixture.controller.dispose);
+      fixture.controller.setView(FullDiffView.history);
+      await pumpWorkspace(
+        tester,
+        controller: fixture.controller,
+        size: const Size(1070, 842),
+      );
+      final semantics = tester.ensureSemantics();
+      final row = find.byKey(Key('history-row-${commitA.sha}'));
 
-    expect(tester.widget<ColoredBox>(row).color, fullDiffSelection);
-    final selectedSemantics = find.ancestor(
-      of: row,
-      matching: find.byWidgetPredicate(
-        (widget) => widget is Semantics && widget.properties.selected == true,
-      ),
-    );
-    expect(selectedSemantics, findsOneWidget);
-    expect(
-      tester.getSemantics(selectedSemantics).flagsCollection.isSelected,
-      ui.Tristate.isTrue,
-    );
+      expect(tester.widget<ColoredBox>(row).color, fullDiffCanvas);
+      final selectedSemantics = find.ancestor(
+        of: row,
+        matching: find.byWidgetPredicate(
+          (widget) => widget is Semantics && widget.properties.selected == true,
+        ),
+      );
+      expect(selectedSemantics, findsOneWidget);
+      expect(
+        tester.getSemantics(selectedSemantics).flagsCollection.isSelected,
+        ui.Tristate.isTrue,
+      );
 
-    semantics.dispose();
-  });
+      semantics.dispose();
+    },
+  );
 
   testWidgets('parent chooser changes all selected resources', (tester) async {
     const merge = GitCommit(
