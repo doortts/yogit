@@ -12,7 +12,6 @@ import 'package:yogit/full_diff_controller.dart';
 import 'package:yogit/full_diff_minimap.dart';
 import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/full_diff_selectable_row.dart';
-import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/full_history_view.dart';
 import 'package:yogit/full_history_workspace.dart';
 import 'package:yogit/git.dart';
