@@ -17,6 +17,11 @@ const fullDiffVisualNames = <String>[
   '10-algorithm-histogram',
   '11-responsive-650',
   '12-responsive-480',
+  '13-font-and-back',
+  '14-algorithm-tooltip',
+  '15-unavailable-panel',
+  '16-history-detail',
+  '17-history-detail-split',
 ];
 
 class VisualDiffMetrics {

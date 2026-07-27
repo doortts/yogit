@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
@@ -186,11 +187,20 @@ const qaCases = <QaCase>[
   ),
 ];
 
+const followupCases = [
+  '13-font-and-back',
+  '15-unavailable-panel',
+  '16-history-detail',
+  '17-history-detail-split',
+];
+
 Future<void> capture(
   WidgetTester tester, {
   required String name,
   required Size size,
   required Widget child,
+  Future<void> Function()? prepare,
+  Finder? target,
 }) async {
   tester.view.devicePixelRatio = 1;
   tester.view.physicalSize = size;
@@ -210,8 +220,9 @@ Future<void> capture(
   await tester.pump(const Duration(milliseconds: 100));
   await tester.pump(const Duration(milliseconds: 100));
   await tester.pump();
+  await prepare?.call();
   await expectLater(
-    find.byKey(const Key('full-diff-comparison-canvas')),
+    target ?? find.byKey(const Key('full-diff-comparison-canvas')),
     matchesGoldenFile(
       '../docs/superpowers/verification/full-diff-qa/actual/$name.png',
     ),
@@ -543,10 +554,12 @@ void main() {
     );
     await tester.pump();
 
-    expect(
-      tester.getTopLeft(find.byKey(const Key('file-path-chip'))).dx,
-      lessThan(80),
-    );
+    final back = tester.getRect(find.byKey(const Key('full-diff-back')));
+    final fileIcon = tester.getRect(find.byIcon(Icons.code));
+    final path = tester.getRect(find.byKey(const Key('file-path-chip')));
+    expect(back.left, lessThan(80));
+    expect(back.right, lessThan(fileIcon.left));
+    expect(fileIcon.right, lessThan(path.left));
     expect(tester.getTopLeft(find.text('탐색 패널')).dx, lessThan(80));
   });
 
@@ -829,4 +842,89 @@ void main() {
       );
     });
   }
+
+  for (final name in followupCases) {
+    testWidgets('capture $name', (tester) async {
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+      final history = name.startsWith('16-') || name.startsWith('17-');
+      final unavailable = name.startsWith('15-');
+      final presentation = name.startsWith('17-')
+          ? DiffPresentation.split
+          : DiffPresentation.hunk;
+      final controller = await qaControllerFor(
+        view: history ? FullDiffView.history : FullDiffView.diff,
+        presentation: presentation,
+        emptyPatch: unavailable,
+        selectPastHistory: history,
+        activeHunkIndex: history || unavailable ? 0 : 1,
+      );
+      addTearDown(controller.dispose);
+
+      if (unavailable) {
+        expect(controller.state.patch.data?.hunks, isEmpty);
+        expect(controller.state.file.data?.kind, FileContentKind.utf8);
+      } else if (history) {
+        expect(controller.state.history.data, hasLength(4));
+        expect(
+          controller.state.selectedHistoryEntry?.commit.shortSha,
+          '65f4c80',
+        );
+        expect(
+          controller.state.patch.data?.rows,
+          qaHistoricalPatchLines.skip(1),
+        );
+      } else {
+        expect(controller.state.patch.data?.hunks, hasLength(7));
+      }
+
+      const size = Size(1070, 842);
+      await capture(
+        tester,
+        name: name,
+        size: size,
+        child: FullDiffQaComparisonCanvas(
+          controller: controller,
+          surfaceSize: size,
+        ),
+      );
+    });
+  }
+
+  testWidgets('capture 14-algorithm-tooltip', (tester) async {
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final controller = await qaControllerFor(
+      algorithm: DiffAlgorithm.histogram,
+    );
+    addTearDown(controller.dispose);
+    const size = Size(1070, 842);
+
+    await capture(
+      tester,
+      name: '14-algorithm-tooltip',
+      size: size,
+      child: FullDiffQaComparisonCanvas(
+        controller: controller,
+        surfaceSize: size,
+      ),
+      prepare: () async {
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer();
+        addTearDown(mouse.removePointer);
+        await mouse.moveTo(
+          tester.getCenter(find.byKey(const Key('diff-algorithm'))),
+        );
+        await tester.pump(const Duration(milliseconds: 600));
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(find.text('Diff 알고리즘 · Histogram'), findsOneWidget);
+        expect(find.textContaining('반복이 많은 코드의 변경 경계를 찾습니다'), findsOneWidget);
+      },
+      target: find.byType(Overlay),
+    );
+  });
 }

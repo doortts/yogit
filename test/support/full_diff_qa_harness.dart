@@ -72,6 +72,16 @@ const qaFiles = <GitFileChange>[
   ),
 ];
 
+const qaHistoricalFiles = <GitFileChange>[
+  GitFileChange(path: 'src/drlua.pas', status: 'M', additions: 3, deletions: 1),
+  GitFileChange(
+    path: 'src/window_sdl.pas',
+    status: 'M',
+    additions: 4,
+    deletions: 2,
+  ),
+];
+
 const qaPatchLines = <DiffLine>[
   DiffLine(kind: DiffLineKind.hunk, text: '@@ -292,5 +292,6 @@ State.Init'),
   DiffLine(
@@ -288,6 +298,35 @@ const qaPatchLines = <DiffLine>[
   ),
 ];
 
+const qaHistoricalPatchLines = <DiffLine>[
+  DiffLine(
+    kind: DiffLineKind.hunk,
+    text: '@@ -212,4 +212,6 @@ InitializeRetina',
+  ),
+  DiffLine(
+    kind: DiffLineKind.context,
+    text: 'procedure InitRetina;',
+    oldNumber: 212,
+    newNumber: 212,
+  ),
+  DiffLine(
+    kind: DiffLineKind.context,
+    text: 'begin',
+    oldNumber: 213,
+    newNumber: 213,
+  ),
+  DiffLine(kind: DiffLineKind.delete, text: '  Scale := 1;', oldNumber: 214),
+  DiffLine(kind: DiffLineKind.add, text: '  Scale := 2;', newNumber: 214),
+  DiffLine(kind: DiffLineKind.add, text: '  Width := 800;', newNumber: 215),
+  DiffLine(kind: DiffLineKind.add, text: '  Height := 600;', newNumber: 216),
+  DiffLine(
+    kind: DiffLineKind.context,
+    text: 'end;',
+    oldNumber: 215,
+    newNumber: 217,
+  ),
+];
+
 final qaWhitespacePatchLines = List<DiffLine>.unmodifiable(
   qaPatchLines.where(
     (line) =>
@@ -404,11 +443,18 @@ Future<FullDiffSessionController> qaControllerFor({
   bool wrapLines = false,
   int activeHunkIndex = 1,
   DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
+  bool emptyPatch = false,
+  bool selectPastHistory = false,
 }) async {
+  final historicalRevision = qaHistoryRecords[1].commit.sha;
   final repository = FakeFullDiffRepository()
-    ..files = ((_, _) async => qaFiles)
-    ..diff = ((_, _, _, _, whitespace) async =>
-        whitespace ? qaWhitespacePatchLines : qaPatchLines)
+    ..files = ((commit, _) async =>
+        commit.sha == historicalRevision ? qaHistoricalFiles : qaFiles)
+    ..diff = ((commit, _, _, _, whitespace) async {
+      if (emptyPatch) return const <DiffLine>[];
+      if (commit.sha == historicalRevision) return qaHistoricalPatchLines;
+      return whitespace ? qaWhitespacePatchLines : qaPatchLines;
+    })
     ..content = ((_, _, _) async => qaFileBytes)
     ..blame = ((_, _, _, _) async => qaBlameLines)
     ..history = ((_, _) async => qaHistoryRecords);
@@ -429,6 +475,16 @@ Future<FullDiffSessionController> qaControllerFor({
     await controller.selectAlgorithm(algorithm);
   }
   await _waitForViewData(controller, view);
+  if (selectPastHistory) {
+    if (view != FullDiffView.history) {
+      throw ArgumentError.value(
+        view,
+        'view',
+        'must be FullDiffView.history when selecting past history',
+      );
+    }
+    await controller.selectHistoryEntry(controller.state.history.data![1]);
+  }
   final document = controller.state.patch.data;
   if (document != null && document.hunks.isNotEmpty) {
     controller.selectAnchor(

@@ -1,13 +1,14 @@
 # Full Diff 최종 검수
 
-2026-07-27에 승인 이미지 13장과 macOS 앱을 기준으로 확인했다.
-기준 이미지 파일은 이름만 `.png`이고 실제 내용은 JPEG라서 차이 도구는
-파일 시그니처로 형식을 판별한다. JPEG 압축과 Flutter 글꼴
-래스터라이징에서 생기는 픽셀 차이는 아래 수치에 포함했다. 수동 판정에서는
-구성 요소의 위치·크기·줄바꿈·말줄임·색·테두리를 각각 확인했다. 기준
-HTML은 고정된 예시 행을 그리지만 구현 캡처는 검수용 데이터를 실제
-위젯으로 렌더링하므로 행의 개수와 문구가 다른 구간은 픽셀 일치 판정에서
-제외했다.
+2026-07-27에 기존 승인 이미지 13장, 후속 검수 이미지 5장과 macOS 앱을
+기준으로 확인했다. 기존 00–12 기준 이미지는 이름만 `.png`이고 실제
+내용은 JPEG라서 차이 도구는 파일 시그니처로 형식을 판별한다. 새 13–17
+기준 이미지는 검토를 통과한 Flutter PNG 캡처다. JPEG 압축과 Flutter
+글꼴 래스터라이징에서 생기는 픽셀 차이는 아래 수치에 포함했다. 수동
+판정에서는 구성 요소의 위치·크기·줄바꿈·말줄임·색·테두리를 각각
+확인했다. 기준 HTML은 고정된 예시 행을 그리지만 구현 캡처는 검수용
+데이터를 실제 위젯으로 렌더링하므로 행의 개수와 문구가 다른 구간은 픽셀
+일치 판정에서 제외했다.
 
 ## 이미지 판정
 
@@ -21,19 +22,24 @@ HTML은 고정된 예시 행을 그리지만 구현 캡처는 검수용 데이�
 
 | 상태 | 기준 | 구현 | 차이 | 메뉴·순서 | 색·테두리 | 크기·배치 | 판정 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 00 Hunk | [기준](../../specs/assets/full-diff-qa/00-overview-hunk.png) | [구현](actual/00-overview-hunk.png) | [차이](diff/00-overview-hunk.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 탐색 2열과 두 번째 Hunk 배치 확인 |
-| 01 Inline | [기준](../../specs/assets/full-diff-qa/01-diff-inline.png) | [구현](actual/01-diff-inline.png) | [차이](diff/01-diff-inline.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 선행 문맥, Hunk 제목, 활성 구간 순서 확인 |
-| 02 Split | [기준](../../specs/assets/full-diff-qa/02-diff-split.png) | [구현](actual/02-diff-split.png) | [차이](diff/02-diff-split.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 이전·이후 행 두 열과 가운데 경계 확인 |
-| 03 File | [기준](../../specs/assets/full-diff-qa/03-file-view.png) | [구현](actual/03-file-view.png) | [차이](diff/03-file-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 선택한 Hunk 하나의 제목과 결과 쪽 추가 행만 표시되는지 확인 |
-| 04 Blame | [기준](../../specs/assets/full-diff-qa/04-blame-view.png) | [구현](actual/04-blame-view.png) | [차이](diff/04-blame-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 선택한 Hunk 하나의 제목·변경 표시와 80px 메타데이터 순서 확인 |
-| 05 History | [기준](../../specs/assets/full-diff-qa/05-history-view.png) | [구현](actual/05-history-view.png) | [차이](diff/05-history-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 시각 선택 색 없이 중립 행 배경을 유지하고 현재 커밋의 접근성 selected 상태와 제목 아래 작성자·경과 시간 배치 확인 |
-| 06 집중 모드 | [기준](../../specs/assets/full-diff-qa/06-focus-mode.png) | [구현](actual/06-focus-mode.png) | [차이](diff/06-focus-mode.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 탐색 열 제거, 머리글 정렬, 본문 확장 확인 |
-| 07 공백 무시 | [기준](../../specs/assets/full-diff-qa/07-ignore-whitespace.png) | [구현](actual/07-ignore-whitespace.png) | [차이](diff/07-ignore-whitespace.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 선택 상태와 공백 행 제거 확인 |
-| 08 줄바꿈 | [기준](../../specs/assets/full-diff-qa/08-wrap-lines.png) | [구현](actual/08-wrap-lines.png) | [차이](diff/08-wrap-lines.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 선택 상태, 한 개의 줄 번호, 긴 소스 줄바꿈 확인 |
-| 09 다음 변경 | [기준](../../specs/assets/full-diff-qa/09-next-change.png) | [구현](actual/09-next-change.png) | [차이](diff/09-next-change.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 상세 화면 `3 / 7`, 한 줄 조작부, 미니맵 확인 |
-| 10 Histogram | [기준](../../specs/assets/full-diff-qa/10-algorithm-histogram.png) | [구현](actual/10-algorithm-histogram.png) | [차이](diff/10-algorithm-histogram.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — Histogram 상태, 두 번째 Hunk, 미니맵 확인 |
-| 11 650px | [기준](../../specs/assets/full-diff-qa/11-responsive-650.png) | [구현](actual/11-responsive-650.png) | [차이](diff/11-responsive-650.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 파일 경로와 통계를 두 줄로 배치하고 파일 열 유지 |
-| 12 480px | [기준](../../specs/assets/full-diff-qa/12-responsive-480.png) | [구현](actual/12-responsive-480.png) | [차이](diff/12-responsive-480.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과 — 두 탐색 열 제거, 한 줄 조작부, 초기 가로 이동값 0, Hunk 제목과 313행의 왼쪽 정렬 확인 |
+| 00 Hunk | [기준](../../specs/assets/full-diff-qa/00-overview-hunk.png) | [구현](actual/00-overview-hunk.png) | [차이](diff/00-overview-hunk.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 탐색 2열과 두 번째 Hunk 배치 확인 |
+| 01 Inline | [기준](../../specs/assets/full-diff-qa/01-diff-inline.png) | [구현](actual/01-diff-inline.png) | [차이](diff/01-diff-inline.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 선행 문맥, Hunk 제목, 활성 구간 순서 확인 |
+| 02 Split | [기준](../../specs/assets/full-diff-qa/02-diff-split.png) | [구현](actual/02-diff-split.png) | [차이](diff/02-diff-split.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 이전·이후 행 두 열과 가운데 경계 확인 |
+| 03 File | [기준](../../specs/assets/full-diff-qa/03-file-view.png) | [구현](actual/03-file-view.png) | [차이](diff/03-file-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 선택한 Hunk 하나의 제목과 결과 쪽 추가 행만 표시되는지 확인 |
+| 04 Blame | [기준](../../specs/assets/full-diff-qa/04-blame-view.png) | [구현](actual/04-blame-view.png) | [차이](diff/04-blame-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 선택한 Hunk 하나의 제목·변경 표시와 80px 메타데이터 순서 확인 |
+| 05 History | [기준](../../specs/assets/full-diff-qa/05-history-view.png) | [구현](actual/05-history-view.png) | [차이](diff/05-history-view.png) | History 목록과 Split 상세 표시 | 기준 상수 적용 | 목록 280px, 상세 영역과 1px 경계 | 통과: 현재 항목의 선택 상태, 오른쪽의 현재 diff와 제목 아래 작성자·경과 시간 확인 |
+| 06 집중 모드 | [기준](../../specs/assets/full-diff-qa/06-focus-mode.png) | [구현](actual/06-focus-mode.png) | [차이](diff/06-focus-mode.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 탐색 열 제거, 머리글 정렬, 본문 확장 확인 |
+| 07 공백 무시 | [기준](../../specs/assets/full-diff-qa/07-ignore-whitespace.png) | [구현](actual/07-ignore-whitespace.png) | [차이](diff/07-ignore-whitespace.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 선택 상태와 공백 행 제거 확인 |
+| 08 줄바꿈 | [기준](../../specs/assets/full-diff-qa/08-wrap-lines.png) | [구현](actual/08-wrap-lines.png) | [차이](diff/08-wrap-lines.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 선택 상태, 한 개의 줄 번호, 긴 소스 줄바꿈 확인 |
+| 09 다음 변경 | [기준](../../specs/assets/full-diff-qa/09-next-change.png) | [구현](actual/09-next-change.png) | [차이](diff/09-next-change.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 상세 화면 `3 / 7`, 한 줄 조작부, 미니맵 확인 |
+| 10 Histogram | [기준](../../specs/assets/full-diff-qa/10-algorithm-histogram.png) | [구현](actual/10-algorithm-histogram.png) | [차이](diff/10-algorithm-histogram.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: Histogram 상태, 두 번째 Hunk, 미니맵 확인 |
+| 11 650px | [기준](../../specs/assets/full-diff-qa/11-responsive-650.png) | [구현](actual/11-responsive-650.png) | [차이](diff/11-responsive-650.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 파일 경로와 통계를 두 줄로 배치하고 파일 열 유지 |
+| 12 480px | [기준](../../specs/assets/full-diff-qa/12-responsive-480.png) | [구현](actual/12-responsive-480.png) | [차이](diff/12-responsive-480.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 두 탐색 열 제거, 한 줄 조작부, 초기 가로 이동값 0, Hunk 제목과 313행의 왼쪽 정렬 확인 |
+| 13 글자와 뒤로 가기 | [기준](../../specs/assets/full-diff-qa/13-font-and-back.png) | [구현](actual/13-font-and-back.png) | [차이](diff/13-font-and-back.png) | 뒤로 가기→파일 아이콘→경로 순서 | 기존 상단 색 유지 | 목록 11·10·9px, diff 10·8px 간격 유지 | 통과: 작은 글자가 행 안에서 붙거나 잘리지 않고 32px 뒤로 가기 버튼이 가장 왼쪽에 있음 |
+| 14 알고리즘 설명 | [기준](../../specs/assets/full-diff-qa/14-algorithm-tooltip.png) | [구현](actual/14-algorithm-tooltip.png) | [차이](diff/14-algorithm-tooltip.png) | 닫힌 버튼에 Histogram 표시 | 밝은 설명 팝오버와 어두운 화면의 대비 분명 | 버튼 아래 설명이 본문을 가리지 않는 너비 | 통과: 선택값, 제목과 반복 코드용 Histogram 설명을 한눈에 읽을 수 있음 |
+| 15 표시 불가 | [기준](../../specs/assets/full-diff-qa/15-unavailable-panel.png) | [구현](actual/15-unavailable-panel.png) | [차이](diff/15-unavailable-panel.png) | 경로→통계→UTF-8→사유→옵션 순서 | 속성 칩과 사유의 대비 분명 | 빈 본문 중앙에서 한 줄 정보 흐름 유지 | 통과: `src/drlua.pas`, `M · +12 −4`, `UTF-8`, 변경이 없다는 사유와 현재 옵션을 순서대로 확인 |
+| 16 History 상세 | [기준](../../specs/assets/full-diff-qa/16-history-detail.png) | [구현](actual/16-history-detail.png) | [차이](diff/16-history-detail.png) | 선택한 65f4c80과 과거 Hunk 표시 | 선택 행과 변경 행 색 구분 | History 280px, 1px 경계 뒤 상세 확장 | 통과: 목록을 유지한 채 과거 커밋의 파일 목록·통계와 1개 Hunk가 오른쪽에서 함께 바뀜 |
+| 17 History Split | [기준](../../specs/assets/full-diff-qa/17-history-detail-split.png) | [구현](actual/17-history-detail-split.png) | [차이](diff/17-history-detail-split.png) | 선택한 65f4c80과 과거 Split 표시 | 삭제·추가 배경과 중앙 경계 분명 | 두 쪽이 상세 너비 안에 온전히 표시 | 통과: 이전·결과 줄 번호, 기호와 모든 검수용 소스 줄이 잘리지 않음 |
 
 승인 이미지가 작업 표보다 우선한다. 승인 이미지에서 Split이 선택된
 03·04·05·07·08은 Split 상태로 캡처했다. 검수 하네스는 Flutter SDK의
@@ -41,7 +47,7 @@ Material Icons와 Roboto, macOS의 Menlo와 Apple SD Gothic Neo를
 불러오며 Menlo에 없는 글자는 앱에 포함된 D2Coding으로 표시한다.
 File과 Blame은 선택한 Hunk의 제목과 변경 표시만 투영하도록 고친 뒤
 03·04를 다시 캡처했다. 미니맵은 선택한 이전·결과 쪽 소스 범위로
-뷰포트를 계산하며, 아래 수치는 이 계산을 적용한 현재 캡처 기준이다.
+뷰포트를 계산하며 아래 수치는 이 계산을 적용한 현재 캡처 기준이다.
 
 ## 픽셀 차이
 
@@ -51,19 +57,24 @@ JPEG라서 넓고 단색인 배경도 미세한 차이로 집계된다.
 
 | 이미지 | 크기 | changed | changed % | mean RGB | max RGB |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 00-overview-hunk | 782×842 | 253,911 | 38.5623 | 8.9820 | 255 |
-| 01-diff-inline | 782×842 | 339,916 | 51.6241 | 15.8557 | 255 |
-| 02-diff-split | 1070×842 | 442,432 | 49.1078 | 15.0879 | 255 |
-| 03-file-view | 1070×842 | 345,870 | 38.3899 | 11.5105 | 255 |
-| 04-blame-view | 1070×842 | 362,361 | 40.2203 | 12.6334 | 255 |
-| 05-history-view | 1070×842 | 273,172 | 30.3208 | 7.4224 | 255 |
-| 06-focus-mode | 1070×842 | 183,760 | 20.3965 | 3.3467 | 255 |
-| 07-ignore-whitespace | 1070×842 | 447,980 | 49.7236 | 15.5707 | 255 |
-| 08-wrap-lines | 1070×842 | 475,143 | 52.7386 | 16.3043 | 255 |
-| 09-next-change | 1280×720 | 654,946 | 71.0662 | 8.9426 | 240 |
-| 10-algorithm-histogram | 1280×720 | 654,738 | 71.0436 | 8.8405 | 248 |
-| 11-responsive-650 | 650×549 | 157,670 | 44.1838 | 11.4431 | 255 |
-| 12-responsive-480 | 480×549 | 105,044 | 39.8619 | 9.6684 | 255 |
+| 00-overview-hunk | 782×842 | 269,413 | 40.9166 | 11.3120 | 255 |
+| 01-diff-inline | 782×842 | 362,554 | 55.0622 | 16.9980 | 255 |
+| 02-diff-split | 1070×842 | 456,589 | 50.6792 | 15.3780 | 255 |
+| 03-file-view | 1070×842 | 371,904 | 41.2796 | 12.0217 | 253 |
+| 04-blame-view | 1070×842 | 386,525 | 42.9024 | 13.1967 | 255 |
+| 05-history-view | 1070×842 | 384,082 | 42.6313 | 13.1179 | 255 |
+| 06-focus-mode | 1070×842 | 212,180 | 23.5510 | 6.2048 | 255 |
+| 07-ignore-whitespace | 1070×842 | 458,523 | 50.8938 | 16.2115 | 255 |
+| 08-wrap-lines | 1070×842 | 490,665 | 54.4615 | 16.7609 | 255 |
+| 09-next-change | 1280×720 | 656,183 | 71.2004 | 8.8207 | 236 |
+| 10-algorithm-histogram | 1280×720 | 655,952 | 71.1753 | 8.8111 | 242 |
+| 11-responsive-650 | 650×549 | 175,328 | 49.1321 | 15.6722 | 242 |
+| 12-responsive-480 | 480×549 | 123,525 | 46.8750 | 15.7065 | 242 |
+| 13-font-and-back | 1070×842 | 0 | 0.0000 | 0.0000 | 0 |
+| 14-algorithm-tooltip | 1070×842 | 0 | 0.0000 | 0.0000 | 0 |
+| 15-unavailable-panel | 1070×842 | 0 | 0.0000 | 0.0000 | 0 |
+| 16-history-detail | 1070×842 | 0 | 0.0000 | 0.0000 | 0 |
+| 17-history-detail-split | 1070×842 | 0 | 0.0000 | 0.0000 | 0 |
 
 ## 구문 강조 성능과 앱 크기
 
