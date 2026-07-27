@@ -237,3 +237,42 @@ errors remain.
 
 None. The implementation, visual evidence, and independent review are ready
 for integration.
+
+## Review Fix Round 1
+
+### Documentation corrections
+
+- Corrected captures 05 and 16 from a 280 px History list to the actual
+  240 px cap. Both captures give `FullHistoryWorkspace` less than 760 px.
+- Clarified that the 280 px list applies only when the History workspace
+  itself is at least 760 px wide.
+- Corrected capture 14 to describe the tooltip as a temporary, readable,
+  high-contrast overlay over the diff header and first source row. It does
+  not avoid the diff body.
+
+### Changed files
+
+- `docs/superpowers/verification/full-diff-qa/README.md`
+- `docs/superpowers/verification/full-diff-qa/followup-review.md`
+- `.superpowers/sdd/2026-07-27-full-diff-usability-followup/task-7-report.md`
+
+No product code, tests, or image assets changed.
+
+### Checks
+
+- All relative Markdown links in the three Task 7 documents resolve.
+- A content search confirms the capture-specific 240 px wording, the
+  workspace-level 760 px breakpoint, and the temporary tooltip overlap.
+- `git diff --check` passed.
+- `git diff --name-only 72658b9..6861fdf` lists only the three documents
+  above.
+- Broad tests and the release build were not repeated because this round
+  changes documentation only.
+
+### Commit
+
+`6861fdf docs: correct full diff visual review details`
+
+### Concerns
+
+None.
