@@ -10,12 +10,14 @@ import 'full_diff_theme.dart';
 import 'git.dart';
 import 'typography.dart';
 
+const fullDiffSourceRowHeight = 21.0;
+
 const fullDiffSourceTextStyle = TextStyle(
   color: Colors.white,
   fontFamily: technicalFontFamily,
   fontFamilyFallback: technicalFontFallback,
   fontSize: 12,
-  height: 21 / 12,
+  height: fullDiffSourceRowHeight / 12,
 );
 
 const _gutterStyle = TextStyle(
@@ -253,6 +255,7 @@ class FullDiffCodeRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compactSourceRow = leadingMetadata != null;
     final (sourceColor, gutterColor, marker) = switch (line.kind) {
       DiffLineKind.add => (fullDiffAddedSource, fullDiffAddedGutter, '+'),
       DiffLineKind.delete => (
@@ -298,9 +301,16 @@ class FullDiffCodeRow extends StatelessWidget {
                 child: Stack(
                   children: [
                     ConstrainedBox(
-                      constraints: const BoxConstraints(minHeight: 27),
+                      constraints: BoxConstraints(
+                        minHeight: compactSourceRow
+                            ? fullDiffSourceRowHeight
+                            : 27,
+                      ),
                       child: Padding(
-                        padding: const EdgeInsets.fromLTRB(10, 3, 10, 3),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: compactSourceRow ? 0 : 3,
+                        ),
                         child: _SourceSelectionContainer(
                           selectionOrder: selectionOrder,
                           child: source,

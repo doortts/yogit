@@ -160,10 +160,10 @@ class BlameSourceRow extends StatelessWidget {
       leadingMetadata: SizedBox(
         key: Key('blame-metadata-$lineNumber'),
         width: metadataWidth,
-        height: 44,
+        height: fullDiffSourceRowHeight,
         child: Row(
           children: [
-            SizedBox(width: 22, child: _avatar()),
+            SizedBox(width: 20, child: _avatar()),
             SizedBox(
               key: Key('blame-line-number-$lineNumber'),
               width: 42,
@@ -208,8 +208,8 @@ class BlameSourceRow extends StatelessWidget {
             ),
             SizedBox(
               key: Key('blame-rail-$lineNumber'),
-              width: 4,
-              height: 44,
+              width: 3,
+              height: fullDiffSourceRowHeight,
               child: ColoredBox(color: _railColor(blame.sha)),
             ),
           ],
@@ -224,7 +224,7 @@ class BlameSourceRow extends StatelessWidget {
       key: Key('blame-avatar-$lineNumber'),
       identity: identity,
       remoteAvatar: remoteAvatar,
-      size: 22,
+      size: 20,
     );
 
     final service = showRemoteAvatars && _shaBranch(blame.sha) != null

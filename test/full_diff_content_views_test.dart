@@ -1093,7 +1093,12 @@ void main() {
       tester.getSize(find.byKey(const Key('blame-metadata-2'))).width,
       360,
     );
-    expect(tester.getSize(find.byKey(const Key('blame-rail-2'))).width, 4);
+    expect(tester.getSize(find.byKey(const Key('blame-line-2'))).height, 21);
+    expect(
+      tester.getSize(find.byKey(const Key('blame-avatar-2'))),
+      const Size(20, 20),
+    );
+    expect(tester.getSize(find.byKey(const Key('blame-rail-2'))).width, 3);
     final orderedColumns = [
       find.byKey(const Key('blame-avatar-2')),
       find.byKey(const Key('blame-line-number-2')),
@@ -1143,6 +1148,48 @@ void main() {
           )
           .showGutter,
       isFalse,
+    );
+  });
+
+  testWidgets('wrapped blame source lines can grow beyond the base row height', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      qaApp(
+        const SizedBox(
+          width: 360,
+          child: BlameSourceRow(
+            key: Key('wrapped-blame-row'),
+            blame: BlameLine(
+              lineNumber: 1,
+              sha: '40aff6d1',
+              author: 'Suwon Chae',
+              uncommitted: false,
+            ),
+            lineNumber: 1,
+            source:
+                'const wrappedSource = '
+                '"a deliberately long value that needs several visual lines";',
+            path: 'wrapped.dart',
+            side: FileDocumentSide.result,
+            kind: DiffLineKind.context,
+            wrapLines: true,
+            highlighter: fakeHighlighter,
+            current: false,
+            viewportWidth: 360,
+            showRemoteAvatars: false,
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      tester.getSize(find.byKey(const Key('wrapped-blame-row'))).height,
+      greaterThan(21),
+    );
+    expect(
+      tester.getSize(find.byKey(const Key('blame-metadata-1'))).height,
+      21,
     );
   });
 

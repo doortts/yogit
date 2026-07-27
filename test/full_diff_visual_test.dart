@@ -781,7 +781,7 @@ void main() {
     expect(filePane, const Rect.fromLTRB(0, 116, 278, 760));
   });
 
-  testWidgets('final polish Blame rows use the approved 44px height', (
+  testWidgets('final polish Blame rows use the approved 21px height', (
     tester,
   ) async {
     addTearDown(() {
@@ -809,7 +809,11 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(tester.getSize(find.byKey(const Key('blame-line-313'))).height, 44);
+    expect(tester.getSize(find.byKey(const Key('blame-line-313'))).height, 21);
+    expect(
+      tester.getSize(find.byKey(const Key('blame-avatar-313'))),
+      const Size(20, 20),
+    );
   });
 
   testWidgets('blame renders aligned metadata columns and source', (
@@ -874,7 +878,7 @@ void main() {
     expect(tester.getTopLeft(summary).dx, lessThan(tester.getTopLeft(date).dx));
     expect(tester.getTopLeft(date).dx, lessThan(tester.getTopLeft(rail).dx));
     expect(tester.getTopLeft(rail).dx, lessThan(tester.getTopLeft(source).dx));
-    expect(tester.getSize(rail).width, 4);
+    expect(tester.getSize(rail).width, 3);
     expect(find.byKey(const Key('blame-hunk-header-hunk-1')), findsNothing);
   });
 
