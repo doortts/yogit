@@ -30,6 +30,7 @@
 
 - 미리보기 파일 목록 영역과 코드 diff 영역의 독립 스크롤
 - Full Diff 화면과 옵션의 영구 저장
+- Full Diff의 File 탭과 원본 파일 전용 화면 제거
 - Unified / Side-by-side 배치와 Hunk 범위의 분리
 - 한 파일의 모든 Hunk를 한 스크롤 화면에 표시
 - Hunk를 끈 전체 파일 diff
@@ -48,16 +49,20 @@
 - Git과 다른 자체 diff 알고리즘 도입
 - 커밋 본문의 추가 조회
 - 미리보기의 커밋 정보 배치 변경
+- Hunk를 끌 때 제공하는 전체 파일 범위의 diff 제거
 
 ## 용어와 옵션 구조
 
 현재 `DiffPresentation.hunk`, `inline`, `split` 구조를 다음 두 축으로 나눈다.
 
 ```dart
+enum FullDiffView { diff, blame, history }
 enum DiffLayout { unified, sideBySide }
 enum DiffScope { hunks, fullFile }
 ```
 
+- **Diff / Blame / History**: Full Diff의 주 화면이다. 기존 File 화면은
+  제거한다.
 - **Unified**: 기존 Inline을 대체한다. 삭제와 추가를 한 열에 이어 표시한다.
 - **Side-by-side**: 기존 Split을 대체한다. 이전 내용과 이후 내용을 두 열에
   나란히 표시한다.
@@ -93,7 +98,7 @@ class FullDiffPreferences {
 
 저장하는 값은 다음과 같다.
 
-- File / Diff / Blame / History 중 마지막 화면
+- Diff / Blame / History 중 마지막 화면
 - Unified / Side-by-side 중 마지막 배치
 - Hunk 켜짐 여부
 - diff 알고리즘
@@ -147,10 +152,9 @@ diff를 다시 읽어야 하므로 새 결과를 성공적으로 받은 뒤 저�
 
 | 동작 | 단축키 |
 | --- | --- |
-| File | `⌘1` |
-| Diff | `⌘2` |
-| Blame | `⌘3` |
-| History | `⌘4` |
+| Diff | `⌘1` |
+| Blame | `⌘2` |
+| History | `⌘3` |
 | Unified / Side-by-side 전환 | `⌘U` |
 | Hunk 켜기·끄기 | `⌘⇧H` |
 | diff 알고리즘 선택창 | `⌘⇧A` |
@@ -315,7 +319,8 @@ History `ListView`의 바깥 `EdgeInsets.all(12)`를 제거한다. 선택 배경
 
 - 미리보기 파일 영역과 diff 영역의 스크롤 위치가 서로 영향을 주지 않는지 확인
 - Full Diff를 닫고 다시 열거나 앱을 다시 만들었을 때 마지막 옵션 복원
-- `⌘1`부터 `⌘4`, `⌘U`, 각 토글 단축키 동작
+- `⌘1`부터 `⌘3`, `⌘U`, 각 토글 단축키 동작
+- File 버튼과 `⌘4` 동작이 남아 있지 않은지 확인
 - Command 키를 누르는 동안에만 단축키 배지가 보이고 레이아웃이 움직이지 않는지
   확인
 - Hunk를 켰을 때 한 파일의 모든 Hunk가 같은 목록에 순서대로 나타나는지 확인
@@ -336,18 +341,20 @@ History `ListView`의 바깥 `EdgeInsets.all(12)`를 제거한다. 선택 배경
 ## 완료 기준
 
 1. 미리보기 파일 영역과 코드 diff 영역을 독립적으로 스크롤할 수 있다.
-2. Full Diff를 다시 열면 마지막 화면과 표시 옵션이 복원된다.
-3. Unified와 Side-by-side 중 하나가 항상 선택되며 `⌘U`로 전환된다.
-4. Hunk는 별도 토글이고 기본값은 켬이다.
-5. Hunk를 켜면 파일의 모든 Hunk가 한 스크롤 화면에 위치 순서대로 표시된다.
-6. Hunk를 끄면 전체 파일 문맥이 Unified와 Side-by-side에 표시된다.
-7. 선택한 Git diff 알고리즘과 공백 옵션이 실제 명령에 적용된다.
-8. 알고리즘 설명창의 오른쪽 설명이 호버와 키보드 이동에 즉시 반응한다.
-9. Command 키를 누르면 옵션 아래에 단축키가 나타나며 화면 배치가 움직이지
+2. Full Diff에는 Diff, Blame, History만 있으며 File 버튼과 원본 파일 전용
+   화면은 없다.
+3. Full Diff를 다시 열면 마지막 화면과 표시 옵션이 복원된다.
+4. Unified와 Side-by-side 중 하나가 항상 선택되며 `⌘U`로 전환된다.
+5. Hunk는 별도 토글이고 기본값은 켬이다.
+6. Hunk를 켜면 파일의 모든 Hunk가 한 스크롤 화면에 위치 순서대로 표시된다.
+7. Hunk를 끄면 전체 파일 문맥이 Unified와 Side-by-side에 표시된다.
+8. 선택한 Git diff 알고리즘과 공백 옵션이 실제 명령에 적용된다.
+9. 알고리즘 설명창의 오른쪽 설명이 호버와 키보드 이동에 즉시 반응한다.
+10. Command 키를 누르면 옵션 아래에 단축키가 나타나며 화면 배치가 움직이지
    않는다.
-10. Blame 줄을 호버·클릭·키보드로 선택할 수 있고 커밋 상세 카드가 두 줄 아래에
+11. Blame 줄을 호버·클릭·키보드로 선택할 수 있고 커밋 상세 카드가 두 줄 아래에
     다른 줄을 밀지 않고 나타난다.
-11. `⌘⇧↑/↓`는 활성 스크롤 영역을 현재 보이는 높이의 50%만큼 이동한다.
-12. 파일·History·diff 패널 사이에 세로선이 있으며 각 목록 폭을 조절하고
+12. `⌘⇧↑/↓`는 활성 스크롤 영역을 현재 보이는 높이의 50%만큼 이동한다.
+13. 파일·History·diff 패널 사이에 세로선이 있으며 각 목록 폭을 조절하고
     복원할 수 있다.
-13. History 목록은 패널 바깥 여백 없이 가장자리에 붙는다.
+14. History 목록은 패널 바깥 여백 없이 가장자리에 붙는다.
