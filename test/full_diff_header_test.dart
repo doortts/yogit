@@ -81,46 +81,72 @@ void main() {
     );
   });
 
-  testWidgets('algorithm menu shows five choices and its selected label', (
+  testWidgets('algorithm chooser marks only its applied value as selected', (
     tester,
   ) async {
+    final semantics = tester.ensureSemantics();
     DiffAlgorithm? selected;
     await pumpHeaders(tester, onAlgorithmSelected: (value) => selected = value);
     await tester.tap(find.byKey(const Key('diff-algorithm')));
-    await tester.pumpAndSettle();
+    await tester.pump();
 
-    for (final label in [
-      'Git setting',
-      'Myers',
-      'Minimal',
-      'Patience',
-      'Histogram',
-    ]) {
-      expect(
-        find.descendant(
-          of: find.byType(CheckedPopupMenuItem<DiffAlgorithm>),
-          matching: find.text(label),
-        ),
-        findsOneWidget,
-      );
+    final selectedOptions = <DiffAlgorithm>[];
+    for (final algorithm in DiffAlgorithm.values) {
+      final option = find.byKey(Key('algorithm-option-${algorithm.name}'));
+      expect(option, findsOneWidget);
+      final data = tester.getSemantics(option).getSemanticsData();
+      if (data.flagsCollection.isSelected == ui.Tristate.isTrue) {
+        selectedOptions.add(algorithm);
+      }
     }
-    final checked = tester
-        .widgetList<CheckedPopupMenuItem<DiffAlgorithm>>(
-          find.byType(CheckedPopupMenuItem<DiffAlgorithm>),
-        )
-        .singleWhere((item) => item.checked);
-    expect(checked.value, DiffAlgorithm.histogram);
+    expect(selectedOptions, [DiffAlgorithm.histogram]);
 
-    await tester.tap(
-      find.ancestor(
-        of: find.text('Histogram'),
-        matching: find.byType(CheckedPopupMenuItem<DiffAlgorithm>),
-      ),
-    );
+    await tester.tap(find.byKey(const Key('algorithm-option-histogram')));
     await tester.pumpAndSettle();
     expect(selected, DiffAlgorithm.histogram);
     expect(find.text('Histogram'), findsOneWidget);
     expect(find.byKey(const Key('diff-algorithm-value')), findsOneWidget);
+    semantics.dispose();
+  });
+
+  testWidgets('algorithm chooser previews immediately and applies on enter', (
+    tester,
+  ) async {
+    DiffAlgorithm? selected;
+    await pumpHeaders(
+      tester,
+      algorithm: DiffAlgorithm.histogram,
+      onAlgorithmSelected: (value) => selected = value,
+    );
+
+    expect(find.text('diff 알고리즘'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('diff-algorithm')),
+        matching: find.text('Histogram'),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const Key('diff-algorithm')));
+    await tester.pump();
+    expect(
+      find.byKey(const Key('algorithm-details-histogram')),
+      findsOneWidget,
+    );
+
+    final patience = find.byKey(const Key('algorithm-option-patience'));
+    final mouse = await tester.createGesture(kind: ui.PointerDeviceKind.mouse);
+    await mouse.addPointer();
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(patience));
+    await tester.pump();
+
+    expect(find.byKey(const Key('algorithm-details-patience')), findsOneWidget);
+    expect(selected, isNull);
+
+    await tester.tap(patience);
+    await tester.pumpAndSettle();
+    expect(selected, DiffAlgorithm.patience);
   });
 
   testWidgets(
@@ -155,7 +181,7 @@ void main() {
       expect(
         data.hint,
         'Git이 변경 구간을 나누는 방식을 정합니다. '
-        '빈도가 낮은 줄을 기준으로 삼아 반복이 많은 코드의 변경 경계를 찾습니다.',
+        '빈도가 낮은 줄을 기준으로 반복 코드의 경계를 찾습니다.',
       );
       expect(data.value, isEmpty);
       expect(data.tooltip, isEmpty);
@@ -180,47 +206,23 @@ void main() {
   test('describes every supported diff algorithm', () {
     expect(
       diffAlgorithmDescription(DiffAlgorithm.gitSetting),
-      'Git 설정에 지정된 알고리즘을 사용합니다. 설정이 없으면 Git의 기본 동작을 따릅니다.',
+      '저장소의 Git 설정을 따릅니다. 설정이 없으면 Git 기본값을 사용합니다.',
     );
     expect(
       diffAlgorithmDescription(DiffAlgorithm.myers),
-      '일반적인 소스 변경을 빠르게 비교하는 Git의 기본 알고리즘입니다.',
+      '일반적인 소스 변경을 빠르게 비교하는 Git 기본 알고리즘입니다.',
     );
     expect(
       diffAlgorithmDescription(DiffAlgorithm.minimal),
-      '계산을 더 수행해 가능한 한 작은 변경 결과를 찾습니다. 큰 파일에서는 느릴 수 있습니다.',
+      '계산을 더 수행해 가능한 한 작은 변경 묶음을 찾습니다.',
     );
     expect(
       diffAlgorithmDescription(DiffAlgorithm.patience),
-      '고유한 줄을 기준으로 삼아 이동하거나 재구성한 코드의 경계를 읽기 쉽게 만듭니다.',
+      '고유한 줄을 기준으로 이동한 코드의 경계를 찾습니다.',
     );
     expect(
       diffAlgorithmDescription(DiffAlgorithm.histogram),
-      '빈도가 낮은 줄을 기준으로 삼아 반복이 많은 코드의 변경 경계를 찾습니다.',
-    );
-  });
-
-  testWidgets('algorithm control explains the selected algorithm on hover', (
-    tester,
-  ) async {
-    await pumpHeaders(tester);
-
-    final mouse = await tester.createGesture(kind: ui.PointerDeviceKind.mouse);
-    await mouse.addPointer();
-    await mouse.moveTo(
-      tester.getCenter(find.byKey(const Key('diff-algorithm'))),
-    );
-    await tester.pump(const Duration(milliseconds: 499));
-    expect(find.text('Diff 알고리즘 · Histogram'), findsNothing);
-    await tester.pump(const Duration(milliseconds: 1));
-
-    expect(find.text('Diff 알고리즘 · Histogram'), findsOneWidget);
-    expect(
-      find.text(
-        'Git이 변경 구간을 나누는 방식을 정합니다. '
-        '빈도가 낮은 줄을 기준으로 삼아 반복이 많은 코드의 변경 경계를 찾습니다.',
-      ),
-      findsOneWidget,
+      '빈도가 낮은 줄을 기준으로 반복 코드의 경계를 찾습니다.',
     );
   });
 

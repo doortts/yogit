@@ -1057,6 +1057,27 @@ void main() {
     expect(find.semantics.byLabel('diff 알고리즘: Histogram'), findsOneWidget);
   });
 
+  testWidgets('the 480px algorithm chooser stays inside the viewport', (
+    tester,
+  ) async {
+    final fixture = await workspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(480, 560),
+    );
+
+    await tester.tap(find.byKey(const Key('diff-algorithm')));
+    await tester.pump();
+
+    final details = find.byKey(const Key('algorithm-details-gitSetting'));
+    expect(details, findsOneWidget);
+    expect(tester.getTopLeft(details).dx, greaterThanOrEqualTo(0));
+    expect(tester.getTopRight(details).dx, lessThanOrEqualTo(480));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('a diff refresh error uses the compact guide type size', (
     tester,
   ) async {
@@ -1134,12 +1155,7 @@ void main() {
 
       await tester.tap(find.byKey(const Key('diff-algorithm')));
       await tester.pumpAndSettle();
-      await tester.tap(
-        find.ancestor(
-          of: find.text('Histogram'),
-          matching: find.byType(CheckedPopupMenuItem<DiffAlgorithm>),
-        ),
-      );
+      await tester.tap(find.byKey(const Key('algorithm-option-histogram')));
       await tester.pumpAndSettle();
 
       expect(histogramLoads, 2);
@@ -1922,6 +1938,84 @@ void main() {
     expect(controller.state.focusMode, isTrue);
   });
 
+  testWidgets(
+    'algorithm shortcut previews with arrows and applies with enter',
+    (tester) async {
+      final fixture = await workspaceFixture();
+      addTearDown(fixture.controller.dispose);
+      await pumpWorkspace(
+        tester,
+        controller: fixture.controller,
+        size: const Size(1070, 842),
+      );
+      final requestsBefore = fixture.repository.diffRequests.length;
+
+      await sendChord(tester, LogicalKeyboardKey.keyA, meta: true, shift: true);
+      expect(
+        find.byKey(const Key('algorithm-details-gitSetting')),
+        findsOneWidget,
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump();
+      expect(find.byKey(const Key('algorithm-details-myers')), findsOneWidget);
+      expect(
+        tester
+            .getSemantics(find.byKey(const Key('algorithm-option-myers')))
+            .getSemanticsData()
+            .flagsCollection
+            .isFocused,
+        ui.Tristate.isTrue,
+      );
+      expect(
+        fixture.controller.state.appliedAlgorithm,
+        DiffAlgorithm.gitSetting,
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+
+      expect(fixture.repository.diffRequests, hasLength(requestsBefore + 1));
+      expect(
+        fixture.repository.diffRequests.last.algorithm,
+        DiffAlgorithm.myers,
+      );
+      expect(fixture.controller.state.appliedAlgorithm, DiffAlgorithm.myers);
+    },
+  );
+
+  testWidgets('escape cancels algorithm preview and restores toolbar focus', (
+    tester,
+  ) async {
+    final fixture = await workspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1070, 842),
+    );
+    final requestsBefore = fixture.repository.diffRequests.length;
+
+    await sendChord(tester, LogicalKeyboardKey.keyA, meta: true, shift: true);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(find.byKey(const Key('algorithm-details-myers')), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('algorithm-details-myers')), findsNothing);
+    expect(fixture.repository.diffRequests, hasLength(requestsBefore));
+    expect(fixture.controller.state.appliedAlgorithm, DiffAlgorithm.gitSetting);
+    final algorithmButton = tester.widget<InkWell>(
+      find.descendant(
+        of: find.byKey(const Key('diff-algorithm')),
+        matching: find.byType(InkWell),
+      ),
+    );
+    expect(algorithmButton.focusNode?.hasFocus, isTrue);
+  });
+
   testWidgets('file and History lists move selection and focus explicitly', (
     tester,
   ) async {
@@ -2048,40 +2142,6 @@ void main() {
       await sendChord(tester, LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
       expect(find.text('Histogram'), findsNothing);
-      expect(find.byKey(const Key('content-scrollable')), findsOneWidget);
-
-      await sendChord(tester, LogicalKeyboardKey.escape);
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('launch-full-diff')), findsOneWidget);
-    },
-  );
-
-  testWidgets(
-    'a visible algorithm tooltip consumes Escape before route navigation',
-    (tester) async {
-      final fixture = await workspaceFixture();
-      addTearDown(fixture.controller.dispose);
-      await pumpWorkspace(
-        tester,
-        controller: fixture.controller,
-        size: const Size(1070, 842),
-        routeBacked: true,
-      );
-      final mouse = await tester.createGesture(
-        kind: ui.PointerDeviceKind.mouse,
-      );
-      await mouse.addPointer();
-      addTearDown(mouse.removePointer);
-      await mouse.moveTo(
-        tester.getCenter(find.byKey(const Key('diff-algorithm'))),
-      );
-      await tester.pump(const Duration(milliseconds: 600));
-      expect(find.textContaining('Git이 변경 구간을 나누는 방식을 정합니다.'), findsOneWidget);
-
-      await sendChord(tester, LogicalKeyboardKey.escape);
-      await tester.pumpAndSettle();
-
-      expect(find.textContaining('Git이 변경 구간을 나누는 방식을 정합니다.'), findsNothing);
       expect(find.byKey(const Key('content-scrollable')), findsOneWidget);
 
       await sendChord(tester, LogicalKeyboardKey.escape);
@@ -2389,6 +2449,69 @@ void main() {
     );
     expect(find.byKey(const Key('hunk-toggle-on')), findsOneWidget);
   });
+
+  testWidgets(
+    'failed algorithm choice keeps its applied label and preference',
+    (tester) async {
+      final pending = Completer<List<DiffLine>>();
+      final repository = FakeFullDiffRepository()
+        ..files = ((_, _) async => const [fileA])
+        ..diff = ((_, _, _, algorithm, _) {
+          if (algorithm == DiffAlgorithm.myers) return pending.future;
+          return Future.value(twoHunkLines);
+        })
+        ..content = ((_, _, _) async => resultFile.bytes);
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [commitA],
+        initialIndex: 0,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      final reported = <FullDiffPreferences>[];
+      await pumpWorkspace(
+        tester,
+        controller: controller,
+        size: const Size(1200, 800),
+        onPreferencesChanged: reported.add,
+      );
+
+      await tester.tap(find.byKey(const Key('diff-algorithm')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('algorithm-option-myers')));
+      await tester.pump();
+
+      expect(controller.state.requestedAlgorithm, DiffAlgorithm.myers);
+      expect(controller.state.appliedAlgorithm, DiffAlgorithm.gitSetting);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('diff-algorithm')),
+          matching: find.text('Git setting'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        reported.where(
+          (preference) => preference.algorithm == DiffAlgorithm.myers,
+        ),
+        isEmpty,
+      );
+
+      pending.completeError(
+        const GitRepositoryException('/repo', 'algorithm failed'),
+      );
+      await tester.pumpAndSettle();
+
+      expect(controller.state.requestedAlgorithm, DiffAlgorithm.gitSetting);
+      expect(controller.state.appliedAlgorithm, DiffAlgorithm.gitSetting);
+      expect(
+        reported.where(
+          (preference) => preference.algorithm == DiffAlgorithm.myers,
+        ),
+        isEmpty,
+      );
+    },
+  );
 
   testWidgets('full diff command shortcuts change only their owned options', (
     tester,

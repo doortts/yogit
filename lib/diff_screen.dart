@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import 'avatars.dart';
 import 'external_editor.dart';
+import 'full_diff_algorithm_chooser.dart';
 import 'full_blame_view.dart';
 import 'full_diff_controller.dart';
 import 'full_diff_header.dart';
@@ -52,6 +53,10 @@ class _ToggleWhitespaceIntent extends Intent {
 
 class _ToggleWrapIntent extends Intent {
   const _ToggleWrapIntent();
+}
+
+class _OpenAlgorithmChooserIntent extends Intent {
+  const _OpenAlgorithmChooserIntent();
 }
 
 class _StepHunkIntent extends Intent {
@@ -124,6 +129,7 @@ class _DiffScreenState extends State<DiffScreen> {
   final _historyScroll = ScrollController();
   final _fileListFocus = FocusNode(debugLabel: 'full diff files');
   final _historyListFocus = FocusNode(debugLabel: 'full diff history');
+  final _algorithmChooserKey = GlobalKey<FullDiffAlgorithmChooserState>();
   final _contentViewportKey = GlobalKey();
   final _fullFileScrollTargetKey = GlobalKey(
     debugLabel: 'full file scroll target',
@@ -805,6 +811,12 @@ class _DiffScreenState extends State<DiffScreen> {
               shift: true,
               includeRepeats: false,
             ): _ToggleWrapIntent(),
+            SingleActivator(
+              LogicalKeyboardKey.keyA,
+              meta: true,
+              shift: true,
+              includeRepeats: false,
+            ): _OpenAlgorithmChooserIntent(),
             SingleActivator(LogicalKeyboardKey.arrowUp, alt: true):
                 _StepHunkIntent(-1),
             SingleActivator(LogicalKeyboardKey.arrowDown, alt: true):
@@ -884,6 +896,13 @@ class _DiffScreenState extends State<DiffScreen> {
                   return null;
                 },
               ),
+              _OpenAlgorithmChooserIntent:
+                  CallbackAction<_OpenAlgorithmChooserIntent>(
+                    onInvoke: (_) {
+                      _algorithmChooserKey.currentState?.show();
+                      return null;
+                    },
+                  ),
               _StepHunkIntent: CallbackAction<_StepHunkIntent>(
                 onInvoke: (intent) {
                   _controller.stepAnchor(intent.delta);
@@ -942,12 +961,13 @@ class _DiffScreenState extends State<DiffScreen> {
                         onFocusModeChanged: _controller.setFocusMode,
                       ),
                       GlobalDiffToolbar(
+                        algorithmChooserKey: _algorithmChooserKey,
                         view: state.view,
                         layout: state.layout,
                         hunkEnabled: state.requestedScope == DiffScope.hunks,
                         activeIndex: state.activeAnchor?.hunkIndex ?? 0,
                         anchorCount: state.patch.data?.hunks.length ?? 0,
-                        algorithm: state.requestedAlgorithm,
+                        algorithm: state.appliedAlgorithm,
                         ignoreWhitespace: state.requestedIgnoreWhitespace,
                         wrapLines: state.wrapLines,
                         loadingPatch: state.patch.loading,

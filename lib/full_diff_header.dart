@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 
+import 'full_diff_algorithm_chooser.dart';
 import 'full_diff_model.dart';
 import 'full_diff_shortcut_hint.dart';
 import 'full_diff_theme.dart';
 import 'git.dart';
 import 'typography.dart';
+
+export 'full_diff_algorithm_chooser.dart'
+    show DiffAlgorithmDetails, diffAlgorithmDescription;
 
 const _fullDiffInputBorder = Color(0x1A000000);
 
@@ -26,15 +30,6 @@ String fileSummary(GitFileChange file) =>
     '${file.status.characters.first} · '
     '+${file.additions ?? '—'} −${file.deletions ?? '—'} · '
     '${formatByteSize(file.sizeBytes)}';
-
-String diffAlgorithmDescription(DiffAlgorithm value) => switch (value) {
-  DiffAlgorithm.gitSetting =>
-    'Git 설정에 지정된 알고리즘을 사용합니다. 설정이 없으면 Git의 기본 동작을 따릅니다.',
-  DiffAlgorithm.myers => '일반적인 소스 변경을 빠르게 비교하는 Git의 기본 알고리즘입니다.',
-  DiffAlgorithm.minimal => '계산을 더 수행해 가능한 한 작은 변경 결과를 찾습니다. 큰 파일에서는 느릴 수 있습니다.',
-  DiffAlgorithm.patience => '고유한 줄을 기준으로 삼아 이동하거나 재구성한 코드의 경계를 읽기 쉽게 만듭니다.',
-  DiffAlgorithm.histogram => '빈도가 낮은 줄을 기준으로 삼아 반복이 많은 코드의 변경 경계를 찾습니다.',
-};
 
 class GlobalFileBar extends StatelessWidget {
   const GlobalFileBar({
@@ -213,6 +208,7 @@ class GlobalDiffToolbar extends StatelessWidget {
     required this.onAlgorithmSelected,
     required this.onIgnoreWhitespaceChanged,
     required this.onWrapLinesChanged,
+    this.algorithmChooserKey,
     this.showLeadingControls = true,
     this.showShortcutHints = false,
     super.key,
@@ -234,6 +230,7 @@ class GlobalDiffToolbar extends StatelessWidget {
   final ValueChanged<DiffAlgorithm> onAlgorithmSelected;
   final ValueChanged<bool> onIgnoreWhitespaceChanged;
   final ValueChanged<bool> onWrapLinesChanged;
+  final GlobalKey<FullDiffAlgorithmChooserState>? algorithmChooserKey;
   final bool showLeadingControls;
   final bool showShortcutHints;
 
@@ -255,11 +252,16 @@ class GlobalDiffToolbar extends StatelessWidget {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         const Text('diff 알고리즘', key: Key('diff-algorithm-label')),
-        _AlgorithmMenu(
-          algorithm: algorithm,
-          onSelected: onAlgorithmSelected,
-          compact: compact,
-          dense: dense,
+        FullDiffShortcutHint(
+          visible: showShortcutHints,
+          label: '⌘⇧A',
+          child: FullDiffAlgorithmChooser(
+            key: algorithmChooserKey,
+            algorithm: algorithm,
+            onSelected: onAlgorithmSelected,
+            compact: compact,
+            dense: dense,
+          ),
         ),
         FullDiffShortcutHint(
           visible: showShortcutHints,
@@ -660,90 +662,6 @@ class _NavigationButton extends StatelessWidget {
       visualDensity: VisualDensity.compact,
     ),
   );
-}
-
-const _diffAlgorithmPurpose = 'Git이 변경 구간을 나누는 방식을 정합니다.';
-
-class _AlgorithmMenu extends StatefulWidget {
-  const _AlgorithmMenu({
-    required this.algorithm,
-    required this.onSelected,
-    this.compact = false,
-    this.dense = false,
-  });
-
-  final DiffAlgorithm algorithm;
-  final ValueChanged<DiffAlgorithm> onSelected;
-  final bool compact;
-  final bool dense;
-
-  @override
-  State<_AlgorithmMenu> createState() => _AlgorithmMenuState();
-}
-
-class _AlgorithmMenuState extends State<_AlgorithmMenu> {
-  final _popupKey = GlobalKey<PopupMenuButtonState<DiffAlgorithm>>();
-
-  @override
-  Widget build(BuildContext context) {
-    final explanation =
-        '$_diffAlgorithmPurpose ${diffAlgorithmDescription(widget.algorithm)}';
-
-    return Semantics(
-      key: const Key('diff-algorithm'),
-      container: true,
-      button: true,
-      excludeSemantics: true,
-      label: 'diff 알고리즘: ${widget.algorithm.label}',
-      hint: explanation,
-      onTap: () => _popupKey.currentState?.showButtonMenu(),
-      child: PopupMenuButton<DiffAlgorithm>(
-        key: _popupKey,
-        tooltip: '',
-        onSelected: widget.onSelected,
-        itemBuilder: (context) => [
-          for (final value in DiffAlgorithm.values)
-            CheckedPopupMenuItem<DiffAlgorithm>(
-              value: value,
-              checked: value == widget.algorithm,
-              child: Text(value.label),
-            ),
-        ],
-        padding: EdgeInsets.zero,
-        child: Tooltip(
-          waitDuration: const Duration(milliseconds: 500),
-          excludeFromSemantics: true,
-          richMessage: TextSpan(
-            children: [
-              WidgetSpan(child: Text('Diff 알고리즘 · ${widget.algorithm.label}')),
-              const TextSpan(text: '\n'),
-              WidgetSpan(child: Text(explanation)),
-            ],
-          ),
-          child: Container(
-            key: const Key('diff-algorithm-value'),
-            height: fullDiffControlHeight,
-            padding: EdgeInsets.symmetric(
-              horizontal: widget.compact || widget.dense ? 4 : 8,
-            ),
-            decoration: BoxDecoration(
-              color: fullDiffControl,
-              borderRadius: BorderRadius.circular(fullDiffControlRadius),
-              border: Border.all(color: _fullDiffInputBorder),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(widget.algorithm.label),
-                SizedBox(width: widget.compact ? 2 : 4),
-                const Icon(Icons.arrow_drop_down, size: 16),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 class _HeaderToggle extends StatelessWidget {
