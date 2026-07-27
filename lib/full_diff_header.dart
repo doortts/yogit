@@ -548,7 +548,9 @@ class _NavigationButton extends StatelessWidget {
   );
 }
 
-class _AlgorithmMenu extends StatelessWidget {
+const _diffAlgorithmPurpose = 'Git이 변경 구간을 나누는 방식을 정합니다.';
+
+class _AlgorithmMenu extends StatefulWidget {
   const _AlgorithmMenu({
     required this.algorithm,
     required this.onSelected,
@@ -562,36 +564,53 @@ class _AlgorithmMenu extends StatelessWidget {
   final bool dense;
 
   @override
-  Widget build(BuildContext context) => Semantics(
-    container: true,
-    button: true,
-    label: 'diff 알고리즘: ${algorithm.label}',
-    child: ExcludeSemantics(
+  State<_AlgorithmMenu> createState() => _AlgorithmMenuState();
+}
+
+class _AlgorithmMenuState extends State<_AlgorithmMenu> {
+  final _popupKey = GlobalKey<PopupMenuButtonState<DiffAlgorithm>>();
+
+  @override
+  Widget build(BuildContext context) {
+    final explanation =
+        '$_diffAlgorithmPurpose ${diffAlgorithmDescription(widget.algorithm)}';
+
+    return Semantics(
+      key: const Key('diff-algorithm'),
+      container: true,
+      button: true,
+      excludeSemantics: true,
+      label: 'diff 알고리즘: ${widget.algorithm.label}',
+      hint: explanation,
+      onTap: () => _popupKey.currentState?.showButtonMenu(),
       child: PopupMenuButton<DiffAlgorithm>(
-        key: const Key('diff-algorithm'),
+        key: _popupKey,
         tooltip: '',
-        onSelected: onSelected,
+        onSelected: widget.onSelected,
         itemBuilder: (context) => [
           for (final value in DiffAlgorithm.values)
             CheckedPopupMenuItem<DiffAlgorithm>(
               value: value,
-              checked: value == algorithm,
+              checked: value == widget.algorithm,
               child: Text(value.label),
             ),
         ],
         padding: EdgeInsets.zero,
         child: Tooltip(
           waitDuration: const Duration(milliseconds: 500),
+          excludeFromSemantics: true,
           richMessage: TextSpan(
             children: [
-              WidgetSpan(child: Text('Diff 알고리즘 · ${algorithm.label}')),
+              WidgetSpan(child: Text('Diff 알고리즘 · ${widget.algorithm.label}')),
               const TextSpan(text: '\n'),
-              WidgetSpan(child: Text(diffAlgorithmDescription(algorithm))),
+              WidgetSpan(child: Text(explanation)),
             ],
           ),
           child: Container(
             height: fullDiffControlHeight,
-            padding: EdgeInsets.symmetric(horizontal: compact || dense ? 4 : 8),
+            padding: EdgeInsets.symmetric(
+              horizontal: widget.compact || widget.dense ? 4 : 8,
+            ),
             decoration: BoxDecoration(
               color: fullDiffControl,
               borderRadius: BorderRadius.circular(fullDiffControlRadius),
@@ -601,17 +620,19 @@ class _AlgorithmMenu extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  compact ? algorithm.label : 'diff 알고리즘 · ${algorithm.label}',
+                  widget.compact
+                      ? widget.algorithm.label
+                      : 'diff 알고리즘 · ${widget.algorithm.label}',
                 ),
-                SizedBox(width: compact ? 2 : 4),
+                SizedBox(width: widget.compact ? 2 : 4),
                 const Icon(Icons.arrow_drop_down, size: 16),
               ],
             ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _HeaderToggle extends StatelessWidget {

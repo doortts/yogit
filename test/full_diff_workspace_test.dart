@@ -127,6 +127,55 @@ void main() {
     return (controller: controller, repository: repository);
   }
 
+  Future<FullDiffSessionController> longHistoryController({
+    List<GitCommit> commits = const [commitA],
+  }) async {
+    const secondaryFile = GitFileChange(
+      path: 'src/secondary.pas',
+      status: 'M',
+      additions: 2,
+      deletions: 1,
+    );
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA, secondaryFile])
+      ..diff = ((_, _, _, _, _) async => twoHunkLines)
+      ..content = ((_, _, _) async => resultFile.bytes)
+      ..history = ((commit, file) async => [
+        GitFileHistoryRecord(
+          commit: commit,
+          path: file.path,
+          oldPath: file.oldPath,
+          status: file.status,
+        ),
+        for (var index = 1; index < 40; index++)
+          GitFileHistoryRecord(
+            commit: GitCommit(
+              sha: '${commit.sha}-history-$index',
+              shortSha: 'h$index',
+              parents: ['parent-$index'],
+              author: fixtureIdentity,
+              authorTimestamp: commit.authorTimestamp - index * 3600,
+              committer: fixtureIdentity,
+              committerTimestamp: commit.committerTimestamp - index * 3600,
+              refs: const [],
+              subject: 'Historical revision $index',
+            ),
+            path: file.path,
+            oldPath: file.oldPath,
+            status: file.status,
+          ),
+      ]);
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: commits,
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+    );
+    await controller.initialize();
+    controller.setView(FullDiffView.history);
+    return controller;
+  }
+
   Future<void> pumpWorkspace(
     WidgetTester tester, {
     required FullDiffSessionController controller,
@@ -203,6 +252,25 @@ void main() {
       matching: find.byType(InkWell),
     ),
   );
+
+  ScrollPosition historyPosition(WidgetTester tester) => tester
+      .state<ScrollableState>(
+        find
+            .descendant(
+              of: find.byKey(const Key('history-list')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      )
+      .position;
+
+  Future<double> scrollHistoryDeep(WidgetTester tester) async {
+    final position = historyPosition(tester);
+    expect(position.maxScrollExtent, greaterThan(300));
+    position.jumpTo(300);
+    await tester.pump();
+    return position.pixels;
+  }
 
   testWidgets('keeps presentation and anchor while switching main views', (
     tester,
@@ -388,6 +456,63 @@ void main() {
     );
   });
 
+  testWidgets(
+    'an empty preserved patch keeps refresh errors visible and can recover',
+    (tester) async {
+      var histogramLoads = 0;
+      final repository = FakeFullDiffRepository()
+        ..files = ((_, _) async => const [fileA])
+        ..diff = ((_, _, _, algorithm, _) async {
+          if (algorithm == DiffAlgorithm.gitSetting) return const [];
+          histogramLoads++;
+          if (histogramLoads == 1) {
+            throw const GitRepositoryException('/repo', 'refresh failed');
+          }
+          return twoHunkLines;
+        })
+        ..content = ((_, _, _) async => resultFile.bytes);
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [commitA],
+        initialIndex: 0,
+        initialView: FullDiffInitialView.hunk,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await pumpWorkspace(
+        tester,
+        controller: controller,
+        size: const Size(1070, 842),
+      );
+      expect(find.text('현재 옵션으로 표시할 변경이 없습니다.'), findsOneWidget);
+
+      await expectLater(
+        controller.selectAlgorithm(DiffAlgorithm.histogram),
+        throwsA(isA<GitRepositoryException>()),
+      );
+      await tester.pump();
+
+      expect(find.byKey(const Key('diff-refresh-error')), findsOneWidget);
+      expect(find.textContaining('refresh failed'), findsOneWidget);
+      expect(find.text('현재 옵션으로 표시할 변경이 없습니다.'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('diff-algorithm')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.ancestor(
+          of: find.text('Histogram'),
+          matching: find.byType(CheckedPopupMenuItem<DiffAlgorithm>),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(histogramLoads, 2);
+      expect(find.byKey(const Key('diff-refresh-error')), findsNothing);
+      expect(find.byKey(const Key('full-diff-unavailable')), findsNothing);
+      expect(find.text('first new'), findsOneWidget);
+    },
+  );
+
   testWidgets('focus mode restores pane widths and selection', (tester) async {
     final fixture = await workspaceFixture();
     addTearDown(fixture.controller.dispose);
@@ -556,6 +681,116 @@ void main() {
       );
       expect(find.byKey(const Key('history-detail-divider')), findsOneWidget);
     }
+  });
+
+  testWidgets(
+    'history split uses the local detail width after real navigation panes',
+    (tester) async {
+      for (final scenario in [
+        (windowWidth: 782.0, showsOldSide: false),
+        (windowWidth: 1440.0, showsOldSide: true),
+      ]) {
+        final fixture = await historyWorkspaceFixture();
+        addTearDown(fixture.controller.dispose);
+        fixture.controller.setPresentation(DiffPresentation.split);
+        await pumpWorkspace(
+          tester,
+          controller: fixture.controller,
+          size: Size(scenario.windowWidth, 842),
+        );
+
+        final detailWidth = tester
+            .getSize(find.byKey(const Key('history-detail-pane')))
+            .width;
+        if (scenario.showsOldSide) {
+          expect(detailWidth, greaterThan(480));
+          expect(find.byKey(const Key('split-old-pane')), findsOneWidget);
+        } else {
+          expect(detailWidth, lessThan(480));
+          expect(find.byKey(const Key('split-old-pane')), findsNothing);
+        }
+      }
+    },
+  );
+
+  testWidgets(
+    'history scroll stays for row selection and resets for a different file',
+    (tester) async {
+      final controller = await longHistoryController();
+      addTearDown(controller.dispose);
+      await pumpWorkspace(
+        tester,
+        controller: controller,
+        size: const Size(1070, 650),
+      );
+      final originalContext = controller.state.historyContext;
+      final beforeSelection = await scrollHistoryDeep(tester);
+
+      await controller.selectHistoryEntry(controller.state.history.data![5]);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(controller.state.historyContext, originalContext);
+      expect(historyPosition(tester).pixels, closeTo(beforeSelection, 0.5));
+
+      await controller.selectFile(controller.state.files.last);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(controller.state.historyContext?.path, 'src/secondary.pas');
+      expect(historyPosition(tester).pixels, 0);
+    },
+  );
+
+  testWidgets('history scroll resets for commit and parent context changes', (
+    tester,
+  ) async {
+    final controller = await longHistoryController(
+      commits: [commitA, historyEntries.last.commit],
+    );
+    addTearDown(controller.dispose);
+    await pumpWorkspace(
+      tester,
+      controller: controller,
+      size: const Size(1070, 650),
+    );
+
+    await scrollHistoryDeep(tester);
+    await controller.selectCommit(historyEntries.last.commit);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(
+      controller.state.historyContext?.startRevision,
+      historyEntries.last.commit.sha,
+    );
+    expect(historyPosition(tester).pixels, 0);
+
+    await scrollHistoryDeep(tester);
+    await controller.selectParent('alternate-parent');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(controller.state.parent, 'alternate-parent');
+    expect(historyPosition(tester).pixels, 0);
+  });
+
+  testWidgets('history scroll resets when the session controller is replaced', (
+    tester,
+  ) async {
+    final first = await longHistoryController();
+    final second = await longHistoryController();
+    addTearDown(first.dispose);
+    addTearDown(second.dispose);
+    await pumpWorkspace(tester, controller: first, size: const Size(1070, 650));
+    await scrollHistoryDeep(tester);
+    expect(first.state.historyContext, second.state.historyContext);
+
+    await pumpWorkspace(
+      tester,
+      controller: second,
+      size: const Size(1070, 650),
+    );
+
+    expect(historyPosition(tester).pixels, 0);
   });
 
   testWidgets('history row metadata shrinks inside the narrow list pane', (
@@ -762,6 +997,119 @@ void main() {
   });
 
   testWidgets(
+    'unmatched history detail retries the failed current patch in place',
+    (tester) async {
+      var patchLoads = 0;
+      final repository = FakeFullDiffRepository()
+        ..files = ((_, _) async => const [fileA])
+        ..diff = ((_, _, _, _, _) async {
+          patchLoads++;
+          if (patchLoads == 1) {
+            throw const GitRepositoryException('/repo', 'patch failed');
+          }
+          return twoHunkLines;
+        })
+        ..content = ((_, _, _) async => resultFile.bytes)
+        ..history = ((_, _) async => [
+          GitFileHistoryRecord(
+            commit: historyEntries.last.commit,
+            path: fileA.path,
+            oldPath: null,
+            status: 'M',
+          ),
+        ]);
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [commitA],
+        initialIndex: 0,
+        initialView: FullDiffInitialView.hunk,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      controller.setView(FullDiffView.history);
+      await pumpWorkspace(
+        tester,
+        controller: controller,
+        size: const Size(1070, 842),
+      );
+      final originalHistory = controller.state.history.data;
+      final originalContext = controller.state.historyContext;
+
+      expect(controller.state.selectedHistoryEntry, isNull);
+      expect(find.byKey(const Key('full-diff-unavailable')), findsOneWidget);
+
+      await tester.tap(find.text('다시 시도'));
+      await pumpUntil(
+        tester,
+        () => patchLoads == 2 && controller.state.patch.data != null,
+      );
+      await tester.pump();
+
+      expect(patchLoads, 2);
+      expect(controller.state.history.data, same(originalHistory));
+      expect(controller.state.historyContext, originalContext);
+      expect(controller.state.selectedHistoryEntry, isNull);
+      expect(find.text('first new'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'changed files retry preserves the selected historical list and context',
+    (tester) async {
+      var historicalFileLoads = 0;
+      final fixture = await historyWorkspaceFixture(
+        files: (commit, _) async {
+          if (commit.sha == commitA.sha) return const [fileA];
+          historicalFileLoads++;
+          if (historicalFileLoads == 1) {
+            throw const GitRepositoryException(
+              '/repo',
+              'historical files failed',
+            );
+          }
+          return const [fileA];
+        },
+      );
+      addTearDown(fixture.controller.dispose);
+      await pumpWorkspace(
+        tester,
+        controller: fixture.controller,
+        size: const Size(1070, 842),
+      );
+      final originalHistory = fixture.controller.state.history.data;
+      final originalContext = fixture.controller.state.historyContext;
+      final selectedEntry = originalHistory!.last;
+
+      await tester.tap(
+        find.byKey(Key('history-row-${selectedEntry.commit.sha}')),
+      );
+      await pumpUntil(
+        tester,
+        () => fixture.controller.state.filesResource.error != null,
+      );
+      await tester.pump();
+      expect(find.byKey(const Key('files-error')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('files-retry')));
+      await pumpUntil(
+        tester,
+        () =>
+            historicalFileLoads == 2 &&
+            fixture.controller.state.patch.data != null,
+      );
+      await tester.pump();
+
+      expect(fixture.controller.state.history.data, same(originalHistory));
+      expect(fixture.controller.state.historyContext, originalContext);
+      expect(
+        fixture.controller.state.selectedHistoryEntry,
+        same(selectedEntry),
+      );
+      expect(find.text('historical change'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
     'history keeps its list and shows loading while revision files load',
     (tester) async {
       final historicalFiles = Completer<List<GitFileChange>>();
@@ -948,6 +1296,40 @@ void main() {
       await sendChord(tester, LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
       expect(find.text('Histogram'), findsNothing);
+      expect(find.byKey(const Key('content-scrollable')), findsOneWidget);
+
+      await sendChord(tester, LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('launch-full-diff')), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'a visible algorithm tooltip consumes Escape before route navigation',
+    (tester) async {
+      final fixture = await workspaceFixture();
+      addTearDown(fixture.controller.dispose);
+      await pumpWorkspace(
+        tester,
+        controller: fixture.controller,
+        size: const Size(1070, 842),
+        routeBacked: true,
+      );
+      final mouse = await tester.createGesture(
+        kind: ui.PointerDeviceKind.mouse,
+      );
+      await mouse.addPointer();
+      addTearDown(mouse.removePointer);
+      await mouse.moveTo(
+        tester.getCenter(find.byKey(const Key('diff-algorithm'))),
+      );
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(find.textContaining('Git이 변경 구간을 나누는 방식을 정합니다.'), findsOneWidget);
+
+      await sendChord(tester, LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Git이 변경 구간을 나누는 방식을 정합니다.'), findsNothing);
       expect(find.byKey(const Key('content-scrollable')), findsOneWidget);
 
       await sendChord(tester, LogicalKeyboardKey.escape);
@@ -1159,6 +1541,64 @@ void main() {
     expect(find.byKey(const Key('full-diff-unavailable')), findsNothing);
     expect(find.text('first new'), findsOneWidget);
   });
+
+  for (final view in [FullDiffView.file, FullDiffView.diff]) {
+    testWidgets(
+      '${view.name} view byte failures use the structured panel and retry only content',
+      (tester) async {
+        var contentLoads = 0;
+        final repository = FakeFullDiffRepository()
+          ..files = ((_, _) async => const [fileA])
+          ..diff = ((_, _, _, _, _) async => twoHunkLines)
+          ..content = ((_, _, _) async {
+            contentLoads++;
+            if (contentLoads == 1) {
+              throw const GitRepositoryException('/repo', 'content failed');
+            }
+            return resultFile.bytes;
+          });
+        final controller = FullDiffSessionController(
+          repository: repository,
+          commits: const [commitA],
+          initialIndex: 0,
+          initialView: view == FullDiffView.file
+              ? FullDiffInitialView.fullFile
+              : FullDiffInitialView.hunk,
+        );
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        await pumpWorkspace(
+          tester,
+          controller: controller,
+          size: const Size(1070, 650),
+        );
+
+        expect(find.byKey(const Key('full-diff-unavailable')), findsOneWidget);
+        expect(find.text(fileA.path), findsWidgets);
+        expect(find.text('M · +12 −4'), findsWidgets);
+        expect(find.text('Git error'), findsOneWidget);
+        expect(find.text('Git에서 이 파일의 변경 내용을 읽지 못했습니다.'), findsOneWidget);
+        expect(find.textContaining('content failed'), findsOneWidget);
+        expect(repository.contentRequests, hasLength(1));
+        expect(repository.diffRequests, hasLength(1));
+
+        await tester.tap(find.text('다시 시도'));
+        await tester.pumpAndSettle();
+
+        expect(repository.contentRequests, hasLength(2));
+        expect(repository.diffRequests, hasLength(1));
+        expect(find.byKey(const Key('full-diff-unavailable')), findsNothing);
+        expect(
+          find.byKey(
+            view == FullDiffView.file
+                ? const Key('file-list')
+                : const Key('hunk-list'),
+          ),
+          findsOneWidget,
+        );
+      },
+    );
+  }
 
   final tooManyLines = Uint8List((fullDiffTextLineLimit + 1) * 2);
   for (var index = 0; index < tooManyLines.length; index += 2) {

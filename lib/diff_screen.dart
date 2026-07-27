@@ -100,6 +100,7 @@ class _DiffScreenState extends State<DiffScreen> {
   bool _scrollSyncScheduled = false;
   bool _programmaticAnchorScroll = false;
   bool _pendingScrollToTop = false;
+  bool _pendingHistoryScrollToTop = false;
   String? _pendingAnchorId;
   int _pendingAnchorDirection = 0;
   String? _editorError;
@@ -170,6 +171,7 @@ class _DiffScreenState extends State<DiffScreen> {
     if (_ownsController) _controller.dispose();
     _attachController(_newController());
     _pendingScrollToTop = true;
+    _pendingHistoryScrollToTop = true;
     _pendingAnchorId = null;
     _queueAttachedAnchorScroll();
     if (_pendingAnchorId == null) _scheduleScrollEffect();
@@ -210,6 +212,9 @@ class _DiffScreenState extends State<DiffScreen> {
     final nextAnchor = next.activeAnchor;
 
     if (changedDocument) _reconcileAnchorKeys(next.patch.data);
+    if (previous.historyContext != next.historyContext) {
+      _pendingHistoryScrollToTop = true;
+    }
     if (movedContext) {
       _invalidateEditorRequest();
       _pendingScrollToTop = true;
@@ -219,7 +224,9 @@ class _DiffScreenState extends State<DiffScreen> {
       _pendingAnchorId = nextAnchor.id;
       _pendingAnchorDirection = nextIndex.compareTo(previousIndex);
     }
-    if (_pendingScrollToTop || _pendingAnchorId != null) {
+    if (_pendingScrollToTop ||
+        _pendingHistoryScrollToTop ||
+        _pendingAnchorId != null) {
       _scheduleScrollEffect();
     }
   }
@@ -268,6 +275,10 @@ class _DiffScreenState extends State<DiffScreen> {
       if (_pendingScrollToTop && _contentScroll.hasClients) {
         _contentScroll.jumpTo(_contentScroll.position.minScrollExtent);
         _pendingScrollToTop = false;
+      }
+      if (_pendingHistoryScrollToTop && _historyScroll.hasClients) {
+        _historyScroll.jumpTo(_historyScroll.position.minScrollExtent);
+        _pendingHistoryScrollToTop = false;
       }
 
       final anchorId = _pendingAnchorId;
@@ -531,6 +542,7 @@ class _DiffScreenState extends State<DiffScreen> {
             actions: <Type, Action<Intent>>{
               _ReturnToTimelineIntent: CallbackAction<_ReturnToTimelineIntent>(
                 onInvoke: (_) {
+                  if (Tooltip.dismissAllToolTips()) return null;
                   _returnToTimeline();
                   return null;
                 },
@@ -1059,12 +1071,26 @@ class _DiffScreenState extends State<DiffScreen> {
         FullDiffView.file => _fileContent(state),
         FullDiffView.diff => _diffContent(state, viewportWidth),
         FullDiffView.blame => _blameContent(state),
-        FullDiffView.history => _historyContent(state, viewportWidth),
+        FullDiffView.history => _historyContent(state),
       };
 
   Widget _fileContent(FullDiffSessionState state) {
     final file = state.file.data;
-    if (file == null) return _resourceStatus(state.file, '파일을 읽는 중입니다');
+    if (file == null) {
+      final selectedFile = state.selectedFile;
+      if (selectedFile != null && state.file.error != null) {
+        return _unavailablePanel(
+          state,
+          reason: FullDiffUnavailableReason.gitError,
+          path: selectedFile.status.startsWith('D')
+              ? selectedFile.oldPath ?? selectedFile.path
+              : selectedFile.path,
+          error: state.file.error,
+          onRetry: () => unawaited(_controller.retryFile()),
+        );
+      }
+      return _resourceStatus(state.file, '파일을 읽는 중입니다');
+    }
     final unavailableReason = _unavailableReasonFor(file);
     if (unavailableReason != null) {
       return _unavailablePanel(
@@ -1098,11 +1124,7 @@ class _DiffScreenState extends State<DiffScreen> {
           reason: FullDiffUnavailableReason.gitError,
           path: state.file.data?.path ?? selectedFile.path,
           error: state.patch.error,
-          onRetry: () => unawaited(
-            state.view == FullDiffView.history
-                ? _controller.retryHistorySelection()
-                : _controller.retryPatch(),
-          ),
+          onRetry: () => unawaited(_controller.retryPatch()),
         ),
       );
     }
@@ -1116,13 +1138,15 @@ class _DiffScreenState extends State<DiffScreen> {
     }
     final fileDocument = state.file.data;
     if (fileDocument == null) {
-      if (state.view == FullDiffView.history && state.file.error != null) {
+      if (state.file.error != null) {
         return _unavailablePanel(
           state,
           reason: FullDiffUnavailableReason.gitError,
-          path: selectedFile.path,
+          path: selectedFile.status.startsWith('D')
+              ? selectedFile.oldPath ?? selectedFile.path
+              : selectedFile.path,
           error: state.file.error,
-          onRetry: () => unawaited(_controller.retryHistorySelection()),
+          onRetry: () => unawaited(_controller.retryFile()),
         );
       }
       return _resourceStatus(state.file, '파일을 읽는 중입니다');
@@ -1136,10 +1160,13 @@ class _DiffScreenState extends State<DiffScreen> {
       );
     }
     if (patch.hunks.isEmpty) {
-      return _unavailablePanel(
-        state,
-        reason: FullDiffUnavailableReason.noChanges,
-        path: fileDocument.path,
+      return _withRefreshError(
+        _unavailablePanel(
+          state,
+          reason: FullDiffUnavailableReason.noChanges,
+          path: fileDocument.path,
+        ),
+        state.patch.error,
       );
     }
     final presentation = switch (state.presentation) {
@@ -1182,7 +1209,10 @@ class _DiffScreenState extends State<DiffScreen> {
         controller: _contentScroll,
       ),
     };
-    final error = state.patch.error;
+    return _withRefreshError(presentation, state.patch.error);
+  }
+
+  Widget _withRefreshError(Widget presentation, Object? error) {
     if (error == null) return presentation;
     return Stack(
       fit: StackFit.expand,
@@ -1258,7 +1288,7 @@ class _DiffScreenState extends State<DiffScreen> {
     );
   }
 
-  Widget _historyContent(FullDiffSessionState state, double viewportWidth) {
+  Widget _historyContent(FullDiffSessionState state) {
     final history = state.history.data;
     if (history == null) {
       return _resourceStatus(state.history, 'History를 읽는 중입니다');
@@ -1270,7 +1300,10 @@ class _DiffScreenState extends State<DiffScreen> {
         onSelected: (entry) => unawaited(_controller.selectHistoryEntry(entry)),
         controller: _historyScroll,
       ),
-      detail: _historyDetailContent(state, viewportWidth),
+      detail: LayoutBuilder(
+        builder: (context, constraints) =>
+            _historyDetailContent(state, constraints.maxWidth),
+      ),
     );
   }
 
@@ -1301,7 +1334,7 @@ class _DiffScreenState extends State<DiffScreen> {
         algorithm: state.requestedAlgorithm,
         ignoreWhitespace: state.requestedIgnoreWhitespace,
         error: error,
-        onRetry: () => unawaited(_controller.retryHistorySelection()),
+        onRetry: () => unawaited(_controller.retryFiles()),
       );
     }
     return _diffContent(state, viewportWidth);

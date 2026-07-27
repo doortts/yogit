@@ -922,6 +922,10 @@ void main() {
         await tester.pump(const Duration(milliseconds: 600));
         await tester.pump(const Duration(milliseconds: 100));
         expect(find.text('Diff 알고리즘 · Histogram'), findsOneWidget);
+        expect(
+          find.textContaining('Git이 변경 구간을 나누는 방식을 정합니다.'),
+          findsOneWidget,
+        );
         expect(find.textContaining('반복이 많은 코드의 변경 경계를 찾습니다'), findsOneWidget);
       },
       target: find.byType(Overlay),

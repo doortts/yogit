@@ -345,9 +345,17 @@ class FullDiffSessionController extends ChangeNotifier {
 
   Future<void> initialize() => _loadFiles();
 
-  Future<void> retryFiles() => _loadFiles();
+  Future<void> retryFiles() {
+    final entry = state.selectedHistoryEntry;
+    if (entry != null && state.historyContext != null) {
+      return selectHistoryEntry(entry);
+    }
+    return _loadFiles();
+  }
 
   Future<void> retryPatch() => _loadPatch();
+
+  Future<void> retryFile() => _loadFile();
 
   Future<void> retryHistorySelection() async {
     final entry = state.selectedHistoryEntry;

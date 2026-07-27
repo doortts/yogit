@@ -1,11 +1,13 @@
 # Full Diff 최종 검수
 
 2026-07-27에 기존 승인 이미지 13장, 후속 검수 이미지 5장과 macOS 앱을
-기준으로 확인했다. 기존 00–12 기준 이미지는 이름만 `.png`이고 실제
-내용은 JPEG라서 차이 도구는 파일 시그니처로 형식을 판별한다. 새 13–17
-기준 이미지는 검토를 통과한 Flutter PNG 캡처다. JPEG 압축과 Flutter
-글꼴 래스터라이징에서 생기는 픽셀 차이는 아래 수치에 포함했다. 수동
-판정에서는 구성 요소의 위치·크기·줄바꿈·말줄임·색·테두리를 각각
+기준으로 확인했다. 이번 후속 수정에서는 실제 History 상세 너비와
+알고리즘 목적 설명이 달라진 05·14·17만 다시 캡처했고 나머지 기준
+이미지는 그대로 유지했다. 00–04·06–12 기준 이미지는 이름만 `.png`이고
+실제 내용은 JPEG라서 차이 도구는 파일 시그니처로 형식을 판별한다.
+05·13–17 기준 이미지는 검토를 통과한 Flutter PNG 캡처다. JPEG 압축과
+Flutter 글꼴 래스터라이징에서 생기는 픽셀 차이는 아래 수치에 포함했다.
+수동 판정에서는 구성 요소의 위치·크기·줄바꿈·말줄임·색·테두리를 각각
 확인했다. 기준 HTML은 고정된 예시 행을 그리지만 구현 캡처는 검수용
 데이터를 실제 위젯으로 렌더링하므로 행의 개수와 문구가 다른 구간은 픽셀
 일치 판정에서 제외했다.
@@ -27,7 +29,7 @@
 | 02 Split | [기준](../../specs/assets/full-diff-qa/02-diff-split.png) | [구현](actual/02-diff-split.png) | [차이](diff/02-diff-split.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 이전·이후 행 두 열과 가운데 경계 확인 |
 | 03 File | [기준](../../specs/assets/full-diff-qa/03-file-view.png) | [구현](actual/03-file-view.png) | [차이](diff/03-file-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 선택한 Hunk 하나의 제목과 결과 쪽 추가 행만 표시되는지 확인 |
 | 04 Blame | [기준](../../specs/assets/full-diff-qa/04-blame-view.png) | [구현](actual/04-blame-view.png) | [차이](diff/04-blame-view.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 선택한 Hunk 하나의 제목·변경 표시와 80px 메타데이터 순서 확인 |
-| 05 History | [기준](../../specs/assets/full-diff-qa/05-history-view.png) | [구현](actual/05-history-view.png) | [차이](diff/05-history-view.png) | History 목록과 Split 상세 표시 | 기준 상수 적용 | History 작업 영역이 760px 미만이라 목록 240px, 상세 영역과 1px 경계 | 통과: 현재 항목의 선택 상태, 오른쪽의 현재 diff와 제목 아래 작성자·경과 시간 확인 |
+| 05 History | [기준](../../specs/assets/full-diff-qa/05-history-view.png) | [구현](actual/05-history-view.png) | [차이](diff/05-history-view.png) | History 목록과 좁은 상세의 한쪽 결과 표시 | 기준 상수 적용 | History 작업 영역이 760px 미만이라 목록 240px, 상세 영역과 1px 경계 | 통과: 실제 상세 너비 467px에서 Split 설정을 유지하되 한쪽 결과만 표시해 잘림을 막음 |
 | 06 집중 모드 | [기준](../../specs/assets/full-diff-qa/06-focus-mode.png) | [구현](actual/06-focus-mode.png) | [차이](diff/06-focus-mode.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 탐색 열 제거, 머리글 정렬, 본문 확장 확인 |
 | 07 공백 무시 | [기준](../../specs/assets/full-diff-qa/07-ignore-whitespace.png) | [구현](actual/07-ignore-whitespace.png) | [차이](diff/07-ignore-whitespace.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 선택 상태와 공백 행 제거 확인 |
 | 08 줄바꿈 | [기준](../../specs/assets/full-diff-qa/08-wrap-lines.png) | [구현](actual/08-wrap-lines.png) | [차이](diff/08-wrap-lines.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 선택 상태, 한 개의 줄 번호, 긴 소스 줄바꿈 확인 |
@@ -36,10 +38,10 @@
 | 11 650px | [기준](../../specs/assets/full-diff-qa/11-responsive-650.png) | [구현](actual/11-responsive-650.png) | [차이](diff/11-responsive-650.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 파일 경로와 통계를 두 줄로 배치하고 파일 열 유지 |
 | 12 480px | [기준](../../specs/assets/full-diff-qa/12-responsive-480.png) | [구현](actual/12-responsive-480.png) | [차이](diff/12-responsive-480.png) | 일치 | 기준 상수 적용 | 핵심 배치 일치 | 통과: 두 탐색 열 제거, 한 줄 조작부, 초기 가로 이동값 0, Hunk 제목과 313행의 왼쪽 정렬 확인 |
 | 13 글자와 뒤로 가기 | [기준](../../specs/assets/full-diff-qa/13-font-and-back.png) | [구현](actual/13-font-and-back.png) | [차이](diff/13-font-and-back.png) | 뒤로 가기→파일 아이콘→경로 순서 | 기존 상단 색 유지 | 목록 11·10·9px, diff 10·8px 간격 유지 | 통과: 작은 글자가 행 안에서 붙거나 잘리지 않고 32px 뒤로 가기 버튼이 가장 왼쪽에 있음 |
-| 14 알고리즘 설명 | [기준](../../specs/assets/full-diff-qa/14-algorithm-tooltip.png) | [구현](actual/14-algorithm-tooltip.png) | [차이](diff/14-algorithm-tooltip.png) | 닫힌 버튼에 Histogram 표시 | 어두운 화면 위에 뜨는 밝은 임시 팝오버의 대비 분명 | diff 머리글과 첫 소스 행 위에 잠시 겹치며 내용은 선명하게 읽힘 | 통과: 선택값, 제목과 반복 코드용 Histogram 설명을 한눈에 읽을 수 있음 |
+| 14 알고리즘 설명 | [기준](../../specs/assets/full-diff-qa/14-algorithm-tooltip.png) | [구현](actual/14-algorithm-tooltip.png) | [차이](diff/14-algorithm-tooltip.png) | 닫힌 버튼에 Histogram 표시 | 어두운 화면 위에 뜨는 밝은 임시 팝오버의 대비 분명 | diff 머리글과 첫 소스 행 위에 잠시 겹치며 내용은 선명하게 읽힘 | 통과: 선택값, 설정 목적과 반복 코드용 Histogram 설명을 한눈에 읽을 수 있음 |
 | 15 표시 불가 | [기준](../../specs/assets/full-diff-qa/15-unavailable-panel.png) | [구현](actual/15-unavailable-panel.png) | [차이](diff/15-unavailable-panel.png) | 경로→통계→UTF-8→사유→옵션 순서 | 속성 칩과 사유의 대비 분명 | 빈 본문 중앙에서 한 줄 정보 흐름 유지 | 통과: `src/drlua.pas`, `M · +12 −4`, `UTF-8`, 변경이 없다는 사유와 현재 옵션을 순서대로 확인 |
 | 16 History 상세 | [기준](../../specs/assets/full-diff-qa/16-history-detail.png) | [구현](actual/16-history-detail.png) | [차이](diff/16-history-detail.png) | 선택한 65f4c80과 과거 Hunk 표시 | 선택 행과 변경 행 색 구분 | History 작업 영역이 760px 미만이라 목록 240px, 1px 경계 뒤 상세 확장 | 통과: 목록을 유지한 채 과거 커밋의 파일 목록·통계와 1개 Hunk가 오른쪽에서 함께 바뀜. 목록 280px은 History 작업 영역 자체가 760px 이상일 때만 적용 |
-| 17 History Split | [기준](../../specs/assets/full-diff-qa/17-history-detail-split.png) | [구현](actual/17-history-detail-split.png) | [차이](diff/17-history-detail-split.png) | 선택한 65f4c80과 과거 Split 표시 | 삭제·추가 배경과 중앙 경계 분명 | 두 쪽이 상세 너비 안에 온전히 표시 | 통과: 이전·결과 줄 번호, 기호와 모든 검수용 소스 줄이 잘리지 않음 |
+| 17 History Split | [기준](../../specs/assets/full-diff-qa/17-history-detail-split.png) | [구현](actual/17-history-detail-split.png) | [차이](diff/17-history-detail-split.png) | 선택한 65f4c80과 과거 Split 설정 | 추가 배경과 결과 쪽 경계 분명 | 467px 상세에서는 한쪽 결과로 접힘 | 통과: Split 설정은 유지하고 실제 상세 너비에 맞춰 결과 쪽만 표시해 모든 검수용 소스 줄이 잘리지 않음 |
 
 승인 이미지가 작업 표보다 우선한다. 승인 이미지에서 Split이 선택된
 03·04·05·07·08은 Split 상태로 캡처했다. 검수 하네스는 Flutter SDK의
@@ -62,7 +64,7 @@ JPEG라서 넓고 단색인 배경도 미세한 차이로 집계된다.
 | 02-diff-split | 1070×842 | 456,589 | 50.6792 | 15.3780 | 255 |
 | 03-file-view | 1070×842 | 371,904 | 41.2796 | 12.0217 | 253 |
 | 04-blame-view | 1070×842 | 386,525 | 42.9024 | 13.1967 | 255 |
-| 05-history-view | 1070×842 | 384,082 | 42.6313 | 13.1179 | 255 |
+| 05-history-view | 1070×842 | 0 | 0.0000 | 0.0000 | 0 |
 | 06-focus-mode | 1070×842 | 212,180 | 23.5510 | 6.2048 | 255 |
 | 07-ignore-whitespace | 1070×842 | 458,523 | 50.8938 | 16.2115 | 255 |
 | 08-wrap-lines | 1070×842 | 490,665 | 54.4615 | 16.7609 | 255 |

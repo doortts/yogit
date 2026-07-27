@@ -836,6 +836,170 @@ void main() {
     expect(controller.state.selectedHistoryEntry, isNull);
     expect(controller.state.historyContext, isNull);
   });
+
+  test(
+    'patch retry recovers an unmatched history row without replacing its context',
+    () async {
+      var patchLoads = 0;
+      final repository = FakeFullDiffRepository()
+        ..files = ((_, _) async => const [fileA])
+        ..diff = ((_, _, _, _, _) async {
+          patchLoads++;
+          if (patchLoads == 1) {
+            throw const GitRepositoryException('/repo', 'patch failed');
+          }
+          return twoHunkLines;
+        })
+        ..content = ((_, _, _) async =>
+            Uint8List.fromList(utf8.encode('current\n')))
+        ..history = ((_, _) async => const [
+          GitFileHistoryRecord(
+            commit: historyCommitB,
+            path: 'src/drlua.pas',
+            oldPath: null,
+            status: 'M',
+          ),
+        ]);
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [commitA],
+        initialIndex: 0,
+        initialView: FullDiffInitialView.hunk,
+      );
+      await controller.initialize();
+      controller.setView(FullDiffView.history);
+      await Future<void>.delayed(Duration.zero);
+      final originalHistory = controller.state.history.data!;
+      final originalContext = controller.state.historyContext;
+
+      expect(controller.state.selectedHistoryEntry, isNull);
+      expect(controller.state.patch.error, isA<GitRepositoryException>());
+
+      await controller.retryPatch();
+
+      expect(patchLoads, 2);
+      expect(controller.state.patch.data, isNotNull);
+      expect(controller.state.history.data, same(originalHistory));
+      expect(controller.state.historyContext, originalContext);
+      expect(controller.state.selectedHistoryEntry, isNull);
+    },
+  );
+
+  test(
+    'files retry targets the selected historical context and preserves its list',
+    () async {
+      var historicalFileLoads = 0;
+      final repository = FakeFullDiffRepository()
+        ..files = ((commit, _) async {
+          if (commit.sha == commitA.sha) return const [fileA];
+          historicalFileLoads++;
+          if (historicalFileLoads == 1) {
+            throw const GitRepositoryException(
+              '/repo',
+              'historical files failed',
+            );
+          }
+          return const [fileA];
+        })
+        ..diff = ((_, _, _, _, _) async => twoHunkLines)
+        ..content = ((_, _, _) async =>
+            Uint8List.fromList(utf8.encode('historical\n')))
+        ..history = ((_, _) async => const [
+          GitFileHistoryRecord(
+            commit: historyCommitB,
+            path: 'src/drlua.pas',
+            oldPath: null,
+            status: 'M',
+          ),
+        ]);
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [commitA],
+        initialIndex: 0,
+        initialView: FullDiffInitialView.hunk,
+      );
+      await controller.initialize();
+      controller.setView(FullDiffView.history);
+      await Future<void>.delayed(Duration.zero);
+      final originalHistory = controller.state.history.data!;
+      final originalContext = controller.state.historyContext;
+      final selectedEntry = originalHistory.single;
+
+      await controller.selectHistoryEntry(selectedEntry);
+      expect(
+        controller.state.filesResource.error,
+        isA<GitRepositoryException>(),
+      );
+
+      await controller.retryFiles();
+
+      expect(historicalFileLoads, 2);
+      expect(controller.state.selectedFile, fileA);
+      expect(controller.state.patch.data, isNotNull);
+      expect(controller.state.history.data, same(originalHistory));
+      expect(controller.state.historyContext, originalContext);
+      expect(controller.state.selectedHistoryEntry, same(selectedEntry));
+    },
+  );
+
+  test('file retry reloads only the selected historical resource', () async {
+    var historicalContentLoads = 0;
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..diff = ((_, _, _, _, _) async => twoHunkLines)
+      ..content = ((commit, _, _) async {
+        if (commit.sha == commitA.sha) {
+          return Uint8List.fromList(utf8.encode('current\n'));
+        }
+        historicalContentLoads++;
+        if (historicalContentLoads == 1) {
+          throw const GitRepositoryException(
+            '/repo',
+            'historical content failed',
+          );
+        }
+        return Uint8List.fromList(utf8.encode('recovered\n'));
+      })
+      ..history = ((_, _) async => const [
+        GitFileHistoryRecord(
+          commit: commitA,
+          path: 'src/drlua.pas',
+          oldPath: null,
+          status: 'M',
+        ),
+        GitFileHistoryRecord(
+          commit: historyCommitB,
+          path: 'src/drlua.pas',
+          oldPath: null,
+          status: 'M',
+        ),
+      ]);
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+    );
+    await controller.initialize();
+    controller.setView(FullDiffView.history);
+    await Future<void>.delayed(Duration.zero);
+    final originalHistory = controller.state.history.data!;
+    final originalContext = controller.state.historyContext;
+    final selectedEntry = originalHistory.last;
+
+    await controller.selectHistoryEntry(selectedEntry);
+    final patchRequests = repository.diffRequests.length;
+    expect(controller.state.file.error, isA<GitRepositoryException>());
+
+    await controller.retryFile();
+
+    expect(historicalContentLoads, 2);
+    expect(repository.diffRequests, hasLength(patchRequests));
+    expect(controller.state.file.data?.lines, ['recovered']);
+    expect(controller.state.history.data, same(originalHistory));
+    expect(controller.state.historyContext, originalContext);
+    expect(controller.state.selectedHistoryEntry, same(selectedEntry));
+  });
 }
 
 const historyCommitB = GitCommit(

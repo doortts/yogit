@@ -93,6 +93,43 @@ void main() {
     expect(find.byKey(const Key('diff-algorithm-value')), findsNothing);
   });
 
+  testWidgets(
+    'algorithm semantics explain the setting and open the menu on semantic tap',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pumpHeaders(tester);
+
+      final algorithm = find.semantics.byLabel('diff 알고리즘: Histogram');
+      expect(algorithm, findsOneWidget);
+      final data = algorithm.evaluate().single.getSemanticsData();
+      expect(data.flagsCollection.isButton, isTrue);
+      expect(data.hasAction(ui.SemanticsAction.tap), isTrue);
+      expect(
+        data.hint,
+        'Git이 변경 구간을 나누는 방식을 정합니다. '
+        '빈도가 낮은 줄을 기준으로 삼아 반복이 많은 코드의 변경 경계를 찾습니다.',
+      );
+      expect(data.value, isEmpty);
+      expect(data.tooltip, isEmpty);
+      expect(
+        find.semantics.byPredicate((node) {
+          final related = node.getSemanticsData();
+          return related.label.contains('diff 알고리즘') ||
+              related.value.contains('Histogram') ||
+              related.hint.contains('Git이 변경 구간을 나누는 방식을 정합니다') ||
+              related.tooltip.contains('Git이 변경 구간을 나누는 방식을 정합니다');
+        }),
+        findsOneWidget,
+      );
+
+      tester.semantics.tap(algorithm);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Minimal'), findsOneWidget);
+      semantics.dispose();
+    },
+  );
+
   test('describes every supported diff algorithm', () {
     expect(
       diffAlgorithmDescription(DiffAlgorithm.gitSetting),
@@ -126,10 +163,18 @@ void main() {
     await mouse.moveTo(
       tester.getCenter(find.byKey(const Key('diff-algorithm'))),
     );
-    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump(const Duration(milliseconds: 499));
+    expect(find.text('Diff 알고리즘 · Histogram'), findsNothing);
+    await tester.pump(const Duration(milliseconds: 1));
 
     expect(find.text('Diff 알고리즘 · Histogram'), findsOneWidget);
-    expect(find.textContaining('반복이 많은 코드의 변경 경계를 찾습니다'), findsOneWidget);
+    expect(
+      find.text(
+        'Git이 변경 구간을 나누는 방식을 정합니다. '
+        '빈도가 낮은 줄을 기준으로 삼아 반복이 많은 코드의 변경 경계를 찾습니다.',
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
