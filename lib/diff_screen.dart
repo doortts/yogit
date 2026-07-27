@@ -1196,7 +1196,7 @@ class _DiffScreenState extends State<DiffScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             child: Text(
               error.toString(),
-              style: const TextStyle(color: fullDiffDeletedMark, fontSize: 12),
+              style: const TextStyle(color: fullDiffDeletedMark, fontSize: 10),
             ),
           ),
         ),
@@ -1317,7 +1317,7 @@ class _DiffScreenState extends State<DiffScreen> {
     child: Text(
       resource.error?.toString() ??
           (resource.loading ? loadingLabel : '표시할 데이터가 없습니다'),
-      style: const TextStyle(color: fullDiffMuted, fontSize: 14),
+      style: const TextStyle(color: fullDiffMuted, fontSize: 10),
     ),
   );
 

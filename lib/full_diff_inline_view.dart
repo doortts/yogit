@@ -43,7 +43,7 @@ class InlinePresentationView extends StatelessWidget {
       return const Center(
         child: Text(
           '현재 옵션으로 표시할 변경이 없습니다',
-          style: TextStyle(color: fullDiffMuted, fontSize: 14),
+          style: TextStyle(color: fullDiffMuted, fontSize: 10),
         ),
       );
     }

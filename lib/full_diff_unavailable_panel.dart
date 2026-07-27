@@ -112,7 +112,7 @@ class FullDiffUnavailablePanel extends StatelessWidget {
                   Text(
                     _message,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(color: fullDiffMuted, fontSize: 14),
+                    style: const TextStyle(color: fullDiffMuted, fontSize: 10),
                   ),
                   if (reason == FullDiffUnavailableReason.noChanges) ...[
                     const SizedBox(height: 8),

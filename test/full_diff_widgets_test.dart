@@ -82,6 +82,7 @@ void main() {
         expect(summary, findsOneWidget);
         expect(attribute, findsOneWidget);
         expect(message, findsOneWidget);
+        expect(tester.widget<Text>(message).style?.fontSize, 10);
         expect(
           tester.getTopLeft(path).dy,
           lessThan(tester.getTopLeft(summary).dy),
@@ -428,6 +429,25 @@ void main() {
     expect(horizontal, findsOneWidget);
     final position = tester.state<ScrollableState>(horizontal).position;
     expect(position.maxScrollExtent, greaterThan(0));
+    final horizontalView = tester
+        .widgetList<SingleChildScrollView>(find.byType(SingleChildScrollView))
+        .singleWhere((view) => view.scrollDirection == Axis.horizontal);
+    final content = horizontalView.child! as SizedBox;
+    final painter = TextPainter(
+      text: TextSpan(
+        text: document.hunks.single.changedLines.last.text,
+        style: const TextStyle(
+          fontFamily: technicalFontFamily,
+          fontFamilyFallback: technicalFontFallback,
+          fontSize: 10,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    expect(
+      content.width,
+      closeTo(fullDiffLineNumberWidth + painter.width + 20, 0.01),
+    );
 
     await tester.drag(horizontal, const Offset(-160, 0));
     await tester.pumpAndSettle();
@@ -908,12 +928,18 @@ void main() {
   testWidgets('hunk empty state and one lazy selection boundary are explicit', (
     tester,
   ) async {
-    await pumpPresentation(
-      tester,
-      presentation: DiffPresentation.hunk,
-      document: DiffDocument.fromLines(const []),
-    );
-    expect(find.text('현재 옵션으로 표시할 변경이 없습니다'), findsOneWidget);
+    for (final presentation in DiffPresentation.values) {
+      await pumpPresentation(
+        tester,
+        presentation: presentation,
+        document: DiffDocument.fromLines(const []),
+      );
+      expect(find.text('현재 옵션으로 표시할 변경이 없습니다'), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.text('현재 옵션으로 표시할 변경이 없습니다')).style?.fontSize,
+        10,
+      );
+    }
 
     await pumpPresentation(
       tester,

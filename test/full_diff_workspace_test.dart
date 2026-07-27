@@ -352,6 +352,42 @@ void main() {
     expect(find.semantics.byLabel('diff 알고리즘: Histogram'), findsOneWidget);
   });
 
+  testWidgets('a diff refresh error uses the compact guide type size', (
+    tester,
+  ) async {
+    final fixture = await workspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1070, 842),
+    );
+    fixture.repository.diff = (_, _, _, algorithm, _) async {
+      if (algorithm == DiffAlgorithm.histogram) {
+        throw const GitRepositoryException('/repo', 'diff failed');
+      }
+      return twoHunkLines;
+    };
+
+    await expectLater(
+      fixture.controller.selectAlgorithm(DiffAlgorithm.histogram),
+      throwsA(isA<GitRepositoryException>()),
+    );
+    await tester.pump();
+
+    final banner = find.byKey(const Key('diff-refresh-error'));
+    expect(banner, findsOneWidget);
+    expect(
+      tester
+          .widget<Text>(
+            find.descendant(of: banner, matching: find.byType(Text)),
+          )
+          .style
+          ?.fontSize,
+      10,
+    );
+  });
+
   testWidgets('focus mode restores pane widths and selection', (tester) async {
     final fixture = await workspaceFixture();
     addTearDown(fixture.controller.dispose);
@@ -751,6 +787,7 @@ void main() {
       expect(find.byKey(const Key('history-list')), findsOneWidget);
       expect(find.byKey(const Key('history-detail-pane')), findsOneWidget);
       expect(find.text('파일을 읽는 중입니다'), findsOneWidget);
+      expect(tester.widget<Text>(find.text('파일을 읽는 중입니다')).style?.fontSize, 10);
       expect(find.text('표시할 데이터가 없습니다'), findsNothing);
 
       historicalFiles.complete(const [fileA]);
