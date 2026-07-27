@@ -2981,21 +2981,28 @@ class _TimelineScreenState extends State<TimelineScreen> {
       callback(commit);
       return;
     }
+    final repository = widget.repository;
+    final commits = List<GitCommit>.unmodifiable(_commits);
+    final initialIndex = _commits.indexOf(commit);
+    final initialPreferences = widget.fullDiffPreferences;
+    final columnWidths = widget.fullDiffColumnWidths;
+    final onPreferencesChanged = widget.onFullDiffPreferencesChanged;
+    final onColumnWidthsChanged = widget.onFullDiffColumnWidthsChanged;
+    final avatarService = widget.avatarService;
+    final showRemoteAvatars = widget.showRemoteAvatars;
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) => DiffScreen(
-          repository: widget.repository,
-          commits: List.unmodifiable(_commits),
-          initialIndex: _commits.indexOf(commit),
-          initialPreferences: widget.fullDiffPreferences,
-          onPreferencesChanged: widget.onFullDiffPreferencesChanged,
-          columnWidths: widget.fullDiffColumnWidths,
-          onColumnWidthsChanged: widget.onFullDiffColumnWidthsChanged,
-          editorService: ExternalEditorService(
-            repositoryRoot: widget.repository.root,
-          ),
-          avatarService: widget.avatarService,
-          showRemoteAvatars: widget.showRemoteAvatars,
+          repository: repository,
+          commits: commits,
+          initialIndex: initialIndex,
+          initialPreferences: initialPreferences,
+          onPreferencesChanged: onPreferencesChanged,
+          columnWidths: columnWidths,
+          onColumnWidthsChanged: onColumnWidthsChanged,
+          editorService: ExternalEditorService(repositoryRoot: repository.root),
+          avatarService: avatarService,
+          showRemoteAvatars: showRemoteAvatars,
         ),
       ),
     );

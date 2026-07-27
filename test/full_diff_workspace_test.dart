@@ -2493,18 +2493,19 @@ void main() {
       size: const Size(1200, 800),
     );
 
-    for (var press = 0; press < 2; press++) {
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    }
-
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyH);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyH);
     expect(fullFileRequests, 1);
     expect(controller.state.requestedScope, DiffScope.fullFile);
     pending.complete(twoHunkLines);
     await tester.pumpAndSettle();
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyH);
+    expect(controller.state.appliedScope, DiffScope.fullFile);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyH);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
   });
 
   testWidgets(
@@ -2536,20 +2537,45 @@ void main() {
         size: const Size(1200, 800),
       );
 
-      for (var press = 0; press < 2; press++) {
-        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-        await tester.sendKeyEvent(LogicalKeyboardKey.space);
-        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-      }
-
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.space);
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.space);
       expect(whitespaceRequests, 1);
       expect(controller.state.requestedIgnoreWhitespace, isTrue);
       pending.complete(twoHunkLines);
       await tester.pumpAndSettle();
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.space);
+      expect(controller.state.appliedIgnoreWhitespace, isTrue);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.space);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     },
   );
+
+  testWidgets('layout and wrap shortcuts ignore key repeats', (tester) async {
+    final fixture = await workspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1200, 800),
+    );
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyU);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyU);
+    expect(fixture.controller.state.layout, DiffLayout.sideBySide);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyU);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyL);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyL);
+    expect(fixture.controller.state.wrapLines, isFalse);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyL);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+  });
 
   testWidgets(
     'deleted Diff content failure retries the old-side file resource',

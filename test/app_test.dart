@@ -2807,6 +2807,93 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets(
+    'settings feedback keeps the live full diff selection and scroll',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1200, 500);
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+      final store = FailingSettingsStore();
+      const firstFile = GitFileChange(
+        path: 'lib/first.dart',
+        status: 'M',
+        additions: 1,
+        deletions: 0,
+      );
+      const secondFile = GitFileChange(
+        path: 'lib/second.dart',
+        status: 'M',
+        additions: 1,
+        deletions: 0,
+      );
+      await tester.pumpWidget(
+        YogitApp(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('1', 'commit')],
+            files: (_, _) async => const [firstFile, secondFile],
+            diff: (_, _, path, _, _) async => [
+              const DiffLine(
+                kind: DiffLineKind.hunk,
+                text: '@@ -1,80 +1,80 @@',
+              ),
+              for (var line = 1; line <= 80; line++)
+                DiffLine(
+                  kind: DiffLineKind.context,
+                  text: '$path line $line',
+                  oldNumber: line,
+                  newNumber: line,
+                ),
+            ],
+            content: (_, file, _) async =>
+                Uint8List.fromList(utf8.encode('${file.path}\n')),
+          ),
+          settingsStore: store,
+          discoverAvatars: false,
+          windowFrameController: controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+      await tester.pumpAndSettle();
+      tester
+          .widget<Focus>(find.byKey(const Key('changed-files-focus')))
+          .focusNode!
+          .requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('selected-file-lib/second.dart')),
+        findsOneWidget,
+      );
+
+      final scrollable = tester.state<ScrollableState>(
+        find
+            .descendant(
+              of: find.byKey(const Key('content-scrollable')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      expect(scrollable.position.maxScrollExtent, greaterThan(100));
+      scrollable.position.jumpTo(100);
+      await tester.pump();
+
+      await tester.tap(find.text('Side-by-side'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('selected-file-lib/second.dart')),
+        findsOneWidget,
+      );
+      expect(scrollable.position.pixels, 100);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('uncommitted changes lead the timeline as a working tree row', (
     tester,
   ) async {
@@ -4034,23 +4121,103 @@ void main() {
     Widget screen(
       FullDiffRepository repository,
       List<GitCommit> screenCommits,
+      FullDiffPreferences preferences,
     ) => MaterialApp(
       home: DiffScreen(
         repository: repository,
         commits: screenCommits,
         initialIndex: 0,
+        initialPreferences: preferences,
       ),
     );
 
-    await tester.pumpWidget(screen(oldRepository, oldCommits));
+    await tester.pumpWidget(
+      screen(oldRepository, oldCommits, const FullDiffPreferences()),
+    );
     await tester.pumpAndSettle();
     expect(find.text('old body'), findsOneWidget);
 
-    await tester.pumpWidget(screen(newRepository, newCommits));
+    await tester.pumpWidget(
+      screen(
+        newRepository,
+        newCommits,
+        const FullDiffPreferences(layout: DiffLayout.sideBySide),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('new body'), findsOneWidget);
     expect(find.text('old body'), findsNothing);
+    expect(
+      tester
+          .getSemantics(find.bySemanticsLabel('Side-by-side'))
+          .flagsCollection
+          .isSelected,
+      ui.Tristate.isTrue,
+    );
+  });
+
+  testWidgets('initial preferences do not reset a live owned session', (
+    tester,
+  ) async {
+    final commits = [
+      commit('one', 'commit', parents: const ['base']),
+    ];
+    final repository = FakeGitRepository(
+      (_, _) async => commits,
+      files: (_, _) async => const [
+        GitFileChange(
+          path: 'first.txt',
+          status: 'M',
+          additions: 1,
+          deletions: 0,
+        ),
+        GitFileChange(
+          path: 'second.txt',
+          status: 'M',
+          additions: 1,
+          deletions: 0,
+        ),
+      ],
+      diff: (_, _, path, _, _) async => [
+        const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,0 +1 @@'),
+        DiffLine(kind: DiffLineKind.add, text: path, newNumber: 1),
+      ],
+    );
+
+    Widget screen(FullDiffPreferences preferences) => MaterialApp(
+      home: DiffScreen(
+        repository: repository,
+        commits: commits,
+        initialIndex: 0,
+        initialPreferences: preferences,
+      ),
+    );
+
+    await tester.pumpWidget(screen(const FullDiffPreferences()));
+    await tester.pumpAndSettle();
+    tester
+        .widget<Focus>(find.byKey(const Key('changed-files-focus')))
+        .focusNode!
+        .requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-file-second.txt')), findsOneWidget);
+
+    await tester.pumpWidget(
+      screen(const FullDiffPreferences(layout: DiffLayout.sideBySide)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('selected-file-second.txt')), findsOneWidget);
+    expect(
+      tester
+          .getSemantics(find.bySemanticsLabel('Unified'))
+          .flagsCollection
+          .isSelected,
+      ui.Tristate.isTrue,
+    );
   });
 
   testWidgets('file and parent changes reset the hunk list to the top', (

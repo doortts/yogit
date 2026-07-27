@@ -211,8 +211,7 @@ class _DiffScreenState extends State<DiffScreen> {
         oldWidget.controller == null &&
         (!identical(widget.repository, oldWidget.repository) ||
             !identical(widget.commits, oldWidget.commits) ||
-            widget.initialIndex != oldWidget.initialIndex ||
-            widget.initialPreferences != oldWidget.initialPreferences);
+            widget.initialIndex != oldWidget.initialIndex);
     if (editorContextChanged || controllerChanged || ownedInputsChanged) {
       _invalidateEditorRequest();
     }
@@ -756,22 +755,56 @@ class _DiffScreenState extends State<DiffScreen> {
             ): PageScrollIntent(
               1,
             ),
-            SingleActivator(LogicalKeyboardKey.keyF, meta: true, shift: true):
-                _ToggleFocusModeIntent(),
-            SingleActivator(LogicalKeyboardKey.digit1, meta: true):
-                _SelectViewIntent(FullDiffView.diff),
-            SingleActivator(LogicalKeyboardKey.digit2, meta: true):
-                _SelectViewIntent(FullDiffView.blame),
-            SingleActivator(LogicalKeyboardKey.digit3, meta: true):
-                _SelectViewIntent(FullDiffView.history),
-            SingleActivator(LogicalKeyboardKey.keyU, meta: true):
-                _ToggleLayoutIntent(),
-            SingleActivator(LogicalKeyboardKey.keyH, meta: true, shift: true):
-                _ToggleScopeIntent(),
-            SingleActivator(LogicalKeyboardKey.space, meta: true, shift: true):
-                _ToggleWhitespaceIntent(),
-            SingleActivator(LogicalKeyboardKey.keyL, meta: true, shift: true):
-                _ToggleWrapIntent(),
+            SingleActivator(
+              LogicalKeyboardKey.keyF,
+              meta: true,
+              shift: true,
+              includeRepeats: false,
+            ): _ToggleFocusModeIntent(),
+            SingleActivator(
+              LogicalKeyboardKey.digit1,
+              meta: true,
+              includeRepeats: false,
+            ): _SelectViewIntent(
+              FullDiffView.diff,
+            ),
+            SingleActivator(
+              LogicalKeyboardKey.digit2,
+              meta: true,
+              includeRepeats: false,
+            ): _SelectViewIntent(
+              FullDiffView.blame,
+            ),
+            SingleActivator(
+              LogicalKeyboardKey.digit3,
+              meta: true,
+              includeRepeats: false,
+            ): _SelectViewIntent(
+              FullDiffView.history,
+            ),
+            SingleActivator(
+              LogicalKeyboardKey.keyU,
+              meta: true,
+              includeRepeats: false,
+            ): _ToggleLayoutIntent(),
+            SingleActivator(
+              LogicalKeyboardKey.keyH,
+              meta: true,
+              shift: true,
+              includeRepeats: false,
+            ): _ToggleScopeIntent(),
+            SingleActivator(
+              LogicalKeyboardKey.space,
+              meta: true,
+              shift: true,
+              includeRepeats: false,
+            ): _ToggleWhitespaceIntent(),
+            SingleActivator(
+              LogicalKeyboardKey.keyL,
+              meta: true,
+              shift: true,
+              includeRepeats: false,
+            ): _ToggleWrapIntent(),
             SingleActivator(LogicalKeyboardKey.arrowUp, alt: true):
                 _StepHunkIntent(-1),
             SingleActivator(LogicalKeyboardKey.arrowDown, alt: true):
