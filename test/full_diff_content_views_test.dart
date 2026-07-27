@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -700,6 +701,143 @@ void main() {
     expect(selected, same(historyEntries.first));
   });
 
+  testWidgets(
+    'history arrow navigation keeps selected rows visible in both directions',
+    (tester) async {
+      final entries = [
+        for (var index = 0; index < 30; index++)
+          FileHistoryEntry(
+            commit: GitCommit(
+              sha: 'history-$index',
+              shortSha: 'h$index',
+              parents: const [],
+              author: fixtureIdentity,
+              authorTimestamp: 1720573200 - index,
+              committer: fixtureIdentity,
+              committerTimestamp: 1720573200 - index,
+              refs: const [],
+              subject: 'History entry $index',
+            ),
+            path: fileA.path,
+            oldPath: null,
+            status: 'M',
+          ),
+      ];
+      final focusNode = FocusNode();
+      final scrollController = ScrollController();
+      addTearDown(focusNode.dispose);
+      addTearDown(scrollController.dispose);
+      var selected = entries.first;
+      await tester.pumpWidget(
+        qaApp(
+          Center(
+            child: SizedBox(
+              width: 360,
+              height: 150,
+              child: StatefulBuilder(
+                builder: (context, setState) => FullHistoryView(
+                  entries: entries,
+                  selected: selected,
+                  focusNode: focusNode,
+                  controller: scrollController,
+                  onSelected: (entry) => setState(() => selected = entry),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      focusNode.requestFocus();
+      await tester.pump();
+
+      void expectSelectedVisible() {
+        final row = find.byKey(Key('history-row-${selected.commit.sha}'));
+        expect(row, findsOneWidget);
+        final viewport = tester.getRect(find.byKey(const Key('history-list')));
+        final rowRect = tester.getRect(row);
+        expect(rowRect.top, greaterThanOrEqualTo(viewport.top));
+        expect(rowRect.bottom, lessThanOrEqualTo(viewport.bottom));
+      }
+
+      for (var step = 0; step < 15; step++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pumpAndSettle();
+        expectSelectedVisible();
+      }
+      for (var step = 0; step < 12; step++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+        await tester.pumpAndSettle();
+        expectSelectedVisible();
+      }
+    },
+  );
+
+  testWidgets(
+    'history navigation mounts an externally selected offscreen row',
+    (tester) async {
+      final entries = [
+        for (var index = 0; index < 30; index++)
+          FileHistoryEntry(
+            commit: GitCommit(
+              sha: 'offscreen-history-$index',
+              shortSha: 'o$index',
+              parents: const [],
+              author: fixtureIdentity,
+              authorTimestamp: 1720573200 - index,
+              committer: fixtureIdentity,
+              committerTimestamp: 1720573200 - index,
+              refs: const [],
+              subject: 'Offscreen history entry $index',
+            ),
+            path: fileA.path,
+            oldPath: null,
+            status: 'M',
+          ),
+      ];
+      final focusNode = FocusNode();
+      final scrollController = ScrollController();
+      addTearDown(focusNode.dispose);
+      addTearDown(scrollController.dispose);
+      var selected = entries.last;
+      await tester.pumpWidget(
+        qaApp(
+          Center(
+            child: SizedBox(
+              width: 360,
+              height: 150,
+              child: StatefulBuilder(
+                builder: (context, setState) => FullHistoryView(
+                  entries: entries,
+                  selected: selected,
+                  focusNode: focusNode,
+                  controller: scrollController,
+                  onSelected: (entry) => setState(() => selected = entry),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      focusNode.requestFocus();
+      await tester.pump();
+      expect(
+        find.byKey(Key('history-row-${entries.last.commit.sha}')),
+        findsNothing,
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pumpAndSettle();
+
+      expect(selected, same(entries[entries.length - 2]));
+      final row = find.byKey(Key('history-row-${selected.commit.sha}'));
+      expect(row, findsOneWidget);
+      final viewport = tester.getRect(find.byKey(const Key('history-list')));
+      final rowRect = tester.getRect(row);
+      expect(rowRect.top, greaterThanOrEqualTo(viewport.top));
+      expect(rowRect.bottom, lessThanOrEqualTo(viewport.bottom));
+    },
+  );
+
   testWidgets('history selection and keyboard focus use distinct surfaces', (
     tester,
   ) async {
@@ -991,6 +1129,211 @@ void main() {
           .showGutter,
       isFalse,
     );
+  });
+
+  testWidgets('blame metadata switches at the compact-width boundary', (
+    tester,
+  ) async {
+    Widget row(double viewportWidth) => qaApp(
+      Center(
+        child: SizedBox(
+          width: viewportWidth,
+          height: 60,
+          child: BlameSourceRow(
+            blame: const BlameLine(
+              lineNumber: 1,
+              sha: '40aff6d1',
+              author: 'Suwon Chae',
+              uncommitted: false,
+            ),
+            lineNumber: 1,
+            source: 'const compact = true;',
+            path: 'compact.dart',
+            side: FileDocumentSide.result,
+            kind: DiffLineKind.context,
+            wrapLines: false,
+            highlighter: fakeHighlighter,
+            current: false,
+            viewportWidth: viewportWidth,
+            showRemoteAvatars: false,
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(row(899));
+    expect(
+      tester.getSize(find.byKey(const Key('blame-metadata-1'))).width,
+      320,
+    );
+
+    await tester.pumpWidget(row(900));
+    expect(
+      tester.getSize(find.byKey(const Key('blame-metadata-1'))).width,
+      360,
+    );
+  });
+
+  testWidgets('zero and non-hex blame SHAs use the muted rail', (tester) async {
+    for (final sha in [
+      '0000000000000000000000000000000000000000',
+      'not-a-sha',
+    ]) {
+      await tester.pumpWidget(
+        qaApp(
+          Center(
+            child: SizedBox(
+              width: 800,
+              height: 60,
+              child: BlameSourceRow(
+                blame: BlameLine(
+                  lineNumber: 1,
+                  sha: sha,
+                  author: 'Suwon Chae',
+                  uncommitted: false,
+                ),
+                lineNumber: 1,
+                source: 'const rail = true;',
+                path: 'rail.dart',
+                side: FileDocumentSide.result,
+                kind: DiffLineKind.context,
+                wrapLines: false,
+                highlighter: fakeHighlighter,
+                current: false,
+                viewportWidth: 800,
+                showRemoteAvatars: false,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final rail = tester.widget<ColoredBox>(
+        find.descendant(
+          of: find.byKey(const Key('blame-rail-1')),
+          matching: find.byType(ColoredBox),
+        ),
+      );
+      expect(rail.color, fullDiffMuted, reason: sha);
+    }
+  });
+
+  testWidgets('enabled blame avatars display a resolved remote author', (
+    tester,
+  ) async {
+    final requests = <List<String>>[];
+    final service = AvatarService(
+      remote: const RemoteRepository(
+        host: 'github.com',
+        owner: 'team',
+        repository: 'yogit',
+      ),
+      runner: (executable, arguments, {workingDirectory}) async {
+        requests.add(List.unmodifiable(arguments));
+        return ProcessResult(
+          1,
+          0,
+          '{"author":{"login":"ada",'
+              '"avatar_url":"https://avatars.example/ada.png"},'
+              '"committer":null}',
+          '',
+        );
+      },
+    );
+
+    await tester.pumpWidget(
+      qaApp(
+        Center(
+          child: SizedBox(
+            width: 1000,
+            height: 60,
+            child: BlameSourceRow(
+              blame: const BlameLine(
+                lineNumber: 1,
+                sha: '40aff6d1',
+                author: 'Suwon Chae',
+                authorEmail: 'suwon@example.com',
+                uncommitted: false,
+              ),
+              lineNumber: 1,
+              source: 'const avatar = true;',
+              path: 'avatar.dart',
+              side: FileDocumentSide.result,
+              kind: DiffLineKind.context,
+              wrapLines: false,
+              highlighter: fakeHighlighter,
+              current: false,
+              viewportWidth: 1000,
+              avatarService: service,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final avatar = tester.widget<IdentityAvatar>(
+      find.byKey(const Key('blame-avatar-1')),
+    );
+    expect(avatar.remoteAvatar?.login, 'ada');
+    expect(requests, hasLength(1));
+  });
+
+  testWidgets('blame avatar resolver failures fall back to initials', (
+    tester,
+  ) async {
+    var requests = 0;
+    final service = AvatarService(
+      remote: const RemoteRepository(
+        host: 'github.com',
+        owner: 'team',
+        repository: 'yogit',
+      ),
+      runner: (executable, arguments, {workingDirectory}) async {
+        requests++;
+        throw StateError('avatar lookup failed');
+      },
+    );
+
+    await tester.pumpWidget(
+      qaApp(
+        Center(
+          child: SizedBox(
+            width: 1000,
+            height: 60,
+            child: BlameSourceRow(
+              blame: const BlameLine(
+                lineNumber: 1,
+                sha: '40aff6d1',
+                author: 'Suwon Chae',
+                authorEmail: 'suwon@example.com',
+                uncommitted: false,
+              ),
+              lineNumber: 1,
+              source: 'const fallback = true;',
+              path: 'fallback.dart',
+              side: FileDocumentSide.result,
+              kind: DiffLineKind.context,
+              wrapLines: false,
+              highlighter: fakeHighlighter,
+              current: false,
+              viewportWidth: 1000,
+              avatarService: service,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final avatar = tester.widget<IdentityAvatar>(
+      find.byKey(const Key('blame-avatar-1')),
+    );
+    expect(avatar.remoteAvatar, isNull);
+    expect(find.text('SC'), findsOneWidget);
+    expect(requests, 1);
   });
 
   testWidgets(

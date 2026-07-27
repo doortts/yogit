@@ -447,7 +447,8 @@ void main() {
         style: const TextStyle(
           fontFamily: technicalFontFamily,
           fontFamilyFallback: technicalFontFallback,
-          fontSize: 10,
+          fontSize: 12,
+          height: 21 / 12,
         ),
       ),
       textDirection: TextDirection.ltr,
@@ -461,6 +462,18 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(position.pixels, greaterThan(0));
+
+    position.jumpTo(position.maxScrollExtent);
+    await tester.pump();
+    final lastSource = find.descendant(
+      of: find.byKey(Key('hunk-line-${document.hunks.single.anchor.id}-1')),
+      matching: find.byKey(const Key('code-row-source-text')),
+    );
+    expect(lastSource, findsOneWidget);
+    expect(
+      tester.getRect(lastSource).right,
+      lessThanOrEqualTo(tester.getRect(horizontal).right),
+    );
   });
 
   testWidgets('inline shows every hunk with three context lines', (

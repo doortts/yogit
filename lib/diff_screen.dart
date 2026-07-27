@@ -206,6 +206,9 @@ class _DiffScreenState extends State<DiffScreen> {
         previous.parent != next.parent ||
         previous.selectedFile?.path != next.selectedFile?.path;
     final changedDocument = !identical(previous.patch.data, next.patch.data);
+    final enteredSourceView =
+        previous.view != next.view &&
+        (next.view == FullDiffView.file || next.view == FullDiffView.blame);
     final previousIndex = previous.activeAnchor?.hunkIndex ?? 0;
     final nextIndex = next.activeAnchor?.hunkIndex ?? 0;
     final navigationRequested =
@@ -220,6 +223,14 @@ class _DiffScreenState extends State<DiffScreen> {
       _invalidateEditorRequest();
       _pendingScrollToTop = true;
       _pendingAnchorId = null;
+    }
+    if (nextAnchor != null &&
+        (enteredSourceView ||
+            (changedDocument &&
+                (next.view == FullDiffView.file ||
+                    next.view == FullDiffView.blame)))) {
+      _pendingAnchorId = nextAnchor.id;
+      _pendingAnchorDirection = nextIndex.compareTo(previousIndex);
     }
     if (!_pendingScrollToTop && navigationRequested && nextAnchor != null) {
       _pendingAnchorId = nextAnchor.id;
@@ -258,7 +269,7 @@ class _DiffScreenState extends State<DiffScreen> {
     final anchor = state.activeAnchor;
     if (state.view == FullDiffView.history ||
         anchor == null ||
-        anchor.hunkIndex == 0) {
+        (state.view == FullDiffView.diff && anchor.hunkIndex == 0)) {
       return;
     }
     _pendingAnchorId = anchor.id;
@@ -319,7 +330,6 @@ class _DiffScreenState extends State<DiffScreen> {
         return;
       }
       if (!_contentScroll.hasClients) {
-        _pendingAnchorId = null;
         return;
       }
 

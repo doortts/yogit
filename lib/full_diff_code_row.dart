@@ -10,7 +10,7 @@ import 'full_diff_theme.dart';
 import 'git.dart';
 import 'typography.dart';
 
-const _sourceStyle = TextStyle(
+const fullDiffSourceTextStyle = TextStyle(
   color: Colors.white,
   fontFamily: technicalFontFamily,
   fontFamilyFallback: technicalFontFallback,
@@ -265,7 +265,7 @@ class FullDiffCodeRow extends StatelessWidget {
     final richText = _SourceText(
       wrapLines: wrapLines,
       text: TextSpan(
-        style: _sourceStyle,
+        style: fullDiffSourceTextStyle,
         children: _sourceSpans(
           line.text,
           richRenderingEnabled
@@ -551,7 +551,7 @@ TextSpan _sourceSpan(
   final changed = wordRanges.any(
     (range) => range.start < end && range.end > start,
   );
-  var style = _sourceStyle;
+  var style = fullDiffSourceTextStyle;
   if (syntax != null) style = style.merge(syntax.style);
   if (changed) {
     style = style.copyWith(

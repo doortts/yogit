@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/git.dart';
 
 const _textByteLimit = 10 * 1024 * 1024;
@@ -56,6 +58,15 @@ Future<void> writeSparseLargeFile(Directory root, String path) async {
   } finally {
     await handle.close();
   }
+}
+
+Future<void> writeLargeTextFile(Directory root, String path) async {
+  final file = File('${root.path}/$path');
+  await file.parent.create(recursive: true);
+  await file.writeAsBytes(
+    Uint8List(_textByteLimit + 2)..fillRange(0, _textByteLimit + 2, 0x61),
+    flush: true,
+  );
 }
 
 Future<Set<String>> blameTemporaryDirectories() async => {
@@ -152,6 +163,66 @@ void main() {
 
     expect(bytes, hasLength(_textByteLimit + 1));
     expect(bytes.last, 0x42);
+  });
+
+  test(
+    'preflights an oversized committed blob without invoking show',
+    () async {
+      final calls = <List<String>>[];
+      var rawCalls = 0;
+      final repository = GitRepository(
+        '/unused',
+        runner: (executable, arguments, {workingDirectory}) async {
+          calls.add(List.unmodifiable(arguments));
+          return ProcessResult(1, 0, '${_textByteLimit + 2}\n', '');
+        },
+        rawRunner: (executable, arguments, {workingDirectory}) async {
+          rawCalls++;
+          throw StateError('git show must not run for an oversized blob');
+        },
+      );
+
+      final bytes = await repository.loadBlobBytes('deadbeef', 'large.txt');
+      final document = FileDocument.fromBytes(
+        revision: 'deadbeef',
+        path: 'large.txt',
+        side: FileDocumentSide.result,
+        bytes: bytes,
+        gitMarkedBinary: false,
+      );
+
+      expect(calls, [
+        ['cat-file', '-s', 'deadbeef:large.txt'],
+      ]);
+      expect(rawCalls, 0);
+      expect(bytes, hasLength(_textByteLimit + 1));
+      expect(document.kind, FileContentKind.tooLarge);
+      expect(document.limitReason, FileContentLimitReason.byteLimit);
+    },
+  );
+
+  test('bounds a committed blob before classifying it as too large', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeLargeTextFile(root, 'large.txt');
+    await runGit(root, ['add', '--all']);
+    await runGit(root, ['commit', '-m', 'large text']);
+    final repository = GitRepository(root.path);
+    final commit = (await repository.loadHistory()).single;
+    final file = (await repository.loadFiles(commit)).single;
+
+    final bytes = await repository.loadFileBytes(commit, file);
+    final document = FileDocument.fromBytes(
+      revision: commit.sha,
+      path: file.path,
+      side: FileDocumentSide.result,
+      bytes: bytes,
+      gitMarkedBinary: file.isBinary,
+    );
+
+    expect(bytes, hasLength(_textByteLimit + 1));
+    expect(document.kind, FileContentKind.tooLarge);
+    expect(document.limitReason, FileContentLimitReason.byteLimit);
   });
 
   test('skips synthetic diff rows for a 32 MiB untracked file', () async {
@@ -518,6 +589,92 @@ $uncommittedSha 4 4
     expect(untrackedBlame.single.author, 'Uncommitted');
   });
 
+  test('synthesizes blame for a staged working tree addition', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'base.txt', 'base\n', 'base');
+    await File('${root.path}/staged.txt').writeAsString('one\ntwo\n');
+    await runGit(root, ['add', '--', 'staged.txt']);
+    final calls = <List<String>>[];
+    final repository = GitRepository(
+      root.path,
+      runner: (executable, arguments, {workingDirectory}) {
+        calls.add(List.unmodifiable(arguments));
+        return runProcess(
+          executable,
+          arguments,
+          workingDirectory: workingDirectory,
+        );
+      },
+    );
+    final working = (await repository.loadWorkingTree())!;
+    final file = (await repository.loadFiles(
+      working,
+    )).singleWhere((entry) => entry.path == 'staged.txt');
+    final bytes = await repository.loadFileBytes(working, file);
+
+    final blame = await repository.loadBlame(
+      working,
+      file,
+      workingTreeBytes: bytes,
+    );
+
+    expect(file.status, 'A');
+    expect(blame, hasLength(2));
+    expect(blame, everyElement(isA<GitBlameLine>()));
+    expect(blame.every((line) => line.uncommitted), isTrue);
+    expect(calls.where((arguments) => arguments.first == 'blame'), isEmpty);
+  });
+
+  test(
+    'blames a worktree rename from its captured base and old path',
+    () async {
+      final root = await createGitFixture();
+      addTearDown(() => root.delete(recursive: true));
+      await writeAndCommit(root, 'before.txt', 'committed\n', 'base');
+      await runGit(root, ['mv', 'before.txt', 'after.txt']);
+      await File(
+        '${root.path}/after.txt',
+      ).writeAsString('committed\nworking\n');
+      final calls = <List<String>>[];
+      final repository = GitRepository(
+        root.path,
+        runner: (executable, arguments, {workingDirectory}) {
+          calls.add(List.unmodifiable(arguments));
+          return runProcess(
+            executable,
+            arguments,
+            workingDirectory: workingDirectory,
+          );
+        },
+      );
+      final working = (await repository.loadWorkingTree())!;
+      final file = (await repository.loadFiles(
+        working,
+      )).singleWhere((entry) => entry.path == 'after.txt');
+      final bytes = await repository.loadFileBytes(working, file);
+
+      final blame = await repository.loadBlame(
+        working,
+        file,
+        workingTreeBytes: bytes,
+      );
+
+      expect(file.status, startsWith('R'));
+      expect(file.oldPath, 'before.txt');
+      expect(blame, hasLength(2));
+      expect(blame.first.uncommitted, isFalse);
+      expect(blame.last.uncommitted, isTrue);
+      final blameCall = calls.singleWhere(
+        (arguments) => arguments.first == 'blame',
+      );
+      expect(blameCall, contains(working.parents.single));
+      expect(blameCall, contains('before.txt'));
+      expect(blameCall, isNot(contains('HEAD')));
+      expect(blameCall, isNot(contains('after.txt')));
+    },
+  );
+
   test(
     'untracked worktree symlink uses link text for diff file and blame',
     () async {
@@ -725,9 +882,9 @@ $uncommittedSha 4 4
     );
     expect(sizeQuery.sublist(0, 4), ['ls-tree', '-rlz', commit.sha, '--']);
     expect(sizeQuery.sublist(4).toSet(), {
-      'modified.txt',
-      'added.txt',
-      'renamed result.txt',
+      ':(literal)modified.txt',
+      ':(literal)added.txt',
+      ':(literal)renamed result.txt',
     });
   });
 
@@ -777,6 +934,110 @@ $uncommittedSha 4 4
     },
   );
 
+  test('uses the explicit merge parent for deleted size metadata', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'selected.txt', 'base\n', 'base');
+    await runGit(root, ['checkout', '-b', 'side']);
+    const sideContents = 'selected parent ✓\n';
+    await File('${root.path}/selected.txt').writeAsString(sideContents);
+    await runGit(root, ['commit', '-am', 'side modifies selected']);
+    final sideSha = (await runGit(root, ['rev-parse', 'HEAD'])).trim();
+    await runGit(root, ['checkout', 'main']);
+    await runGit(root, ['rm', '--', 'selected.txt']);
+    await runGit(root, ['commit', '-m', 'main deletes selected']);
+    final merge = await Process.run('git', [
+      'merge',
+      '--no-ff',
+      'side',
+      '-m',
+      'merge side',
+    ], workingDirectory: root.path);
+    expect(merge.exitCode, isNonZero, reason: 'fixture needs modify/delete');
+    await runGit(root, ['rm', '--', 'selected.txt']);
+    await runGit(root, ['commit', '-m', 'resolve merge as deletion']);
+
+    final calls = <List<String>>[];
+    final repository = GitRepository(
+      root.path,
+      runner: (executable, arguments, {workingDirectory}) {
+        calls.add(List.unmodifiable(arguments));
+        return runProcess(
+          executable,
+          arguments,
+          workingDirectory: workingDirectory,
+        );
+      },
+    );
+    final commit = (await repository.loadHistory()).first;
+    expect(commit.parents, hasLength(2));
+    expect(commit.parents, contains(sideSha));
+
+    final file = (await repository.loadFiles(commit, parent: sideSha)).single;
+
+    expect(file.status, startsWith('D'));
+    expect(file.sizeBytes, utf8.encode(sideContents).length);
+    final sizeQuery = calls.singleWhere(
+      (arguments) => arguments.first == 'ls-tree',
+    );
+    expect(sizeQuery[2], sideSha);
+  });
+
+  test('isolates result and deleted size batch failures', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'modified.txt', 'before\n', 'base');
+    const deletedContents = 'deleted parent ✓\n';
+    await writeAndCommit(
+      root,
+      'deleted.txt',
+      deletedContents,
+      'add deleted file',
+    );
+    await File('${root.path}/modified.txt').writeAsString('after\n');
+    await runGit(root, ['rm', '--', 'deleted.txt']);
+    await runGit(root, ['commit', '-am', 'modify and delete']);
+
+    String? resultRevision;
+    final calls = <List<String>>[];
+    final repository = GitRepository(
+      root.path,
+      runner: (executable, arguments, {workingDirectory}) {
+        calls.add(List.unmodifiable(arguments));
+        if (arguments.first == 'ls-tree' && arguments[2] == resultRevision) {
+          return Future.value(
+            ProcessResult(1, 1, '', 'forced result-size failure'),
+          );
+        }
+        return runProcess(
+          executable,
+          arguments,
+          workingDirectory: workingDirectory,
+        );
+      },
+    );
+    final commit = (await repository.loadHistory()).first;
+    resultRevision = commit.sha;
+
+    final files = {
+      for (final file in await repository.loadFiles(commit)) file.path: file,
+    };
+
+    expect(files['modified.txt']!.sizeBytes, isNull);
+    expect(
+      files['deleted.txt']!.sizeBytes,
+      utf8.encode(deletedContents).length,
+    );
+    final sizeQueries = calls
+        .where((arguments) => arguments.first == 'ls-tree')
+        .toList();
+    expect(sizeQueries, hasLength(2));
+    expect(
+      sizeQueries.map((arguments) => arguments[2]),
+      containsAll([commit.sha, commit.parents.single]),
+    );
+  });
+
   test('parses ls-tree sizes for paths containing spaces and tabs', () async {
     final root = await createGitFixture();
     addTearDown(() => root.delete(recursive: true));
@@ -797,6 +1058,26 @@ $uncommittedSha 4 4
 
     expect(files[spacedPath]!.sizeBytes, 11);
     expect(files[tabbedPath]!.sizeBytes, 12);
+  });
+
+  test('loads sizes for a leading-colon path as a literal pathspec', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    const path = ':leading.txt';
+    await File('${root.path}/$path').writeAsString('before\n');
+    await runGit(root, ['add', '--all']);
+    await runGit(root, ['commit', '-m', 'base']);
+    await File('${root.path}/$path').writeAsString('after colon\n');
+    await runGit(root, ['add', '--all']);
+    await runGit(root, ['commit', '-m', 'change leading colon']);
+
+    final repository = GitRepository(root.path);
+    final commit = (await repository.loadHistory()).first;
+    final file = (await repository.loadFiles(
+      commit,
+    )).singleWhere((entry) => entry.path == path);
+
+    expect(file.sizeBytes, utf8.encode('after colon\n').length);
   });
 
   test('keeps files when size metadata lookup fails', () async {
@@ -863,6 +1144,74 @@ $uncommittedSha 4 4
       expect(files['link']!.sizeBytes, 18);
       expect(calls.where((arguments) => arguments.first == 'show'), isEmpty);
       expect(calls.where((arguments) => arguments.first == 'ls-tree'), isEmpty);
+    },
+  );
+
+  test('loads a worktree deletion size from its captured base', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    const contents = 'deleted from worktree ✓\n';
+    await writeAndCommit(root, 'deleted.txt', contents, 'base');
+    await runGit(root, ['rm', '--', 'deleted.txt']);
+
+    final calls = <List<String>>[];
+    final repository = GitRepository(
+      root.path,
+      runner: (executable, arguments, {workingDirectory}) {
+        calls.add(List.unmodifiable(arguments));
+        return runProcess(
+          executable,
+          arguments,
+          workingDirectory: workingDirectory,
+        );
+      },
+    );
+    final working = (await repository.loadWorkingTree())!;
+    final file = (await repository.loadFiles(working)).single;
+
+    expect(file.status, startsWith('D'));
+    expect(file.sizeBytes, utf8.encode(contents).length);
+    final sizeQuery = calls.singleWhere(
+      (arguments) => arguments.first == 'ls-tree',
+    );
+    expect(sizeQuery[2], working.parents.single);
+  });
+
+  test(
+    'keeps captured worktree files when they disappear before stat',
+    () async {
+      final root = await createGitFixture();
+      addTearDown(() => root.delete(recursive: true));
+      await writeAndCommit(root, 'racing.txt', 'before\n', 'base');
+      final racingFile = File('${root.path}/racing.txt');
+      await racingFile.writeAsString('modified\n');
+      var removedBeforeStat = false;
+      final repository = GitRepository(
+        root.path,
+        runner: (executable, arguments, {workingDirectory}) async {
+          final result = await runProcess(
+            executable,
+            arguments,
+            workingDirectory: workingDirectory,
+          );
+          if (!removedBeforeStat &&
+              arguments.length >= 2 &&
+              arguments[0] == 'ls-files' &&
+              arguments[1] == '--others') {
+            await racingFile.delete();
+            removedBeforeStat = true;
+          }
+          return result;
+        },
+      );
+      final working = (await repository.loadWorkingTree())!;
+
+      final file = (await repository.loadFiles(working)).single;
+
+      expect(removedBeforeStat, isTrue);
+      expect(file.path, 'racing.txt');
+      expect(file.status, startsWith('M'));
+      expect(file.sizeBytes, isNull);
     },
   );
 }

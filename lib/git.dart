@@ -29,13 +29,26 @@ Future<ProcessResult> runRawProcess(
   String executable,
   List<String> arguments, {
   String? workingDirectory,
-}) => Process.run(
-  executable,
-  arguments,
-  workingDirectory: workingDirectory,
-  stdoutEncoding: null,
-  stderrEncoding: utf8,
-);
+}) async {
+  final process = await Process.start(
+    executable,
+    arguments,
+    workingDirectory: workingDirectory,
+  );
+  final stderr = process.stderr.transform(utf8.decoder).join();
+  final stdout = BytesBuilder(copy: false);
+  var captured = 0;
+  const captureLimit = fullDiffTextByteLimit + 1;
+  await for (final chunk in process.stdout) {
+    final remaining = captureLimit - captured;
+    if (remaining <= 0) continue;
+    final length = min(remaining, chunk.length);
+    stdout.add(length == chunk.length ? chunk : chunk.sublist(0, length));
+    captured += length;
+  }
+  final exitCode = await process.exitCode;
+  return ProcessResult(process.pid, exitCode, stdout.takeBytes(), await stderr);
+}
 
 String resolveExecutable(
   String name, {
@@ -861,7 +874,13 @@ class GitRepository implements FullDiffRepository {
     if (pathList.isEmpty) return const {};
     try {
       return _parseLsTreeSizes(
-        await _run(['ls-tree', '-rlz', revision, '--', ...pathList]),
+        await _run([
+          'ls-tree',
+          '-rlz',
+          revision,
+          '--',
+          ...pathList.map((path) => ':(literal)$path'),
+        ]),
       );
     } on ProcessException {
       return const {};
@@ -932,7 +951,8 @@ class GitRepository implements FullDiffRepository {
     String? parent,
     Uint8List? workingTreeBytes,
   }) async {
-    if (commit.isWorkingTree && (_untrackedFiles[file] ?? false)) {
+    if (commit.isWorkingTree &&
+        ((_untrackedFiles[file] ?? false) || file.status.startsWith('A'))) {
       final before = await _readWorktreeSnapshot(file.path);
       final expected = workingTreeBytes == null
           ? before
@@ -1029,9 +1049,19 @@ class GitRepository implements FullDiffRepository {
   }
 
   Future<Uint8List> loadBlobBytes(String revision, String path) async {
+    final object = '$revision:$path';
+    final sizeOutput = await _run(['cat-file', '-s', object]);
+    final size = int.tryParse(sizeOutput.trim());
+    if (size == null) {
+      throw FormatException('Invalid blob size: ${sizeOutput.trim()}');
+    }
+    if (size > fullDiffTextByteLimit) {
+      return Uint8List(fullDiffTextByteLimit + 1)
+        ..fillRange(0, fullDiffTextByteLimit + 1, 0x20);
+    }
     final result = await rawRunner(gitExecutable, [
       'show',
-      '$revision:$path',
+      object,
     ], workingDirectory: root);
     if (result.exitCode != 0) {
       throw ProcessException(
@@ -1041,7 +1071,14 @@ class GitRepository implements FullDiffRepository {
         result.exitCode,
       );
     }
-    return Uint8List.fromList((result.stdout as List<int>));
+    final bytes = result.stdout as List<int>;
+    final boundedLength = min(bytes.length, fullDiffTextByteLimit + 1);
+    if (bytes is Uint8List) {
+      return boundedLength == bytes.length
+          ? bytes
+          : Uint8List.sublistView(bytes, 0, boundedLength);
+    }
+    return Uint8List.fromList(bytes.sublist(0, boundedLength));
   }
 
   /// Sidebar data: local branches, remote branches, and tags, plus the
@@ -1221,9 +1258,9 @@ List<String> blameArguments({
       '--line-porcelain',
       '--contents',
       contentsPath,
-      'HEAD',
+      base,
       '--',
-      file.path,
+      file.oldPath ?? file.path,
     ];
   }
   return [

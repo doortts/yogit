@@ -10,7 +10,6 @@ import 'full_diff_syntax.dart';
 import 'full_diff_syntax_contract.dart';
 import 'full_diff_theme.dart';
 import 'git.dart';
-import 'typography.dart';
 
 class HunkPresentationView extends StatelessWidget {
   const HunkPresentationView({
@@ -158,14 +157,7 @@ double _unwrappedContentWidth(BuildContext context, Iterable<DiffLine> lines) {
   );
   var widest = 0.0;
   for (final line in lines) {
-    painter.text = TextSpan(
-      text: line.text,
-      style: const TextStyle(
-        fontFamily: technicalFontFamily,
-        fontFamilyFallback: technicalFontFallback,
-        fontSize: 10,
-      ),
-    );
+    painter.text = TextSpan(text: line.text, style: fullDiffSourceTextStyle);
     painter.layout();
     widest = math.max(widest, painter.width);
   }

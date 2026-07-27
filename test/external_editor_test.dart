@@ -134,7 +134,10 @@ void main() {
     final service = ExternalEditorService(
       repositoryRoot: rootLink.path,
       environment: const {},
-      nativeFileOpener: (path) async => opened.add(path),
+      nativeFileOpener: (path) async {
+        opened.add(path);
+        return true;
+      },
     );
 
     await service.open(relativePath: 'nested/../target.txt');
@@ -153,7 +156,10 @@ void main() {
     final service = ExternalEditorService(
       repositoryRoot: root.path,
       environment: const {},
-      nativeFileOpener: (_) async => opened = true,
+      nativeFileOpener: (_) async {
+        opened = true;
+        return true;
+      },
     );
 
     await expectLater(
@@ -173,7 +179,7 @@ void main() {
     final service = ExternalEditorService(
       repositoryRoot: root.path,
       environment: const {},
-      nativeFileOpener: (_) async {},
+      nativeFileOpener: (_) async => true,
     );
 
     await expectLater(
@@ -196,7 +202,10 @@ void main() {
         repositoryRoot: root.path,
         environment: const {},
         processStarter: (_, _) async => launched = true,
-        nativeFileOpener: (_) async => opened = true,
+        nativeFileOpener: (_) async {
+          opened = true;
+          return true;
+        },
       );
 
       await expectLater(
@@ -215,7 +224,7 @@ void main() {
     final service = ExternalEditorService(
       repositoryRoot: root.path,
       environment: const {},
-      nativeFileOpener: (_) async {},
+      nativeFileOpener: (_) async => true,
     );
 
     await expectLater(
@@ -271,7 +280,10 @@ void main() {
         'PATH': root.path,
       },
       processStarter: (_, _) async => launched = true,
-      nativeFileOpener: (_) async => opened = true,
+      nativeFileOpener: (_) async {
+        opened = true;
+        return true;
+      },
     );
 
     await expectLater(
@@ -281,6 +293,70 @@ void main() {
     expect(launched, isFalse);
     expect(opened, isFalse);
     expect(File('${root.path}/injected').existsSync(), isFalse);
+  });
+
+  test('reports a false native open result', () async {
+    const channel = MethodChannel('yogit/window');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (_) async => false);
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null),
+    );
+    final root = await Directory.systemTemp.createTemp('yogit_root_');
+    addTearDown(() => root.delete(recursive: true));
+    await File('${root.path}/working.txt').writeAsString('working tree\n');
+    final service = ExternalEditorService(
+      repositoryRoot: root.path,
+      environment: const {},
+    );
+
+    await expectLater(
+      service.open(relativePath: 'working.txt'),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('Native file opener failed'),
+        ),
+      ),
+    );
+  });
+
+  test('preserves a native openFile platform error', () async {
+    const channel = MethodChannel('yogit/window');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          channel,
+          (_) async => throw PlatformException(
+            code: 'open_failed',
+            message: 'workspace rejected file',
+          ),
+        );
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null),
+    );
+    final root = await Directory.systemTemp.createTemp('yogit_root_');
+    addTearDown(() => root.delete(recursive: true));
+    await File('${root.path}/working.txt').writeAsString('working tree\n');
+    final service = ExternalEditorService(
+      repositoryRoot: root.path,
+      environment: const {},
+    );
+
+    await expectLater(
+      service.open(relativePath: 'working.txt'),
+      throwsA(
+        isA<PlatformException>()
+            .having((error) => error.code, 'code', 'open_failed')
+            .having(
+              (error) => error.message,
+              'message',
+              'workspace rejected file',
+            ),
+      ),
+    );
   });
 
   test(

@@ -5,12 +5,6 @@ import 'full_diff_model.dart';
 import 'full_diff_theme.dart';
 import 'typography.dart';
 
-class HistoryEntryIntent extends Intent {
-  const HistoryEntryIntent(this.entry);
-
-  final FileHistoryEntry entry;
-}
-
 class FullHistoryView extends StatefulWidget {
   const FullHistoryView({
     required this.entries,
@@ -35,10 +29,13 @@ class FullHistoryView extends StatefulWidget {
 
 class _FullHistoryViewState extends State<FullHistoryView> {
   final _ownedFocusNode = FocusNode(debugLabel: 'full history list');
+  final _ownedScrollController = ScrollController();
   final Map<String, GlobalKey> _rowKeys = {};
   bool _hasFocus = false;
 
   FocusNode get _focusNode => widget.focusNode ?? _ownedFocusNode;
+  ScrollController get _scrollController =>
+      widget.controller ?? _ownedScrollController;
 
   @override
   void didUpdateWidget(covariant FullHistoryView oldWidget) {
@@ -50,6 +47,7 @@ class _FullHistoryViewState extends State<FullHistoryView> {
   @override
   void dispose() {
     _ownedFocusNode.dispose();
+    _ownedScrollController.dispose();
     super.dispose();
   }
 
@@ -85,12 +83,33 @@ class _FullHistoryViewState extends State<FullHistoryView> {
         : (selectedIndex + delta).clamp(0, widget.entries.length - 1);
     final entry = widget.entries[nextIndex];
     widget.onSelected(entry);
+    _revealSelection(entry, nextIndex, delta);
+  }
+
+  void _revealSelection(
+    FileHistoryEntry entry,
+    int entryIndex,
+    int direction, {
+    bool mayApproximate = true,
+  }) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final rowContext = _rowKeys[entry.commit.sha]?.currentContext;
-      if (!mounted || rowContext == null) return;
+      if (!mounted) return;
+      if (rowContext == null) {
+        if (!mayApproximate || !_scrollController.hasClients) return;
+        final position = _scrollController.position;
+        final fraction = widget.entries.length <= 1
+            ? 0.0
+            : entryIndex / (widget.entries.length - 1);
+        position.jumpTo(position.maxScrollExtent * fraction);
+        _revealSelection(entry, entryIndex, direction, mayApproximate: false);
+        return;
+      }
       Scrollable.ensureVisible(
         rowContext,
-        alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+        alignmentPolicy: direction < 0
+            ? ScrollPositionAlignmentPolicy.keepVisibleAtStart
+            : ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
       );
     });
   }
@@ -115,8 +134,8 @@ class _FullHistoryViewState extends State<FullHistoryView> {
       child: FocusTraversalGroup(
         child: ListView.builder(
           key: const Key('history-list'),
-          controller: widget.controller,
-          primary: widget.controller == null,
+          controller: _scrollController,
+          primary: false,
           padding: const EdgeInsets.all(12),
           itemCount: widget.entries.length,
           itemBuilder: (context, index) {

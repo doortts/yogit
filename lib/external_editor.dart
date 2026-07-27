@@ -6,7 +6,7 @@ import 'git.dart';
 
 typedef EditorProcessStarter =
     Future<void> Function(String executable, List<String> arguments);
-typedef NativeFileOpener = Future<void> Function(String absolutePath);
+typedef NativeFileOpener = Future<bool> Function(String absolutePath);
 
 List<String> parsePosixWords(String source) {
   final words = <String>[];
@@ -81,9 +81,11 @@ class ExternalEditorService {
            }),
        nativeFileOpener =
            nativeFileOpener ??
-           ((path) => const MethodChannel(
-             'yogit/window',
-           ).invokeMethod<void>('openFile', {'path': path}));
+           ((path) async =>
+               await const MethodChannel(
+                 'yogit/window',
+               ).invokeMethod<bool>('openFile', {'path': path}) ==
+               true);
 
   final String repositoryRoot;
   final Map<String, String> environment;
@@ -125,7 +127,9 @@ class ExternalEditorService {
       return;
     }
 
-    await nativeFileOpener(file);
+    if (!await nativeFileOpener(file)) {
+      throw StateError('Native file opener failed');
+    }
   }
 }
 

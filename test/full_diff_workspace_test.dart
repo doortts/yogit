@@ -89,6 +89,45 @@ void main() {
   Future<
     ({FullDiffSessionController controller, FakeFullDiffRepository repository})
   >
+  distantChangeFixture(FullDiffInitialView initialView) async {
+    final repository = FakeFullDiffRepository();
+    final source = [
+      for (var line = 1; line <= 180; line++) 'source line $line',
+    ].join('\n');
+    repository.files = (_, _) async => const [fileA];
+    repository.diff = (_, _, _, _, _) async => const [
+      DiffLine(kind: DiffLineKind.hunk, text: '@@ -120 +120 @@ distant'),
+      DiffLine(
+        kind: DiffLineKind.delete,
+        text: 'old source line 120',
+        oldNumber: 120,
+      ),
+      DiffLine(kind: DiffLineKind.add, text: 'source line 120', newNumber: 120),
+    ];
+    repository.content = (_, _, _) async =>
+        Uint8List.fromList(utf8.encode('$source\n'));
+    repository.blame = (_, _, _, _) async => [
+      for (var line = 1; line <= 180; line++)
+        GitBlameLine(
+          lineNumber: line,
+          sha: commitA.sha,
+          author: fixtureIdentity.name,
+          uncommitted: false,
+        ),
+    ];
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+      initialView: initialView,
+    );
+    await controller.initialize();
+    return (controller: controller, repository: repository);
+  }
+
+  Future<
+    ({FullDiffSessionController controller, FakeFullDiffRepository repository})
+  >
   historyWorkspaceFixture({
     Future<List<GitFileChange>> Function(GitCommit, String?)? files,
     Future<List<DiffLine>> Function(
@@ -310,6 +349,59 @@ void main() {
     expect(controller.state.activeAnchor?.hunkIndex, 1);
     expect(fixture.repository.diffRequests, hasLength(1));
   });
+
+  testWidgets('initial Full File aligns the first change in the viewport', (
+    tester,
+  ) async {
+    final fixture = await distantChangeFixture(FullDiffInitialView.fullFile);
+    addTearDown(fixture.controller.dispose);
+
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1070, 520),
+    );
+
+    final target = find.byKey(const Key('file-current-line-120'));
+    expect(target, findsOneWidget);
+    final viewport = tester.getRect(find.byKey(const Key('file-list')));
+    final targetRect = tester.getRect(target);
+    expect(targetRect.top, greaterThanOrEqualTo(viewport.top));
+    expect(targetRect.bottom, lessThanOrEqualTo(viewport.bottom));
+  });
+
+  for (final view in [FullDiffView.file, FullDiffView.blame]) {
+    testWidgets('switching into ${view.name} aligns the active change', (
+      tester,
+    ) async {
+      final fixture = await distantChangeFixture(FullDiffInitialView.hunk);
+      addTearDown(fixture.controller.dispose);
+      await pumpWorkspace(
+        tester,
+        controller: fixture.controller,
+        size: const Size(1070, 520),
+      );
+
+      await tester.tap(find.text(view == FullDiffView.file ? 'File' : 'Blame'));
+      await tester.pumpAndSettle();
+
+      final list = find.byKey(
+        Key(view == FullDiffView.file ? 'file-list' : 'blame-list'),
+      );
+      final target = find.byKey(
+        Key(
+          view == FullDiffView.file
+              ? 'file-current-line-120'
+              : 'blame-current-line-120',
+        ),
+      );
+      expect(target, findsOneWidget);
+      final viewport = tester.getRect(list);
+      final targetRect = tester.getRect(target);
+      expect(targetRect.top, greaterThanOrEqualTo(viewport.top));
+      expect(targetRect.bottom, lessThanOrEqualTo(viewport.bottom));
+    });
+  }
 
   test(
     'navigation boundaries and scroll synchronization do not bounce',
@@ -2313,6 +2405,56 @@ void main() {
       },
     );
   }
+
+  testWidgets('a false native editor result is exposed on the editor control', (
+    tester,
+  ) async {
+    const workingTree = GitCommit(
+      sha: '',
+      shortSha: '',
+      parents: ['HEAD'],
+      author: fixtureIdentity,
+      authorTimestamp: 1720573300,
+      committer: fixtureIdentity,
+      committerTimestamp: 1720573300,
+      refs: [],
+      subject: 'working tree',
+    );
+    final repository = FakeFullDiffRepository();
+    repository.files = (_, _) async => const [fileA];
+    repository.diff = (_, _, _, _, _) async => twoHunkLines;
+    repository.content = (_, _, _) async => resultFile.bytes;
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [workingTree],
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    final editorCompleter = Completer<void>();
+    final editorService = _CompletingEditorService(editorCompleter);
+    await pumpWorkspace(
+      tester,
+      controller: controller,
+      size: const Size(1070, 842),
+      editorService: editorService,
+    );
+
+    await tester.tap(find.byKey(const Key('open-editor')));
+    await tester.pump();
+    editorCompleter.completeError(StateError('Native file opener failed'));
+    await tester.pump();
+    await tester.pump();
+
+    final tooltip = tester.widget<Tooltip>(
+      find.ancestor(
+        of: find.byKey(const Key('open-editor')),
+        matching: find.byType(Tooltip),
+      ),
+    );
+    expect(tooltip.message, contains('Native file opener failed'));
+  });
 
   testWidgets(
     'external editor stays blocked outside an existing worktree file',
