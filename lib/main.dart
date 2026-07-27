@@ -298,6 +298,11 @@ class _YogitAppState extends State<YogitApp> {
                 _settings.copyWith(fullDiffColumnWidths: widths),
               )
             : null,
+        onFullDiffPreferencesChanged: _settingsLoaded
+            ? (preferences) => _changeSettings(
+                _settings.copyWith(fullDiffPreferences: preferences),
+              )
+            : null,
         onPreviewSizeChanged: _settingsLoaded
             ? (size) => _changeSettings(
                 _settings.copyWith(

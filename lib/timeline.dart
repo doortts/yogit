@@ -316,6 +316,7 @@ class TimelineScreen extends StatefulWidget {
     this.onPreviewPlacementChanged,
     this.onColumnWidthsChanged,
     this.onFullDiffColumnWidthsChanged,
+    this.onFullDiffPreferencesChanged,
     this.onPreviewSizeChanged,
     super.key,
   });
@@ -341,6 +342,7 @@ class TimelineScreen extends StatefulWidget {
   final ValueChanged<PreviewPlacement>? onPreviewPlacementChanged;
   final ValueChanged<TimelineColumnWidths>? onColumnWidthsChanged;
   final ValueChanged<FullDiffColumnWidths>? onFullDiffColumnWidthsChanged;
+  final ValueChanged<FullDiffPreferences>? onFullDiffPreferencesChanged;
   final ValueChanged<({double width, double height})>? onPreviewSizeChanged;
 
   @override
@@ -2986,6 +2988,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
           commits: List.unmodifiable(_commits),
           initialIndex: _commits.indexOf(commit),
           initialPreferences: widget.fullDiffPreferences,
+          onPreferencesChanged: widget.onFullDiffPreferencesChanged,
           columnWidths: widget.fullDiffColumnWidths,
           onColumnWidthsChanged: widget.onFullDiffColumnWidthsChanged,
           editorService: ExternalEditorService(

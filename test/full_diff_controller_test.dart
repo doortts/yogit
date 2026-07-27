@@ -1502,6 +1502,42 @@ void main() {
     expect(controller.state.historyContext, originalContext);
     expect(controller.state.selectedHistoryEntry, same(selectedEntry));
   });
+
+  test(
+    'new repository keeps display preferences but starts with its own file',
+    () async {
+      const newFile = GitFileChange(
+        path: 'lib/new_repository.dart',
+        status: 'M',
+        additions: 1,
+        deletions: 0,
+      );
+      final repository = FakeFullDiffRepository(root: '/second')
+        ..files = ((_, _) async => const [newFile])
+        ..scopedDiff = ((_, _, _, _, _, _) async => twoHunkLines)
+        ..content = ((_, _, _) async =>
+            Uint8List.fromList(utf8.encode('new repository\n')));
+      const preferences = FullDiffPreferences(
+        view: FullDiffView.history,
+        layout: DiffLayout.sideBySide,
+        scope: DiffScope.hunks,
+        algorithm: DiffAlgorithm.patience,
+        ignoreWhitespace: true,
+        wrapLines: false,
+      );
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [commitA],
+        initialIndex: 0,
+        initialPreferences: preferences,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      expect(controller.state.selectedFile, newFile);
+      expect(controller.state.preferences, preferences);
+    },
+  );
 }
 
 const historyCommitB = GitCommit(

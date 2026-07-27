@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'full_diff_model.dart';
+import 'full_diff_shortcut_hint.dart';
 import 'full_diff_theme.dart';
 import 'git.dart';
 import 'typography.dart';
@@ -47,6 +48,7 @@ class GlobalFileBar extends StatelessWidget {
     required this.onOpenEditor,
     required this.onViewSelected,
     required this.onFocusModeChanged,
+    this.showShortcutHints = false,
     this.editorError,
     super.key,
   });
@@ -61,6 +63,7 @@ class GlobalFileBar extends StatelessWidget {
   final VoidCallback onOpenEditor;
   final ValueChanged<FullDiffView> onViewSelected;
   final ValueChanged<bool> onFocusModeChanged;
+  final bool showShortcutHints;
   final String? editorError;
 
   @override
@@ -142,14 +145,19 @@ class GlobalFileBar extends StatelessWidget {
             runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              _HeaderToggle(
-                controlKey: const Key('focus-mode'),
-                label: focusMode ? '탐색 패널' : '집중 모드',
-                value: focusMode,
-                icon: focusMode
-                    ? Icons.view_sidebar_outlined
-                    : Icons.vertical_split_outlined,
-                onChanged: onFocusModeChanged,
+              FullDiffShortcutHint(
+                visible: showShortcutHints,
+                label: '⌘⇧F',
+                child: _HeaderToggle(
+                  controlKey: const Key('focus-mode'),
+                  label: focusMode ? '탐색 패널' : '집중 모드',
+                  value: focusMode,
+                  icon: focusMode
+                      ? Icons.view_sidebar_outlined
+                      : Icons.vertical_split_outlined,
+                  onChanged: onFocusModeChanged,
+                  semanticsHint: '집중 모드 켜기 또는 끄기, 단축키 Command Shift F',
+                ),
               ),
               Tooltip(
                 message: editorError ?? '현재 작업 디렉터리의 파일을 외부 편집기로 엽니다',
@@ -170,6 +178,14 @@ class GlobalFileBar extends StatelessWidget {
                 onSelected: onViewSelected,
                 tooltipFor: (value) =>
                     value == FullDiffView.history ? '파일의 변경 이력을 보여줍니다' : null,
+                showShortcutHints: showShortcutHints,
+                shortcutLabelFor: (value) => switch (value) {
+                  FullDiffView.diff => '⌘1',
+                  FullDiffView.blame => '⌘2',
+                  FullDiffView.history => '⌘3',
+                },
+                semanticsHintFor: (value) =>
+                    '${_viewLabel(value)} 화면으로 전환, 단축키 Command ${value.index + 1}',
               ),
             ],
           ),
@@ -198,6 +214,7 @@ class GlobalDiffToolbar extends StatelessWidget {
     required this.onIgnoreWhitespaceChanged,
     required this.onWrapLinesChanged,
     this.showLeadingControls = true,
+    this.showShortcutHints = false,
     super.key,
   });
 
@@ -218,6 +235,7 @@ class GlobalDiffToolbar extends StatelessWidget {
   final ValueChanged<bool> onIgnoreWhitespaceChanged;
   final ValueChanged<bool> onWrapLinesChanged;
   final bool showLeadingControls;
+  final bool showShortcutHints;
 
   @override
   Widget build(BuildContext context) {
@@ -243,21 +261,31 @@ class GlobalDiffToolbar extends StatelessWidget {
           compact: compact,
           dense: dense,
         ),
-        _HeaderToggle(
-          controlKey: const Key('ignore-whitespace'),
-          label: '공백 무시',
-          value: ignoreWhitespace,
-          icon: Icons.space_bar,
-          onChanged: onIgnoreWhitespaceChanged,
-          compact: compact || dense,
+        FullDiffShortcutHint(
+          visible: showShortcutHints,
+          label: '⌘⇧Space',
+          child: _HeaderToggle(
+            controlKey: const Key('ignore-whitespace'),
+            label: '공백 무시',
+            value: ignoreWhitespace,
+            icon: Icons.space_bar,
+            onChanged: onIgnoreWhitespaceChanged,
+            compact: compact || dense,
+            semanticsHint: '공백 무시 켜기 또는 끄기, 단축키 Command Shift Space',
+          ),
         ),
-        _HeaderToggle(
-          controlKey: const Key('wrap-lines'),
-          label: '줄바꿈',
-          value: wrapLines,
-          icon: Icons.wrap_text,
-          onChanged: onWrapLinesChanged,
-          compact: compact || dense,
+        FullDiffShortcutHint(
+          visible: showShortcutHints,
+          label: '⌘⇧L',
+          child: _HeaderToggle(
+            controlKey: const Key('wrap-lines'),
+            label: '줄바꿈',
+            value: wrapLines,
+            icon: Icons.wrap_text,
+            onChanged: onWrapLinesChanged,
+            compact: compact || dense,
+            semanticsHint: '줄바꿈 켜기 또는 끄기, 단축키 Command Shift L',
+          ),
         ),
       ],
     );
@@ -312,13 +340,25 @@ class GlobalDiffToolbar extends StatelessWidget {
       selected: layout,
       labelFor: _layoutLabel,
       onSelected: onLayoutSelected,
+      groupHint: 'Unified와 Side-by-side 전환, 단축키 Command U',
     );
-    final hunkControl = _HeaderToggle(
-      controlKey: Key(hunkEnabled ? 'hunk-toggle-on' : 'hunk-toggle-off'),
-      label: 'Hunk',
-      value: hunkEnabled,
-      icon: Icons.segment,
-      onChanged: onHunkChanged,
+    final layoutHint = FullDiffShortcutHint(
+      visible: showShortcutHints,
+      label: '⌘U',
+      hintKey: const Key('shortcut-hint-layout'),
+      child: layoutControls,
+    );
+    final hunkControl = FullDiffShortcutHint(
+      visible: showShortcutHints,
+      label: '⌘⇧H',
+      child: _HeaderToggle(
+        controlKey: Key(hunkEnabled ? 'hunk-toggle-on' : 'hunk-toggle-off'),
+        label: 'Hunk',
+        value: hunkEnabled,
+        icon: Icons.segment,
+        onChanged: onHunkChanged,
+        semanticsHint: 'Hunk 켜기 또는 끄기, 단축키 Command Shift H',
+      ),
     );
 
     return _HeaderBar(
@@ -335,7 +375,7 @@ class GlobalDiffToolbar extends StatelessWidget {
               spacing: 6,
               runSpacing: 6,
               crossAxisAlignment: WrapCrossAlignment.center,
-              children: [layoutControls, hunkControl],
+              children: [layoutHint, hunkControl],
             ),
         ],
       ),
@@ -352,6 +392,10 @@ class FullDiffSegmentedControl<T> extends StatelessWidget {
     required this.onSelected,
     this.isEnabled,
     this.tooltipFor,
+    this.showShortcutHints = false,
+    this.shortcutLabelFor,
+    this.semanticsHintFor,
+    this.groupHint,
     super.key,
   });
 
@@ -362,6 +406,10 @@ class FullDiffSegmentedControl<T> extends StatelessWidget {
   final ValueChanged<T> onSelected;
   final bool Function(T value)? isEnabled;
   final String? Function(T value)? tooltipFor;
+  final bool showShortcutHints;
+  final String? Function(T value)? shortcutLabelFor;
+  final String? Function(T value)? semanticsHintFor;
+  final String? groupHint;
 
   @override
   Widget build(BuildContext context) {
@@ -369,18 +417,34 @@ class FullDiffSegmentedControl<T> extends StatelessWidget {
       container: true,
       explicitChildNodes: true,
       label: groupLabel,
+      hint: groupHint,
       child: Wrap(
         spacing: 6,
         runSpacing: 6,
         children: [
           for (final value in values)
-            _SegmentButton(
-              label: labelFor(value),
-              selected: value == selected,
-              enabled: isEnabled?.call(value) ?? true,
-              onPressed: () => onSelected(value),
-              tooltip: tooltipFor?.call(value),
-            ),
+            if (shortcutLabelFor?.call(value) case final shortcut?)
+              FullDiffShortcutHint(
+                visible: showShortcutHints,
+                label: shortcut,
+                child: _SegmentButton(
+                  label: labelFor(value),
+                  selected: value == selected,
+                  enabled: isEnabled?.call(value) ?? true,
+                  onPressed: () => onSelected(value),
+                  tooltip: tooltipFor?.call(value),
+                  semanticsHint: semanticsHintFor?.call(value),
+                ),
+              )
+            else
+              _SegmentButton(
+                label: labelFor(value),
+                selected: value == selected,
+                enabled: isEnabled?.call(value) ?? true,
+                onPressed: () => onSelected(value),
+                tooltip: tooltipFor?.call(value),
+                semanticsHint: semanticsHintFor?.call(value),
+              ),
         ],
       ),
     );
@@ -412,6 +476,7 @@ class _SegmentButton extends StatelessWidget {
     required this.enabled,
     required this.onPressed,
     this.tooltip,
+    this.semanticsHint,
   });
 
   final String label;
@@ -419,6 +484,7 @@ class _SegmentButton extends StatelessWidget {
   final bool enabled;
   final VoidCallback onPressed;
   final String? tooltip;
+  final String? semanticsHint;
 
   @override
   Widget build(BuildContext context) {
@@ -429,6 +495,7 @@ class _SegmentButton extends StatelessWidget {
       selected: selected,
       enabled: enabled,
       label: label,
+      hint: semanticsHint,
       onTap: enabled ? onPressed : null,
       child: ExcludeSemantics(
         child: _HeaderButton(
@@ -687,6 +754,7 @@ class _HeaderToggle extends StatelessWidget {
     required this.onChanged,
     this.controlKey,
     this.compact = false,
+    this.semanticsHint,
   });
 
   final String label;
@@ -695,6 +763,7 @@ class _HeaderToggle extends StatelessWidget {
   final ValueChanged<bool> onChanged;
   final Key? controlKey;
   final bool compact;
+  final String? semanticsHint;
 
   @override
   Widget build(BuildContext context) => Semantics(
@@ -703,6 +772,7 @@ class _HeaderToggle extends StatelessWidget {
     toggled: value,
     enabled: true,
     label: label,
+    hint: semanticsHint,
     onTap: () => onChanged(!value),
     child: ExcludeSemantics(
       child: _HeaderButton(

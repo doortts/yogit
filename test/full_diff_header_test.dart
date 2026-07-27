@@ -461,6 +461,25 @@ void main() {
     }
     semantics.dispose();
   });
+
+  testWidgets('shortcut hints overlay controls without moving them', (
+    tester,
+  ) async {
+    await pumpHeaders(tester);
+    final before = tester.getRect(find.text('Unified'));
+    expect(find.byKey(const Key('shortcut-hint-layout')), findsNothing);
+
+    await pumpHeaders(tester, showShortcutHints: true);
+
+    expect(find.text('⌘1'), findsOneWidget);
+    expect(find.text('⌘2'), findsOneWidget);
+    expect(find.text('⌘3'), findsOneWidget);
+    expect(find.text('⌘U'), findsOneWidget);
+    expect(tester.getRect(find.text('Unified')), before);
+
+    await pumpHeaders(tester);
+    expect(find.byKey(const Key('shortcut-hint-layout')), findsNothing);
+  });
 }
 
 Future<void> pumpHeaders(
@@ -470,6 +489,7 @@ Future<void> pumpHeaders(
   bool ignoreWhitespace = false,
   DiffAlgorithm algorithm = DiffAlgorithm.histogram,
   String encodingLabel = 'UTF-8',
+  bool showShortcutHints = false,
   VoidCallback? onBack,
   ValueChanged<DiffAlgorithm>? onAlgorithmSelected,
 }) => tester.pumpWidget(
@@ -483,6 +503,7 @@ Future<void> pumpHeaders(
           encodingLabel: encodingLabel,
           canOpenEditor: true,
           focusMode: focusMode,
+          showShortcutHints: showShortcutHints,
           onBack: onBack ?? () {},
           onOpenEditor: () {},
           onViewSelected: (_) {},
@@ -498,6 +519,7 @@ Future<void> pumpHeaders(
           ignoreWhitespace: ignoreWhitespace,
           wrapLines: false,
           loadingPatch: false,
+          showShortcutHints: showShortcutHints,
           onLayoutSelected: (_) {},
           onHunkChanged: (_) {},
           onPrevious: () {},

@@ -325,6 +325,7 @@ void main() {
     required FullDiffSessionController controller,
     required Size size,
     ExternalEditorService? editorService,
+    ValueChanged<FullDiffPreferences>? onPreferencesChanged,
     bool routeBacked = false,
   }) async {
     tester.view.devicePixelRatio = 1;
@@ -339,6 +340,7 @@ void main() {
       initialIndex: 0,
       controller: controller,
       editorService: editorService,
+      onPreferencesChanged: onPreferencesChanged,
     );
     await tester.pumpWidget(
       MaterialApp(
@@ -2349,6 +2351,205 @@ void main() {
       },
     );
   }
+
+  testWidgets('failed scope change does not report a new preference', (
+    tester,
+  ) async {
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..scopedDiff = ((_, _, _, _, _, scope) async {
+        if (scope == DiffScope.fullFile) {
+          throw const GitRepositoryException('/repo', 'full file failed');
+        }
+        return twoHunkLines;
+      })
+      ..content = ((_, _, _) async =>
+          Uint8List.fromList(utf8.encode('current\n')));
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    final reported = <FullDiffPreferences>[];
+    await pumpWorkspace(
+      tester,
+      controller: controller,
+      size: const Size(1200, 800),
+      onPreferencesChanged: reported.add,
+    );
+
+    await tester.tap(find.text('Hunk'));
+    await tester.pumpAndSettle();
+
+    expect(
+      reported.where((value) => value.scope == DiffScope.fullFile),
+      isEmpty,
+    );
+    expect(find.byKey(const Key('hunk-toggle-on')), findsOneWidget);
+  });
+
+  testWidgets('full diff command shortcuts change only their owned options', (
+    tester,
+  ) async {
+    final fixture = await workspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1200, 800),
+    );
+
+    expect(find.byKey(const Key('shortcut-hint-layout')), findsNothing);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+    for (final label in ['⌘1', '⌘2', '⌘3', '⌘U']) {
+      expect(find.text(label), findsOneWidget);
+    }
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaRight);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+    expect(find.byKey(const Key('shortcut-hint-layout')), findsOneWidget);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaRight);
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+    expect(fixture.controller.state.view, FullDiffView.blame);
+    expect(find.byKey(const Key('shortcut-hint-layout')), findsNothing);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyU);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    expect(fixture.controller.state.layout, DiffLayout.sideBySide);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(fixture.controller.state.appliedScope, DiffScope.fullFile);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    expect(fixture.controller.state.view, FullDiffView.diff);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    expect(fixture.controller.state.view, FullDiffView.history);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(fixture.controller.state.appliedIgnoreWhitespace, isTrue);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    expect(fixture.controller.state.wrapLines, isFalse);
+
+    final beforeCommand4 = fixture.controller.state.view;
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit4);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    expect(fixture.controller.state.view, beforeCommand4);
+  });
+
+  testWidgets('scope shortcut ignores repeats while its patch is loading', (
+    tester,
+  ) async {
+    final pending = Completer<List<DiffLine>>();
+    var fullFileRequests = 0;
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..scopedDiff = ((_, _, _, _, _, scope) {
+        if (scope == DiffScope.fullFile) {
+          fullFileRequests++;
+          return pending.future;
+        }
+        return Future.value(twoHunkLines);
+      })
+      ..content = ((_, _, _) async =>
+          Uint8List.fromList(utf8.encode('current\n')));
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await pumpWorkspace(
+      tester,
+      controller: controller,
+      size: const Size(1200, 800),
+    );
+
+    for (var press = 0; press < 2; press++) {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    }
+
+    expect(fullFileRequests, 1);
+    expect(controller.state.requestedScope, DiffScope.fullFile);
+    pending.complete(twoHunkLines);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets(
+    'whitespace shortcut ignores repeats while its patch is loading',
+    (tester) async {
+      final pending = Completer<List<DiffLine>>();
+      var whitespaceRequests = 0;
+      final repository = FakeFullDiffRepository()
+        ..files = ((_, _) async => const [fileA])
+        ..scopedDiff = ((_, _, _, _, ignoreWhitespace, _) {
+          if (ignoreWhitespace) {
+            whitespaceRequests++;
+            return pending.future;
+          }
+          return Future.value(twoHunkLines);
+        })
+        ..content = ((_, _, _) async =>
+            Uint8List.fromList(utf8.encode('current\n')));
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [commitA],
+        initialIndex: 0,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await pumpWorkspace(
+        tester,
+        controller: controller,
+        size: const Size(1200, 800),
+      );
+
+      for (var press = 0; press < 2; press++) {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.space);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      }
+
+      expect(whitespaceRequests, 1);
+      expect(controller.state.requestedIgnoreWhitespace, isTrue);
+      pending.complete(twoHunkLines);
+      await tester.pumpAndSettle();
+    },
+  );
 
   testWidgets(
     'deleted Diff content failure retries the old-side file resource',

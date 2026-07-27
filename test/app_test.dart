@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -2532,15 +2533,12 @@ void main() {
     );
   });
 
-  test('legacy full file initial view migrates to full file scope', () {
+  test('legacy full diff initial view is ignored', () {
     final settings = AppSettings.fromJson(const {
       'fullDiffInitialView': 'fullFile',
     });
 
-    expect(
-      settings.fullDiffPreferences,
-      const FullDiffPreferences(scope: DiffScope.fullFile),
-    );
+    expect(settings.fullDiffPreferences, const FullDiffPreferences());
     expect(settings.toJson(), isNot(contains('fullDiffInitialView')));
   });
 
@@ -2673,6 +2671,140 @@ void main() {
       tester.widget<DiffScreen>(find.byType(DiffScreen)).initialPreferences,
       preferences,
     );
+  });
+
+  testWidgets('reopening full diff restores the last successful options', (
+    tester,
+  ) async {
+    final store = MemorySettingsStore();
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('1', 'commit')],
+      files: (_, _) async => const [
+        GitFileChange(
+          path: 'lib/example.dart',
+          status: 'M',
+          additions: 1,
+          deletions: 1,
+        ),
+      ],
+      diff: (_, _, _, _, _) async => const [
+        DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+        DiffLine(kind: DiffLineKind.delete, text: 'old', oldNumber: 1),
+        DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
+      ],
+      content: (_, _, _) async => Uint8List.fromList(utf8.encode('new\n')),
+      history: (_, file) async => [
+        GitFileHistoryRecord(
+          commit: commit('1', 'commit'),
+          path: file.path,
+          oldPath: null,
+          status: 'M',
+        ),
+      ],
+    );
+
+    Future<void> pumpApp() async {
+      await tester.pumpWidget(
+        YogitApp(
+          repository: repository,
+          settingsStore: store,
+          discoverAvatars: false,
+          windowFrameController: controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+      await tester.pumpAndSettle();
+    }
+
+    await pumpApp();
+    await tester.tap(find.text('History'));
+    await tester.tap(find.text('Side-by-side'));
+    await tester.tap(find.text('Hunk'));
+    await tester.tap(find.byKey(const Key('ignore-whitespace')));
+    await tester.tap(find.byKey(const Key('wrap-lines')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('full-diff-back')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .getSemantics(find.bySemanticsLabel('History'))
+          .flagsCollection
+          .isSelected,
+      ui.Tristate.isTrue,
+    );
+    expect(
+      tester
+          .getSemantics(find.bySemanticsLabel('Side-by-side'))
+          .flagsCollection
+          .isSelected,
+      ui.Tristate.isTrue,
+    );
+    expect(
+      store.current.fullDiffPreferences,
+      const FullDiffPreferences(
+        view: FullDiffView.history,
+        layout: DiffLayout.sideBySide,
+        scope: DiffScope.fullFile,
+        algorithm: DiffAlgorithm.gitSetting,
+        ignoreWhitespace: true,
+        wrapLines: false,
+      ),
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await pumpApp();
+
+    expect(
+      tester
+          .getSemantics(find.bySemanticsLabel('History'))
+          .flagsCollection
+          .isSelected,
+      ui.Tristate.isTrue,
+    );
+    expect(
+      tester
+          .getSemantics(find.bySemanticsLabel('Side-by-side'))
+          .flagsCollection
+          .isSelected,
+      ui.Tristate.isTrue,
+    );
+    expect(find.byKey(const Key('hunk-toggle-off')), findsOneWidget);
+  });
+
+  testWidgets('settings write failure keeps the applied full diff session', (
+    tester,
+  ) async {
+    final store = FailingSettingsStore();
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository(
+          (_, _) async => [commit('1', 'commit')],
+          files: (_, _) async => const [],
+        ),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Side-by-side'));
+    await tester.pump();
+
+    expect(
+      tester
+          .getSemantics(find.bySemanticsLabel('Side-by-side'))
+          .flagsCollection
+          .isSelected,
+      ui.Tristate.isTrue,
+    );
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('uncommitted changes lead the timeline as a working tree row', (
@@ -8118,6 +8250,13 @@ class MemorySettingsStore extends SettingsStore {
 
   @override
   Future<void> save(AppSettings settings) async => current = settings;
+}
+
+class FailingSettingsStore extends MemorySettingsStore {
+  @override
+  Future<void> save(AppSettings settings) async {
+    throw const FileSystemException('settings write failed');
+  }
 }
 
 /// A row built for the painter directly: it reads lanes and [transitions], so

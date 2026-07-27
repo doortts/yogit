@@ -32,6 +32,28 @@ class _ToggleFocusModeIntent extends Intent {
   const _ToggleFocusModeIntent();
 }
 
+class _SelectViewIntent extends Intent {
+  const _SelectViewIntent(this.view);
+
+  final FullDiffView view;
+}
+
+class _ToggleLayoutIntent extends Intent {
+  const _ToggleLayoutIntent();
+}
+
+class _ToggleScopeIntent extends Intent {
+  const _ToggleScopeIntent();
+}
+
+class _ToggleWhitespaceIntent extends Intent {
+  const _ToggleWhitespaceIntent();
+}
+
+class _ToggleWrapIntent extends Intent {
+  const _ToggleWrapIntent();
+}
+
 class _StepHunkIntent extends Intent {
   const _StepHunkIntent(this.delta);
 
@@ -74,6 +96,7 @@ class DiffScreen extends StatefulWidget {
     this.controller,
     this.columnWidths = const FullDiffColumnWidths(),
     this.onColumnWidthsChanged,
+    this.onPreferencesChanged,
     this.editorService,
     this.avatarService,
     this.showRemoteAvatars = true,
@@ -87,6 +110,7 @@ class DiffScreen extends StatefulWidget {
   final FullDiffSessionController? controller;
   final FullDiffColumnWidths columnWidths;
   final ValueChanged<FullDiffColumnWidths>? onColumnWidthsChanged;
+  final ValueChanged<FullDiffPreferences>? onPreferencesChanged;
   final ExternalEditorService? editorService;
   final AvatarService? avatarService;
   final bool showRemoteAvatars;
@@ -112,6 +136,7 @@ class _DiffScreenState extends State<DiffScreen> {
   late ExternalEditorService _editorService;
   late bool _ownsController;
   late FullDiffSessionState _observedState;
+  late FullDiffPreferences _lastReportedPreferences;
   late double _filesWidth;
 
   bool _effectScheduled = false;
@@ -126,6 +151,7 @@ class _DiffScreenState extends State<DiffScreen> {
   int _pendingAnchorDirection = 0;
   String? _editorError;
   bool _openingEditor = false;
+  bool _commandHeld = false;
   int _editorRequestSerial = 0;
 
   @override
@@ -139,6 +165,7 @@ class _DiffScreenState extends State<DiffScreen> {
         widget.editorService ??
         ExternalEditorService(repositoryRoot: widget.repository.root);
     _attachController(_newController());
+    HardwareKeyboard.instance.addHandler(_handleHardwareKeyEvent);
     _contentScroll.addListener(_handleContentScrolled);
     _queueAttachedAnchorScroll();
     if (_ownsController) unawaited(_controller.initialize());
@@ -158,6 +185,7 @@ class _DiffScreenState extends State<DiffScreen> {
   void _attachController(FullDiffSessionController controller) {
     _controller = controller;
     _observedState = controller.state;
+    _lastReportedPreferences = _observedState.preferences;
     _reconcileAnchorKeys(_observedState.patch.data);
     controller.addListener(_handleControllerChanged);
   }
@@ -207,6 +235,7 @@ class _DiffScreenState extends State<DiffScreen> {
   @override
   void dispose() {
     _editorRequestSerial++;
+    HardwareKeyboard.instance.removeHandler(_handleHardwareKeyEvent);
     _controller.removeListener(_handleControllerChanged);
     _contentScroll
       ..removeListener(_handleContentScrolled)
@@ -216,6 +245,18 @@ class _DiffScreenState extends State<DiffScreen> {
     _historyListFocus.dispose();
     if (_ownsController) _controller.dispose();
     super.dispose();
+  }
+
+  bool _handleHardwareKeyEvent(KeyEvent event) {
+    if (event.logicalKey != LogicalKeyboardKey.metaLeft &&
+        event.logicalKey != LogicalKeyboardKey.metaRight) {
+      return false;
+    }
+    final held = HardwareKeyboard.instance.isMetaPressed;
+    if (_commandHeld != held && mounted) {
+      setState(() => _commandHeld = held);
+    }
+    return false;
   }
 
   void _invalidateEditorRequest() {
@@ -228,6 +269,7 @@ class _DiffScreenState extends State<DiffScreen> {
     final previous = _observedState;
     final next = _controller.state;
     _observedState = next;
+    _reportPreferences(next);
     final movedContext =
         previous.selectedCommit.sha != next.selectedCommit.sha ||
         previous.parent != next.parent ||
@@ -291,6 +333,13 @@ class _DiffScreenState extends State<DiffScreen> {
         _pendingAnchorId != null) {
       _scheduleScrollEffect();
     }
+  }
+
+  void _reportPreferences(FullDiffSessionState state) {
+    final next = state.preferences;
+    if (next == _lastReportedPreferences) return;
+    _lastReportedPreferences = next;
+    widget.onPreferencesChanged?.call(next);
   }
 
   void _reconcileAnchorKeys(DiffDocument? document) {
@@ -709,6 +758,20 @@ class _DiffScreenState extends State<DiffScreen> {
             ),
             SingleActivator(LogicalKeyboardKey.keyF, meta: true, shift: true):
                 _ToggleFocusModeIntent(),
+            SingleActivator(LogicalKeyboardKey.digit1, meta: true):
+                _SelectViewIntent(FullDiffView.diff),
+            SingleActivator(LogicalKeyboardKey.digit2, meta: true):
+                _SelectViewIntent(FullDiffView.blame),
+            SingleActivator(LogicalKeyboardKey.digit3, meta: true):
+                _SelectViewIntent(FullDiffView.history),
+            SingleActivator(LogicalKeyboardKey.keyU, meta: true):
+                _ToggleLayoutIntent(),
+            SingleActivator(LogicalKeyboardKey.keyH, meta: true, shift: true):
+                _ToggleScopeIntent(),
+            SingleActivator(LogicalKeyboardKey.space, meta: true, shift: true):
+                _ToggleWhitespaceIntent(),
+            SingleActivator(LogicalKeyboardKey.keyL, meta: true, shift: true):
+                _ToggleWrapIntent(),
             SingleActivator(LogicalKeyboardKey.arrowUp, alt: true):
                 _StepHunkIntent(-1),
             SingleActivator(LogicalKeyboardKey.arrowDown, alt: true):
@@ -735,6 +798,56 @@ class _DiffScreenState extends State<DiffScreen> {
               _ToggleFocusModeIntent: CallbackAction<_ToggleFocusModeIntent>(
                 onInvoke: (_) {
                   _controller.setFocusMode(!_controller.state.focusMode);
+                  return null;
+                },
+              ),
+              _SelectViewIntent: CallbackAction<_SelectViewIntent>(
+                onInvoke: (intent) {
+                  _controller.setView(intent.view);
+                  return null;
+                },
+              ),
+              _ToggleLayoutIntent: CallbackAction<_ToggleLayoutIntent>(
+                onInvoke: (_) {
+                  _controller.setLayout(
+                    _controller.state.layout == DiffLayout.unified
+                        ? DiffLayout.sideBySide
+                        : DiffLayout.unified,
+                  );
+                  return null;
+                },
+              ),
+              _ToggleScopeIntent: CallbackAction<_ToggleScopeIntent>(
+                onInvoke: (_) {
+                  if (_controller.state.patch.loading) return null;
+                  unawaited(
+                    _controller
+                        .setScope(
+                          _controller.state.requestedScope == DiffScope.hunks
+                              ? DiffScope.fullFile
+                              : DiffScope.hunks,
+                        )
+                        .catchError((_) {}),
+                  );
+                  return null;
+                },
+              ),
+              _ToggleWhitespaceIntent: CallbackAction<_ToggleWhitespaceIntent>(
+                onInvoke: (_) {
+                  if (_controller.state.patch.loading) return null;
+                  unawaited(
+                    _controller
+                        .setIgnoreWhitespace(
+                          !_controller.state.requestedIgnoreWhitespace,
+                        )
+                        .catchError((_) {}),
+                  );
+                  return null;
+                },
+              ),
+              _ToggleWrapIntent: CallbackAction<_ToggleWrapIntent>(
+                onInvoke: (_) {
+                  _controller.setWrapLines(!_controller.state.wrapLines);
                   return null;
                 },
               ),
@@ -788,6 +901,7 @@ class _DiffScreenState extends State<DiffScreen> {
                         encodingLabel: state.encodingLabel,
                         canOpenEditor: _canOpenEditor(state),
                         focusMode: state.focusMode,
+                        showShortcutHints: _commandHeld,
                         editorError: _editorError,
                         onBack: _returnToTimeline,
                         onOpenEditor: _openEditor,
@@ -804,6 +918,7 @@ class _DiffScreenState extends State<DiffScreen> {
                         ignoreWhitespace: state.requestedIgnoreWhitespace,
                         wrapLines: state.wrapLines,
                         loadingPatch: state.patch.loading,
+                        showShortcutHints: _commandHeld,
                         onLayoutSelected: _controller.setLayout,
                         onHunkChanged: (enabled) {
                           unawaited(
