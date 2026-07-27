@@ -93,7 +93,7 @@ class UnifiedPresentationView extends StatelessWidget {
               ),
             );
           }
-          if (item.firstInHunk) {
+          if (item.anchorTarget) {
             child = KeyedSubtree(
               key: _anchorKey(hunk.anchor),
               child: KeyedSubtree(
@@ -128,8 +128,6 @@ List<_UnifiedItem> _unifiedItems(DiffDocument document) {
           line.kind == DiffLineKind.add || line.kind == DiffLineKind.delete,
     );
     final leadingContextCount = firstChange < 0 ? 0 : firstChange;
-    var firstInHunk = true;
-
     void addLine(int lineIndex) {
       final descriptor = lineDescriptors[lineIndex];
       items.add(
@@ -140,17 +138,14 @@ List<_UnifiedItem> _unifiedItems(DiffDocument document) {
           sourceRow: sourceRow++,
           pairedLine: descriptor.pairedLine,
           oldSide: descriptor.oldSide,
-          firstInHunk: firstInHunk,
         ),
       );
-      firstInHunk = false;
     }
 
     for (var index = 0; index < leadingContextCount; index++) {
       addLine(index);
     }
-    items.add(_UnifiedItem(hunk: hunk, firstInHunk: firstInHunk));
-    firstInHunk = false;
+    items.add(_UnifiedItem(hunk: hunk, anchorTarget: true));
     for (var index = leadingContextCount; index < hunk.lines.length; index++) {
       addLine(index);
     }
@@ -203,7 +198,7 @@ class _UnifiedItem {
     this.sourceRow,
     this.pairedLine,
     this.oldSide = false,
-    this.firstInHunk = false,
+    this.anchorTarget = false,
   });
 
   final DiffHunk hunk;
@@ -212,7 +207,7 @@ class _UnifiedItem {
   final int? sourceRow;
   final DiffLine? pairedLine;
   final bool oldSide;
-  final bool firstInHunk;
+  final bool anchorTarget;
 
   List<WordRange> wordRanges(FullDiffWordDiffer differ) {
     final current = line;

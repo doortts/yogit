@@ -460,7 +460,7 @@ void main() {
     );
   });
 
-  testWidgets('inline shows every hunk with three context lines', (
+  testWidgets('unified shows every hunk with three context lines', (
     tester,
   ) async {
     await pumpPresentation(
@@ -475,7 +475,7 @@ void main() {
     expect(find.text('context after 3'), findsOneWidget);
     expect(
       find.descendant(
-        of: find.byKey(const Key('unified-hunk-0')),
+        of: find.byKey(const Key('unified-line-0-0')),
         matching: find.text('10'),
       ),
       findsOneWidget,
@@ -491,7 +491,7 @@ void main() {
     );
   });
 
-  testWidgets('inline mounts supplied anchor keys for ensureVisible', (
+  testWidgets('unified mounts supplied anchor keys for ensureVisible', (
     tester,
   ) async {
     final anchorKeys = {
@@ -537,7 +537,7 @@ void main() {
     expect(controller.offset, greaterThan(0));
   });
 
-  testWidgets('split pairs replacements and hatches a missing side', (
+  testWidgets('side-by-side pairs replacements and hatches a missing side', (
     tester,
   ) async {
     final anchorKey = GlobalKey(debugLabel: 'added-only-anchor');
@@ -553,7 +553,7 @@ void main() {
     expect(anchorKey.currentContext, isNotNull);
   });
 
-  testWidgets('split places leading context before its hunk header', (
+  testWidgets('side-by-side places leading context before its hunk header', (
     tester,
   ) async {
     await pumpPresentation(
@@ -565,7 +565,7 @@ void main() {
     final header = find.text('Configure · lines 10–16 · change 1 of 2');
     expect(
       find.descendant(
-        of: find.byKey(const Key('side-by-side-hunk-0')),
+        of: find.byKey(const Key('side-by-side-row-0-0')),
         matching: find.text('10'),
       ),
       findsNWidgets(2),
@@ -580,7 +580,7 @@ void main() {
     );
   });
 
-  testWidgets('split copies paired sources as tab-separated text', (
+  testWidgets('side-by-side copies paired sources as tab-separated text', (
     tester,
   ) async {
     final copied = <String>[];

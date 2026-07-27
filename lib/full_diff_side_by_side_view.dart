@@ -92,7 +92,7 @@ class SideBySidePresentationView extends StatelessWidget {
               ),
             );
           }
-          if (item.firstInHunk) {
+          if (item.anchorTarget) {
             child = KeyedSubtree(
               key: _anchorKey(hunk.anchor),
               child: KeyedSubtree(
@@ -131,8 +131,6 @@ List<_SideBySideItem> _sideBySideItems(DiffDocument document) {
           pair.right?.kind == DiffLineKind.add,
     );
     final leadingContextCount = firstChange < 0 ? 0 : firstChange;
-    var firstInHunk = true;
-
     void addPair(int pairIndex) {
       items.add(
         _SideBySideItem(
@@ -140,17 +138,14 @@ List<_SideBySideItem> _sideBySideItems(DiffDocument document) {
           pair: pairs[pairIndex],
           pairIndex: pairIndex,
           sourceRow: sourceRow++,
-          firstInHunk: firstInHunk,
         ),
       );
-      firstInHunk = false;
     }
 
     for (var index = 0; index < leadingContextCount; index++) {
       addPair(index);
     }
-    items.add(_SideBySideItem(hunk: hunk, firstInHunk: firstInHunk));
-    firstInHunk = false;
+    items.add(_SideBySideItem(hunk: hunk, anchorTarget: true));
     for (var index = leadingContextCount; index < pairs.length; index++) {
       addPair(index);
     }
@@ -173,14 +168,14 @@ class _SideBySideItem {
     this.pair,
     this.pairIndex,
     this.sourceRow,
-    this.firstInHunk = false,
+    this.anchorTarget = false,
   });
 
   final DiffHunk hunk;
   final DiffPair? pair;
   final int? pairIndex;
   final int? sourceRow;
-  final bool firstInHunk;
+  final bool anchorTarget;
 }
 
 class _SideBySideRow extends StatelessWidget {

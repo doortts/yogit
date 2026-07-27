@@ -2532,13 +2532,54 @@ void main() {
     );
   });
 
-  test('legacy full diff initial view is ignored in favor of preferences', () {
+  test('legacy full file initial view migrates to full file scope', () {
     final settings = AppSettings.fromJson(const {
       'fullDiffInitialView': 'fullFile',
     });
 
-    expect(settings.fullDiffPreferences, const FullDiffPreferences());
+    expect(
+      settings.fullDiffPreferences,
+      const FullDiffPreferences(scope: DiffScope.fullFile),
+    );
     expect(settings.toJson(), isNot(contains('fullDiffInitialView')));
+  });
+
+  test('legacy hunk and missing initial views keep default preferences', () {
+    expect(
+      AppSettings.fromJson(const {
+        'fullDiffInitialView': 'hunk',
+      }).fullDiffPreferences,
+      const FullDiffPreferences(),
+    );
+    expect(
+      AppSettings.fromJson(const {}).fullDiffPreferences,
+      const FullDiffPreferences(),
+    );
+  });
+
+  test('explicit full diff preferences take precedence over legacy view', () {
+    final settings = AppSettings.fromJson(const {
+      'fullDiffInitialView': 'fullFile',
+      'fullDiffPreferences': {
+        'view': 'history',
+        'layout': 'sideBySide',
+        'scope': 'hunks',
+        'algorithm': 'patience',
+        'ignoreWhitespace': true,
+        'wrapLines': false,
+      },
+    });
+
+    expect(
+      settings.fullDiffPreferences,
+      const FullDiffPreferences(
+        view: FullDiffView.history,
+        layout: DiffLayout.sideBySide,
+        algorithm: DiffAlgorithm.patience,
+        ignoreWhitespace: true,
+        wrapLines: false,
+      ),
+    );
   });
 
   test('full diff preferences survive settings JSON', () {

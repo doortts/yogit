@@ -94,14 +94,39 @@ void main() {
       for (var line = 1; line <= 180; line++) 'source line $line',
     ].join('\n');
     repository.files = (_, _) async => const [fileA];
-    repository.diff = (_, _, _, _, _) async => const [
-      DiffLine(kind: DiffLineKind.hunk, text: '@@ -120 +120 @@ distant'),
+    repository.scopedDiff = (_, _, _, _, _, scope) async => [
       DiffLine(
+        kind: DiffLineKind.hunk,
+        text: scope == DiffScope.fullFile
+            ? '@@ -1,180 +1,180 @@ distant'
+            : '@@ -120 +120 @@ distant',
+      ),
+      if (scope == DiffScope.fullFile)
+        for (var line = 1; line < 120; line++)
+          DiffLine(
+            kind: DiffLineKind.context,
+            text: 'source line $line',
+            oldNumber: line,
+            newNumber: line,
+          ),
+      const DiffLine(
         kind: DiffLineKind.delete,
         text: 'old source line 120',
         oldNumber: 120,
       ),
-      DiffLine(kind: DiffLineKind.add, text: 'source line 120', newNumber: 120),
+      const DiffLine(
+        kind: DiffLineKind.add,
+        text: 'source line 120',
+        newNumber: 120,
+      ),
+      if (scope == DiffScope.fullFile)
+        for (var line = 121; line <= 180; line++)
+          DiffLine(
+            kind: DiffLineKind.context,
+            text: 'source line $line',
+            oldNumber: line,
+            newNumber: line,
+          ),
     ];
     repository.content = (_, _, _) async =>
         Uint8List.fromList(utf8.encode('$source\n'));
@@ -392,9 +417,57 @@ void main() {
       size: const Size(1070, 520),
     );
 
-    final target = find.byKey(const Key('unified-line-0-0'));
+    final target = find.byKey(const Key('unified-line-0-119'));
     expect(target, findsOneWidget);
-    final viewport = tester.getRect(find.byType(ListView).last);
+    final viewport = tester.getRect(find.byKey(const Key('unified-list')));
+    final targetRect = tester.getRect(target);
+    final position = tester
+        .state<ScrollableState>(
+          find
+              .descendant(
+                of: find.byKey(const Key('content-scrollable')),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        )
+        .position;
+    expect(position.pixels, greaterThan(0));
+    expect(targetRect.top, greaterThanOrEqualTo(viewport.top));
+    expect(targetRect.bottom, lessThanOrEqualTo(viewport.bottom));
+  });
+
+  testWidgets('turning Hunk off aligns the active change in full file scope', (
+    tester,
+  ) async {
+    final fixture = await distantChangeFixture(const FullDiffPreferences());
+    addTearDown(fixture.controller.dispose);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1070, 520),
+    );
+
+    final position = tester
+        .state<ScrollableState>(
+          find
+              .descendant(
+                of: find.byKey(const Key('content-scrollable')),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        )
+        .position;
+    expect(position.pixels, 0);
+    expect(find.byKey(const Key('unified-line-0-0')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('hunk-toggle-on')));
+    await tester.pumpAndSettle();
+
+    final target = find.byKey(const Key('unified-line-0-119'));
+    expect(fixture.controller.state.appliedScope, DiffScope.fullFile);
+    expect(position.pixels, greaterThan(0));
+    expect(target, findsOneWidget);
+    final viewport = tester.getRect(find.byKey(const Key('unified-list')));
     final targetRect = tester.getRect(target);
     expect(targetRect.top, greaterThanOrEqualTo(viewport.top));
     expect(targetRect.bottom, lessThanOrEqualTo(viewport.bottom));
@@ -1815,7 +1888,7 @@ void main() {
     });
   }
 
-  testWidgets('File view keeps unsupported content out of FullFileView', (
+  testWidgets('full-file scope keeps unsupported content in the panel', (
     tester,
   ) async {
     final controller = await unavailableController(

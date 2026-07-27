@@ -133,52 +133,6 @@ MinimapViewport scrollViewport({
   return MinimapViewport(top: scrollFraction * travel, height: viewportHeight);
 }
 
-MinimapViewport? hunkViewport({
-  required DiffHunk? hunk,
-  required FileDocumentSide sourceSide,
-  required int sourceLineCount,
-  required double height,
-}) {
-  if (hunk == null) return null;
-  final trackHeight = math.max(0.0, height);
-  final lineCount = math.max(0, sourceLineCount);
-  final start = sourceSide == FileDocumentSide.old
-      ? hunk.oldStart
-      : hunk.newStart;
-  final count = sourceSide == FileDocumentSide.old
-      ? hunk.oldCount
-      : hunk.newCount;
-  if (lineCount == 0) {
-    if (count > 0) return null;
-    return MinimapViewport(
-      top: 0,
-      height: math.min(_minimumViewportHeight, trackHeight),
-    );
-  }
-
-  late final int boundaryStart;
-  late final int boundaryEnd;
-  if (count > 0) {
-    boundaryStart = (start - 1).clamp(0, lineCount);
-    boundaryEnd = (boundaryStart + count).clamp(boundaryStart, lineCount);
-  } else {
-    boundaryStart = start.clamp(0, lineCount);
-    boundaryEnd = boundaryStart;
-  }
-  final rawTop = boundaryStart / lineCount * trackHeight;
-  final rawBottom = boundaryEnd / lineCount * trackHeight;
-  final viewportHeight = math.min(
-    trackHeight,
-    math.max(_minimumViewportHeight, rawBottom - rawTop),
-  );
-  final travel = math.max(0.0, trackHeight - viewportHeight);
-  final center = (rawTop + rawBottom) / 2;
-  return MinimapViewport(
-    top: (center - viewportHeight / 2).clamp(0.0, travel).toDouble(),
-    height: viewportHeight,
-  );
-}
-
 DiffAnchor? nearestAnchorForY(
   double y,
   double height,

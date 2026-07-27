@@ -737,13 +737,11 @@ void main() {
         find.byKey(const Key('content-scrollable')),
       );
       final header = find.text('SetupBase · lines 312–316 · change 2 of 7');
-      final line309 = find.byKey(const Key('unified-line-1-0'));
       final changedRow = find.byKey(const Key('unified-line-1-3'));
       expect(header, findsOneWidget);
       expect(changedRow, findsOneWidget);
-      expect(line309, findsOneWidget);
       expect(
-        tester.getTopLeft(line309).dy,
+        tester.getTopLeft(header).dy,
         inInclusiveRange(viewport.top - 27, viewport.top + 27),
       );
       expect(tester.getRect(header).overlaps(viewport), isTrue);

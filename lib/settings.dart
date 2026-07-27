@@ -277,9 +277,11 @@ class AppSettings {
       fullDiffColumnWidths: FullDiffColumnWidths.fromJson(
         value['fullDiffColumnWidths'],
       ),
-      fullDiffPreferences: FullDiffPreferences.fromJson(
-        value['fullDiffPreferences'],
-      ),
+      fullDiffPreferences: value.containsKey('fullDiffPreferences')
+          ? FullDiffPreferences.fromJson(value['fullDiffPreferences'])
+          : value['fullDiffInitialView'] == 'fullFile'
+          ? const FullDiffPreferences(scope: DiffScope.fullFile)
+          : const FullDiffPreferences(),
       laneColors: valid ? laneColors : defaultLaneColors,
       previewWidth: _clamped(value['previewWidth'], 288, 240, 560),
       previewHeight: _clamped(value['previewHeight'], 280, 200, 480),
