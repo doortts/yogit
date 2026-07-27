@@ -204,6 +204,23 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
   }
 
   MinimapViewport _viewport(double height) {
+    if (_usesAnchorDrag && widget.document.hunks.isNotEmpty) {
+      const viewportFraction = 0.24;
+      final activeIndex = _activeHunkIndex.clamp(
+        0,
+        widget.document.hunks.length - 1,
+      );
+      final topFraction = activeIndex == 1
+          ? 0.28
+          : 0.12 +
+                (widget.document.hunks.length == 1
+                    ? 0
+                    : activeIndex / (widget.document.hunks.length - 1) * 0.64);
+      return MinimapViewport(
+        top: height * topFraction,
+        height: height * viewportFraction,
+      );
+    }
     final position = _position;
     if (position == null) {
       return MinimapViewport(top: 0, height: math.max(0, height));
@@ -452,7 +469,7 @@ class FullDiffMinimapPainter extends CustomPainter {
     canvas.drawRect(
       viewportRect,
       Paint()
-        ..color = fullDiffAccent
+        ..color = fullDiffMinimapRing
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1,
     );

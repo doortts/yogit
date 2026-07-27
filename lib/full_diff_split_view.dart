@@ -50,6 +50,23 @@ class SplitPresentationView extends StatelessWidget {
       itemBuilder: (context, hunkIndex) {
         final hunk = document.hunks[hunkIndex];
         final current = activeAnchor?.hunkIndex == hunk.index;
+        final pairs = pairDiff(hunk.lines);
+        final firstChange = pairs.indexWhere(
+          (pair) =>
+              pair.left?.kind == DiffLineKind.delete ||
+              pair.right?.kind == DiffLineKind.add,
+        );
+        final leadingContextCount = firstChange < 0 ? 0 : firstChange;
+        Widget splitRow(int rowIndex) => _SplitRow(
+          pair: pairs[rowIndex],
+          rowIndex: rowIndex,
+          oldPath: oldPath,
+          newPath: newPath,
+          wrapLines: wrapLines,
+          showOldSide: showOldSide,
+          highlighter: highlighter,
+          current: current,
+        );
         return KeyedSubtree(
           key: _anchorKey(hunk.anchor),
           child: FullDiffSelectionArea(
@@ -57,22 +74,19 @@ class SplitPresentationView extends StatelessWidget {
               key: Key('split-hunk-$hunkIndex'),
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                for (var index = 0; index < leadingContextCount; index++)
+                  splitRow(index),
                 _SplitHunkHeader(
                   hunk: hunk,
                   path: newPath,
                   hunkCount: document.hunks.length,
                 ),
-                for (final (rowIndex, pair) in pairDiff(hunk.lines).indexed)
-                  _SplitRow(
-                    pair: pair,
-                    rowIndex: rowIndex,
-                    oldPath: oldPath,
-                    newPath: newPath,
-                    wrapLines: wrapLines,
-                    showOldSide: showOldSide,
-                    highlighter: highlighter,
-                    current: current,
-                  ),
+                for (
+                  var index = leadingContextCount;
+                  index < pairs.length;
+                  index++
+                )
+                  splitRow(index),
               ],
             ),
           ),
@@ -130,6 +144,7 @@ class _SplitRow extends StatelessWidget {
             highlighter: highlighter,
             current: markCurrent,
             wordRanges: wordChanges.newRanges,
+            compactGutter: true,
           );
 
     if (!showOldSide) return newSide;
@@ -147,6 +162,7 @@ class _SplitRow extends StatelessWidget {
                   highlighter: highlighter,
                   current: markCurrent,
                   wordRanges: wordChanges.oldRanges,
+                  compactGutter: true,
                 ),
         ),
         const VerticalDivider(width: 1, color: fullDiffDivider),

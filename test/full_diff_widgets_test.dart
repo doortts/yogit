@@ -342,6 +342,22 @@ void main() {
     expect(find.byKey(const Key('inline-hunk-1')), findsOneWidget);
     expect(find.text('context before 3'), findsOneWidget);
     expect(find.text('context after 3'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('inline-hunk-0')),
+        matching: find.text('10'),
+      ),
+      findsOneWidget,
+    );
+    final header = find.text('Configure · lines 10–16 · change 1 of 2');
+    expect(
+      tester.getTopLeft(find.text('context before 1')).dy,
+      lessThan(tester.getTopLeft(header).dy),
+    );
+    expect(
+      tester.getTopLeft(find.text('first old')).dy,
+      greaterThan(tester.getTopLeft(header).dy),
+    );
   });
 
   testWidgets('inline mounts supplied anchor keys for ensureVisible', (
@@ -404,6 +420,33 @@ void main() {
     expect(find.byKey(const Key('split-missing-old-0')), findsOneWidget);
     expect(find.text('added line'), findsOneWidget);
     expect(anchorKey.currentContext, isNotNull);
+  });
+
+  testWidgets('split places leading context before its hunk header', (
+    tester,
+  ) async {
+    await pumpPresentation(
+      tester,
+      presentation: DiffPresentation.split,
+      document: twoHunkDocument,
+    );
+
+    final header = find.text('Configure · lines 10–16 · change 1 of 2');
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('split-hunk-0')),
+        matching: find.text('10'),
+      ),
+      findsNWidgets(2),
+    );
+    expect(
+      tester.getTopLeft(find.text('context before 1').first).dy,
+      lessThan(tester.getTopLeft(header).dy),
+    );
+    expect(
+      tester.getTopLeft(find.text('first old')).dy,
+      greaterThan(tester.getTopLeft(header).dy),
+    );
   });
 
   testWidgets('split copies paired sources as tab-separated text', (

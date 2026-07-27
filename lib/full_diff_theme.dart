@@ -18,6 +18,7 @@ const fullDiffWordChange = Color(0xFF394C5E);
 const fullDiffString = Color(0xFFFFBFA0);
 const fullDiffMinimapTrack = Color(0xFF2F2F2F);
 const fullDiffMinimapViewport = Color(0xFF353A3E);
+const fullDiffMinimapRing = Color(0xC283C4FF);
 const fullDiffDeletedMark = Color(0xFFF68B59);
 
 const fullDiffOuterPadding = 12.0;

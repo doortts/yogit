@@ -119,10 +119,10 @@ void main() {
     await tester.pump();
   }
 
-  TextButton editorButton(WidgetTester tester) => tester.widget<TextButton>(
-    find.descendant(
+  InkWell editorButton(WidgetTester tester) => tester.widget<InkWell>(
+    find.ancestor(
       of: find.byKey(const Key('open-editor')),
-      matching: find.byType(TextButton),
+      matching: find.byType(InkWell),
     ),
   );
 
@@ -690,7 +690,7 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('open-editor')));
     await tester.pump();
-    expect(editorButton(tester).onPressed, isNull);
+    expect(editorButton(tester).onTap, isNull);
 
     await pumpWorkspace(
       tester,
@@ -699,7 +699,7 @@ void main() {
       editorService: editorService,
     );
     expect(find.text('src/second.pas'), findsWidgets);
-    expect(editorButton(tester).onPressed, isNotNull);
+    expect(editorButton(tester).onTap, isNotNull);
 
     editorCompleter.completeError(StateError('late editor failed'));
     await tester.pump();
@@ -712,7 +712,7 @@ void main() {
       ),
     );
     expect(tooltip.message, isNot(contains('late editor failed')));
-    expect(editorButton(tester).onPressed, isNotNull);
+    expect(editorButton(tester).onTap, isNotNull);
   });
 
   testWidgets(
@@ -764,7 +764,7 @@ void main() {
 
       await tester.tap(find.byKey(const Key('open-editor')));
       await tester.pump();
-      expect(editorButton(tester).onPressed, isNull);
+      expect(editorButton(tester).onTap, isNull);
 
       unawaited(controller.selectFile(secondFile));
       await tester.pump();
@@ -789,7 +789,7 @@ void main() {
         ),
       );
       expect(tooltip.message, isNot(contains('late editor failed')));
-      expect(editorButton(tester).onPressed, isNull);
+      expect(editorButton(tester).onTap, isNull);
 
       secondPatch.complete(twoHunkLines);
       secondContent.complete(resultFile.bytes);
@@ -905,7 +905,7 @@ void main() {
         controller: committed.controller,
         size: const Size(1070, 842),
       );
-      expect(editorButton(tester).onPressed, isNull);
+      expect(editorButton(tester).onTap, isNull);
 
       const workingTree = GitCommit(
         sha: '',
@@ -937,7 +937,7 @@ void main() {
         size: const Size(1070, 842),
         editorService: editorService,
       );
-      expect(editorButton(tester).onPressed, isNotNull);
+      expect(editorButton(tester).onTap, isNotNull);
       await tester.tap(find.byKey(const Key('open-editor')));
       await tester.pump();
       expect(editorService.relativePath, fileA.path);
@@ -967,7 +967,7 @@ void main() {
         controller: deletedController,
         size: const Size(1070, 842),
       );
-      expect(editorButton(tester).onPressed, isNull);
+      expect(editorButton(tester).onTap, isNull);
     },
   );
 }

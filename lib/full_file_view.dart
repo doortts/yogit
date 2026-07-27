@@ -76,15 +76,18 @@ class FullFileView extends StatelessWidget {
               : null,
         );
         Widget row = KeyedSubtree(
-          key: current ? Key('file-current-line-$lineNumber') : null,
-          child: FullDiffCodeRow(
-            line: line,
-            path: path,
-            wrapLines: wrapLines,
-            highlighter: document.disableRichRendering
-                ? const _NoopSyntaxHighlighter()
-                : highlighter,
-            current: current,
+          key: Key('file-line-$lineNumber'),
+          child: KeyedSubtree(
+            key: current ? Key('file-current-line-$lineNumber') : null,
+            child: FullDiffCodeRow(
+              line: line,
+              path: path,
+              wrapLines: wrapLines,
+              highlighter: document.disableRichRendering
+                  ? const _NoopSyntaxHighlighter()
+                  : highlighter,
+              current: current,
+            ),
           ),
         );
         for (final hunk in anchorHunks[lineNumber] ?? const <DiffHunk>[]) {

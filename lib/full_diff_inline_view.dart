@@ -47,6 +47,23 @@ class InlinePresentationView extends StatelessWidget {
         final hunk = document.hunks[index];
         final wordRanges = _wordRangesByLine(hunk.lines);
         final current = activeAnchor?.hunkIndex == hunk.index;
+        final firstChange = hunk.lines.indexWhere(
+          (line) =>
+              line.kind == DiffLineKind.add || line.kind == DiffLineKind.delete,
+        );
+        final leadingContextCount = firstChange < 0 ? 0 : firstChange;
+        Widget codeRow(DiffLine line) => FullDiffCodeRow(
+          line: line,
+          path: path,
+          wrapLines: wrapLines,
+          highlighter: highlighter,
+          current:
+              current &&
+              (line.kind == DiffLineKind.add ||
+                  line.kind == DiffLineKind.delete),
+          wordRanges: wordRanges[line] ?? const [],
+          compactGutter: true,
+        );
         return KeyedSubtree(
           key: _anchorKey(hunk.anchor),
           child: FullDiffSelectionArea(
@@ -54,23 +71,15 @@ class InlinePresentationView extends StatelessWidget {
               key: Key('inline-hunk-$index'),
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                for (final line in hunk.lines.take(leadingContextCount))
+                  codeRow(line),
                 _InlineHunkHeader(
                   hunk: hunk,
                   path: path,
                   hunkCount: document.hunks.length,
                 ),
-                for (final line in hunk.lines)
-                  FullDiffCodeRow(
-                    line: line,
-                    path: path,
-                    wrapLines: wrapLines,
-                    highlighter: highlighter,
-                    current:
-                        current &&
-                        (line.kind == DiffLineKind.add ||
-                            line.kind == DiffLineKind.delete),
-                    wordRanges: wordRanges[line] ?? const [],
-                  ),
+                for (final line in hunk.lines.skip(leadingContextCount))
+                  codeRow(line),
               ],
             ),
           ),

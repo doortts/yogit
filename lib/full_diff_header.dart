@@ -54,19 +54,22 @@ class GlobalFileBar extends StatelessWidget {
                   key: const Key('file-path-chip'),
                   height: fullDiffControlHeight,
                   constraints: const BoxConstraints(maxWidth: 260),
-                  alignment: Alignment.centerLeft,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   decoration: BoxDecoration(
                     color: fullDiffChip,
                     borderRadius: BorderRadius.circular(fullDiffChipRadius),
                   ),
-                  child: Text(
-                    path,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: technicalTextStyle.copyWith(
-                      color: Colors.white,
-                      fontSize: 14,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: 1,
+                    child: Text(
+                      path,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: technicalTextStyle.copyWith(
+                        color: Colors.white,
+                        fontSize: 14,
+                      ),
                     ),
                   ),
                 ),
@@ -131,6 +134,7 @@ class GlobalDiffToolbar extends StatelessWidget {
     required this.onIgnoreWhitespaceChanged,
     required this.onWrapLinesChanged,
     required this.onFocusModeChanged,
+    this.showLeadingControls = true,
     super.key,
   });
 
@@ -150,9 +154,11 @@ class GlobalDiffToolbar extends StatelessWidget {
   final ValueChanged<bool> onIgnoreWhitespaceChanged;
   final ValueChanged<bool> onWrapLinesChanged;
   final ValueChanged<bool> onFocusModeChanged;
+  final bool showLeadingControls;
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width <= 480;
     final navigationEnabled = view != FullDiffView.history && anchorCount > 0;
     final displayedIndex = anchorCount == 0
         ? 0
@@ -160,97 +166,117 @@ class GlobalDiffToolbar extends StatelessWidget {
     final canGoPrevious = navigationEnabled && activeIndex > 0;
     final canGoNext =
         navigationEnabled && activeIndex >= 0 && activeIndex < anchorCount - 1;
+    final trailingChildren = <Widget>[
+      _NavigationButton(
+        controlKey: const Key('previous-change'),
+        label: '이전 변경 구간',
+        icon: Icons.arrow_upward,
+        onPressed: canGoPrevious ? onPrevious : null,
+        compact: compact,
+      ),
+      Semantics(
+        enabled: navigationEnabled,
+        child: SizedBox(
+          key: const Key('change-counter'),
+          height: fullDiffControlHeight,
+          child: Center(
+            widthFactor: 1,
+            child: Text(
+              '$displayedIndex / $anchorCount',
+              style: technicalTextStyle.copyWith(
+                color: navigationEnabled
+                    ? fullDiffMuted
+                    : fullDiffMuted.withValues(alpha: 0.5),
+                fontSize: compact ? 12 : 13,
+              ),
+            ),
+          ),
+        ),
+      ),
+      _NavigationButton(
+        controlKey: const Key('next-change'),
+        label: '다음 변경 구간',
+        icon: Icons.arrow_downward,
+        onPressed: canGoNext ? onNext : null,
+        compact: compact,
+      ),
+      if (loadingPatch)
+        const SizedBox.square(
+          dimension: 16,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      _AlgorithmMenu(
+        algorithm: algorithm,
+        onSelected: onAlgorithmSelected,
+        compact: compact,
+      ),
+      _HeaderToggle(
+        controlKey: const Key('ignore-whitespace'),
+        label: '공백 무시',
+        value: ignoreWhitespace,
+        icon: Icons.space_bar,
+        onChanged: onIgnoreWhitespaceChanged,
+        compact: compact,
+      ),
+      _HeaderToggle(
+        controlKey: const Key('wrap-lines'),
+        label: '줄바꿈',
+        value: wrapLines,
+        icon: Icons.wrap_text,
+        onChanged: onWrapLinesChanged,
+        compact: compact,
+      ),
+    ];
+    final trailingControls = Wrap(
+      spacing: compact ? 3 : 6,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: trailingChildren,
+    );
+    final detailTrailingControls = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var index = 0; index < trailingChildren.length; index++) ...[
+          if (index > 0) SizedBox(width: compact ? 3 : 6),
+          trailingChildren[index],
+        ],
+      ],
+    );
 
     return _HeaderBar(
       child: Wrap(
-        alignment: WrapAlignment.spaceBetween,
+        alignment: showLeadingControls
+            ? WrapAlignment.spaceBetween
+            : WrapAlignment.end,
         runSpacing: 8,
         spacing: 10,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              _HeaderToggle(
-                controlKey: const Key('focus-mode'),
-                label: focusMode ? '탐색 패널' : '집중 모드',
-                value: focusMode,
-                icon: focusMode
-                    ? Icons.view_sidebar_outlined
-                    : Icons.vertical_split_outlined,
-                onChanged: onFocusModeChanged,
-              ),
-              FullDiffSegmentedControl<DiffPresentation>(
-                groupLabel: 'Diff 표시 방식',
-                values: DiffPresentation.values,
-                selected: presentation,
-                labelFor: _presentationLabel,
-                onSelected: onPresentationSelected,
-              ),
-            ],
-          ),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              _NavigationButton(
-                controlKey: const Key('previous-change'),
-                label: '이전 변경 구간',
-                icon: Icons.arrow_upward,
-                onPressed: canGoPrevious ? onPrevious : null,
-              ),
-              Semantics(
-                enabled: navigationEnabled,
-                child: SizedBox(
-                  key: const Key('change-counter'),
-                  height: fullDiffControlHeight,
-                  child: Center(
-                    child: Text(
-                      '$displayedIndex / $anchorCount',
-                      style: technicalTextStyle.copyWith(
-                        color: navigationEnabled
-                            ? fullDiffMuted
-                            : fullDiffMuted.withValues(alpha: 0.5),
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
+          if (showLeadingControls)
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                _HeaderToggle(
+                  controlKey: const Key('focus-mode'),
+                  label: focusMode ? '탐색 패널' : '집중 모드',
+                  value: focusMode,
+                  icon: focusMode
+                      ? Icons.view_sidebar_outlined
+                      : Icons.vertical_split_outlined,
+                  onChanged: onFocusModeChanged,
                 ),
-              ),
-              _NavigationButton(
-                controlKey: const Key('next-change'),
-                label: '다음 변경 구간',
-                icon: Icons.arrow_downward,
-                onPressed: canGoNext ? onNext : null,
-              ),
-              if (loadingPatch)
-                const SizedBox.square(
-                  dimension: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+                FullDiffSegmentedControl<DiffPresentation>(
+                  groupLabel: 'Diff 표시 방식',
+                  values: DiffPresentation.values,
+                  selected: presentation,
+                  labelFor: _presentationLabel,
+                  onSelected: onPresentationSelected,
                 ),
-              _AlgorithmMenu(
-                algorithm: algorithm,
-                onSelected: onAlgorithmSelected,
-              ),
-              _HeaderToggle(
-                controlKey: const Key('ignore-whitespace'),
-                label: '공백 무시',
-                value: ignoreWhitespace,
-                icon: Icons.space_bar,
-                onChanged: onIgnoreWhitespaceChanged,
-              ),
-              _HeaderToggle(
-                controlKey: const Key('wrap-lines'),
-                label: '줄바꿈',
-                value: wrapLines,
-                icon: Icons.wrap_text,
-                onChanged: onWrapLinesChanged,
-              ),
-            ],
-          ),
+              ],
+            ),
+          if (showLeadingControls) trailingControls else detailTrailingControls,
         ],
       ),
     );
@@ -358,6 +384,7 @@ class _HeaderButton extends StatelessWidget {
     this.selected = false,
     this.enabled = true,
     this.controlKey,
+    this.compact = false,
   });
 
   final String label;
@@ -366,41 +393,57 @@ class _HeaderButton extends StatelessWidget {
   final bool enabled;
   final VoidCallback onPressed;
   final Key? controlKey;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final foreground = selected ? Colors.black : Colors.white;
-    final style = TextButton.styleFrom(
-      foregroundColor: foreground,
-      disabledForegroundColor: fullDiffMuted.withValues(alpha: 0.5),
-      backgroundColor: selected ? Colors.white : fullDiffControl,
-      disabledBackgroundColor: fullDiffControl.withValues(alpha: 0.5),
-      minimumSize: Size.zero,
-      padding: EdgeInsets.only(left: icon == null ? 12 : 9, right: 12),
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      textStyle: const TextStyle(fontSize: 14, height: 1),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(fullDiffControlRadius),
-        side: selected
-            ? BorderSide.none
-            : const BorderSide(color: _fullDiffInputBorder),
-      ),
-    );
-    return SizedBox(
-      key: controlKey,
-      height: fullDiffControlHeight,
-      child: icon == null
-          ? TextButton(
-              onPressed: enabled ? onPressed : null,
-              style: style,
-              child: Text(label),
-            )
-          : TextButton.icon(
-              onPressed: enabled ? onPressed : null,
-              icon: Icon(icon, size: 16, color: foreground),
-              label: Text(label),
-              style: style,
+    final disabledForeground = fullDiffMuted.withValues(alpha: 0.5);
+    final radius = BorderRadius.circular(fullDiffControlRadius);
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: label,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: radius,
+          onTap: enabled ? onPressed : null,
+          child: Container(
+            key: controlKey,
+            height: fullDiffControlHeight,
+            padding: EdgeInsets.symmetric(horizontal: compact ? 4 : 8),
+            decoration: BoxDecoration(
+              color: enabled
+                  ? (selected ? Colors.white : fullDiffControl)
+                  : fullDiffControl.withValues(alpha: 0.5),
+              borderRadius: radius,
+              border: selected ? null : Border.all(color: _fullDiffInputBorder),
             ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (icon case final icon?) ...[
+                  Icon(
+                    icon,
+                    size: 16,
+                    color: enabled ? foreground : disabledForeground,
+                  ),
+                  SizedBox(width: compact ? 3 : 4),
+                ],
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: enabled ? foreground : disabledForeground,
+                    fontSize: 14,
+                    height: 1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -419,18 +462,20 @@ class _HeaderBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     height: fullDiffControlHeight,
-    alignment: Alignment.center,
     padding: const EdgeInsets.symmetric(horizontal: 9),
     decoration: BoxDecoration(
       color: background,
       borderRadius: BorderRadius.circular(9999),
     ),
-    child: Text(
-      label,
-      style: technicalTextStyle.copyWith(
-        color: foreground,
-        fontSize: 13,
-        height: 1,
+    child: Center(
+      widthFactor: 1,
+      child: Text(
+        label,
+        style: technicalTextStyle.copyWith(
+          color: foreground,
+          fontSize: 13,
+          height: 1,
+        ),
       ),
     ),
   );
@@ -442,12 +487,14 @@ class _NavigationButton extends StatelessWidget {
     required this.icon,
     required this.onPressed,
     this.controlKey,
+    this.compact = false,
   });
 
   final String label;
   final IconData icon;
   final VoidCallback? onPressed;
   final Key? controlKey;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) => Semantics(
@@ -462,8 +509,8 @@ class _NavigationButton extends StatelessWidget {
       color: fullDiffMuted,
       disabledColor: fullDiffMuted.withValues(alpha: 0.35),
       padding: EdgeInsets.zero,
-      constraints: const BoxConstraints.tightFor(
-        width: fullDiffControlHeight,
+      constraints: BoxConstraints.tightFor(
+        width: compact ? 22 : fullDiffControlHeight,
         height: fullDiffControlHeight,
       ),
       visualDensity: VisualDensity.compact,
@@ -472,10 +519,15 @@ class _NavigationButton extends StatelessWidget {
 }
 
 class _AlgorithmMenu extends StatelessWidget {
-  const _AlgorithmMenu({required this.algorithm, required this.onSelected});
+  const _AlgorithmMenu({
+    required this.algorithm,
+    required this.onSelected,
+    this.compact = false,
+  });
 
   final DiffAlgorithm algorithm;
   final ValueChanged<DiffAlgorithm> onSelected;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) => Semantics(
@@ -496,18 +548,18 @@ class _AlgorithmMenu extends StatelessWidget {
       padding: EdgeInsets.zero,
       child: Container(
         height: fullDiffControlHeight,
-        padding: const EdgeInsets.only(left: 12, right: 7),
+        padding: EdgeInsets.symmetric(horizontal: compact ? 4 : 8),
         decoration: BoxDecoration(
           color: fullDiffControl,
           borderRadius: BorderRadius.circular(fullDiffControlRadius),
           border: Border.all(color: _fullDiffInputBorder),
         ),
-        child: const Row(
+        child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('diff 알고리즘'),
-            SizedBox(width: 6),
-            Icon(Icons.arrow_drop_down, size: 16),
+            const Text('diff 알고리즘'),
+            SizedBox(width: compact ? 2 : 4),
+            const Icon(Icons.arrow_drop_down, size: 16),
           ],
         ),
       ),
@@ -522,6 +574,7 @@ class _HeaderToggle extends StatelessWidget {
     required this.icon,
     required this.onChanged,
     this.controlKey,
+    this.compact = false,
   });
 
   final String label;
@@ -529,6 +582,7 @@ class _HeaderToggle extends StatelessWidget {
   final IconData icon;
   final ValueChanged<bool> onChanged;
   final Key? controlKey;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) => Semantics(
@@ -545,6 +599,7 @@ class _HeaderToggle extends StatelessWidget {
         icon: icon,
         selected: value,
         onPressed: () => onChanged(!value),
+        compact: compact,
       ),
     ),
   );

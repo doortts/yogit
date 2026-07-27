@@ -414,9 +414,9 @@ void main() {
 
     expect(find.byKey(const Key('blame-list')), findsOneWidget);
     expect(find.text('·······'), findsOneWidget);
-    expect(find.text('Uncommitted'), findsOneWidget);
+    expect(find.text('U'), findsOneWidget);
     expect(find.text('40aff6d'), findsOneWidget);
-    expect(find.text('Suwon Chae'), findsOneWidget);
+    expect(find.text('SC'), findsOneWidget);
     expect(find.text('alpha'), findsOneWidget);
     expect(find.text('beta'), findsOneWidget);
     expect(anchorKey.currentContext, isNotNull);

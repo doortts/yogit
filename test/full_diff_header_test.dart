@@ -192,11 +192,10 @@ void main() {
     await pumpHeaders(tester, focusMode: true, ignoreWhitespace: true);
 
     for (final label in ['Diff', 'Hunk', '탐색 패널', '공백 무시']) {
-      final button = tester.widget<TextButton>(
-        find.ancestor(of: find.text(label), matching: find.byType(TextButton)),
-      );
-      expect(button.style?.backgroundColor?.resolve({}), Colors.white);
-      expect(button.style?.foregroundColor?.resolve({}), Colors.black);
+      final decoration =
+          _headerControl(tester, label).decoration as BoxDecoration;
+      expect(decoration.color, Colors.white);
+      expect(tester.widget<Text>(find.text(label)).style?.color, Colors.black);
     }
   });
 
@@ -205,15 +204,9 @@ void main() {
   ) async {
     await pumpHeaders(tester);
 
-    final openEditor = tester.widget<TextButton>(
-      find.ancestor(
-        of: find.text('편집기로 열기'),
-        matching: find.byType(TextButton),
-      ),
-    );
-    final openEditorShape =
-        openEditor.style?.shape?.resolve({}) as RoundedRectangleBorder;
-    expect(openEditorShape.side.color, const Color(0x1A000000));
+    final openEditorDecoration =
+        _headerControl(tester, '편집기로 열기').decoration as BoxDecoration;
+    expect(openEditorDecoration.border?.top.color, const Color(0x1A000000));
 
     final algorithmDecoration =
         tester
@@ -307,3 +300,14 @@ Future<void> pumpHeaders(
     ),
   ),
 );
+
+Container _headerControl(WidgetTester tester, String label) => tester
+    .widgetList<Container>(
+      find.ancestor(of: find.text(label), matching: find.byType(Container)),
+    )
+    .singleWhere(
+      (container) =>
+          container.constraints?.minHeight == fullDiffControlHeight &&
+          container.constraints?.maxHeight == fullDiffControlHeight &&
+          container.decoration is BoxDecoration,
+    );

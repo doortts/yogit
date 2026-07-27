@@ -173,6 +173,7 @@ class FullDiffCodeRow extends StatelessWidget {
     this.current = false,
     this.wordRanges = const [],
     this.compactGutter = false,
+    this.leadingMetadata,
     this.horizontalScroll = true,
     super.key,
   });
@@ -184,6 +185,7 @@ class FullDiffCodeRow extends StatelessWidget {
   final bool current;
   final List<WordRange> wordRanges;
   final bool compactGutter;
+  final Widget? leadingMetadata;
   final bool horizontalScroll;
 
   @override
@@ -225,6 +227,8 @@ class FullDiffCodeRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(width: fullDiffLineNumberWidth),
+              if (leadingMetadata case final Widget metadata)
+                SelectionContainer.disabled(child: metadata),
               Expanded(
                 child: Stack(
                   children: [
@@ -399,7 +403,7 @@ class _GutterCell extends StatelessWidget {
     constraints: const BoxConstraints(minHeight: 27),
     alignment: Alignment.topRight,
     color: color,
-    padding: const EdgeInsets.fromLTRB(2, 3, 5, 3),
+    padding: const EdgeInsets.fromLTRB(0, 3, 2, 3),
     child: Text(number?.toString() ?? '', style: _gutterStyle),
   );
 }

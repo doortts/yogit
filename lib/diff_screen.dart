@@ -63,6 +63,7 @@ class DiffScreen extends StatefulWidget {
     this.columnWidths = const FullDiffColumnWidths(),
     this.onColumnWidthsChanged,
     this.editorService,
+    this.editorEnabledOverride,
     super.key,
   });
 
@@ -74,6 +75,7 @@ class DiffScreen extends StatefulWidget {
   final FullDiffColumnWidths columnWidths;
   final ValueChanged<FullDiffColumnWidths>? onColumnWidthsChanged;
   final ExternalEditorService? editorService;
+  final bool? editorEnabledOverride;
 
   @override
   State<DiffScreen> createState() => _DiffScreenState();
@@ -94,6 +96,7 @@ class _DiffScreenState extends State<DiffScreen> {
 
   bool _effectScheduled = false;
   bool _scrollSyncScheduled = false;
+  bool _programmaticAnchorScroll = false;
   bool _pendingScrollToTop = false;
   String? _pendingAnchorId;
   int _pendingAnchorDirection = 0;
@@ -111,6 +114,7 @@ class _DiffScreenState extends State<DiffScreen> {
         ExternalEditorService(repositoryRoot: widget.repository.root);
     _attachController(_newController());
     _contentScroll.addListener(_handleContentScrolled);
+    _queueAttachedAnchorScroll();
     if (_ownsController) unawaited(_controller.initialize());
   }
 
@@ -165,7 +169,8 @@ class _DiffScreenState extends State<DiffScreen> {
     _attachController(_newController());
     _pendingScrollToTop = true;
     _pendingAnchorId = null;
-    _scheduleScrollEffect();
+    _queueAttachedAnchorScroll();
+    if (_pendingAnchorId == null) _scheduleScrollEffect();
     if (_ownsController) unawaited(_controller.initialize());
   }
 
@@ -224,6 +229,19 @@ class _DiffScreenState extends State<DiffScreen> {
     };
   }
 
+  void _queueAttachedAnchorScroll() {
+    final state = _controller.state;
+    final anchor = state.activeAnchor;
+    if (state.view == FullDiffView.history ||
+        anchor == null ||
+        anchor.hunkIndex == 0) {
+      return;
+    }
+    _pendingAnchorId = anchor.id;
+    _pendingAnchorDirection = 1;
+    _scheduleScrollEffect();
+  }
+
   void _scheduleScrollEffect() {
     if (_effectScheduled) return;
     _effectScheduled = true;
@@ -246,12 +264,22 @@ class _DiffScreenState extends State<DiffScreen> {
       final anchorContext = _anchorKeys[anchorId]?.currentContext;
       if (anchorContext != null) {
         _pendingAnchorId = null;
+        _programmaticAnchorScroll = true;
+        final state = _controller.state;
+        final alignment = switch ((state.view, state.presentation)) {
+          (FullDiffView.file || FullDiffView.blame, _) => 0.2,
+          (FullDiffView.diff, DiffPresentation.inline) ||
+          (FullDiffView.diff, DiffPresentation.split) => 0.0,
+          _ => 0.1,
+        };
         unawaited(
           Scrollable.ensureVisible(
             anchorContext,
-            alignment: 0.1,
+            alignment: alignment,
             duration: const Duration(milliseconds: 100),
-          ),
+          ).whenComplete(() {
+            if (mounted) _programmaticAnchorScroll = false;
+          }),
         );
         return;
       }
@@ -305,7 +333,11 @@ class _DiffScreenState extends State<DiffScreen> {
   }
 
   void _handleContentScrolled() {
-    if (_scrollSyncScheduled || _pendingAnchorId != null) return;
+    if (_scrollSyncScheduled ||
+        _pendingAnchorId != null ||
+        _programmaticAnchorScroll) {
+      return;
+    }
     _scrollSyncScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollSyncScheduled = false;
@@ -370,6 +402,9 @@ class _DiffScreenState extends State<DiffScreen> {
   }
 
   bool _canOpenEditor(FullDiffSessionState state) {
+    if (widget.editorEnabledOverride case final enabled?) {
+      return !_openingEditor && enabled;
+    }
     final file = state.selectedFile;
     return !_openingEditor &&
         state.selectedCommit.isWorkingTree &&
@@ -504,13 +539,14 @@ class _DiffScreenState extends State<DiffScreen> {
             },
             child: Focus(
               autofocus: true,
-              child: Padding(
-                padding: const EdgeInsets.all(fullDiffOuterPadding),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(fullDiffOuterRadius),
-                  child: ColoredBox(
-                    color: fullDiffHeader,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(fullDiffOuterRadius),
+                child: ColoredBox(
+                  color: fullDiffHeader,
+                  child: Padding(
+                    padding: const EdgeInsets.all(fullDiffOuterPadding),
                     child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         GlobalFileBar(
                           file: state.selectedFile,
@@ -555,9 +591,9 @@ class _DiffScreenState extends State<DiffScreen> {
                         Expanded(
                           child: LayoutBuilder(
                             builder: (context, constraints) {
-                              final viewportWidth =
-                                  constraints.maxWidth +
-                                  fullDiffOuterPadding * 2;
+                              final viewportWidth = MediaQuery.sizeOf(
+                                context,
+                              ).width;
                               return _ResponsiveDiffBody(
                                 showCommits:
                                     !state.focusMode && viewportWidth > 650,
@@ -597,22 +633,19 @@ class _DiffScreenState extends State<DiffScreen> {
         _sectionHeader(
           Row(
             children: [
-              IconButton(
-                tooltip: 'Back',
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints.tightFor(
-                  width: 30,
-                  height: 30,
-                ),
-                onPressed: () => Navigator.of(context).maybePop(),
-                icon: const Icon(Icons.arrow_back, size: 17),
-              ),
-              const SizedBox(width: 4),
               const Expanded(
                 child: Text(
-                  'Nearby commits',
+                  '주변 커밋',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Text(
+                '⌘↑↓',
+                style: technicalTextStyle.copyWith(
+                  color: fullDiffMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.normal,
                 ),
               ),
             ],
@@ -747,7 +780,48 @@ class _DiffScreenState extends State<DiffScreen> {
               ],
             ),
           ),
-          _sectionHeader(const Text('Changed files')),
+          _sectionHeader(
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final summary =
+                    '${state.files.length} files · '
+                    '+${state.files.fold<int>(0, (sum, file) => sum + (file.additions ?? 0))} '
+                    '−${state.files.fold<int>(0, (sum, file) => sum + (file.deletions ?? 0))}';
+                final narrow = constraints.maxWidth <= 140;
+                return Row(
+                  children: [
+                    if (narrow)
+                      const SizedBox(
+                        width: 28,
+                        child: Text('변경 파일', maxLines: 2),
+                      )
+                    else
+                      const Expanded(
+                        child: Text(
+                          '변경 파일',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        summary,
+                        maxLines: 2,
+                        textAlign: TextAlign.end,
+                        overflow: TextOverflow.ellipsis,
+                        style: technicalTextStyle.copyWith(
+                          color: fullDiffMuted,
+                          fontSize: 11,
+                          fontWeight: FontWeight.normal,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
           Expanded(
             child: Stack(
               children: [
@@ -784,39 +858,45 @@ class _DiffScreenState extends State<DiffScreen> {
                                     child: Text(_statusLetter(file.status)),
                                   ),
                                   Expanded(
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 3,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: selected
-                                            ? fullDiffSelectedChip
-                                            : fullDiffChip,
-                                        borderRadius: BorderRadius.circular(
-                                          fullDiffChipRadius,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 3,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: selected
+                                                ? fullDiffSelectedChip
+                                                : fullDiffChip,
+                                            borderRadius: BorderRadius.circular(
+                                              fullDiffChipRadius,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            file.path,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontFamily: technicalFontFamily,
+                                              fontFamilyFallback:
+                                                  technicalFontFallback,
+                                              fontSize: 14,
+                                            ),
+                                          ),
                                         ),
-                                      ),
-                                      child: Text(
-                                        file.path,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          fontFamily: technicalFontFamily,
-                                          fontFamilyFallback:
-                                              technicalFontFallback,
-                                          fontSize: 14,
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          '+${file.additions ?? '—'} '
+                                          '−${file.deletions ?? '—'}',
+                                          style: technicalTextStyle.copyWith(
+                                            color: fullDiffMuted,
+                                            fontSize: 11,
+                                          ),
                                         ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    '+${file.additions ?? '—'} '
-                                    '−${file.deletions ?? '—'}',
-                                    style: technicalTextStyle.copyWith(
-                                      color: fullDiffMuted,
-                                      fontSize: 11,
+                                      ],
                                     ),
                                   ),
                                 ],
@@ -1103,7 +1183,7 @@ class _DiffScreenState extends State<DiffScreen> {
       color: fullDiffHeader,
       border: Border(bottom: BorderSide(color: fullDiffDivider)),
     ),
-    child: DefaultTextStyle(
+    child: DefaultTextStyle.merge(
       style: const TextStyle(
         color: Colors.white,
         fontSize: 11,

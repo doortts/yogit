@@ -49,6 +49,7 @@ class FullHistoryView extends StatelessWidget {
           key: const Key('history-list'),
           controller: controller,
           primary: controller == null,
+          padding: const EdgeInsets.all(12),
           itemCount: entries.length,
           itemBuilder: (context, index) {
             final entry = entries[index];
@@ -93,47 +94,72 @@ class HistoryRow extends StatelessWidget {
     key: Key('history-row-${entry.commit.sha}'),
     color: selected ? fullDiffSelection : fullDiffCanvas,
     child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
             width: 76,
-            child: Text(
-              entry.commit.shortSha,
-              maxLines: 1,
-              overflow: TextOverflow.clip,
-              style: const TextStyle(
-                fontFamily: technicalFontFamily,
-                fontFamilyFallback: technicalFontFallback,
-                fontSize: 12,
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: fullDiffChip,
+                  borderRadius: BorderRadius.circular(fullDiffChipRadius),
+                ),
+                child: Text(
+                  entry.commit.shortSha,
+                  maxLines: 1,
+                  overflow: TextOverflow.clip,
+                  style: const TextStyle(
+                    fontFamily: technicalFontFamily,
+                    fontFamilyFallback: technicalFontFallback,
+                    fontSize: 12,
+                  ),
+                ),
               ),
             ),
           ),
           Expanded(
-            child: Text(
-              entry.commit.subject,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 14),
-            ),
-          ),
-          SizedBox(
-            width: 132,
-            child: Text(
-              entry.commit.author.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: fullDiffMuted, fontSize: 12),
-            ),
-          ),
-          SizedBox(
-            width: 92,
-            child: Text(
-              _relativeTime(entry.commit.committerTimestamp),
-              maxLines: 1,
-              textAlign: TextAlign.end,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: fullDiffMuted, fontSize: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  entry.commit.subject,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 14),
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        entry.commit.author.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: fullDiffMuted,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                    const Text(
+                      ' · ',
+                      style: TextStyle(color: fullDiffMuted, fontSize: 12),
+                    ),
+                    Text(
+                      _relativeTime(entry.commit.committerTimestamp),
+                      maxLines: 1,
+                      style: const TextStyle(
+                        color: fullDiffMuted,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         ],

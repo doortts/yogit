@@ -45,15 +45,21 @@ class FullBlameView extends StatelessWidget {
         itemBuilder: (context, index) {
           final lineNumber = index + 1;
           final current = lineNumber == sourceLine;
-          Widget row = BlameSourceRow(
-            blame: document.lines[index],
-            source: document.file.lines[index],
-            path: document.file.path,
-            wrapLines: wrapLines,
-            highlighter: document.file.disableRichRendering
-                ? const _NoopSyntaxHighlighter()
-                : highlighter,
-            current: current,
+          Widget row = KeyedSubtree(
+            key: Key('blame-line-$lineNumber'),
+            child: KeyedSubtree(
+              key: current ? Key('blame-current-line-$lineNumber') : null,
+              child: BlameSourceRow(
+                blame: document.lines[index],
+                source: document.file.lines[index],
+                path: document.file.path,
+                wrapLines: wrapLines,
+                highlighter: document.file.disableRichRendering
+                    ? const _NoopSyntaxHighlighter()
+                    : highlighter,
+                current: current,
+              ),
+            ),
           );
           for (final hunk in anchorHunks[lineNumber] ?? const <DiffHunk>[]) {
             row = KeyedSubtree(key: _anchorKey(hunk.anchor), child: row);
@@ -125,57 +131,65 @@ class BlameSourceRow extends StatelessWidget {
   final bool current;
 
   @override
-  Widget build(BuildContext context) => Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      SizedBox(
-        width: 76,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 3, 4, 3),
-          child: Text(
-            blame.uncommitted ? '·······' : _shortSha(blame.sha),
-            maxLines: 1,
-            overflow: TextOverflow.clip,
-            style: const TextStyle(
-              fontFamily: technicalFontFamily,
-              fontFamilyFallback: technicalFontFallback,
-              fontSize: 12,
+  Widget build(BuildContext context) => FullDiffCodeRow(
+    line: DiffLine(
+      kind: DiffLineKind.context,
+      text: source,
+      oldNumber: null,
+      newNumber: blame.lineNumber,
+    ),
+    path: path,
+    wrapLines: wrapLines,
+    highlighter: highlighter,
+    current: current,
+    compactGutter: true,
+    leadingMetadata: SizedBox(
+      key: Key('blame-metadata-${blame.lineNumber}'),
+      width: 80,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 3, 4, 3),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 52,
+              child: Text(
+                blame.uncommitted ? '·······' : _shortSha(blame.sha),
+                maxLines: 1,
+                overflow: TextOverflow.clip,
+                style: const TextStyle(
+                  fontFamily: technicalFontFamily,
+                  fontFamilyFallback: technicalFontFallback,
+                  fontSize: 12,
+                ),
+              ),
             ),
-          ),
+            Expanded(
+              child: Text(
+                _authorInitials(blame.author),
+                maxLines: 1,
+                overflow: TextOverflow.clip,
+                style: const TextStyle(fontSize: 12),
+              ),
+            ),
+          ],
         ),
       ),
-      SizedBox(
-        width: 108,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(4, 3, 8, 3),
-          child: Text(
-            blame.author,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 12),
-          ),
-        ),
-      ),
-      Expanded(
-        child: FullDiffCodeRow(
-          line: DiffLine(
-            kind: DiffLineKind.context,
-            text: source,
-            oldNumber: null,
-            newNumber: blame.lineNumber,
-          ),
-          path: path,
-          wrapLines: wrapLines,
-          highlighter: highlighter,
-          current: current,
-          compactGutter: true,
-        ),
-      ),
-    ],
+    ),
   );
 }
 
 String _shortSha(String sha) => sha.length <= 7 ? sha : sha.substring(0, 7);
+
+String _authorInitials(String author) {
+  final words = author
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((word) => word.isNotEmpty);
+  return words
+      .take(2)
+      .map((word) => word.characters.first.toUpperCase())
+      .join();
+}
 
 class _NoopSyntaxHighlighter implements FullDiffSyntaxHighlighter {
   const _NoopSyntaxHighlighter();
