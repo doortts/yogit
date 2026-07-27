@@ -661,6 +661,7 @@ abstract interface class FullDiffRepository {
     String? parent,
     DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
     bool ignoreWhitespace = false,
+    DiffScope scope = DiffScope.hunks,
   });
 
   Future<Uint8List> loadFileBytes(
@@ -910,6 +911,7 @@ class GitRepository implements FullDiffRepository {
     String? parent,
     DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
     bool ignoreWhitespace = false,
+    DiffScope scope = DiffScope.hunks,
   }) async {
     if (commit.isWorkingTree && (_untrackedFiles[file] ?? false)) {
       final snapshot = await _readWorktreeSnapshot(file.path);
@@ -921,7 +923,7 @@ class GitRepository implements FullDiffRepository {
       await _run([
         'diff',
         ...safeDiffArguments,
-        '--unified=3',
+        '--unified=${scope == DiffScope.hunks ? 3 : fullDiffTextLineLimit}',
         if (ignoreWhitespace) '--ignore-all-space',
         ...algorithm.gitArguments,
         ...await _revisionsFor(commit, parent),

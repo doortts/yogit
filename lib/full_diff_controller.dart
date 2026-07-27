@@ -14,6 +14,7 @@ typedef PatchCacheKey = ({
   String newPath,
   DiffAlgorithm algorithm,
   bool ignoreWhitespace,
+  DiffScope scope,
 });
 
 typedef FileCacheKey = ({
@@ -81,8 +82,11 @@ class FullDiffSessionState {
     required this.files,
     required this.selectedFile,
     required this.view,
+    required this.layout,
     required this.presentation,
     required this.activeAnchor,
+    required this.requestedScope,
+    required this.appliedScope,
     required this.requestedAlgorithm,
     required this.appliedAlgorithm,
     required this.requestedIgnoreWhitespace,
@@ -107,8 +111,11 @@ class FullDiffSessionState {
   final List<GitFileChange> files;
   final GitFileChange? selectedFile;
   final FullDiffView view;
+  final DiffLayout layout;
   final DiffPresentation presentation;
   final DiffAnchor? activeAnchor;
+  final DiffScope requestedScope;
+  final DiffScope appliedScope;
   final DiffAlgorithm requestedAlgorithm;
   final DiffAlgorithm appliedAlgorithm;
   final bool requestedIgnoreWhitespace;
@@ -139,6 +146,15 @@ class FullDiffSessionState {
     return document != null && !document.disableRichRendering;
   }
 
+  FullDiffPreferences get preferences => FullDiffPreferences(
+    view: view == FullDiffView.file ? FullDiffView.diff : view,
+    layout: layout,
+    scope: appliedScope,
+    algorithm: appliedAlgorithm,
+    ignoreWhitespace: appliedIgnoreWhitespace,
+    wrapLines: wrapLines,
+  );
+
   FullDiffSessionState copyWith({
     List<GitCommit>? nearbyCommits,
     GitCommit? selectedCommit,
@@ -146,8 +162,11 @@ class FullDiffSessionState {
     List<GitFileChange>? files,
     Object? selectedFile = _unset,
     FullDiffView? view,
+    DiffLayout? layout,
     DiffPresentation? presentation,
     Object? activeAnchor = _unset,
+    DiffScope? requestedScope,
+    DiffScope? appliedScope,
     DiffAlgorithm? requestedAlgorithm,
     DiffAlgorithm? appliedAlgorithm,
     bool? requestedIgnoreWhitespace,
@@ -173,10 +192,13 @@ class FullDiffSessionState {
         ? this.selectedFile
         : selectedFile as GitFileChange?,
     view: view ?? this.view,
+    layout: layout ?? this.layout,
     presentation: presentation ?? this.presentation,
     activeAnchor: identical(activeAnchor, _unset)
         ? this.activeAnchor
         : activeAnchor as DiffAnchor?,
+    requestedScope: requestedScope ?? this.requestedScope,
+    appliedScope: appliedScope ?? this.appliedScope,
     requestedAlgorithm: requestedAlgorithm ?? this.requestedAlgorithm,
     appliedAlgorithm: appliedAlgorithm ?? this.appliedAlgorithm,
     requestedIgnoreWhitespace:
@@ -270,6 +292,7 @@ FullDiffSessionState _initialState(
   List<GitCommit> commits,
   int initialIndex,
   FullDiffInitialView initialView,
+  FullDiffPreferences? initialPreferences,
 ) {
   if (commits.isEmpty) {
     throw ArgumentError.value(commits, 'commits', 'must not be empty');
@@ -277,6 +300,13 @@ FullDiffSessionState _initialState(
   final nearbyCommits = List<GitCommit>.unmodifiable(commits);
   final selectedCommit =
       nearbyCommits[initialIndex.clamp(0, nearbyCommits.length - 1)];
+  final preferences =
+      initialPreferences ??
+      FullDiffPreferences(
+        view: initialView == FullDiffInitialView.fullFile
+            ? FullDiffView.file
+            : FullDiffView.diff,
+      );
   return FullDiffSessionState(
     nearbyCommits: nearbyCommits,
     selectedCommit: selectedCommit,
@@ -285,16 +315,17 @@ FullDiffSessionState _initialState(
         : selectedCommit.parents.first,
     files: const [],
     selectedFile: null,
-    view: initialView == FullDiffInitialView.fullFile
-        ? FullDiffView.file
-        : FullDiffView.diff,
+    view: preferences.view,
+    layout: preferences.layout,
     presentation: DiffPresentation.hunk,
     activeAnchor: null,
-    requestedAlgorithm: DiffAlgorithm.gitSetting,
-    appliedAlgorithm: DiffAlgorithm.gitSetting,
-    requestedIgnoreWhitespace: false,
-    appliedIgnoreWhitespace: false,
-    wrapLines: true,
+    requestedScope: preferences.scope,
+    appliedScope: preferences.scope,
+    requestedAlgorithm: preferences.algorithm,
+    appliedAlgorithm: preferences.algorithm,
+    requestedIgnoreWhitespace: preferences.ignoreWhitespace,
+    appliedIgnoreWhitespace: preferences.ignoreWhitespace,
+    wrapLines: preferences.wrapLines,
     focusMode: false,
     filesResource: const AsyncResource(),
     patch: const AsyncResource(),
@@ -325,9 +356,15 @@ class FullDiffSessionController extends ChangeNotifier {
     required List<GitCommit> commits,
     required int initialIndex,
     required FullDiffInitialView initialView,
+    FullDiffPreferences? initialPreferences,
     FullDiffEncodingCache? encodingCache,
   }) : _encodingCache = encodingCache ?? FullDiffEncodingCache.shared,
-       state = _initialState(commits, initialIndex, initialView) {
+       state = _initialState(
+         commits,
+         initialIndex,
+         initialView,
+         initialPreferences,
+       ) {
     _patchCache = _LruFutureCache(
       capacity: _cacheCapacity,
       sizeOf: _patchSize,
@@ -545,6 +582,27 @@ class FullDiffSessionController extends ChangeNotifier {
     _replace(state.copyWith(presentation: presentation));
   }
 
+  void setLayout(DiffLayout layout) {
+    if (_disposed || state.layout == layout) return;
+    _replace(state.copyWith(layout: layout));
+  }
+
+  Future<void> setScope(DiffScope scope) async {
+    if (_disposed || state.requestedScope == scope) return;
+    final sourceLine = _anchorSourceLine(state.activeAnchor);
+    _replace(
+      state.copyWith(
+        requestedScope: scope,
+        patch: state.patch.copyWith(loading: true, error: null),
+      ),
+    );
+    await _loadPatch(
+      preserveDataOnFailure: true,
+      sourceLine: sourceLine,
+      propagateError: true,
+    );
+  }
+
   Future<void> selectAlgorithm(DiffAlgorithm algorithm) async {
     if (_disposed || state.requestedAlgorithm == algorithm) return;
     final sourceLine = _anchorSourceLine(state.activeAnchor);
@@ -741,6 +799,7 @@ class FullDiffSessionController extends ChangeNotifier {
     final request = ++_patchRequest;
     final commit = state.selectedCommit;
     final parent = state.parent;
+    final scope = state.requestedScope;
     final algorithm = state.requestedAlgorithm;
     final ignoreWhitespace = state.requestedIgnoreWhitespace;
     _replace(
@@ -760,6 +819,7 @@ class FullDiffSessionController extends ChangeNotifier {
         file,
         algorithm,
         ignoreWhitespace,
+        scope,
       );
       _trimRawCaches();
       if (!_accepts(
@@ -775,6 +835,7 @@ class FullDiffSessionController extends ChangeNotifier {
         state.copyWith(
           patch: AsyncResource(data: document),
           activeAnchor: nearestAnchor(document, sourceLine),
+          appliedScope: scope,
           appliedAlgorithm: algorithm,
           appliedIgnoreWhitespace: ignoreWhitespace,
         ),
@@ -789,6 +850,9 @@ class FullDiffSessionController extends ChangeNotifier {
       )) {
         _replace(
           state.copyWith(
+            requestedScope: preserveDataOnFailure
+                ? state.appliedScope
+                : state.requestedScope,
             requestedAlgorithm: preserveDataOnFailure
                 ? state.appliedAlgorithm
                 : state.requestedAlgorithm,
@@ -1018,6 +1082,7 @@ class FullDiffSessionController extends ChangeNotifier {
     GitFileChange file,
     DiffAlgorithm algorithm,
     bool ignoreWhitespace,
+    DiffScope scope,
   ) {
     Future<DiffDocument> load() async => DiffDocument.fromLines(
       await repository.loadDiff(
@@ -1026,6 +1091,7 @@ class FullDiffSessionController extends ChangeNotifier {
         parent: parent,
         algorithm: algorithm,
         ignoreWhitespace: ignoreWhitespace,
+        scope: scope,
       ),
     );
     if (commit.isWorkingTree) return load();
@@ -1037,6 +1103,7 @@ class FullDiffSessionController extends ChangeNotifier {
       newPath: file.path,
       algorithm: algorithm,
       ignoreWhitespace: ignoreWhitespace,
+      scope: scope,
     );
     return _patchCache.getOrLoad(key, load);
   }

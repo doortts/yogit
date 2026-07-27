@@ -80,6 +80,99 @@ Future<Set<String>> blameTemporaryDirectories() async => {
 };
 
 void main() {
+  test(
+    'diff scope changes context without dropping algorithm options',
+    () async {
+      final root = await createGitFixture();
+      addTearDown(() => root.delete(recursive: true));
+      await writeAndCommit(root, 'sample.txt', 'one\ntwo\nthree\n', 'base');
+      await File(
+        '${root.path}/sample.txt',
+      ).writeAsString('one\nchanged\nthree\n');
+      await runGit(root, ['commit', '-am', 'change']);
+
+      final calls = <List<String>>[];
+      final repository = GitRepository(
+        root.path,
+        runner: (executable, arguments, {workingDirectory}) {
+          calls.add(List.unmodifiable(arguments));
+          return runProcess(
+            executable,
+            arguments,
+            workingDirectory: workingDirectory,
+          );
+        },
+      );
+      final commit = (await repository.loadHistory()).first;
+      final file = (await repository.loadFiles(commit)).single;
+
+      await repository.loadDiff(
+        commit,
+        file,
+        scope: DiffScope.hunks,
+        algorithm: DiffAlgorithm.patience,
+        ignoreWhitespace: true,
+      );
+      await repository.loadDiff(
+        commit,
+        file,
+        scope: DiffScope.fullFile,
+        algorithm: DiffAlgorithm.patience,
+        ignoreWhitespace: true,
+      );
+
+      final diffCalls = calls
+          .where(
+            (call) =>
+                call.first == 'diff' &&
+                call.any((argument) => argument.startsWith('--unified=')),
+          )
+          .toList();
+      expect(diffCalls[0], contains('--unified=3'));
+      expect(diffCalls[1], contains('--unified=$fullDiffTextLineLimit'));
+      for (final call in diffCalls) {
+        expect(call, contains('--diff-algorithm=patience'));
+        expect(call, contains('--ignore-all-space'));
+      }
+    },
+  );
+
+  test(
+    'selected git algorithm changes the parsed patch when boundaries differ',
+    () async {
+      final root = await createGitFixture();
+      addTearDown(() => root.delete(recursive: true));
+      await writeAndCommit(
+        root,
+        'repeated.txt',
+        'A\nD\nB\nD\nD\nD\nC\nA\nD\nA\nD\nA\n',
+        'base',
+      );
+      await File(
+        '${root.path}/repeated.txt',
+      ).writeAsString('A\nB\nC\nD\nC\nC\nA\nD\nD\nC\nA\nB\n');
+      await runGit(root, ['commit', '-am', 'reorder repeated lines']);
+      final repository = GitRepository(root.path);
+      final commit = (await repository.loadHistory()).first;
+      final file = (await repository.loadFiles(commit)).single;
+
+      final myers = await repository.loadDiff(
+        commit,
+        file,
+        algorithm: DiffAlgorithm.myers,
+      );
+      final histogram = await repository.loadDiff(
+        commit,
+        file,
+        algorithm: DiffAlgorithm.histogram,
+      );
+      List<String> signature(List<DiffLine> lines) =>
+          lines.map((line) => '${line.kind.name}:${line.text}').toList();
+
+      expect(signature(histogram), isNot(signature(myers)));
+    },
+  );
+
   test('finds renames and passes both paths when loading its patch', () async {
     final root = await createGitFixture();
     addTearDown(() => root.delete(recursive: true));

@@ -106,7 +106,6 @@ enum FileDocumentSide { old, result }
 
 const fullDiffLargeByteLimit = 2 * 1024 * 1024;
 const fullDiffLargeLineLimit = 50000;
-const fullDiffTextLineLimit = 200000;
 
 bool _exceedsFullDiffTextLineLimit(Uint8List bytes) {
   var lineCount = 0;

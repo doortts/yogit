@@ -345,6 +345,61 @@ void main() {
     },
   );
 
+  test('failed full-file scope keeps the applied hunk preference', () async {
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..content = ((_, _, _) async =>
+          Uint8List.fromList(utf8.encode('current\n')))
+      ..scopedDiff = ((_, _, _, _, _, scope) async {
+        if (scope == DiffScope.fullFile) {
+          throw const GitRepositoryException('/repo', 'full file failed');
+        }
+        return twoHunkLines;
+      });
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    await expectLater(
+      controller.setScope(DiffScope.fullFile),
+      throwsA(isA<GitRepositoryException>()),
+    );
+
+    expect(controller.state.requestedScope, DiffScope.hunks);
+    expect(controller.state.appliedScope, DiffScope.hunks);
+    expect(controller.state.preferences.scope, DiffScope.hunks);
+  });
+
+  test('hunk and full-file patches use separate cache entries', () async {
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..scopedDiff = ((_, _, _, _, _, scope) async => twoHunkLines)
+      ..content = ((_, _, _) async =>
+          Uint8List.fromList(utf8.encode('current\n')));
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+      initialPreferences: const FullDiffPreferences(),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    await controller.setScope(DiffScope.fullFile);
+    await controller.setScope(DiffScope.hunks);
+
+    expect(repository.diffRequests.map((request) => request.scope), [
+      DiffScope.hunks,
+      DiffScope.fullFile,
+    ]);
+  });
+
   test('file failure settles blame after leaving the blame view', () async {
     final patch = Completer<List<DiffLine>>();
     final content = Completer<Uint8List>();

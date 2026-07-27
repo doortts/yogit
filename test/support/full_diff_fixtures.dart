@@ -21,6 +21,7 @@ class FakeFullDiffRepository implements FullDiffRepository {
           String? parent,
           DiffAlgorithm algorithm,
           bool whitespace,
+          DiffScope scope,
         })
       >[];
   final contentRequests = <({String sha, String path, String? parent})>[];
@@ -36,6 +37,15 @@ class FakeFullDiffRepository implements FullDiffRepository {
     bool,
   )?
   diff;
+  Future<List<DiffLine>> Function(
+    GitCommit,
+    GitFileChange,
+    String?,
+    DiffAlgorithm,
+    bool,
+    DiffScope,
+  )?
+  scopedDiff;
   Future<Uint8List> Function(GitCommit, GitFileChange, String?)? content;
   Future<List<GitBlameLine>> Function(
     GitCommit,
@@ -60,6 +70,7 @@ class FakeFullDiffRepository implements FullDiffRepository {
     String? parent,
     DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
     bool ignoreWhitespace = false,
+    DiffScope scope = DiffScope.hunks,
   }) {
     diffRequests.add((
       sha: commit.sha,
@@ -67,8 +78,17 @@ class FakeFullDiffRepository implements FullDiffRepository {
       parent: parent,
       algorithm: algorithm,
       whitespace: ignoreWhitespace,
+      scope: scope,
     ));
-    return diff?.call(commit, file, parent, algorithm, ignoreWhitespace) ??
+    return scopedDiff?.call(
+          commit,
+          file,
+          parent,
+          algorithm,
+          ignoreWhitespace,
+          scope,
+        ) ??
+        diff?.call(commit, file, parent, algorithm, ignoreWhitespace) ??
         Future.value(const []);
   }
 

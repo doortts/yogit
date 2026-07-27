@@ -8060,6 +8060,7 @@ class FakeGitRepository extends GitRepository {
     String? parent,
     DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
     bool ignoreWhitespace = false,
+    DiffScope scope = DiffScope.hunks,
   }) =>
       diff?.call(commit, parent, file.path, algorithm, ignoreWhitespace) ??
       Future.value(const []);
