@@ -579,4 +579,181 @@ void main() {
     expect(blame.single.lineNumber, 1);
     expect(history.map((entry) => entry.path), containsAll([oldPath, newPath]));
   });
+
+  test('loads result blob sizes with one ls-tree query', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'modified.txt', 'before\n', 'base');
+    await writeAndCommit(root, 'renamed.txt', 'rename before\n', 'rename base');
+    await File('${root.path}/modified.txt').writeAsString('changed ✓\n');
+    await File('${root.path}/added.txt').writeAsString('added 🎉\n');
+    await runGit(root, ['mv', 'renamed.txt', 'renamed result.txt']);
+    await runGit(root, ['add', '--all']);
+    await runGit(root, ['commit', '-m', 'change files']);
+
+    final calls = <List<String>>[];
+    final repository = GitRepository(
+      root.path,
+      runner: (executable, arguments, {workingDirectory}) {
+        calls.add(List.unmodifiable(arguments));
+        return runProcess(
+          executable,
+          arguments,
+          workingDirectory: workingDirectory,
+        );
+      },
+    );
+    final commit = (await repository.loadHistory()).first;
+    final files = {
+      for (final file in await repository.loadFiles(commit)) file.path: file,
+    };
+
+    expect(files['modified.txt']!.sizeBytes, 12);
+    expect(files['added.txt']!.sizeBytes, 11);
+    expect(files['renamed result.txt']!.sizeBytes, 14);
+    final sizeQuery = calls.singleWhere(
+      (arguments) => arguments.first == 'ls-tree',
+    );
+    expect(sizeQuery.sublist(0, 4), ['ls-tree', '-rlz', commit.sha, '--']);
+    expect(sizeQuery.sublist(4).toSet(), {
+      'modified.txt',
+      'added.txt',
+      'renamed result.txt',
+    });
+  });
+
+  test(
+    'loads deleted sizes from the selected parent with at most two queries',
+    () async {
+      final root = await createGitFixture();
+      addTearDown(() => root.delete(recursive: true));
+      await writeAndCommit(root, 'modified.txt', 'before\n', 'base');
+      await writeAndCommit(root, 'deleted.txt', 'delete me ✓\n', 'delete base');
+      await File('${root.path}/modified.txt').writeAsString('after 🎉\n');
+      await runGit(root, ['rm', 'deleted.txt']);
+      await runGit(root, ['add', '--all']);
+      await runGit(root, ['commit', '-m', 'modify and delete']);
+
+      final calls = <List<String>>[];
+      final repository = GitRepository(
+        root.path,
+        runner: (executable, arguments, {workingDirectory}) {
+          calls.add(List.unmodifiable(arguments));
+          return runProcess(
+            executable,
+            arguments,
+            workingDirectory: workingDirectory,
+          );
+        },
+      );
+      final commit = (await repository.loadHistory()).first;
+      final files = {
+        for (final file in await repository.loadFiles(commit)) file.path: file,
+      };
+
+      expect(files['modified.txt']!.sizeBytes, 11);
+      expect(files['deleted.txt']!.sizeBytes, 14);
+      final sizeQueries = calls
+          .where((arguments) => arguments.first == 'ls-tree')
+          .toList();
+      expect(sizeQueries, hasLength(2));
+      expect(
+        sizeQueries.map((arguments) => arguments[2]),
+        contains(commit.sha),
+      );
+      expect(
+        sizeQueries.map((arguments) => arguments[2]),
+        contains(commit.parents.single),
+      );
+    },
+  );
+
+  test('parses ls-tree sizes for paths containing spaces and tabs', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    const spacedPath = 'space name.txt';
+    const tabbedPath = 'tab\tname.txt';
+    await writeAndCommit(root, spacedPath, 'old\n', 'space base');
+    await writeAndCommit(root, tabbedPath, 'old\n', 'tab base');
+    await File('${root.path}/$spacedPath').writeAsString('spaced ✓\n');
+    await File('${root.path}/$tabbedPath').writeAsString('tabbed 🎉\n');
+    await runGit(root, ['add', '--all']);
+    await runGit(root, ['commit', '-m', 'special paths']);
+
+    final repository = GitRepository(root.path);
+    final commit = (await repository.loadHistory()).first;
+    final files = {
+      for (final file in await repository.loadFiles(commit)) file.path: file,
+    };
+
+    expect(files[spacedPath]!.sizeBytes, 11);
+    expect(files[tabbedPath]!.sizeBytes, 12);
+  });
+
+  test('keeps files when size metadata lookup fails', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'tracked.txt', 'before\n', 'base');
+    await File('${root.path}/tracked.txt').writeAsString('after\n');
+    await runGit(root, ['commit', '-am', 'change']);
+
+    final repository = GitRepository(
+      root.path,
+      runner: (executable, arguments, {workingDirectory}) {
+        if (arguments.first == 'ls-tree') {
+          return Future.value(
+            ProcessResult(1, 1, '', 'forced ls-tree failure'),
+          );
+        }
+        return runProcess(
+          executable,
+          arguments,
+          workingDirectory: workingDirectory,
+        );
+      },
+    );
+    final commit = (await repository.loadHistory()).first;
+    final files = await repository.loadFiles(commit);
+
+    expect(files, hasLength(1));
+    expect(files.single.path, 'tracked.txt');
+    expect(files.single.sizeBytes, isNull);
+  });
+
+  test(
+    'loads working tree file and symbolic link sizes without blob reads',
+    () async {
+      final root = await createGitFixture();
+      addTearDown(() => root.delete(recursive: true));
+      await writeAndCommit(root, 'regular.txt', 'before\n', 'file base');
+      await Link('${root.path}/link').create('before-target');
+      await runGit(root, ['add', '--', 'link']);
+      await runGit(root, ['commit', '-m', 'link base']);
+      await File('${root.path}/regular.txt').writeAsString('working ✓\n');
+      await Link('${root.path}/link').delete();
+      await Link('${root.path}/link').create('working-target ✓');
+
+      final calls = <List<String>>[];
+      final repository = GitRepository(
+        root.path,
+        runner: (executable, arguments, {workingDirectory}) {
+          calls.add(List.unmodifiable(arguments));
+          return runProcess(
+            executable,
+            arguments,
+            workingDirectory: workingDirectory,
+          );
+        },
+      );
+      final working = (await repository.loadWorkingTree())!;
+      final files = {
+        for (final file in await repository.loadFiles(working)) file.path: file,
+      };
+
+      expect(files['regular.txt']!.sizeBytes, 12);
+      expect(files['link']!.sizeBytes, 18);
+      expect(calls.where((arguments) => arguments.first == 'show'), isEmpty);
+      expect(calls.where((arguments) => arguments.first == 'ls-tree'), isEmpty);
+    },
+  );
 }

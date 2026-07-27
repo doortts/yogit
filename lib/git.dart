@@ -580,6 +580,7 @@ class GitFileChange {
     required this.deletions,
     this.oldPath,
     this.isBinary = false,
+    this.sizeBytes,
   });
 
   final String path;
@@ -588,6 +589,7 @@ class GitFileChange {
   final int? additions;
   final int? deletions;
   final bool isBinary;
+  final int? sizeBytes;
 }
 
 class GitFileHistoryRecord {
@@ -782,7 +784,96 @@ class GitRepository implements FullDiffRepository {
         }
       }
     }
-    return files;
+    return _withFileSizes(commit, files, parent: parent);
+  }
+
+  Future<List<GitFileChange>> _withFileSizes(
+    GitCommit commit,
+    List<GitFileChange> files, {
+    required String? parent,
+  }) async {
+    final sizes = <GitFileChange, int?>{};
+    if (commit.isWorkingTree) {
+      for (final file in files) {
+        if (!file.status.startsWith('D')) {
+          sizes[file] = await _worktreeFileSize(file.path);
+        }
+      }
+    } else {
+      final resultFiles = files.where((file) => !file.status.startsWith('D'));
+      final resultSizes = await _loadLsTreeSizes(
+        commit.sha,
+        resultFiles.map((file) => file.path),
+      );
+      for (final file in resultFiles) {
+        sizes[file] = resultSizes[file.path];
+      }
+    }
+
+    final deletedFiles = files
+        .where((file) => file.status.startsWith('D'))
+        .toList();
+    final deletedPaths = {
+      for (final file in deletedFiles) file: file.oldPath ?? file.path,
+    };
+    if (deletedPaths.isNotEmpty) {
+      final deletedSizes = await _loadLsTreeSizes(
+        await _baseFor(commit, parent),
+        deletedPaths.values,
+      );
+      for (final entry in deletedPaths.entries) {
+        sizes[entry.key] = deletedSizes[entry.value];
+      }
+    }
+
+    return [for (final file in files) _copyWithSize(file, sizes[file])];
+  }
+
+  Future<int?> _worktreeFileSize(String path) async {
+    final absolutePath = '$root/$path';
+    try {
+      final type = await FileSystemEntity.type(
+        absolutePath,
+        followLinks: false,
+      );
+      return switch (type) {
+        FileSystemEntityType.file => (await FileStat.stat(absolutePath)).size,
+        FileSystemEntityType.link =>
+          utf8.encode(await Link(absolutePath).target()).length,
+        _ => null,
+      };
+    } on FileSystemException {
+      return null;
+    }
+  }
+
+  Future<Map<String, int>> _loadLsTreeSizes(
+    String revision,
+    Iterable<String> paths,
+  ) async {
+    final pathList = paths.toList();
+    if (pathList.isEmpty) return const {};
+    try {
+      return _parseLsTreeSizes(
+        await _run(['ls-tree', '-rlz', revision, '--', ...pathList]),
+      );
+    } on ProcessException {
+      return const {};
+    }
+  }
+
+  GitFileChange _copyWithSize(GitFileChange file, int? sizeBytes) {
+    final copy = GitFileChange(
+      path: file.path,
+      oldPath: file.oldPath,
+      status: file.status,
+      additions: file.additions,
+      deletions: file.deletions,
+      isBinary: file.isBinary,
+      sizeBytes: sizeBytes,
+    );
+    if (_untrackedFiles[file] ?? false) _untrackedFiles[copy] = true;
+    return copy;
   }
 
   @override
@@ -1093,6 +1184,20 @@ Map<String, _Stats> _parseNumstat(String output) {
     );
   }
   return stats;
+}
+
+Map<String, int> _parseLsTreeSizes(String output) {
+  final result = <String, int>{};
+  for (final record in output.split('\x00')) {
+    if (record.isEmpty) continue;
+    final tab = record.indexOf('\t');
+    if (tab < 0) continue;
+    final metadata = record.substring(0, tab).trim().split(RegExp(r'\s+'));
+    if (metadata.length < 4) continue;
+    final size = int.tryParse(metadata[3]);
+    if (size != null) result[record.substring(tab + 1)] = size;
+  }
+  return result;
 }
 
 List<String> blameArguments({
