@@ -375,6 +375,22 @@ void main() {
     expect(controller.state.preferences.scope, DiffScope.hunks);
   });
 
+  test('scope selection without a file does not leave patch loading', () async {
+    final controller = FullDiffSessionController(
+      repository: FakeFullDiffRepository(),
+      commits: const [commitA],
+      initialIndex: 0,
+      initialView: FullDiffInitialView.hunk,
+    );
+    addTearDown(controller.dispose);
+
+    await controller.setScope(DiffScope.fullFile);
+
+    expect(controller.state.requestedScope, DiffScope.fullFile);
+    expect(controller.state.appliedScope, DiffScope.hunks);
+    expect(controller.state.patch.loading, isFalse);
+  });
+
   test('hunk and full-file patches use separate cache entries', () async {
     final repository = FakeFullDiffRepository()
       ..files = ((_, _) async => const [fileA])

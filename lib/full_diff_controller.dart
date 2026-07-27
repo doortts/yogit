@@ -590,6 +590,10 @@ class FullDiffSessionController extends ChangeNotifier {
   Future<void> setScope(DiffScope scope) async {
     if (_disposed || state.requestedScope == scope) return;
     final sourceLine = _anchorSourceLine(state.activeAnchor);
+    if (state.selectedFile == null) {
+      _replace(state.copyWith(requestedScope: scope));
+      return;
+    }
     _replace(
       state.copyWith(
         requestedScope: scope,

@@ -696,15 +696,18 @@ class GitRepository implements FullDiffRepository {
   GitRepository(
     this.root, {
     this.gitExecutable = 'git',
-    this.runner = runProcess,
-    this.rawRunner = runRawProcess,
-  });
+    CommandRunner? runner,
+    RawCommandRunner? rawRunner,
+  }) : runner = runner ?? runProcess,
+       rawRunner = rawRunner ?? runRawProcess,
+       _diffRunner = runner ?? rawRunner ?? runRawProcess;
 
   @override
   final String root;
   final String gitExecutable;
   final CommandRunner runner;
   final RawCommandRunner rawRunner;
+  final RawCommandRunner _diffRunner;
   Future<String>? _emptyTree;
   Future<List<String>>? _startingRevisions;
   final _untrackedFiles = Expando<bool>();
@@ -919,18 +922,17 @@ class GitRepository implements FullDiffRepository {
           ? const <DiffLine>[]
           : _untrackedDiff(snapshot.bytes);
     }
-    return parseUnifiedDiff(
-      await _run([
-        'diff',
-        ...safeDiffArguments,
-        '--unified=${scope == DiffScope.hunks ? 3 : fullDiffTextLineLimit}',
-        if (ignoreWhitespace) '--ignore-all-space',
-        ...algorithm.gitArguments,
-        ...await _revisionsFor(commit, parent),
-        '--',
-        ...pathspecsFor(file),
-      ]),
-    );
+    final output = await _runDiff([
+      'diff',
+      ...safeDiffArguments,
+      '--unified=${scope == DiffScope.hunks ? 3 : fullDiffTextLineLimit}',
+      if (ignoreWhitespace) '--ignore-all-space',
+      ...algorithm.gitArguments,
+      ...await _revisionsFor(commit, parent),
+      '--',
+      ...pathspecsFor(file),
+    ]);
+    return output == null ? const <DiffLine>[] : parseUnifiedDiff(output);
   }
 
   @override
@@ -1188,6 +1190,33 @@ class GitRepository implements FullDiffRepository {
     }
     return result.stdout.toString();
   }
+
+  Future<String?> _runDiff(List<String> args) async {
+    final result = await _diffRunner(
+      gitExecutable,
+      args,
+      workingDirectory: root,
+    );
+    if (result.exitCode != 0) {
+      throw ProcessException(
+        gitExecutable,
+        args,
+        result.stderr.toString(),
+        result.exitCode,
+      );
+    }
+    final stdout = result.stdout;
+    final bytes = stdout is String
+        ? utf8.encode(stdout)
+        : stdout is List<int>
+        ? stdout
+        : utf8.encode(stdout.toString());
+    if (bytes.length > fullDiffTextByteLimit ||
+        _exceedsFullDiffLineLimit(bytes)) {
+      return null;
+    }
+    return utf8.decode(bytes, allowMalformed: true);
+  }
 }
 
 typedef _StatusEntry = ({String status, String path, String? oldPath});
@@ -1333,6 +1362,16 @@ bool _sameBytes(List<int> left, List<int> right) {
 }
 
 typedef _WorktreeSnapshot = ({Uint8List bytes, bool exceeded});
+
+bool _exceedsFullDiffLineLimit(List<int> bytes) {
+  var lineCount = 0;
+  for (final byte in bytes) {
+    if (byte == 0x0A && ++lineCount > fullDiffTextLineLimit) return true;
+  }
+  return lineCount == fullDiffTextLineLimit &&
+      bytes.isNotEmpty &&
+      bytes.last != 0x0A;
+}
 
 _WorktreeSnapshot _snapshotForBytes(Uint8List bytes) {
   final bounded = bytes.length <= fullDiffTextByteLimit + 1

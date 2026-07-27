@@ -8,6 +8,27 @@ import 'package:yogit/git.dart';
 
 const _textByteLimit = 10 * 1024 * 1024;
 const _largeFileLength = 32 * 1024 * 1024;
+const _boundedDiffIdentity = GitIdentity(
+  name: 'Test User',
+  email: 'test@example.com',
+);
+const _boundedDiffCommit = GitCommit(
+  sha: 'target',
+  shortSha: 'target',
+  parents: ['base'],
+  author: _boundedDiffIdentity,
+  authorTimestamp: 0,
+  committer: _boundedDiffIdentity,
+  committerTimestamp: 0,
+  refs: [],
+  subject: 'bounded diff',
+);
+const _boundedDiffFile = GitFileChange(
+  path: 'large.txt',
+  status: 'M',
+  additions: 1,
+  deletions: 1,
+);
 
 Future<String> runGit(
   Directory root,
@@ -80,6 +101,36 @@ Future<Set<String>> blameTemporaryDirectories() async => {
 };
 
 void main() {
+  test('oversized full-file diff output becomes an empty patch', () async {
+    final byteOverflow = Uint8List(fullDiffTextByteLimit + 1)
+      ..fillRange(0, fullDiffTextByteLimit + 1, 0x61);
+    final lineOverflow = Uint8List((fullDiffTextLineLimit + 1) * 2);
+    for (var index = 0; index < lineOverflow.length; index += 2) {
+      lineOverflow[index] = 0x78;
+      lineOverflow[index + 1] = 0x0A;
+    }
+
+    for (final output in [byteOverflow, lineOverflow]) {
+      var rawCalls = 0;
+      final repository = GitRepository(
+        '/unused',
+        rawRunner: (executable, arguments, {workingDirectory}) async {
+          rawCalls++;
+          return ProcessResult(1, 0, output, '');
+        },
+      );
+
+      final lines = await repository.loadDiff(
+        _boundedDiffCommit,
+        _boundedDiffFile,
+        scope: DiffScope.fullFile,
+      );
+
+      expect(lines, isEmpty);
+      expect(rawCalls, 1);
+    }
+  });
+
   test(
     'diff scope changes context without dropping algorithm options',
     () async {
