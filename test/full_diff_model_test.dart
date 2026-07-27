@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -5,7 +6,62 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/git.dart';
 
+class _ReadCountingList<E> extends ListBase<E> {
+  _ReadCountingList(this.values);
+
+  final List<E> values;
+  int reads = 0;
+
+  @override
+  int get length => values.length;
+
+  @override
+  set length(int value) => values.length = value;
+
+  @override
+  E operator [](int index) {
+    reads++;
+    return values[index];
+  }
+
+  @override
+  void operator []=(int index, E value) {
+    values[index] = value;
+  }
+}
+
 void main() {
+  test('accepted source target identity does not rescan rows while paging', () {
+    final rows = _ReadCountingList<DiffLine>([
+      const DiffLine(
+        kind: DiffLineKind.context,
+        text: 'target',
+        oldNumber: 1,
+        newNumber: 1,
+      ),
+    ]);
+    final document = DiffDocument(
+      headers: const [],
+      hunks: const [],
+      rows: rows,
+    );
+    const target = (oldLine: 1, newLine: 1);
+
+    expect(diffDocumentContainsSourceTarget(document, target), isTrue);
+    final readsAfterResolution = rows.reads;
+    final identity = DiffSourceTargetIdentity(
+      document: document,
+      target: target,
+    );
+
+    for (var page = 0; page < 100; page++) {
+      expect(identity.matches(document: document, target: target), isTrue);
+    }
+
+    expect(readsAfterResolution, greaterThan(0));
+    expect(rows.reads, readsAfterResolution);
+  });
+
   test('groups patch rows into hunks with readable ranges and anchors', () {
     final document = DiffDocument.fromLines(const [
       DiffLine(kind: DiffLineKind.header, text: 'diff --git a/a.pas b/a.pas'),

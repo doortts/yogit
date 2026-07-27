@@ -438,6 +438,88 @@ void main() {
     expect(controller.state.fullFileScrollTarget, isNull);
   });
 
+  test('failed hunk return restores the full-file target for retry', () async {
+    var hunkLoads = 0;
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..content = ((_, _, _) async =>
+          Uint8List.fromList(utf8.encode('current\n')))
+      ..scopedDiff = ((_, _, _, _, _, scope) async {
+        if (scope == DiffScope.fullFile) return mergedTwoHunkLines;
+        if (hunkLoads++ == 1) {
+          throw const GitRepositoryException('/repo', 'hunk return failed');
+        }
+        return twoHunkLines;
+      });
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [_workingTreeCommit],
+      initialIndex: 0,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.selectAnchor(controller.state.patch.data!.hunks.last.anchor);
+    await controller.setScope(DiffScope.fullFile);
+    final preservedTarget = controller.state.fullFileScrollTarget;
+
+    await expectLater(
+      controller.setScope(DiffScope.hunks),
+      throwsA(isA<GitRepositoryException>()),
+    );
+
+    expect(controller.state.requestedScope, DiffScope.fullFile);
+    expect(controller.state.appliedScope, DiffScope.fullFile);
+    expect(controller.state.fullFileScrollTarget, preservedTarget);
+
+    await controller.setScope(DiffScope.hunks);
+
+    expect(controller.state.appliedScope, DiffScope.hunks);
+    expect(controller.state.activeAnchor?.hunkIndex, 1);
+    expect(controller.state.activeAnchor?.newLine, 21);
+    expect(controller.state.fullFileScrollTarget, isNull);
+  });
+
+  test(
+    'stale failed hunk return cannot restore its full-file target',
+    () async {
+      final failedHunkReturn = Completer<List<DiffLine>>();
+      var hunkLoads = 0;
+      final repository = FakeFullDiffRepository()
+        ..files = ((_, _) async => const [fileA])
+        ..content = ((_, _, _) async =>
+            Uint8List.fromList(utf8.encode('current\n')))
+        ..scopedDiff = ((_, _, _, _, _, scope) {
+          if (scope == DiffScope.fullFile) {
+            return Future.value(mergedTwoHunkLines);
+          }
+          if (hunkLoads++ == 0) return Future.value(twoHunkLines);
+          return failedHunkReturn.future;
+        });
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [_workingTreeCommit],
+        initialIndex: 0,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      controller.selectAnchor(controller.state.patch.data!.hunks.last.anchor);
+      await controller.setScope(DiffScope.fullFile);
+
+      final loading = controller.setScope(DiffScope.hunks);
+      await Future<void>.delayed(Duration.zero);
+      controller.setView(FullDiffView.blame);
+      failedHunkReturn.completeError(
+        const GitRepositoryException('/repo', 'late hunk failure'),
+      );
+      await expectLater(loading, throwsA(isA<GitRepositoryException>()));
+
+      expect(controller.state.view, FullDiffView.blame);
+      expect(controller.state.requestedScope, DiffScope.fullFile);
+      expect(controller.state.appliedScope, DiffScope.fullFile);
+      expect(controller.state.fullFileScrollTarget, isNull);
+    },
+  );
+
   test('empty accepted full-file document never publishes a target', () async {
     final repository = FakeFullDiffRepository()
       ..files = ((_, _) async => const [fileA])

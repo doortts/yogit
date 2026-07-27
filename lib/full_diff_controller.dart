@@ -606,6 +606,7 @@ class FullDiffSessionController extends ChangeNotifier {
       preserveDataOnFailure: true,
       sourceLine: sourceLine,
       fullFileScrollTarget: scope == DiffScope.fullFile ? sourceTarget : null,
+      rollbackFullFileScrollTarget: preservedTarget,
       scrollTargetGeneration: scrollTargetGeneration,
       propagateError: true,
     );
@@ -824,6 +825,7 @@ class FullDiffSessionController extends ChangeNotifier {
     bool preserveDataOnFailure = false,
     int? sourceLine,
     DiffSourceTarget? fullFileScrollTarget,
+    DiffSourceTarget? rollbackFullFileScrollTarget,
     int? scrollTargetGeneration,
     bool propagateError = false,
   }) async {
@@ -839,6 +841,7 @@ class FullDiffSessionController extends ChangeNotifier {
     final scope = state.requestedScope;
     final algorithm = state.requestedAlgorithm;
     final ignoreWhitespace = state.requestedIgnoreWhitespace;
+    final preservedDocument = state.patch.data;
     _replace(
       state.copyWith(
         fullFileScrollTarget: null,
@@ -896,6 +899,19 @@ class FullDiffSessionController extends ChangeNotifier {
         commit: commit,
         file: file,
       )) {
+        final restoredFullFileScrollTarget =
+            preserveDataOnFailure &&
+                state.appliedScope == DiffScope.fullFile &&
+                rollbackFullFileScrollTarget != null &&
+                acceptedScrollTargetGeneration == _fullFileScrollGeneration &&
+                identical(state.patch.data, preservedDocument) &&
+                preservedDocument != null &&
+                diffDocumentContainsSourceTarget(
+                  preservedDocument,
+                  rollbackFullFileScrollTarget,
+                )
+            ? rollbackFullFileScrollTarget
+            : null;
         _replace(
           state.copyWith(
             requestedScope: preserveDataOnFailure
@@ -911,6 +927,7 @@ class FullDiffSessionController extends ChangeNotifier {
               data: preserveDataOnFailure ? state.patch.data : null,
               error: error,
             ),
+            fullFileScrollTarget: restoredFullFileScrollTarget,
           ),
         );
       }

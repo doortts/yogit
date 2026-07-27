@@ -13,6 +13,22 @@ enum DiffLayout { unified, sideBySide }
 
 typedef DiffSourceTarget = ({int? oldLine, int? newLine});
 
+@immutable
+class DiffSourceTargetIdentity {
+  const DiffSourceTargetIdentity({
+    required this.document,
+    required this.target,
+  });
+
+  final DiffDocument document;
+  final DiffSourceTarget target;
+
+  bool matches({
+    required DiffDocument? document,
+    required DiffSourceTarget? target,
+  }) => identical(this.document, document) && this.target == target;
+}
+
 int diffSourceTargetIndex<T>({
   required List<T> rows,
   required DiffSourceTarget? target,

@@ -93,6 +93,40 @@ const _distantHunkLines = <DiffLine>[
   DiffLine(kind: DiffLineKind.add, text: 'source line 200', newNumber: 200),
 ];
 
+List<DiffLine> _nearFullFileLines() => [
+  const DiffLine(
+    kind: DiffLineKind.hunk,
+    text: '@@ -1,24 +1,24 @@ merged full file',
+  ),
+  for (var line = 1; line <= 24; line++) ...[
+    if (line == 1 || line == 3) ...[
+      DiffLine(
+        kind: DiffLineKind.delete,
+        text: 'old source line $line',
+        oldNumber: line,
+      ),
+      DiffLine(
+        kind: DiffLineKind.add,
+        text: 'source line $line',
+        newNumber: line,
+      ),
+    ] else
+      DiffLine(
+        kind: DiffLineKind.context,
+        text: 'source line $line',
+        oldNumber: line,
+        newNumber: line,
+      ),
+  ],
+];
+
+const _nearHunkLines = <DiffLine>[
+  DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1,0 @@ nearby deletion'),
+  DiffLine(kind: DiffLineKind.delete, text: 'old source line 1', oldNumber: 1),
+  DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,0 +1 @@ nearby addition'),
+  DiffLine(kind: DiffLineKind.add, text: 'source line 1', newNumber: 1),
+];
+
 void main() {
   Future<
     ({FullDiffSessionController controller, FakeFullDiffRepository repository})
@@ -162,6 +196,28 @@ void main() {
       commits: const [commitA],
       initialIndex: 0,
       initialPreferences: initialPreferences,
+    );
+    await controller.initialize();
+    return (controller: controller, repository: repository);
+  }
+
+  Future<
+    ({FullDiffSessionController controller, FakeFullDiffRepository repository})
+  >
+  nearbyChangeFixture() async {
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..scopedDiff = ((_, _, _, _, _, scope) async =>
+          scope == DiffScope.hunks ? _nearHunkLines : _nearFullFileLines())
+      ..content = ((_, _, _) async => Uint8List.fromList(
+        utf8.encode(
+          '${[for (var line = 1; line <= 24; line++) 'source line $line'].join('\n')}\n',
+        ),
+      ));
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
     );
     await controller.initialize();
     return (controller: controller, repository: repository);
@@ -359,6 +415,16 @@ void main() {
     return position.pixels;
   }
 
+  ScrollableState contentScrollableState(WidgetTester tester) =>
+      tester.state<ScrollableState>(
+        find
+            .descendant(
+              of: find.byKey(const Key('content-scrollable')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+
   testWidgets('full diff exposes only Diff Blame History and one layout', (
     tester,
   ) async {
@@ -542,6 +608,143 @@ void main() {
       expect(fixture.controller.state.fullFileScrollTarget, isNull);
     });
   }
+
+  testWidgets(
+    'full-file target survives a frame with an attached row but no scroll client',
+    (tester) async {
+      final initialFixture = await nearbyChangeFixture();
+      final replacementFixture = await nearbyChangeFixture();
+      final initialController = initialFixture.controller;
+      final replacementController = replacementFixture.controller;
+      addTearDown(initialController.dispose);
+      addTearDown(replacementController.dispose);
+      initialController.selectAnchor(
+        initialController.state.patch.data!.hunks.last.anchor,
+      );
+      replacementController.selectAnchor(
+        replacementController.state.patch.data!.hunks.last.anchor,
+      );
+      await initialController.setScope(DiffScope.fullFile);
+      await replacementController.setScope(DiffScope.fullFile);
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1070, 220);
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(),
+          home: Stack(
+            children: [
+              DiffScreen(
+                repository: initialController.repository,
+                commits: initialController.state.nearbyCommits,
+                initialIndex: 0,
+                controller: initialController,
+              ),
+              const SizedBox.shrink(),
+            ],
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('source line 1'), findsOneWidget);
+      final scrollable = contentScrollableState(tester);
+      final scrollController =
+          scrollable.widget.controller! as FullDiffScrollController;
+      final position = scrollable.position;
+      position.jumpTo(position.minScrollExtent);
+      scrollController.debugClientsAvailable = false;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(),
+          home: Stack(
+            children: [
+              DiffScreen(
+                repository: replacementController.repository,
+                commits: replacementController.state.nearbyCommits,
+                initialIndex: 0,
+                controller: replacementController,
+              ),
+              const SizedBox.shrink(),
+            ],
+          ),
+        ),
+      );
+
+      expect(scrollController.hasClients, isTrue);
+      expect(scrollController.clientsReady, isFalse);
+      expect(replacementController.state.fullFileScrollTarget, (
+        oldLine: null,
+        newLine: 1,
+      ));
+      expect(find.text('source line 1'), findsOneWidget);
+
+      scrollController.debugClientsAvailable = true;
+      scrollController.detach(position);
+      scrollController.attach(position);
+      await tester.pumpAndSettle();
+
+      expect(position.pixels, greaterThan(0));
+      final viewport = tester.getRect(
+        find.byKey(const Key('content-scrollable')),
+      );
+      final target = tester.getRect(find.text('source line 1'));
+      expect(target.top, greaterThanOrEqualTo(viewport.top));
+      expect(target.bottom, lessThanOrEqualTo(viewport.bottom));
+    },
+  );
+
+  testWidgets(
+    'lazy full-file target resumes paging when the scroll client reattaches',
+    (tester) async {
+      final fixture = await distantChangeFixture(const FullDiffPreferences());
+      final controller = fixture.controller;
+      addTearDown(controller.dispose);
+      controller.selectAnchor(controller.state.patch.data!.hunks.last.anchor);
+      await pumpWorkspace(
+        tester,
+        controller: controller,
+        size: const Size(1070, 220),
+      );
+      final scrollable = contentScrollableState(tester);
+      final scrollController = scrollable.widget.controller!;
+      final position = scrollable.position;
+      position.jumpTo(position.minScrollExtent);
+      scrollController.detach(position);
+      var reattached = false;
+      addTearDown(() {
+        if (!reattached && !scrollController.positions.contains(position)) {
+          scrollController.attach(position);
+        }
+      });
+
+      await controller.setScope(DiffScope.fullFile);
+      await tester.pump();
+
+      expect(scrollController.hasClients, isFalse);
+      expect(controller.state.fullFileScrollTarget, (
+        oldLine: 200,
+        newLine: 200,
+      ));
+      expect(find.text('source line 200'), findsNothing);
+
+      scrollController.attach(position);
+      reattached = true;
+      await tester.pumpAndSettle();
+
+      expect(position.pixels, greaterThan(0));
+      expect(find.text('source line 200'), findsOneWidget);
+      final viewport = tester.getRect(
+        find.byKey(const Key('content-scrollable')),
+      );
+      final target = tester.getRect(find.text('source line 200'));
+      expect(target.top, greaterThanOrEqualTo(viewport.top));
+      expect(target.bottom, lessThanOrEqualTo(viewport.bottom));
+    },
+  );
 
   testWidgets(
     'late full-file load cannot override newer navigation or scroll',
