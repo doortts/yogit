@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:yogit/full_diff_minimap.dart';
 import 'package:yogit/full_diff_model.dart';
-import 'package:yogit/full_diff_split_view.dart';
+import 'package:yogit/full_diff_side_by_side_view.dart';
 import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/git.dart';
 
@@ -17,7 +17,7 @@ typedef QaCase = ({
   String name,
   Size size,
   FullDiffView view,
-  DiffPresentation presentation,
+  DiffLayout layout,
   bool focus,
   bool whitespace,
   bool wrap,
@@ -34,7 +34,7 @@ const qaCases = <QaCase>[
     name: '00-overview-hunk',
     size: Size(782, 842),
     view: FullDiffView.diff,
-    presentation: DiffPresentation.hunk,
+    layout: DiffLayout.unified,
     focus: false,
     whitespace: false,
     wrap: false,
@@ -46,7 +46,7 @@ const qaCases = <QaCase>[
     name: '01-diff-inline',
     size: Size(782, 842),
     view: FullDiffView.diff,
-    presentation: DiffPresentation.inline,
+    layout: DiffLayout.unified,
     focus: false,
     whitespace: false,
     wrap: false,
@@ -58,7 +58,7 @@ const qaCases = <QaCase>[
     name: '02-diff-split',
     size: Size(1070, 842),
     view: FullDiffView.diff,
-    presentation: DiffPresentation.split,
+    layout: DiffLayout.sideBySide,
     focus: false,
     whitespace: false,
     wrap: false,
@@ -71,8 +71,8 @@ const qaCases = <QaCase>[
   (
     name: '03-file-view',
     size: Size(1070, 842),
-    view: FullDiffView.file,
-    presentation: DiffPresentation.split,
+    view: FullDiffView.diff,
+    layout: DiffLayout.sideBySide,
     focus: false,
     whitespace: false,
     wrap: false,
@@ -84,7 +84,7 @@ const qaCases = <QaCase>[
     name: '04-blame-view',
     size: Size(1070, 842),
     view: FullDiffView.blame,
-    presentation: DiffPresentation.split,
+    layout: DiffLayout.sideBySide,
     focus: false,
     whitespace: false,
     wrap: false,
@@ -96,7 +96,7 @@ const qaCases = <QaCase>[
     name: '05-history-view',
     size: Size(1070, 842),
     view: FullDiffView.history,
-    presentation: DiffPresentation.split,
+    layout: DiffLayout.sideBySide,
     focus: false,
     whitespace: false,
     wrap: false,
@@ -108,7 +108,7 @@ const qaCases = <QaCase>[
     name: '06-focus-mode',
     size: Size(1070, 842),
     view: FullDiffView.diff,
-    presentation: DiffPresentation.hunk,
+    layout: DiffLayout.unified,
     focus: true,
     whitespace: false,
     wrap: false,
@@ -121,7 +121,7 @@ const qaCases = <QaCase>[
     name: '07-ignore-whitespace',
     size: Size(1070, 842),
     view: FullDiffView.diff,
-    presentation: DiffPresentation.split,
+    layout: DiffLayout.sideBySide,
     focus: false,
     whitespace: true,
     wrap: false,
@@ -133,7 +133,7 @@ const qaCases = <QaCase>[
     name: '08-wrap-lines',
     size: Size(1070, 842),
     view: FullDiffView.diff,
-    presentation: DiffPresentation.split,
+    layout: DiffLayout.sideBySide,
     focus: false,
     whitespace: false,
     wrap: true,
@@ -145,7 +145,7 @@ const qaCases = <QaCase>[
     name: '09-next-change',
     size: Size(1280, 720),
     view: FullDiffView.diff,
-    presentation: DiffPresentation.hunk,
+    layout: DiffLayout.unified,
     focus: false,
     whitespace: false,
     wrap: false,
@@ -157,7 +157,7 @@ const qaCases = <QaCase>[
     name: '10-algorithm-histogram',
     size: Size(1280, 720),
     view: FullDiffView.diff,
-    presentation: DiffPresentation.hunk,
+    layout: DiffLayout.unified,
     focus: false,
     whitespace: false,
     wrap: false,
@@ -169,7 +169,7 @@ const qaCases = <QaCase>[
     name: '11-responsive-650',
     size: Size(650, 549),
     view: FullDiffView.diff,
-    presentation: DiffPresentation.hunk,
+    layout: DiffLayout.unified,
     focus: false,
     whitespace: false,
     wrap: false,
@@ -181,7 +181,7 @@ const qaCases = <QaCase>[
     name: '12-responsive-480',
     size: Size(480, 549),
     view: FullDiffView.diff,
-    presentation: DiffPresentation.hunk,
+    layout: DiffLayout.unified,
     focus: false,
     whitespace: false,
     wrap: false,
@@ -193,7 +193,7 @@ const qaCases = <QaCase>[
     name: '18-final-default',
     size: Size(1070, 842),
     view: FullDiffView.diff,
-    presentation: DiffPresentation.hunk,
+    layout: DiffLayout.unified,
     focus: false,
     whitespace: false,
     wrap: false,
@@ -205,7 +205,7 @@ const qaCases = <QaCase>[
     name: '21-final-focus',
     size: Size(1070, 842),
     view: FullDiffView.diff,
-    presentation: DiffPresentation.hunk,
+    layout: DiffLayout.unified,
     focus: true,
     whitespace: false,
     wrap: false,
@@ -217,7 +217,7 @@ const qaCases = <QaCase>[
     name: '22-final-responsive-650',
     size: Size(650, 549),
     view: FullDiffView.diff,
-    presentation: DiffPresentation.hunk,
+    layout: DiffLayout.unified,
     focus: false,
     whitespace: false,
     wrap: false,
@@ -229,7 +229,7 @@ const qaCases = <QaCase>[
     name: '23-final-responsive-480',
     size: Size(480, 549),
     view: FullDiffView.diff,
-    presentation: DiffPresentation.hunk,
+    layout: DiffLayout.unified,
     focus: false,
     whitespace: false,
     wrap: false,
@@ -358,7 +358,7 @@ void main() {
 
     expect(
       tester.getCenter(find.byKey(const Key('file-path-chip'))).dy,
-      closeTo(tester.getCenter(find.text('File')).dy, 0.5),
+      closeTo(tester.getCenter(find.text('Diff')).dy, 0.5),
     );
     expect(
       tester.getCenter(find.text('집중 모드')).dy,
@@ -563,8 +563,14 @@ void main() {
         .getCenter(find.byKey(const Key('change-counter')))
         .dy;
     expect(tester.getCenter(find.text('Hunk')).dy, closeTo(navigationY, 0.5));
-    expect(tester.getCenter(find.text('Inline')).dy, closeTo(navigationY, 0.5));
-    expect(tester.getCenter(find.text('Split')).dy, closeTo(navigationY, 0.5));
+    expect(
+      tester.getCenter(find.text('Unified')).dy,
+      closeTo(navigationY, 0.5),
+    );
+    expect(
+      tester.getCenter(find.text('Side-by-side')).dy,
+      closeTo(navigationY, 0.5),
+    );
   });
 
   testWidgets('480px initial hunk keeps the unwrapped source at x=0', (
@@ -588,7 +594,6 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     await tester.pump();
 
-    final anchor = controller.state.activeAnchor!;
     final content = find.byKey(const Key('content-scrollable'));
     final horizontal = find.descendant(
       of: content,
@@ -604,8 +609,8 @@ void main() {
     final horizontalPosition = tester
         .state<ScrollableState>(horizontalScrollable)
         .position;
-    final header = find.byKey(Key('hunk-card-surface-${anchor.id}'));
-    final line313 = find.byKey(Key('hunk-line-${anchor.id}-0'));
+    final header = find.byKey(Key('unified-hunk-1'));
+    final line313 = find.byKey(const Key('unified-line-1-3'));
     final left = tester.getRect(content).left;
 
     expect(horizontalPosition.pixels, 0);
@@ -652,103 +657,102 @@ void main() {
     expect(find.byKey(const Key('diff-column')), findsOneWidget);
   });
 
-  for (final presentation in DiffPresentation.values) {
-    testWidgets(
-      '${presentation.name} honors an initially selected second hunk',
-      (tester) async {
-        addTearDown(() {
-          tester.view.resetDevicePixelRatio();
-          tester.view.resetPhysicalSize();
-        });
-        final controller = await qaControllerFor(
-          presentation: presentation,
-          activeHunkIndex: 1,
-        );
-        addTearDown(controller.dispose);
-        tester.view.devicePixelRatio = 1;
-        tester.view.physicalSize = const Size(782, 842);
-        await tester.pumpWidget(
-          MaterialApp(
-            theme: fullDiffQaTheme(),
-            home: FullDiffQaComparisonCanvas(
-              controller: controller,
-              surfaceSize: const Size(782, 842),
-            ),
+  for (final layout in DiffLayout.values) {
+    testWidgets('${layout.name} honors an initially selected second hunk', (
+      tester,
+    ) async {
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+      final controller = await qaControllerFor(
+        layout: layout,
+        activeHunkIndex: 1,
+      );
+      addTearDown(controller.dispose);
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(782, 842);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: fullDiffQaTheme(),
+          home: FullDiffQaComparisonCanvas(
+            controller: controller,
+            surfaceSize: const Size(782, 842),
           ),
-        );
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 100));
-        await tester.pump();
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump();
 
-        final activeAnchor = controller.state.activeAnchor!;
-        expect(activeAnchor.hunkIndex, 1);
-        final target = switch (presentation) {
-          DiffPresentation.hunk => find.byKey(
-            Key('hunk-card-surface-${activeAnchor.id}'),
-          ),
-          DiffPresentation.inline => find.byKey(const Key('inline-hunk-1')),
-          DiffPresentation.split => find.byKey(const Key('split-hunk-1')),
-        };
-        expect(target, findsOneWidget);
-        final viewport = tester.getRect(
-          find.byKey(const Key('content-scrollable')),
-        );
-        expect(
-          tester.getTopLeft(target).dy,
-          lessThanOrEqualTo(
-            viewport.top + (presentation == DiffPresentation.hunk ? 130 : 2),
-          ),
-        );
-      },
-    );
+      final activeAnchor = controller.state.activeAnchor!;
+      expect(activeAnchor.hunkIndex, 1);
+      final target = switch (layout) {
+        DiffLayout.unified => find.byKey(const Key('unified-hunk-1')),
+        DiffLayout.sideBySide => find.byKey(const Key('side-by-side-hunk-1')),
+      };
+      expect(target, findsOneWidget);
+      final viewport = tester.getRect(
+        find.byKey(const Key('content-scrollable')),
+      );
+      expect(
+        tester.getTopLeft(target).dy,
+        lessThanOrEqualTo(
+          viewport.top + (layout == DiffLayout.unified ? 130 : 2),
+        ),
+      );
+    });
   }
 
-  testWidgets('file initially reveals the selected source anchor', (
-    tester,
-  ) async {
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    final controller = await qaControllerFor(
-      view: FullDiffView.file,
-      activeHunkIndex: 1,
-    );
-    addTearDown(controller.dispose);
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1070, 842);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: fullDiffQaTheme(),
-        home: FullDiffQaComparisonCanvas(
-          controller: controller,
-          surfaceSize: const Size(1070, 842),
+  testWidgets(
+    'full-file unified initially reveals the selected source anchor',
+    (tester) async {
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+      final controller = await qaControllerFor(
+        view: FullDiffView.diff,
+        scope: DiffScope.fullFile,
+        activeHunkIndex: 1,
+      );
+      addTearDown(controller.dispose);
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1070, 842);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: fullDiffQaTheme(),
+          home: FullDiffQaComparisonCanvas(
+            controller: controller,
+            surfaceSize: const Size(1070, 842),
+          ),
         ),
-      ),
-    );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 100));
-    await tester.pump(const Duration(milliseconds: 100));
-    await tester.pump();
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump();
 
-    final viewport = tester.getRect(
-      find.byKey(const Key('content-scrollable')),
-    );
-    final activeAnchor = controller.state.activeAnchor!;
-    final header = find.byKey(Key('file-hunk-header-${activeAnchor.id}'));
-    final line309 = find.byKey(const Key('file-line-309'));
-    final changedRow = find.byKey(const Key('file-line-313'));
-    expect(header, findsOneWidget);
-    expect(changedRow, findsOneWidget);
-    expect(line309, findsOneWidget);
-    expect(
-      tester.getTopLeft(line309).dy,
-      inInclusiveRange(viewport.top - 27, viewport.top + 27),
-    );
-    expect(tester.getRect(header).overlaps(viewport), isTrue);
-    expect(tester.getBottomLeft(header).dy, tester.getTopLeft(changedRow).dy);
-    expect(find.byKey(const Key('file-current-line-313')), findsOneWidget);
-  });
+      final viewport = tester.getRect(
+        find.byKey(const Key('content-scrollable')),
+      );
+      final header = find.text('SetupBase · lines 312–316 · change 2 of 7');
+      final line309 = find.byKey(const Key('unified-line-1-0'));
+      final changedRow = find.byKey(const Key('unified-line-1-3'));
+      expect(header, findsOneWidget);
+      expect(changedRow, findsOneWidget);
+      expect(line309, findsOneWidget);
+      expect(
+        tester.getTopLeft(line309).dy,
+        inInclusiveRange(viewport.top - 27, viewport.top + 27),
+      );
+      expect(tester.getRect(header).overlaps(viewport), isTrue);
+      expect(
+        tester.getTopLeft(header).dy,
+        lessThan(tester.getTopLeft(changedRow).dy),
+      );
+    },
+  );
 
   testWidgets('final polish canvas uses approved desktop geometry', (
     tester,
@@ -882,7 +886,7 @@ void main() {
     expect(find.byKey(const Key('blame-hunk-header-hunk-1')), findsNothing);
   });
 
-  testWidgets('detail QA state includes the approved hunk minimap viewport', (
+  testWidgets('detail QA state maps the unified viewport from the top', (
     tester,
   ) async {
     addTearDown(() {
@@ -917,11 +921,9 @@ void main() {
         .sourceLineCount;
     expect(sourceLineCount, 441);
     expect(painter.viewport, isNotNull);
-    expect(
-      painter.viewport!.top,
-      closeTo(height * 319.5 / sourceLineCount - 9, 0.01),
-    );
-    expect(painter.viewport!.height, 18);
+    expect(painter.viewport!.top, 0);
+    expect(painter.viewport!.height, greaterThan(18));
+    expect(painter.viewport!.height, lessThan(height));
   });
 
   testWidgets('history rows place author and age below the title', (
@@ -977,7 +979,7 @@ void main() {
       });
       final controller = await qaControllerFor(
         view: scenario.view,
-        presentation: scenario.presentation,
+        layout: scenario.layout,
         focusMode: scenario.focus,
         ignoreWhitespace: scenario.whitespace,
         wrapLines: scenario.wrap,
@@ -987,7 +989,7 @@ void main() {
       addTearDown(controller.dispose);
 
       expect(controller.state.view, scenario.view);
-      expect(controller.state.presentation, scenario.presentation);
+      expect(controller.state.layout, scenario.layout);
       expect(controller.state.focusMode, scenario.focus);
       expect(controller.state.requestedIgnoreWhitespace, scenario.whitespace);
       expect(controller.state.wrapLines, scenario.wrap);
@@ -1017,12 +1019,12 @@ void main() {
       });
       final history = name.startsWith('16-') || name.startsWith('17-');
       final unavailable = name.startsWith('15-');
-      final presentation = name.startsWith('17-')
-          ? DiffPresentation.split
-          : DiffPresentation.hunk;
+      final layout = name.startsWith('17-')
+          ? DiffLayout.sideBySide
+          : DiffLayout.unified;
       final controller = await qaControllerFor(
         view: history ? FullDiffView.history : FullDiffView.diff,
-        presentation: presentation,
+        layout: layout,
         emptyPatch: unavailable,
         selectPastHistory: history,
         activeHunkIndex: history || unavailable ? 0 : 1,
@@ -1066,7 +1068,7 @@ void main() {
     });
     final controller = await qaControllerFor(
       view: FullDiffView.history,
-      presentation: DiffPresentation.split,
+      layout: DiffLayout.sideBySide,
       selectPastHistory: true,
       activeHunkIndex: 0,
     );

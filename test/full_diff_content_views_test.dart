@@ -10,70 +10,72 @@ import 'package:yogit/full_blame_view.dart';
 import 'package:yogit/full_diff_code_row.dart';
 import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/full_diff_selectable_row.dart';
-import 'package:yogit/full_diff_split_view.dart';
+import 'package:yogit/full_diff_side_by_side_view.dart';
 import 'package:yogit/full_diff_syntax_contract.dart';
 import 'package:yogit/full_diff_theme.dart';
-import 'package:yogit/full_file_view.dart';
+import 'package:yogit/full_diff_unified_view.dart';
 import 'package:yogit/full_history_view.dart';
 import 'package:yogit/git.dart';
 
 import 'support/full_diff_fixtures.dart';
 
 void main() {
-  testWidgets('file view shows the selected side and current source line', (
-    tester,
-  ) async {
-    const anchor = DiffAnchor(hunkIndex: 0, oldLine: 313, newLine: 314);
-    final anchorKey = GlobalKey(debugLabel: anchor.id);
-    final controller = ScrollController();
-    addTearDown(controller.dispose);
+  testWidgets(
+    'full-file unified shows source lines with its scroll controller',
+    (tester) async {
+      const anchor = DiffAnchor(hunkIndex: 0, oldLine: 313, newLine: 314);
+      final anchorKey = GlobalKey(debugLabel: anchor.id);
+      final controller = ScrollController();
+      addTearDown(controller.dispose);
 
-    await tester.pumpWidget(
-      qaApp(
-        FullFileView(
-          document: resultFile,
-          hunks: const [
-            DiffHunk(
-              index: 0,
-              oldStart: 313,
-              oldCount: 1,
-              newStart: 314,
-              newCount: 1,
-              context: '',
-              lines: [],
-              anchor: anchor,
-            ),
-          ],
-          path: 'src/drlua.pas',
-          activeAnchor: anchor,
-          wrapLines: false,
-          highlighter: fakeHighlighter,
-          anchorKeys: {anchor.id: anchorKey},
-          controller: controller,
+      await tester.pumpWidget(
+        qaApp(
+          _fullFileUnifiedView(
+            document: resultFile,
+            hunks: const [
+              DiffHunk(
+                index: 0,
+                oldStart: 313,
+                oldCount: 1,
+                newStart: 314,
+                newCount: 1,
+                context: '',
+                lines: [],
+                anchor: anchor,
+              ),
+            ],
+            path: 'src/drlua.pas',
+            activeAnchor: anchor,
+            wrapLines: false,
+            highlighter: fakeHighlighter,
+            anchorKeys: {anchor.id: anchorKey},
+            controller: controller,
+          ),
         ),
-      ),
-    );
-    await tester.pump();
-    await tester.scrollUntilVisible(
-      find.text('Log(LOGINFO, BASE MODULE VERSION);'),
-      500,
-      scrollable: find
-          .descendant(
-            of: find.byKey(const Key('file-list')),
-            matching: find.byType(Scrollable),
-          )
-          .first,
-    );
+      );
+      await tester.pump();
+      await tester.scrollUntilVisible(
+        find.text('Log(LOGINFO, BASE MODULE VERSION);'),
+        500,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const Key('unified-list')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
 
-    expect(find.text('314'), findsOneWidget);
-    expect(find.byKey(const Key('file-current-line-314')), findsOneWidget);
-    expect(find.text('Log(LOGINFO, BASE MODULE VERSION);'), findsOneWidget);
-    expect(anchorKey.currentContext, isNotNull);
-    expect(
-      tester.widget<ListView>(find.byKey(const Key('file-list'))).controller,
-      same(controller),
-    );
-  });
+      expect(find.text('314'), findsOneWidget);
+      expect(find.byKey(const Key('unified-line-0-313')), findsOneWidget);
+      expect(find.text('Log(LOGINFO, BASE MODULE VERSION);'), findsOneWidget);
+      expect(
+        tester
+            .widget<ListView>(find.byKey(const Key('unified-list')))
+            .controller,
+        same(controller),
+      );
+    },
+  );
 
   testWidgets(
     'file result shows the selected hunk header before its added source row',
@@ -102,7 +104,7 @@ void main() {
 
       await tester.pumpWidget(
         qaApp(
-          FullFileView(
+          _fullFileUnifiedView(
             document: file,
             hunks: const [hunk],
             path: file.path,
@@ -114,13 +116,14 @@ void main() {
         ),
       );
 
-      final header = find.byKey(Key('file-hunk-header-${anchor.id}'));
-      final changedRow = find.byKey(const Key('file-line-2'));
+      final header = find.text('replace value · lines 1–3 · change 1 of 1');
+      final changedRow = find.byKey(const Key('unified-line-0-1'));
       expect(header, findsOneWidget);
-      expect(tester.getBottomLeft(header).dy, tester.getTopLeft(changedRow).dy);
-      final renderedLine = tester.widget<FullDiffCodeRow>(
-        find.descendant(of: changedRow, matching: find.byType(FullDiffCodeRow)),
+      expect(
+        tester.getBottomLeft(header).dy,
+        lessThan(tester.getTopLeft(changedRow).dy),
       );
+      final renderedLine = tester.widget<FullDiffCodeRow>(changedRow);
       expect(renderedLine.line.kind, DiffLineKind.add);
       expect(renderedLine.line.oldNumber, isNull);
       expect(renderedLine.line.newNumber, 2);
@@ -188,7 +191,7 @@ void main() {
     final keys = {firstAnchor.id: firstKey, secondAnchor.id: secondKey};
 
     Widget view(DiffAnchor activeAnchor) => qaApp(
-      FullFileView(
+      _fullFileUnifiedView(
         document: file,
         hunks: hunks,
         path: file.path,
@@ -201,36 +204,20 @@ void main() {
 
     await tester.pumpWidget(view(firstAnchor));
 
-    expect(
-      find.byKey(Key('file-hunk-header-${firstAnchor.id}')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(Key('file-hunk-header-${secondAnchor.id}')),
-      findsNothing,
-    );
+    expect(find.byKey(const Key('unified-hunk-0')), findsOneWidget);
+    expect(find.byKey(const Key('unified-hunk-1')), findsNothing);
     expect(firstKey.currentContext, isNotNull);
     expect(secondKey.currentContext, isNull);
     expect(
       tester
-          .widget<FullDiffCodeRow>(
-            find.descendant(
-              of: find.byKey(const Key('file-line-2')),
-              matching: find.byType(FullDiffCodeRow),
-            ),
-          )
+          .widget<FullDiffCodeRow>(find.byKey(const Key('unified-line-0-1')))
           .line
           .kind,
       DiffLineKind.add,
     );
     expect(
       tester
-          .widget<FullDiffCodeRow>(
-            find.descendant(
-              of: find.byKey(const Key('file-line-4')),
-              matching: find.byType(FullDiffCodeRow),
-            ),
-          )
+          .widget<FullDiffCodeRow>(find.byKey(const Key('unified-line-0-3')))
           .line
           .kind,
       DiffLineKind.context,
@@ -238,33 +225,20 @@ void main() {
 
     await tester.pumpWidget(view(secondAnchor));
 
-    expect(find.byKey(Key('file-hunk-header-${firstAnchor.id}')), findsNothing);
-    expect(
-      find.byKey(Key('file-hunk-header-${secondAnchor.id}')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('unified-hunk-0')), findsNothing);
+    expect(find.byKey(const Key('unified-hunk-1')), findsOneWidget);
     expect(firstKey.currentContext, isNull);
     expect(secondKey.currentContext, isNotNull);
     expect(
       tester
-          .widget<FullDiffCodeRow>(
-            find.descendant(
-              of: find.byKey(const Key('file-line-2')),
-              matching: find.byType(FullDiffCodeRow),
-            ),
-          )
+          .widget<FullDiffCodeRow>(find.byKey(const Key('unified-line-1-1')))
           .line
           .kind,
       DiffLineKind.context,
     );
     expect(
       tester
-          .widget<FullDiffCodeRow>(
-            find.descendant(
-              of: find.byKey(const Key('file-line-4')),
-              matching: find.byType(FullDiffCodeRow),
-            ),
-          )
+          .widget<FullDiffCodeRow>(find.byKey(const Key('unified-line-1-3')))
           .line
           .kind,
       DiffLineKind.add,
@@ -319,7 +293,7 @@ void main() {
 
     await tester.pumpWidget(
       qaApp(
-        FullFileView(
+        _fullFileUnifiedView(
           document: file,
           hunks: hunks,
           path: file.path,
@@ -331,20 +305,18 @@ void main() {
       ),
     );
 
-    final firstHeader = find.byKey(Key('file-hunk-header-${firstAnchor.id}'));
-    final deletedRow = find.byKey(const Key('file-line-2'));
-    final eofHeader = find.byKey(Key('file-hunk-header-${eofAnchor.id}'));
+    final firstHeader = find.text('replace value · lines 1–2 · change 1 of 1');
+    final deletedRow = find.byKey(const Key('unified-line-0-1'));
+    final eofHeader = find.byKey(const Key('unified-hunk-1'));
     expect(firstHeader, findsOneWidget);
     expect(eofHeader, findsNothing);
     expect(
       tester.getBottomLeft(firstHeader).dy,
-      tester.getTopLeft(deletedRow).dy,
+      lessThan(tester.getTopLeft(deletedRow).dy),
     );
     expect(firstKey.currentContext, isNotNull);
     expect(eofKey.currentContext, isNull);
-    final renderedLine = tester.widget<FullDiffCodeRow>(
-      find.descendant(of: deletedRow, matching: find.byType(FullDiffCodeRow)),
-    );
+    final renderedLine = tester.widget<FullDiffCodeRow>(deletedRow);
     expect(renderedLine.line.kind, DiffLineKind.delete);
     expect(renderedLine.line.oldNumber, 2);
     expect(renderedLine.line.newNumber, isNull);
@@ -412,7 +384,7 @@ void main() {
 
     await tester.pumpWidget(
       qaApp(
-        FullFileView(
+        _fullFileUnifiedView(
           document: file,
           hunks: hunks,
           path: file.path,
@@ -424,29 +396,30 @@ void main() {
       ),
     );
 
-    final lastSourceRow = find.byKey(const Key('file-line-2'));
-    final firstHeader = find.byKey(Key('file-hunk-header-${firstAnchor.id}'));
-    final secondHeader = find.byKey(Key('file-hunk-header-${secondAnchor.id}'));
+    final lastSourceRow = find.byKey(const Key('unified-line-0-1'));
+    final firstHeader = find.text(
+      'first EOF deletion · lines 1–2 · change 1 of 1',
+    );
+    final secondHeader = find.byKey(const Key('unified-hunk-1'));
     expect(
       tester.getTopLeft(firstHeader).dy,
-      tester.getBottomLeft(lastSourceRow).dy,
+      lessThan(tester.getBottomLeft(lastSourceRow).dy),
     );
     expect(secondHeader, findsNothing);
     expect(firstKey.currentContext, isNotNull);
     expect(secondKey.currentContext, isNull);
     for (final lineNumber in [1, 2]) {
       final renderedLine = tester.widget<FullDiffCodeRow>(
-        find.descendant(
-          of: find.byKey(Key('file-line-$lineNumber')),
-          matching: find.byType(FullDiffCodeRow),
-        ),
+        find.byKey(Key('unified-line-0-${lineNumber - 1}')),
       );
       expect(renderedLine.line.kind, DiffLineKind.context);
     }
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('file view distinguishes every non-source state', (tester) async {
+  testWidgets('unified leaves non-source states to the workspace panel', (
+    tester,
+  ) async {
     final cases = <(FileContentKind, String)>[
       (FileContentKind.binary, 'Binary file'),
       (FileContentKind.unsupportedEncoding, 'Unsupported encoding'),
@@ -455,7 +428,7 @@ void main() {
     for (final (kind, label) in cases) {
       await tester.pumpWidget(
         qaApp(
-          FullFileView(
+          _fullFileUnifiedView(
             document: FileDocument(
               revision: commitA.sha,
               path: fileA.path,
@@ -476,7 +449,8 @@ void main() {
           ),
         ),
       );
-      expect(find.text(label), findsOneWidget, reason: '$kind');
+      expect(find.text(label), findsNothing, reason: '$kind');
+      expect(find.byKey(const Key('unified-list')), findsOneWidget);
     }
 
     final empty = FileDocument.fromBytes(
@@ -490,7 +464,7 @@ void main() {
     final emptyAnchorKey = GlobalKey(debugLabel: emptyAnchor.id);
     await tester.pumpWidget(
       qaApp(
-        FullFileView(
+        _fullFileUnifiedView(
           document: empty,
           hunks: const [
             DiffHunk(
@@ -518,12 +492,10 @@ void main() {
         ),
       ),
     );
-    expect(find.text('Empty file'), findsOneWidget);
+    expect(find.text('Empty file'), findsNothing);
+    expect(find.text('removed'), findsOneWidget);
     expect(find.textContaining('empty deletion'), findsOneWidget);
-    expect(
-      find.byKey(Key('file-hunk-header-${emptyAnchor.id}')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('unified-hunk-0')), findsOneWidget);
     expect(emptyAnchorKey.currentContext, isNotNull);
 
     final deleted = FileDocument.fromBytes(
@@ -535,7 +507,7 @@ void main() {
     );
     await tester.pumpWidget(
       qaApp(
-        FullFileView(
+        _fullFileUnifiedView(
           document: deleted,
           hunks: const [],
           path: deleted.path,
@@ -546,15 +518,12 @@ void main() {
         ),
       ),
     );
-    expect(
-      find.text('Deleted file · showing previous version'),
-      findsOneWidget,
-    );
+    expect(find.text('Deleted file · showing previous version'), findsNothing);
     expect(find.text('old content'), findsOneWidget);
     expect(find.text('1'), findsOneWidget);
   });
 
-  testWidgets('deleted file keeps its banner with every source state', (
+  testWidgets('unified does not recreate the removed deleted-file banner', (
     tester,
   ) async {
     final cases = <(FileContentKind, String)>[
@@ -567,7 +536,7 @@ void main() {
     for (final (kind, label) in cases) {
       await tester.pumpWidget(
         qaApp(
-          FullFileView(
+          _fullFileUnifiedView(
             document: FileDocument(
               revision: commitA.parents.single,
               path: 'deleted.txt',
@@ -591,10 +560,11 @@ void main() {
 
       expect(
         find.text('Deleted file · showing previous version'),
-        findsOneWidget,
+        findsNothing,
         reason: '$kind',
       );
-      expect(find.text(label), findsOneWidget, reason: '$kind');
+      expect(find.text(label), findsNothing, reason: '$kind');
+      expect(find.byKey(const Key('unified-list')), findsOneWidget);
     }
   });
 
@@ -615,7 +585,7 @@ void main() {
 
     await tester.pumpWidget(
       qaApp(
-        FullFileView(
+        _fullFileUnifiedView(
           document: document,
           hunks: const [],
           path: document.path,
@@ -642,7 +612,7 @@ void main() {
 
     await tester.pumpWidget(
       qaApp(
-        FullFileView(
+        _fullFileUnifiedView(
           document: document,
           hunks: const [],
           path: document.path,
@@ -1943,6 +1913,85 @@ void main() {
       findsOneWidget,
     );
   });
+}
+
+Widget _fullFileUnifiedView({
+  required FileDocument document,
+  required List<DiffHunk> hunks,
+  required String path,
+  required DiffAnchor? activeAnchor,
+  required bool wrapLines,
+  required FullDiffSyntaxHighlighter highlighter,
+  required Map<String, GlobalKey> anchorKeys,
+  ScrollController? controller,
+}) {
+  final selectedHunk = hunks.where(
+    (hunk) => hunk.anchor.hunkIndex == activeAnchor?.hunkIndex,
+  );
+  final baseHunk = selectedHunk.isNotEmpty
+      ? selectedHunk.single
+      : hunks.isNotEmpty
+      ? hunks.first
+      : const DiffHunk(
+          index: 0,
+          oldStart: 1,
+          oldCount: 0,
+          newStart: 1,
+          newCount: 0,
+          context: 'full file',
+          lines: [],
+          anchor: DiffAnchor(hunkIndex: 0, oldLine: 1, newLine: 1),
+        );
+  final changedByLine = <int, DiffLine>{};
+  for (final line in baseHunk.lines) {
+    final lineNumber = document.side == FileDocumentSide.old
+        ? line.oldNumber
+        : line.newNumber;
+    if (lineNumber != null) changedByLine[lineNumber] = line;
+  }
+  final lines = document.lines.isEmpty
+      ? baseHunk.lines
+      : [
+          for (var index = 0; index < document.lines.length; index++)
+            changedByLine[index + 1] ??
+                DiffLine(
+                  kind: DiffLineKind.context,
+                  text: document.lines[index],
+                  oldNumber: document.side == FileDocumentSide.old
+                      ? index + 1
+                      : null,
+                  newNumber: document.side == FileDocumentSide.result
+                      ? index + 1
+                      : null,
+                ),
+        ];
+  final hunk = DiffHunk(
+    index: baseHunk.index,
+    oldStart: 1,
+    oldCount: document.side == FileDocumentSide.old ? lines.length : 0,
+    newStart: 1,
+    newCount: document.side == FileDocumentSide.result ? lines.length : 0,
+    context: baseHunk.context,
+    lines: List.unmodifiable(lines),
+    anchor: baseHunk.anchor,
+  );
+  return UnifiedPresentationView(
+    document: DiffDocument(
+      headers: const [],
+      hunks: [hunk],
+      rows: List.unmodifiable(lines),
+    ),
+    activeAnchor: activeAnchor ?? hunk.anchor,
+    path: path,
+    wrapLines: wrapLines,
+    highlighter: highlighter,
+    anchorKeys: {
+      ...anchorKeys,
+      hunk.anchor.id: anchorKeys[hunk.anchor.id] ?? GlobalKey(),
+    },
+    richRenderingEnabled: !document.disableRichRendering,
+    controller: controller,
+  );
 }
 
 class _ThrowingSyntaxHighlighter implements FullDiffSyntaxHighlighter {

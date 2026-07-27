@@ -9,8 +9,8 @@ import 'full_diff_syntax_contract.dart';
 import 'full_diff_theme.dart';
 import 'git.dart';
 
-class InlinePresentationView extends StatelessWidget {
-  const InlinePresentationView({
+class UnifiedPresentationView extends StatelessWidget {
+  const UnifiedPresentationView({
     required this.document,
     required this.activeAnchor,
     required this.path,
@@ -48,7 +48,7 @@ class InlinePresentationView extends StatelessWidget {
       );
     }
 
-    final items = _inlineItems(document);
+    final items = _unifiedItems(document);
     final allSourceText = [
       for (final item in items)
         if (item.line case final line?) line.text,
@@ -56,6 +56,7 @@ class InlinePresentationView extends StatelessWidget {
     return FullDiffSelectionArea(
       allSourceText: allSourceText,
       child: ListView.builder(
+        key: const Key('unified-list'),
         controller: controller,
         primary: controller == null,
         itemCount: items.length,
@@ -69,7 +70,7 @@ class InlinePresentationView extends StatelessWidget {
                 ? item.wordRanges(wordDiffer)
                 : const <WordRange>[];
             child = FullDiffCodeRow(
-              key: Key('inline-line-${hunk.index}-${item.lineIndex}'),
+              key: Key('unified-line-${hunk.index}-${item.lineIndex}'),
               line: line,
               path: path,
               wrapLines: wrapLines,
@@ -96,7 +97,7 @@ class InlinePresentationView extends StatelessWidget {
             child = KeyedSubtree(
               key: _anchorKey(hunk.anchor),
               child: KeyedSubtree(
-                key: Key('inline-hunk-${hunk.index}'),
+                key: Key('unified-hunk-${hunk.index}'),
                 child: child,
               ),
             );
@@ -117,11 +118,11 @@ class InlinePresentationView extends StatelessWidget {
       (throw StateError('Missing GlobalKey for ${anchor.id}'));
 }
 
-List<_InlineItem> _inlineItems(DiffDocument document) {
-  final items = <_InlineItem>[];
+List<_UnifiedItem> _unifiedItems(DiffDocument document) {
+  final items = <_UnifiedItem>[];
   var sourceRow = 0;
   for (final hunk in document.hunks) {
-    final lineDescriptors = _inlineLines(hunk.lines);
+    final lineDescriptors = _unifiedLines(hunk.lines);
     final firstChange = hunk.lines.indexWhere(
       (line) =>
           line.kind == DiffLineKind.add || line.kind == DiffLineKind.delete,
@@ -132,7 +133,7 @@ List<_InlineItem> _inlineItems(DiffDocument document) {
     void addLine(int lineIndex) {
       final descriptor = lineDescriptors[lineIndex];
       items.add(
-        _InlineItem(
+        _UnifiedItem(
           hunk: hunk,
           line: descriptor.line,
           lineIndex: lineIndex,
@@ -148,7 +149,7 @@ List<_InlineItem> _inlineItems(DiffDocument document) {
     for (var index = 0; index < leadingContextCount; index++) {
       addLine(index);
     }
-    items.add(_InlineItem(hunk: hunk, firstInHunk: firstInHunk));
+    items.add(_UnifiedItem(hunk: hunk, firstInHunk: firstInHunk));
     firstInHunk = false;
     for (var index = leadingContextCount; index < hunk.lines.length; index++) {
       addLine(index);
@@ -157,20 +158,20 @@ List<_InlineItem> _inlineItems(DiffDocument document) {
   return items;
 }
 
-List<_InlineLineDescriptor> _inlineLines(List<DiffLine> lines) {
-  final descriptors = <DiffLine, _InlineLineDescriptor>{};
+List<_UnifiedLineDescriptor> _unifiedLines(List<DiffLine> lines) {
+  final descriptors = <DiffLine, _UnifiedLineDescriptor>{};
   for (final pair in pairDiff(lines)) {
     final left = pair.left;
     final right = pair.right;
     if (left?.kind != DiffLineKind.delete || right?.kind != DiffLineKind.add) {
       continue;
     }
-    descriptors[left!] = _InlineLineDescriptor(
+    descriptors[left!] = _UnifiedLineDescriptor(
       line: left,
       pairedLine: right!,
       oldSide: true,
     );
-    descriptors[right] = _InlineLineDescriptor(
+    descriptors[right] = _UnifiedLineDescriptor(
       line: right,
       pairedLine: left,
       oldSide: false,
@@ -178,12 +179,12 @@ List<_InlineLineDescriptor> _inlineLines(List<DiffLine> lines) {
   }
   return [
     for (final line in lines)
-      descriptors[line] ?? _InlineLineDescriptor(line: line),
+      descriptors[line] ?? _UnifiedLineDescriptor(line: line),
   ];
 }
 
-class _InlineLineDescriptor {
-  const _InlineLineDescriptor({
+class _UnifiedLineDescriptor {
+  const _UnifiedLineDescriptor({
     required this.line,
     this.pairedLine,
     this.oldSide = false,
@@ -194,8 +195,8 @@ class _InlineLineDescriptor {
   final bool oldSide;
 }
 
-class _InlineItem {
-  const _InlineItem({
+class _UnifiedItem {
+  const _UnifiedItem({
     required this.hunk,
     this.line,
     this.lineIndex,

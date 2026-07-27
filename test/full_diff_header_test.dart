@@ -58,7 +58,6 @@ void main() {
         'UTF-8',
         '집중 모드',
         '편집기로 열기',
-        'File',
         'Diff',
         'Blame',
         'History',
@@ -67,9 +66,9 @@ void main() {
         '공백 무시',
         '줄바꿈',
         '2 / 7',
+        'Unified',
+        'Side-by-side',
         'Hunk',
-        'Inline',
-        'Split',
       ]),
     );
     expect(
@@ -78,7 +77,7 @@ void main() {
     );
     expect(
       tester.getCenter(find.byKey(const Key('open-editor'))).dx,
-      lessThan(tester.getCenter(find.text('File')).dx),
+      lessThan(tester.getCenter(find.text('Diff')).dx),
     );
   });
 
@@ -231,14 +230,12 @@ void main() {
       await pumpHeaders(tester, view: FullDiffView.history);
       expect(
         tester
-            .widget<IconButton>(find.byKey(const Key('previous-change')))
+            .widget<IconButton>(find.byKey(const Key('previous-hunk')))
             .onPressed,
         isNull,
       );
       expect(
-        tester
-            .widget<IconButton>(find.byKey(const Key('next-change')))
-            .onPressed,
+        tester.widget<IconButton>(find.byKey(const Key('next-hunk'))).onPressed,
         isNull,
       );
       expect(find.byKey(const Key('change-counter')), findsOneWidget);
@@ -493,14 +490,16 @@ Future<void> pumpHeaders(
         ),
         GlobalDiffToolbar(
           view: view,
-          presentation: DiffPresentation.hunk,
+          layout: DiffLayout.unified,
+          hunkEnabled: true,
           activeIndex: 1,
           anchorCount: 7,
           algorithm: algorithm,
           ignoreWhitespace: ignoreWhitespace,
           wrapLines: false,
           loadingPatch: false,
-          onPresentationSelected: (_) {},
+          onLayoutSelected: (_) {},
+          onHunkChanged: (_) {},
           onPrevious: () {},
           onNext: () {},
           onAlgorithmSelected: onAlgorithmSelected ?? (_) {},

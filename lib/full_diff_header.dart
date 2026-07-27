@@ -182,14 +182,16 @@ class GlobalFileBar extends StatelessWidget {
 class GlobalDiffToolbar extends StatelessWidget {
   const GlobalDiffToolbar({
     required this.view,
-    required this.presentation,
+    required this.layout,
+    required this.hunkEnabled,
     required this.activeIndex,
     required this.anchorCount,
     required this.algorithm,
     required this.ignoreWhitespace,
     required this.wrapLines,
     required this.loadingPatch,
-    required this.onPresentationSelected,
+    required this.onLayoutSelected,
+    required this.onHunkChanged,
     required this.onPrevious,
     required this.onNext,
     required this.onAlgorithmSelected,
@@ -200,14 +202,16 @@ class GlobalDiffToolbar extends StatelessWidget {
   });
 
   final FullDiffView view;
-  final DiffPresentation presentation;
+  final DiffLayout layout;
+  final bool hunkEnabled;
   final int activeIndex;
   final int anchorCount;
   final DiffAlgorithm algorithm;
   final bool ignoreWhitespace;
   final bool wrapLines;
   final bool loadingPatch;
-  final ValueChanged<DiffPresentation> onPresentationSelected;
+  final ValueChanged<DiffLayout> onLayoutSelected;
+  final ValueChanged<bool> onHunkChanged;
   final VoidCallback onPrevious;
   final VoidCallback onNext;
   final ValueChanged<DiffAlgorithm> onAlgorithmSelected;
@@ -263,7 +267,7 @@ class GlobalDiffToolbar extends StatelessWidget {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         _NavigationButton(
-          controlKey: const Key('previous-change'),
+          controlKey: const Key('previous-hunk'),
           label: '이전 변경 구간',
           icon: Icons.arrow_upward,
           onPressed: canGoPrevious ? onPrevious : null,
@@ -289,7 +293,7 @@ class GlobalDiffToolbar extends StatelessWidget {
           ),
         ),
         _NavigationButton(
-          controlKey: const Key('next-change'),
+          controlKey: const Key('next-hunk'),
           label: '다음 변경 구간',
           icon: Icons.arrow_downward,
           onPressed: canGoNext ? onNext : null,
@@ -302,12 +306,19 @@ class GlobalDiffToolbar extends StatelessWidget {
           ),
       ],
     );
-    final presentationControls = FullDiffSegmentedControl<DiffPresentation>(
+    final layoutControls = FullDiffSegmentedControl<DiffLayout>(
       groupLabel: 'Diff 표시 방식',
-      values: DiffPresentation.values,
-      selected: presentation,
-      labelFor: _presentationLabel,
-      onSelected: onPresentationSelected,
+      values: DiffLayout.values,
+      selected: layout,
+      labelFor: _layoutLabel,
+      onSelected: onLayoutSelected,
+    );
+    final hunkControl = _HeaderToggle(
+      controlKey: Key(hunkEnabled ? 'hunk-toggle-on' : 'hunk-toggle-off'),
+      label: 'Hunk',
+      value: hunkEnabled,
+      icon: Icons.segment,
+      onChanged: onHunkChanged,
     );
 
     return _HeaderBar(
@@ -319,7 +330,13 @@ class GlobalDiffToolbar extends StatelessWidget {
         children: [
           algorithmControls,
           navigationControls,
-          if (showLeadingControls) presentationControls,
+          if (showLeadingControls)
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [layoutControls, hunkControl],
+            ),
         ],
       ),
     );
@@ -408,6 +425,7 @@ class _SegmentButton extends StatelessWidget {
     final button = Semantics(
       container: true,
       button: true,
+      inMutuallyExclusiveGroup: true,
       selected: selected,
       enabled: enabled,
       label: label,
@@ -700,18 +718,15 @@ class _HeaderToggle extends StatelessWidget {
 }
 
 String _viewLabel(FullDiffView view) => switch (view) {
-  FullDiffView.file => 'File',
   FullDiffView.diff => 'Diff',
   FullDiffView.blame => 'Blame',
   FullDiffView.history => 'History',
 };
 
-String _presentationLabel(DiffPresentation presentation) =>
-    switch (presentation) {
-      DiffPresentation.hunk => 'Hunk',
-      DiffPresentation.inline => 'Inline',
-      DiffPresentation.split => 'Split',
-    };
+String _layoutLabel(DiffLayout layout) => switch (layout) {
+  DiffLayout.unified => 'Unified',
+  DiffLayout.sideBySide => 'Side-by-side',
+};
 
 class DiffFileHeader extends StatelessWidget {
   const DiffFileHeader({

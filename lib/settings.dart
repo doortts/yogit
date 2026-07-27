@@ -181,7 +181,6 @@ class AppSettings {
     this.previewPlacement = PreviewPlacement.right,
     this.columnWidths = const TimelineColumnWidths(),
     this.fullDiffColumnWidths = const FullDiffColumnWidths(),
-    this.fullDiffInitialView = FullDiffInitialView.hunk,
     this.fullDiffPreferences = const FullDiffPreferences(),
     this.laneColors = defaultLaneColors,
     this.previewWidth = 288,
@@ -218,7 +217,6 @@ class AppSettings {
   final PreviewPlacement previewPlacement;
   final TimelineColumnWidths columnWidths;
   final FullDiffColumnWidths fullDiffColumnWidths;
-  final FullDiffInitialView fullDiffInitialView;
   final FullDiffPreferences fullDiffPreferences;
   final List<String> laneColors;
 
@@ -240,7 +238,6 @@ class AppSettings {
     PreviewPlacement? previewPlacement,
     TimelineColumnWidths? columnWidths,
     FullDiffColumnWidths? fullDiffColumnWidths,
-    FullDiffInitialView? fullDiffInitialView,
     FullDiffPreferences? fullDiffPreferences,
     List<String>? laneColors,
     double? previewWidth,
@@ -250,7 +247,6 @@ class AppSettings {
     previewPlacement: previewPlacement ?? this.previewPlacement,
     columnWidths: columnWidths ?? this.columnWidths,
     fullDiffColumnWidths: fullDiffColumnWidths ?? this.fullDiffColumnWidths,
-    fullDiffInitialView: fullDiffInitialView ?? this.fullDiffInitialView,
     fullDiffPreferences: fullDiffPreferences ?? this.fullDiffPreferences,
     laneColors: laneColors ?? this.laneColors,
     previewWidth: previewWidth ?? this.previewWidth,
@@ -281,10 +277,6 @@ class AppSettings {
       fullDiffColumnWidths: FullDiffColumnWidths.fromJson(
         value['fullDiffColumnWidths'],
       ),
-      fullDiffInitialView: switch (value['fullDiffInitialView']) {
-        'fullFile' => FullDiffInitialView.fullFile,
-        _ => FullDiffInitialView.hunk,
-      },
       fullDiffPreferences: FullDiffPreferences.fromJson(
         value['fullDiffPreferences'],
       ),
@@ -299,7 +291,6 @@ class AppSettings {
     'previewPlacement': previewPlacement.name,
     'columnWidths': columnWidths.toJson(),
     'fullDiffColumnWidths': fullDiffColumnWidths.toJson(),
-    'fullDiffInitialView': fullDiffInitialView.name,
     'fullDiffPreferences': fullDiffPreferences.toJson(),
     'laneColors': laneColors,
     'previewWidth': previewWidth,
@@ -313,7 +304,6 @@ class AppSettings {
       previewPlacement == other.previewPlacement &&
       columnWidths == other.columnWidths &&
       fullDiffColumnWidths == other.fullDiffColumnWidths &&
-      fullDiffInitialView == other.fullDiffInitialView &&
       fullDiffPreferences == other.fullDiffPreferences &&
       listEquals(laneColors, other.laneColors) &&
       previewWidth == other.previewWidth &&
@@ -325,7 +315,6 @@ class AppSettings {
     previewPlacement,
     columnWidths,
     fullDiffColumnWidths,
-    fullDiffInitialView,
     fullDiffPreferences,
     Object.hashAll(laneColors),
     previewWidth,
@@ -530,39 +519,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           value: _settings.showAvatars,
                           onChanged: (value) =>
                               _change(_settings.copyWith(showAvatars: value)),
-                        ),
-                        const SizedBox(height: 24),
-                        const Text(
-                          'Full Diff',
-                          style: TextStyle(
-                            color: Color(0xFFE8EAF2),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        RadioGroup<FullDiffInitialView>(
-                          groupValue: _settings.fullDiffInitialView,
-                          onChanged: (value) {
-                            if (value != null) {
-                              _change(
-                                _settings.copyWith(fullDiffInitialView: value),
-                              );
-                            }
-                          },
-                          child: const Column(
-                            children: [
-                              RadioListTile(
-                                value: FullDiffInitialView.hunk,
-                                title: Text('Hunk'),
-                              ),
-                              RadioListTile(
-                                value: FullDiffInitialView.fullFile,
-                                title: Text(
-                                  'Full file focused on first change',
-                                ),
-                              ),
-                            ],
-                          ),
                         ),
                         const SizedBox(height: 24),
                         _laneColors(),

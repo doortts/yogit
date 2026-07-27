@@ -23,7 +23,6 @@ void main() {
         repository: repository,
         commits: const [commitA],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
         encodingCache: FullDiffEncodingCache(),
       );
 
@@ -35,10 +34,10 @@ void main() {
       expect(controller.state.encodingLabel, '');
       expect(controller.state.richRenderingEnabled, isFalse);
       controller
-        ..setView(FullDiffView.file)
-        ..setPresentation(DiffPresentation.split);
-      expect(controller.state.view, FullDiffView.file);
-      expect(controller.state.presentation, DiffPresentation.split);
+        ..setView(FullDiffView.diff)
+        ..setLayout(DiffLayout.sideBySide);
+      expect(controller.state.view, FullDiffView.diff);
+      expect(controller.state.layout, DiffLayout.sideBySide);
       expect(repository.diffRequests, hasLength(1));
 
       patch.complete(twoHunkLines);
@@ -68,7 +67,6 @@ void main() {
       repository: firstRepository,
       commits: const [commitA],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
       encodingCache: encodingCache,
     );
     addTearDown(first.dispose);
@@ -88,7 +86,6 @@ void main() {
       repository: secondRepository,
       commits: const [commitA],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
       encodingCache: encodingCache,
     );
     addTearDown(second.dispose);
@@ -114,7 +111,6 @@ void main() {
       repository: firstRepository,
       commits: const [_workingTreeCommit],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
       encodingCache: encodingCache,
     );
     addTearDown(first.dispose);
@@ -134,7 +130,6 @@ void main() {
       repository: secondRepository,
       commits: const [_workingTreeCommit],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
       encodingCache: encodingCache,
     );
     addTearDown(second.dispose);
@@ -159,7 +154,6 @@ void main() {
       repository: firstRepository,
       commits: const [_workingTreeCommit],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
       encodingCache: encodingCache,
     );
     addTearDown(first.dispose);
@@ -176,7 +170,6 @@ void main() {
       repository: secondRepository,
       commits: const [_workingTreeCommit],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
       encodingCache: encodingCache,
     );
     addTearDown(second.dispose);
@@ -223,7 +216,6 @@ void main() {
       repository: repository,
       commits: const [commitA],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     final firstLoad = controller.initialize();
     await Future<void>.delayed(Duration.zero);
@@ -282,7 +274,6 @@ void main() {
         repository: repository,
         commits: const [commitA],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
       await controller.initialize();
       controller.setView(FullDiffView.history);
@@ -329,7 +320,6 @@ void main() {
         repository: repository,
         commits: const [commitA],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
       await controller.initialize();
       final successful = controller.state.patch.data;
@@ -360,7 +350,6 @@ void main() {
       repository: repository,
       commits: const [commitA],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     addTearDown(controller.dispose);
     await controller.initialize();
@@ -380,7 +369,6 @@ void main() {
       repository: FakeFullDiffRepository(),
       commits: const [commitA],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     addTearDown(controller.dispose);
 
@@ -401,7 +389,6 @@ void main() {
       repository: repository,
       commits: const [commitA],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
       initialPreferences: const FullDiffPreferences(),
     );
     addTearDown(controller.dispose);
@@ -428,7 +415,6 @@ void main() {
       repository: repository,
       commits: const [commitA],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
 
     final loading = controller.initialize();
@@ -474,7 +460,6 @@ void main() {
         repository: repository,
         commits: const [commitA],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
 
       final loading = controller.initialize();
@@ -518,7 +503,6 @@ void main() {
       repository: repository,
       commits: commits,
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     await controller.initialize();
     for (final commit in commits.skip(1)) {
@@ -564,7 +548,6 @@ void main() {
         repository: repository,
         commits: const [commitA],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
       await controller.initialize();
       await controller.selectHistoryEntry(
@@ -624,7 +607,6 @@ void main() {
         repository: repository,
         commits: const [commitA],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
 
       expect(controller.state.selectedHistoryEntry, isNull);
@@ -694,7 +676,6 @@ void main() {
         repository: repository,
         commits: const [commitA],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
       await controller.initialize();
       controller.setView(FullDiffView.history);
@@ -762,7 +743,6 @@ void main() {
         repository: repository,
         commits: const [commitA],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
       await controller.initialize();
       controller.setView(FullDiffView.history);
@@ -815,7 +795,6 @@ void main() {
       repository: repository,
       commits: const [commitA],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     await controller.initialize();
     controller.setView(FullDiffView.history);
@@ -883,7 +862,6 @@ void main() {
         repository: repository,
         commits: const [commitA],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
       await controller.initialize();
       controller.setView(FullDiffView.history);
@@ -938,7 +916,6 @@ void main() {
         repository: repository,
         commits: const [commitA],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
       await controller.initialize();
       controller.setView(FullDiffView.history);
@@ -972,7 +949,6 @@ void main() {
         repository: repository,
         commits: const [commitA, historyCommitB],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
       await controller.initialize();
       controller.setView(FullDiffView.history);
@@ -1010,7 +986,6 @@ void main() {
       repository: repository,
       commits: const [commitA],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     await controller.initialize();
     controller.setView(FullDiffView.history);
@@ -1065,7 +1040,6 @@ void main() {
         repository: repository,
         commits: const [commitA],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
       await controller.initialize();
       controller.setView(FullDiffView.history);
@@ -1117,7 +1091,6 @@ void main() {
         repository: repository,
         commits: const [commitA],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
       await controller.initialize();
       controller.setView(FullDiffView.history);
@@ -1179,7 +1152,6 @@ void main() {
       repository: repository,
       commits: const [commitA],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     await controller.initialize();
     controller.setView(FullDiffView.history);

@@ -7,10 +7,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/full_diff_code_row.dart';
 import 'package:yogit/full_diff_header.dart';
 import 'package:yogit/full_diff_hunk_header.dart';
-import 'package:yogit/full_diff_hunk_view.dart';
-import 'package:yogit/full_diff_inline_view.dart';
+import 'package:yogit/full_diff_unified_view.dart';
 import 'package:yogit/full_diff_model.dart';
-import 'package:yogit/full_diff_split_view.dart';
+import 'package:yogit/full_diff_side_by_side_view.dart';
 import 'package:yogit/full_diff_syntax.dart';
 import 'package:yogit/full_diff_syntax_contract.dart';
 import 'package:yogit/full_diff_theme.dart';
@@ -367,36 +366,41 @@ void main() {
     },
   );
 
-  testWidgets('hunk shows only changed rows for the active block', (
+  testWidgets('unified hunk scope renders every hunk in source order', (
     tester,
   ) async {
     final anchorKeys = {
       for (final hunk in twoHunkDocument.hunks)
         hunk.anchor.id: GlobalKey(debugLabel: hunk.anchor.id),
     };
-    await pumpPresentation(
-      tester,
-      presentation: DiffPresentation.hunk,
-      document: twoHunkDocument,
-      activeAnchor: twoHunkDocument.hunks.last.anchor,
-      anchorKeys: anchorKeys,
+    await tester.pumpWidget(
+      qaApp(
+        SizedBox(
+          width: 640,
+          height: 420,
+          child: UnifiedPresentationView(
+            document: twoHunkDocument,
+            activeAnchor: twoHunkDocument.hunks.last.anchor,
+            path: fileA.path,
+            wrapLines: false,
+            highlighter: fakeHighlighter,
+            anchorKeys: anchorKeys,
+          ),
+        ),
+      ),
     );
 
+    expect(find.text('first old'), findsOneWidget);
+    expect(find.text('first new'), findsOneWidget);
     expect(find.text('second old'), findsOneWidget);
     expect(find.text('second new'), findsOneWidget);
-    expect(find.text('second context'), findsNothing);
-    expect(find.text('first old'), findsNothing);
     expect(
-      find.text('SetupBase · lines 20–21 · change 2 of 2'),
-      findsOneWidget,
-    );
-    expect(
-      anchorKeys[twoHunkDocument.hunks.last.anchor.id]!.currentContext,
-      isNotNull,
+      tester.getTopLeft(find.text('first old')).dy,
+      lessThan(tester.getTopLeft(find.text('second old')).dy),
     );
   });
 
-  testWidgets('an unwrapped hunk shares one movable horizontal scroll', (
+  testWidgets('unwrapped unified rows keep their source horizontally movable', (
     tester,
   ) async {
     final document = DiffDocument.fromLines([
@@ -417,7 +421,7 @@ void main() {
         SizedBox(
           width: 320,
           height: 180,
-          child: HunkPresentationView(
+          child: UnifiedPresentationView(
             document: document,
             activeAnchor: document.hunks.single.anchor,
             path: fileA.path,
@@ -434,31 +438,11 @@ void main() {
       (widget) =>
           widget is Scrollable && widget.axisDirection == AxisDirection.right,
     );
-    expect(horizontal, findsOneWidget);
-    final position = tester.state<ScrollableState>(horizontal).position;
+    expect(horizontal, findsNWidgets(2));
+    final position = tester.state<ScrollableState>(horizontal.last).position;
     expect(position.maxScrollExtent, greaterThan(0));
-    final horizontalView = tester
-        .widgetList<SingleChildScrollView>(find.byType(SingleChildScrollView))
-        .singleWhere((view) => view.scrollDirection == Axis.horizontal);
-    final content = horizontalView.child! as SizedBox;
-    final painter = TextPainter(
-      text: TextSpan(
-        text: document.hunks.single.changedLines.last.text,
-        style: const TextStyle(
-          fontFamily: technicalFontFamily,
-          fontFamilyFallback: technicalFontFallback,
-          fontSize: 12,
-          height: 21 / 12,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    expect(
-      content.width,
-      closeTo(fullDiffLineNumberWidth + painter.width + 20, 0.01),
-    );
 
-    await tester.drag(horizontal, const Offset(-160, 0));
+    await tester.drag(horizontal.last, const Offset(-160, 0));
     await tester.pumpAndSettle();
 
     expect(position.pixels, greaterThan(0));
@@ -466,13 +450,13 @@ void main() {
     position.jumpTo(position.maxScrollExtent);
     await tester.pump();
     final lastSource = find.descendant(
-      of: find.byKey(Key('hunk-line-${document.hunks.single.anchor.id}-1')),
+      of: find.byKey(const Key('unified-line-0-1')),
       matching: find.byKey(const Key('code-row-source-text')),
     );
     expect(lastSource, findsOneWidget);
     expect(
       tester.getRect(lastSource).right,
-      lessThanOrEqualTo(tester.getRect(horizontal).right),
+      lessThanOrEqualTo(tester.getRect(horizontal.last).right),
     );
   });
 
@@ -481,17 +465,17 @@ void main() {
   ) async {
     await pumpPresentation(
       tester,
-      presentation: DiffPresentation.inline,
+      layout: DiffLayout.unified,
       document: twoHunkDocument,
     );
 
-    expect(find.byKey(const Key('inline-hunk-0')), findsOneWidget);
-    expect(find.byKey(const Key('inline-hunk-1')), findsOneWidget);
+    expect(find.byKey(const Key('unified-hunk-0')), findsOneWidget);
+    expect(find.byKey(const Key('unified-hunk-1')), findsOneWidget);
     expect(find.text('context before 3'), findsOneWidget);
     expect(find.text('context after 3'), findsOneWidget);
     expect(
       find.descendant(
-        of: find.byKey(const Key('inline-hunk-0')),
+        of: find.byKey(const Key('unified-hunk-0')),
         matching: find.text('10'),
       ),
       findsOneWidget,
@@ -522,7 +506,7 @@ void main() {
         SizedBox(
           width: 800,
           height: 200,
-          child: InlinePresentationView(
+          child: UnifiedPresentationView(
             document: twoHunkDocument,
             activeAnchor: twoHunkDocument.hunks.first.anchor,
             path: fileA.path,
@@ -559,12 +543,12 @@ void main() {
     final anchorKey = GlobalKey(debugLabel: 'added-only-anchor');
     await pumpPresentation(
       tester,
-      presentation: DiffPresentation.split,
+      layout: DiffLayout.sideBySide,
       document: addedOnlyDocument,
       anchorKeys: {addedOnlyDocument.hunks.single.anchor.id: anchorKey},
     );
 
-    expect(find.byKey(const Key('split-missing-old-0')), findsOneWidget);
+    expect(find.byKey(const Key('side-by-side-missing-old-0')), findsOneWidget);
     expect(find.text('added line'), findsOneWidget);
     expect(anchorKey.currentContext, isNotNull);
   });
@@ -574,14 +558,14 @@ void main() {
   ) async {
     await pumpPresentation(
       tester,
-      presentation: DiffPresentation.split,
+      layout: DiffLayout.sideBySide,
       document: twoHunkDocument,
     );
 
     final header = find.text('Configure · lines 10–16 · change 1 of 2');
     expect(
       find.descendant(
-        of: find.byKey(const Key('split-hunk-0')),
+        of: find.byKey(const Key('side-by-side-hunk-0')),
         matching: find.text('10'),
       ),
       findsNWidgets(2),
@@ -620,7 +604,7 @@ void main() {
     ]);
     await pumpPresentation(
       tester,
-      presentation: DiffPresentation.split,
+      layout: DiffLayout.sideBySide,
       document: document,
     );
 
@@ -656,9 +640,159 @@ void main() {
     expect(copied.single, isNot(contains('+')));
   });
 
-  for (final presentation in DiffPresentation.values) {
+  for (final layout in DiffLayout.values) {
+    testWidgets('${layout.name} lazily mounts a 600-line unwrapped hunk', (
+      tester,
+    ) async {
+      final document = DiffDocument.fromLines([
+        const DiffLine(
+          kind: DiffLineKind.hunk,
+          text: '@@ -1,300 +1,300 @@ large',
+        ),
+        for (var index = 1; index <= 300; index++) ...[
+          DiffLine(
+            kind: DiffLineKind.delete,
+            text: 'old $index ${'segment ' * 20}',
+            oldNumber: index,
+          ),
+          DiffLine(
+            kind: DiffLineKind.add,
+            text: 'new $index ${'segment ' * 20}',
+            newNumber: index,
+          ),
+        ],
+      ]);
+      final controller = ScrollController();
+      addTearDown(controller.dispose);
+      final highlighter = _CountingSyntaxHighlighter();
+      var wordDiffCalls = 0;
+      WordChangeRanges wordDiffer(String oldText, String newText) {
+        wordDiffCalls++;
+        return WordChangeRanges.empty;
+      }
+
+      final lastKey = switch (layout) {
+        DiffLayout.unified => const Key('unified-line-0-599'),
+        DiffLayout.sideBySide => const Key('side-by-side-row-0-299'),
+      };
+      final view = switch (layout) {
+        DiffLayout.unified => UnifiedPresentationView(
+          document: document,
+          activeAnchor: document.hunks.single.anchor,
+          path: fileA.path,
+          wrapLines: false,
+          highlighter: highlighter,
+          wordDiffer: wordDiffer,
+          anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
+          controller: controller,
+        ),
+        DiffLayout.sideBySide => SideBySidePresentationView(
+          document: document,
+          activeAnchor: document.hunks.single.anchor,
+          oldPath: fileA.path,
+          newPath: fileA.path,
+          wrapLines: false,
+          showOldSide: true,
+          highlighter: highlighter,
+          wordDiffer: wordDiffer,
+          anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
+          controller: controller,
+        ),
+      };
+
+      await tester.pumpWidget(
+        qaApp(SizedBox(width: 800, height: 200, child: view)),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(FullDiffCodeRow).evaluate().length, lessThan(80));
+      expect(highlighter.calls, lessThan(80));
+      expect(wordDiffCalls, lessThan(80));
+      expect(find.byKey(lastKey), findsNothing);
+      expect(find.byType(IntrinsicHeight), findsNothing);
+
+      controller.jumpTo(controller.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(lastKey), findsOneWidget);
+    });
+  }
+
+  for (final layout in DiffLayout.values) {
+    testWidgets('lazy ${layout.name} select all copies every source row', (
+      tester,
+    ) async {
+      final copied = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+            if (call.method == 'Clipboard.setData') {
+              copied.add(
+                (call.arguments as Map<Object?, Object?>)['text']! as String,
+              );
+            }
+            return null;
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(SystemChannels.platform, null),
+      );
+      final document = DiffDocument.fromLines([
+        const DiffLine(
+          kind: DiffLineKind.hunk,
+          text: '@@ -0,0 +1,600 @@ copy all',
+        ),
+        for (var index = 1; index <= 600; index++)
+          DiffLine(
+            kind: DiffLineKind.add,
+            text: 'copy line $index',
+            newNumber: index,
+          ),
+      ]);
+      final view = switch (layout) {
+        DiffLayout.unified => UnifiedPresentationView(
+          document: document,
+          activeAnchor: document.hunks.single.anchor,
+          path: fileA.path,
+          wrapLines: false,
+          highlighter: fakeHighlighter,
+          anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
+        ),
+        DiffLayout.sideBySide => SideBySidePresentationView(
+          document: document,
+          activeAnchor: document.hunks.single.anchor,
+          oldPath: fileA.path,
+          newPath: fileA.path,
+          wrapLines: false,
+          showOldSide: true,
+          highlighter: fakeHighlighter,
+          anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
+        ),
+      };
+
+      await tester.pumpWidget(
+        qaApp(SizedBox(width: 800, height: 200, child: view)),
+      );
+      await tester.pumpAndSettle();
+      final firstSource = tester.element(find.text('copy line 1'));
+
+      Actions.invoke(
+        firstSource,
+        const SelectAllTextIntent(SelectionChangedCause.keyboard),
+      );
+      await tester.pump();
+      Actions.invoke(firstSource, CopySelectionTextIntent.copy);
+      await tester.pump();
+
+      expect(copied, hasLength(1));
+      expect(copied.single.split('\n'), hasLength(600));
+      expect(copied.single, startsWith('copy line 1\n'));
+      expect(copied.single, endsWith('\ncopy line 600'));
+    });
+  }
+
+  for (final layout in DiffLayout.values) {
     testWidgets(
-      '${presentation.name} lazily mounts a 600-line unwrapped hunk',
+      '${layout.name} disables syntax and word diff for a large patch',
       (tester) async {
         final document = DiffDocument.fromLines([
           const DiffLine(
@@ -687,183 +821,8 @@ void main() {
           return WordChangeRanges.empty;
         }
 
-        final lastKey = switch (presentation) {
-          DiffPresentation.hunk => Key(
-            'hunk-line-${document.hunks.single.anchor.id}-599',
-          ),
-          DiffPresentation.inline => const Key('inline-line-0-599'),
-          DiffPresentation.split => const Key('split-row-0-299'),
-        };
-        final view = switch (presentation) {
-          DiffPresentation.hunk => HunkPresentationView(
-            document: document,
-            activeAnchor: document.hunks.single.anchor,
-            path: fileA.path,
-            wrapLines: false,
-            highlighter: highlighter,
-            wordDiffer: wordDiffer,
-            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
-            controller: controller,
-          ),
-          DiffPresentation.inline => InlinePresentationView(
-            document: document,
-            activeAnchor: document.hunks.single.anchor,
-            path: fileA.path,
-            wrapLines: false,
-            highlighter: highlighter,
-            wordDiffer: wordDiffer,
-            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
-            controller: controller,
-          ),
-          DiffPresentation.split => SplitPresentationView(
-            document: document,
-            activeAnchor: document.hunks.single.anchor,
-            oldPath: fileA.path,
-            newPath: fileA.path,
-            wrapLines: false,
-            showOldSide: true,
-            highlighter: highlighter,
-            wordDiffer: wordDiffer,
-            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
-            controller: controller,
-          ),
-        };
-
-        await tester.pumpWidget(
-          qaApp(SizedBox(width: 800, height: 200, child: view)),
-        );
-        await tester.pumpAndSettle();
-
-        expect(find.byType(FullDiffCodeRow).evaluate().length, lessThan(80));
-        expect(highlighter.calls, lessThan(80));
-        expect(wordDiffCalls, lessThan(80));
-        expect(find.byKey(lastKey), findsNothing);
-        expect(find.byType(IntrinsicHeight), findsNothing);
-
-        controller.jumpTo(controller.position.maxScrollExtent);
-        await tester.pumpAndSettle();
-
-        expect(find.byKey(lastKey), findsOneWidget);
-      },
-    );
-  }
-
-  for (final presentation in DiffPresentation.values) {
-    testWidgets(
-      'lazy ${presentation.name} select all copies every source row',
-      (tester) async {
-        final copied = <String>[];
-        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-            .setMockMethodCallHandler(SystemChannels.platform, (call) async {
-              if (call.method == 'Clipboard.setData') {
-                copied.add(
-                  (call.arguments as Map<Object?, Object?>)['text']! as String,
-                );
-              }
-              return null;
-            });
-        addTearDown(
-          () => TestDefaultBinaryMessengerBinding
-              .instance
-              .defaultBinaryMessenger
-              .setMockMethodCallHandler(SystemChannels.platform, null),
-        );
-        final document = DiffDocument.fromLines([
-          const DiffLine(
-            kind: DiffLineKind.hunk,
-            text: '@@ -0,0 +1,600 @@ copy all',
-          ),
-          for (var index = 1; index <= 600; index++)
-            DiffLine(
-              kind: DiffLineKind.add,
-              text: 'copy line $index',
-              newNumber: index,
-            ),
-        ]);
-        final view = switch (presentation) {
-          DiffPresentation.hunk => HunkPresentationView(
-            document: document,
-            activeAnchor: document.hunks.single.anchor,
-            path: fileA.path,
-            wrapLines: false,
-            highlighter: fakeHighlighter,
-            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
-          ),
-          DiffPresentation.inline => InlinePresentationView(
-            document: document,
-            activeAnchor: document.hunks.single.anchor,
-            path: fileA.path,
-            wrapLines: false,
-            highlighter: fakeHighlighter,
-            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
-          ),
-          DiffPresentation.split => SplitPresentationView(
-            document: document,
-            activeAnchor: document.hunks.single.anchor,
-            oldPath: fileA.path,
-            newPath: fileA.path,
-            wrapLines: false,
-            showOldSide: true,
-            highlighter: fakeHighlighter,
-            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
-          ),
-        };
-
-        await tester.pumpWidget(
-          qaApp(SizedBox(width: 800, height: 200, child: view)),
-        );
-        await tester.pumpAndSettle();
-        final firstSource = tester.element(find.text('copy line 1'));
-
-        Actions.invoke(
-          firstSource,
-          const SelectAllTextIntent(SelectionChangedCause.keyboard),
-        );
-        await tester.pump();
-        Actions.invoke(firstSource, CopySelectionTextIntent.copy);
-        await tester.pump();
-
-        expect(copied, hasLength(1));
-        expect(copied.single.split('\n'), hasLength(600));
-        expect(copied.single, startsWith('copy line 1\n'));
-        expect(copied.single, endsWith('\ncopy line 600'));
-      },
-    );
-  }
-
-  for (final presentation in DiffPresentation.values) {
-    testWidgets(
-      '${presentation.name} disables syntax and word diff for a large patch',
-      (tester) async {
-        final document = DiffDocument.fromLines([
-          const DiffLine(
-            kind: DiffLineKind.hunk,
-            text: '@@ -1,300 +1,300 @@ large',
-          ),
-          for (var index = 1; index <= 300; index++) ...[
-            DiffLine(
-              kind: DiffLineKind.delete,
-              text: 'old $index ${'segment ' * 20}',
-              oldNumber: index,
-            ),
-            DiffLine(
-              kind: DiffLineKind.add,
-              text: 'new $index ${'segment ' * 20}',
-              newNumber: index,
-            ),
-          ],
-        ]);
-        final controller = ScrollController();
-        addTearDown(controller.dispose);
-        final highlighter = _CountingSyntaxHighlighter();
-        var wordDiffCalls = 0;
-        WordChangeRanges wordDiffer(String oldText, String newText) {
-          wordDiffCalls++;
-          return WordChangeRanges.empty;
-        }
-
-        final view = switch (presentation) {
-          DiffPresentation.hunk => HunkPresentationView(
+        final view = switch (layout) {
+          DiffLayout.unified => UnifiedPresentationView(
             document: document,
             activeAnchor: document.hunks.single.anchor,
             path: fileA.path,
@@ -874,18 +833,7 @@ void main() {
             anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
             controller: controller,
           ),
-          DiffPresentation.inline => InlinePresentationView(
-            document: document,
-            activeAnchor: document.hunks.single.anchor,
-            path: fileA.path,
-            wrapLines: false,
-            richRenderingEnabled: false,
-            highlighter: highlighter,
-            wordDiffer: wordDiffer,
-            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
-            controller: controller,
-          ),
-          DiffPresentation.split => SplitPresentationView(
+          DiffLayout.sideBySide => SideBySidePresentationView(
             document: document,
             activeAnchor: document.hunks.single.anchor,
             oldPath: fileA.path,
@@ -925,7 +873,7 @@ void main() {
       qaApp(
         SizedBox(
           width: 400,
-          child: SplitPresentationView(
+          child: SideBySidePresentationView(
             document: deletedOnlyDocument,
             activeAnchor: deletedOnlyDocument.hunks.single.anchor,
             oldPath: fileA.path,
@@ -942,17 +890,17 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('split-missing-new-0')), findsOneWidget);
+    expect(find.byKey(const Key('side-by-side-missing-new-0')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('hunk empty state and one lazy selection boundary are explicit', (
     tester,
   ) async {
-    for (final presentation in DiffPresentation.values) {
+    for (final layout in DiffLayout.values) {
       await pumpPresentation(
         tester,
-        presentation: presentation,
+        layout: layout,
         document: DiffDocument.fromLines(const []),
       );
       expect(find.text('현재 옵션으로 표시할 변경이 없습니다'), findsOneWidget);
@@ -964,7 +912,7 @@ void main() {
 
     await pumpPresentation(
       tester,
-      presentation: DiffPresentation.inline,
+      layout: DiffLayout.unified,
       document: twoHunkDocument,
     );
     expect(find.byType(SelectionArea), findsOneWidget);
@@ -1278,7 +1226,7 @@ Future<void> _dragSelection(
 
 Future<void> pumpPresentation(
   WidgetTester tester, {
-  required DiffPresentation presentation,
+  required DiffLayout layout,
   required DiffDocument document,
   DiffAnchor? activeAnchor,
   Map<String, GlobalKey>? anchorKeys,
@@ -1286,8 +1234,8 @@ Future<void> pumpPresentation(
   final resolvedAnchorKeys =
       anchorKeys ??
       {for (final hunk in document.hunks) hunk.anchor.id: GlobalKey()};
-  final child = switch (presentation) {
-    DiffPresentation.hunk => HunkPresentationView(
+  final child = switch (layout) {
+    DiffLayout.unified => UnifiedPresentationView(
       document: document,
       activeAnchor:
           activeAnchor ??
@@ -1297,17 +1245,7 @@ Future<void> pumpPresentation(
       highlighter: fakeHighlighter,
       anchorKeys: resolvedAnchorKeys,
     ),
-    DiffPresentation.inline => InlinePresentationView(
-      document: document,
-      activeAnchor:
-          activeAnchor ??
-          (document.hunks.isEmpty ? null : document.hunks.first.anchor),
-      path: fileA.path,
-      wrapLines: false,
-      highlighter: fakeHighlighter,
-      anchorKeys: resolvedAnchorKeys,
-    ),
-    DiffPresentation.split => SplitPresentationView(
+    DiffLayout.sideBySide => SideBySidePresentationView(
       document: document,
       activeAnchor:
           activeAnchor ??

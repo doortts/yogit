@@ -9,10 +9,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/diff_screen.dart';
 import 'package:yogit/full_diff_controller.dart';
 import 'package:yogit/full_diff_header.dart';
-import 'package:yogit/full_diff_hunk_view.dart';
 import 'package:yogit/full_diff_minimap.dart';
 import 'package:yogit/full_diff_model.dart';
+import 'package:yogit/full_diff_side_by_side_view.dart';
 import 'package:yogit/full_diff_theme.dart';
+import 'package:yogit/full_diff_unified_view.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/settings.dart';
 
@@ -460,7 +461,8 @@ FocusNode focusQaHistoryRow(WidgetTester tester, String sha) {
 
 Future<FullDiffSessionController> qaControllerFor({
   FullDiffView view = FullDiffView.diff,
-  DiffPresentation presentation = DiffPresentation.hunk,
+  DiffLayout layout = DiffLayout.unified,
+  DiffScope scope = DiffScope.hunks,
   bool focusMode = false,
   bool ignoreWhitespace = false,
   bool wrapLines = false,
@@ -485,12 +487,16 @@ Future<FullDiffSessionController> qaControllerFor({
     repository: repository,
     commits: qaCommits,
     initialIndex: 1,
-    initialView: FullDiffInitialView.hunk,
+    initialPreferences: FullDiffPreferences(
+      view: view,
+      layout: layout,
+      scope: scope,
+    ),
   );
   await controller.initialize();
   controller
     ..setView(view)
-    ..setPresentation(presentation)
+    ..setLayout(layout)
     ..setFocusMode(focusMode)
     ..setWrapLines(wrapLines);
   if (ignoreWhitespace) await controller.setIgnoreWhitespace(true);
@@ -546,7 +552,6 @@ class FullDiffQaProductShell extends StatelessWidget {
             repository: controller.repository,
             commits: controller.state.nearbyCommits,
             initialIndex: 0,
-            initialView: FullDiffInitialView.hunk,
             controller: controller,
             columnWidths: finalPolishGeometry
                 ? const FullDiffColumnWidths(files: 278)
@@ -665,7 +670,8 @@ class _FullDiffQaDetailState extends State<FullDiffQaDetail> {
               children: [
                 GlobalDiffToolbar(
                   view: state.view,
-                  presentation: state.presentation,
+                  layout: state.layout,
+                  hunkEnabled: state.requestedScope == DiffScope.hunks,
                   activeIndex: state.activeAnchor?.hunkIndex ?? 0,
                   anchorCount: patch.hunks.length,
                   algorithm: state.requestedAlgorithm,
@@ -673,7 +679,10 @@ class _FullDiffQaDetailState extends State<FullDiffQaDetail> {
                   wrapLines: state.wrapLines,
                   loadingPatch: state.patch.loading,
                   showLeadingControls: false,
-                  onPresentationSelected: controller.setPresentation,
+                  onLayoutSelected: controller.setLayout,
+                  onHunkChanged: (enabled) => controller.setScope(
+                    enabled ? DiffScope.hunks : DiffScope.fullFile,
+                  ),
                   onPrevious: () => controller.stepAnchor(-1),
                   onNext: () => controller.stepAnchor(1),
                   onAlgorithmSelected: controller.selectAlgorithm,
@@ -684,15 +693,32 @@ class _FullDiffQaDetailState extends State<FullDiffQaDetail> {
                   child: Row(
                     children: [
                       Expanded(
-                        child: HunkPresentationView(
-                          document: patch,
-                          activeAnchor: state.activeAnchor,
-                          path: state.selectedFile?.path ?? 'src/drlua.pas',
-                          wrapLines: state.wrapLines,
-                          highlighter: const NoopSyntaxHighlighter(),
-                          anchorKeys: anchorKeys,
-                          controller: _scrollController,
-                        ),
+                        child: switch (state.layout) {
+                          DiffLayout.unified => UnifiedPresentationView(
+                            document: patch,
+                            activeAnchor: state.activeAnchor,
+                            path: state.selectedFile?.path ?? 'src/drlua.pas',
+                            wrapLines: state.wrapLines,
+                            highlighter: const NoopSyntaxHighlighter(),
+                            anchorKeys: anchorKeys,
+                            controller: _scrollController,
+                          ),
+                          DiffLayout.sideBySide => SideBySidePresentationView(
+                            document: patch,
+                            activeAnchor: state.activeAnchor,
+                            oldPath:
+                                state.selectedFile?.oldPath ??
+                                state.selectedFile?.path ??
+                                'src/drlua.pas',
+                            newPath:
+                                state.selectedFile?.path ?? 'src/drlua.pas',
+                            wrapLines: state.wrapLines,
+                            showOldSide: true,
+                            highlighter: const NoopSyntaxHighlighter(),
+                            anchorKeys: anchorKeys,
+                            controller: _scrollController,
+                          ),
+                        },
                       ),
                       SizedBox(
                         width: fullDiffMinimapWidth,
@@ -702,7 +728,6 @@ class _FullDiffQaDetailState extends State<FullDiffQaDetail> {
                           sourceLineCount: patch.sourceLineCount,
                           sourceSide: FileDocumentSide.result,
                           view: state.view,
-                          presentation: state.presentation,
                           scrollController: _scrollController,
                           onAnchorSelected: controller.selectAnchor,
                           onScrollFractionChanged: _scrollToFraction,

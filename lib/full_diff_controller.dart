@@ -83,7 +83,6 @@ class FullDiffSessionState {
     required this.selectedFile,
     required this.view,
     required this.layout,
-    required this.presentation,
     required this.activeAnchor,
     required this.requestedScope,
     required this.appliedScope,
@@ -112,7 +111,6 @@ class FullDiffSessionState {
   final GitFileChange? selectedFile;
   final FullDiffView view;
   final DiffLayout layout;
-  final DiffPresentation presentation;
   final DiffAnchor? activeAnchor;
   final DiffScope requestedScope;
   final DiffScope appliedScope;
@@ -147,7 +145,7 @@ class FullDiffSessionState {
   }
 
   FullDiffPreferences get preferences => FullDiffPreferences(
-    view: view == FullDiffView.file ? FullDiffView.diff : view,
+    view: view,
     layout: layout,
     scope: appliedScope,
     algorithm: appliedAlgorithm,
@@ -163,7 +161,6 @@ class FullDiffSessionState {
     Object? selectedFile = _unset,
     FullDiffView? view,
     DiffLayout? layout,
-    DiffPresentation? presentation,
     Object? activeAnchor = _unset,
     DiffScope? requestedScope,
     DiffScope? appliedScope,
@@ -193,7 +190,6 @@ class FullDiffSessionState {
         : selectedFile as GitFileChange?,
     view: view ?? this.view,
     layout: layout ?? this.layout,
-    presentation: presentation ?? this.presentation,
     activeAnchor: identical(activeAnchor, _unset)
         ? this.activeAnchor
         : activeAnchor as DiffAnchor?,
@@ -291,8 +287,7 @@ class _LruFutureCache<K, V> {
 FullDiffSessionState _initialState(
   List<GitCommit> commits,
   int initialIndex,
-  FullDiffInitialView initialView,
-  FullDiffPreferences? initialPreferences,
+  FullDiffPreferences initialPreferences,
 ) {
   if (commits.isEmpty) {
     throw ArgumentError.value(commits, 'commits', 'must not be empty');
@@ -300,13 +295,6 @@ FullDiffSessionState _initialState(
   final nearbyCommits = List<GitCommit>.unmodifiable(commits);
   final selectedCommit =
       nearbyCommits[initialIndex.clamp(0, nearbyCommits.length - 1)];
-  final preferences =
-      initialPreferences ??
-      FullDiffPreferences(
-        view: initialView == FullDiffInitialView.fullFile
-            ? FullDiffView.file
-            : FullDiffView.diff,
-      );
   return FullDiffSessionState(
     nearbyCommits: nearbyCommits,
     selectedCommit: selectedCommit,
@@ -315,17 +303,16 @@ FullDiffSessionState _initialState(
         : selectedCommit.parents.first,
     files: const [],
     selectedFile: null,
-    view: preferences.view,
-    layout: preferences.layout,
-    presentation: DiffPresentation.hunk,
+    view: initialPreferences.view,
+    layout: initialPreferences.layout,
     activeAnchor: null,
-    requestedScope: preferences.scope,
-    appliedScope: preferences.scope,
-    requestedAlgorithm: preferences.algorithm,
-    appliedAlgorithm: preferences.algorithm,
-    requestedIgnoreWhitespace: preferences.ignoreWhitespace,
-    appliedIgnoreWhitespace: preferences.ignoreWhitespace,
-    wrapLines: preferences.wrapLines,
+    requestedScope: initialPreferences.scope,
+    appliedScope: initialPreferences.scope,
+    requestedAlgorithm: initialPreferences.algorithm,
+    appliedAlgorithm: initialPreferences.algorithm,
+    requestedIgnoreWhitespace: initialPreferences.ignoreWhitespace,
+    appliedIgnoreWhitespace: initialPreferences.ignoreWhitespace,
+    wrapLines: initialPreferences.wrapLines,
     focusMode: false,
     filesResource: const AsyncResource(),
     patch: const AsyncResource(),
@@ -355,16 +342,10 @@ class FullDiffSessionController extends ChangeNotifier {
     required this.repository,
     required List<GitCommit> commits,
     required int initialIndex,
-    required FullDiffInitialView initialView,
-    FullDiffPreferences? initialPreferences,
+    FullDiffPreferences initialPreferences = const FullDiffPreferences(),
     FullDiffEncodingCache? encodingCache,
   }) : _encodingCache = encodingCache ?? FullDiffEncodingCache.shared,
-       state = _initialState(
-         commits,
-         initialIndex,
-         initialView,
-         initialPreferences,
-       ) {
+       state = _initialState(commits, initialIndex, initialPreferences) {
     _patchCache = _LruFutureCache(
       capacity: _cacheCapacity,
       sizeOf: _patchSize,
@@ -575,11 +556,6 @@ class FullDiffSessionController extends ChangeNotifier {
     _replace(state.copyWith(view: view));
     if (view == FullDiffView.blame) unawaited(_ensureBlame());
     if (view == FullDiffView.history) unawaited(_ensureHistory());
-  }
-
-  void setPresentation(DiffPresentation presentation) {
-    if (_disposed) return;
-    _replace(state.copyWith(presentation: presentation));
   }
 
   void setLayout(DiffLayout layout) {

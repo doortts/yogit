@@ -203,7 +203,6 @@ class FullDiffMinimap extends StatefulWidget {
     required this.sourceLineCount,
     required this.sourceSide,
     required this.view,
-    required this.presentation,
     required this.scrollController,
     required this.onAnchorSelected,
     required this.onScrollFractionChanged,
@@ -215,7 +214,6 @@ class FullDiffMinimap extends StatefulWidget {
   final int sourceLineCount;
   final FileDocumentSide sourceSide;
   final FullDiffView view;
-  final DiffPresentation presentation;
   final ScrollController scrollController;
   final ValueChanged<DiffAnchor> onAnchorSelected;
   final ValueChanged<double> onScrollFractionChanged;
@@ -239,7 +237,6 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
   double? _cachedHeight;
   FileDocumentSide? _cachedSourceSide;
   FullDiffView? _cachedView;
-  DiffPresentation? _cachedPresentation;
 
   @override
   void initState() {
@@ -270,19 +267,6 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
   }
 
   MinimapViewport? _viewport(double height) {
-    if (_usesAnchorDrag) {
-      final activeIndex = _activeHunkIndex;
-      final activeHunk =
-          activeIndex < 0 || activeIndex >= widget.document.hunks.length
-          ? null
-          : widget.document.hunks[activeIndex];
-      return hunkViewport(
-        hunk: activeHunk,
-        sourceSide: widget.sourceSide,
-        sourceLineCount: widget.sourceLineCount,
-        height: height,
-      );
-    }
     final position = _position;
     if (position == null) {
       return MinimapViewport(top: 0, height: math.max(0, height));
@@ -311,10 +295,6 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
         position.maxScrollExtent > 0;
   }
 
-  bool get _usesAnchorDrag =>
-      widget.view == FullDiffView.diff &&
-      widget.presentation == DiffPresentation.hunk;
-
   void _scheduleMetricsRebuild() {
     if (_metricsRebuildScheduled) return;
     _metricsRebuildScheduled = true;
@@ -339,10 +319,7 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
     final viewport = _viewport(height);
     final y = details.localPosition.dy;
     _draggingViewport =
-        !_usesAnchorDrag &&
-        _hasScrollableContent &&
-        viewport != null &&
-        viewport.contains(y);
+        _hasScrollableContent && viewport != null && viewport.contains(y);
     if (_draggingViewport) {
       _dragOffset = y - viewport!.top;
     } else {
@@ -414,8 +391,7 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
         _cachedSourceLineCount == widget.sourceLineCount &&
         _cachedHeight == height &&
         _cachedSourceSide == widget.sourceSide &&
-        _cachedView == widget.view &&
-        _cachedPresentation == widget.presentation) {
+        _cachedView == widget.view) {
       return cached;
     }
 
@@ -433,7 +409,6 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
     _cachedHeight = height;
     _cachedSourceSide = widget.sourceSide;
     _cachedView = widget.view;
-    _cachedPresentation = widget.presentation;
     return geometry;
   }
 

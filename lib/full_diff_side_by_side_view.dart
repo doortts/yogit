@@ -9,8 +9,8 @@ import 'full_diff_syntax_contract.dart';
 import 'full_diff_theme.dart';
 import 'git.dart';
 
-class SplitPresentationView extends StatelessWidget {
-  const SplitPresentationView({
+class SideBySidePresentationView extends StatelessWidget {
+  const SideBySidePresentationView({
     required this.document,
     required this.activeAnchor,
     required this.oldPath,
@@ -52,7 +52,7 @@ class SplitPresentationView extends StatelessWidget {
       );
     }
 
-    final items = _splitItems(document);
+    final items = _sideBySideItems(document);
     final allSourceText = [
       for (final item in items)
         if (item.pair case final pair?) _pairSourceText(pair, showOldSide),
@@ -60,6 +60,7 @@ class SplitPresentationView extends StatelessWidget {
     final list = FullDiffSelectionArea(
       allSourceText: allSourceText,
       child: ListView.builder(
+        key: const Key('side-by-side-list'),
         controller: controller,
         primary: controller == null,
         itemCount: items.length,
@@ -69,8 +70,8 @@ class SplitPresentationView extends StatelessWidget {
           final current = activeAnchor?.hunkIndex == hunk.index;
           Widget child;
           if (item.pair case final pair?) {
-            child = _SplitRow(
-              key: Key('split-row-${hunk.index}-${item.pairIndex}'),
+            child = _SideBySideRow(
+              key: Key('side-by-side-row-${hunk.index}-${item.pairIndex}'),
               pair: pair,
               sourceRow: item.sourceRow!,
               oldPath: oldPath,
@@ -95,7 +96,7 @@ class SplitPresentationView extends StatelessWidget {
             child = KeyedSubtree(
               key: _anchorKey(hunk.anchor),
               child: KeyedSubtree(
-                key: Key('split-hunk-${hunk.index}'),
+                key: Key('side-by-side-hunk-${hunk.index}'),
                 child: child,
               ),
             );
@@ -110,7 +111,7 @@ class SplitPresentationView extends StatelessWidget {
       ),
     );
     return showOldSide
-        ? KeyedSubtree(key: const Key('split-old-pane'), child: list)
+        ? KeyedSubtree(key: const Key('side-by-side-old-pane'), child: list)
         : list;
   }
 
@@ -119,8 +120,8 @@ class SplitPresentationView extends StatelessWidget {
       (throw StateError('Missing GlobalKey for ${anchor.id}'));
 }
 
-List<_SplitItem> _splitItems(DiffDocument document) {
-  final items = <_SplitItem>[];
+List<_SideBySideItem> _sideBySideItems(DiffDocument document) {
+  final items = <_SideBySideItem>[];
   var sourceRow = 0;
   for (final hunk in document.hunks) {
     final pairs = pairDiff(hunk.lines);
@@ -134,7 +135,7 @@ List<_SplitItem> _splitItems(DiffDocument document) {
 
     void addPair(int pairIndex) {
       items.add(
-        _SplitItem(
+        _SideBySideItem(
           hunk: hunk,
           pair: pairs[pairIndex],
           pairIndex: pairIndex,
@@ -148,7 +149,7 @@ List<_SplitItem> _splitItems(DiffDocument document) {
     for (var index = 0; index < leadingContextCount; index++) {
       addPair(index);
     }
-    items.add(_SplitItem(hunk: hunk, firstInHunk: firstInHunk));
+    items.add(_SideBySideItem(hunk: hunk, firstInHunk: firstInHunk));
     firstInHunk = false;
     for (var index = leadingContextCount; index < pairs.length; index++) {
       addPair(index);
@@ -166,8 +167,8 @@ String _pairSourceText(DiffPair pair, bool showOldSide) {
   return '$left\t$right';
 }
 
-class _SplitItem {
-  const _SplitItem({
+class _SideBySideItem {
+  const _SideBySideItem({
     required this.hunk,
     this.pair,
     this.pairIndex,
@@ -182,8 +183,8 @@ class _SplitItem {
   final bool firstInHunk;
 }
 
-class _SplitRow extends StatelessWidget {
-  const _SplitRow({
+class _SideBySideRow extends StatelessWidget {
+  const _SideBySideRow({
     required this.pair,
     required this.sourceRow,
     required this.oldPath,
@@ -222,7 +223,7 @@ class _SplitRow extends StatelessWidget {
         current &&
         (left?.kind == DiffLineKind.delete || right?.kind == DiffLineKind.add);
     final newSide = right == null
-        ? HatchedDiffCell(key: Key('split-missing-new-$sourceRow'))
+        ? HatchedDiffCell(key: Key('side-by-side-missing-new-$sourceRow'))
         : FullDiffCodeRow(
             line: right,
             path: newPath,
@@ -245,7 +246,7 @@ class _SplitRow extends StatelessWidget {
       children: [
         Expanded(
           child: left == null
-              ? HatchedDiffCell(key: Key('split-missing-old-$sourceRow'))
+              ? HatchedDiffCell(key: Key('side-by-side-missing-old-$sourceRow'))
               : FullDiffCodeRow(
                   line: left,
                   path: oldPath,

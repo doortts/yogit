@@ -2532,22 +2532,13 @@ void main() {
     );
   });
 
-  test('full diff initial view round-trips and defaults to hunk', () {
-    const settings = AppSettings(
-      fullDiffInitialView: FullDiffInitialView.fullFile,
-    );
+  test('legacy full diff initial view is ignored in favor of preferences', () {
+    final settings = AppSettings.fromJson(const {
+      'fullDiffInitialView': 'fullFile',
+    });
 
-    expect(
-      AppSettings.fromJson(settings.toJson()).fullDiffInitialView,
-      FullDiffInitialView.fullFile,
-    );
-    expect(
-      AppSettings.fromJson(const {
-        'fullDiffInitialView': 'unknown',
-      }).fullDiffInitialView,
-      FullDiffInitialView.hunk,
-    );
-    expect(const AppSettings().fullDiffInitialView, FullDiffInitialView.hunk);
+    expect(settings.fullDiffPreferences, const FullDiffPreferences());
+    expect(settings.toJson(), isNot(contains('fullDiffInitialView')));
   });
 
   test('full diff preferences survive settings JSON', () {
@@ -2596,7 +2587,9 @@ void main() {
     expect(preferences, const FullDiffPreferences());
   });
 
-  testWidgets('settings exposes both full diff starting views', (tester) async {
+  testWidgets('settings removes legacy full diff starting views', (
+    tester,
+  ) async {
     final saved = <AppSettings>[];
     await tester.pumpWidget(
       MaterialApp(
@@ -2606,21 +2599,20 @@ void main() {
         ),
       ),
     );
-    await tester.ensureVisible(find.text('Full file focused on first change'));
-
-    expect(find.text('Hunk'), findsOneWidget);
-    expect(find.text('Full file focused on first change'), findsOneWidget);
-
-    await tester.tap(find.text('Full file focused on first change'));
-    await tester.pump();
-
-    expect(saved.last.fullDiffInitialView, FullDiffInitialView.fullFile);
+    expect(find.text('Hunk'), findsNothing);
+    expect(find.text('Full file focused on first change'), findsNothing);
+    expect(saved, isEmpty);
   });
 
-  testWidgets('full diff initial view applies only when opening a new screen', (
+  testWidgets('stored full diff preferences apply when opening a new screen', (
     tester,
   ) async {
-    final store = MemorySettingsStore();
+    const preferences = FullDiffPreferences(
+      layout: DiffLayout.sideBySide,
+      scope: DiffScope.fullFile,
+    );
+    final store = MemorySettingsStore()
+      ..current = const AppSettings(fullDiffPreferences: preferences);
     await tester.pumpWidget(
       YogitApp(
         repository: FakeGitRepository(
@@ -2637,25 +2629,8 @@ void main() {
     await tester.tap(find.byKey(const Key('toolbar-full-diff')));
     await tester.pumpAndSettle();
     expect(
-      tester.widget<DiffScreen>(find.byType(DiffScreen)).initialView,
-      FullDiffInitialView.hunk,
-    );
-
-    Navigator.of(tester.element(find.byType(DiffScreen))).pop();
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('open-settings')));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Full file focused on first change'));
-    await tester.tap(find.text('Full file focused on first change'));
-    await tester.pump();
-    await tester.tap(find.text('Done'));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
-    await tester.pumpAndSettle();
-    expect(
-      tester.widget<DiffScreen>(find.byType(DiffScreen)).initialView,
-      FullDiffInitialView.fullFile,
+      tester.widget<DiffScreen>(find.byType(DiffScreen)).initialPreferences,
+      preferences,
     );
   });
 
@@ -3158,11 +3133,12 @@ void main() {
     );
     expect(find.byKey(const Key('nearby-commits-list')), findsNothing);
     expect(find.byKey(const Key('changed-files-list')), findsOneWidget);
-    expect(find.byKey(const Key('hunk-list')), findsOneWidget);
+    expect(find.byKey(const Key('unified-list')), findsOneWidget);
     expect(find.textContaining('change 1 of 1'), findsOneWidget);
     expect(find.text('1 / 1'), findsWidgets);
-    expect(find.text('Unified'), findsNothing);
-    expect(find.text('Side-by-side'), findsNothing);
+    expect(find.text('Unified'), findsOneWidget);
+    expect(find.text('Side-by-side'), findsOneWidget);
+    expect(find.text('Hunk'), findsOneWidget);
     expect(find.text('diff 알고리즘'), findsOneWidget);
     expect(
       find.descendant(
@@ -3173,7 +3149,7 @@ void main() {
     );
     expect(
       tester.getTopLeft(find.byKey(const Key('changed-files-list'))).dx,
-      lessThan(tester.getTopLeft(find.byKey(const Key('hunk-list'))).dx),
+      lessThan(tester.getTopLeft(find.byKey(const Key('unified-list'))).dx),
     );
     expect(find.byKey(const Key('merge-parent-chooser')), findsOneWidget);
 
@@ -3547,8 +3523,6 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Inline'));
-    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('diff-algorithm')));
     await tester.pumpAndSettle();
     final minimalItem = find.ancestor(
@@ -3702,7 +3676,7 @@ void main() {
     expect(find.byKey(const Key('diff-error-without-document')), findsNothing);
   });
 
-  testWidgets('hunk blocks mark additions and deletions', (tester) async {
+  testWidgets('unified rows mark additions and deletions', (tester) async {
     final repository = FakeGitRepository(
       (_, _) async => [commit('1', 'commit')],
       files: (_, _) async => [
@@ -3730,8 +3704,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final deletion = find.byKey(const Key('hunk-line-hunk-0-1-1-0'));
-    final addition = find.byKey(const Key('hunk-line-hunk-0-1-1-1'));
+    final deletion = find.byKey(const Key('unified-line-0-0'));
+    final addition = find.byKey(const Key('unified-line-0-1'));
     expect(
       find.descendant(of: deletion, matching: find.text('−')),
       findsOneWidget,
@@ -3829,7 +3803,6 @@ void main() {
       repository: repository,
       commits: commits,
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     addTearDown(session.dispose);
     await session.initialize();
@@ -3941,9 +3914,6 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Inline'));
     await tester.pumpAndSettle();
 
     ScrollPosition contentPosition() => tester
@@ -6733,7 +6703,6 @@ void main() {
       repository: repository,
       commits: commits,
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     addTearDown(session.dispose);
     await session.initialize();
@@ -6754,8 +6723,8 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
     await tester.pumpAndSettle();
     expect(session.state.activeAnchor?.hunkIndex, 1);
-    final target = find.byKey(const Key('hunk-card-surface-hunk-1-10-10'));
-    final viewport = tester.getRect(find.byKey(const Key('hunk-list')));
+    final target = find.byKey(const Key('unified-hunk-1'));
+    final viewport = tester.getRect(find.byKey(const Key('unified-list')));
     final targetRect = tester.getRect(target);
     expect(targetRect.top, greaterThanOrEqualTo(viewport.top));
     expect(targetRect.bottom, lessThanOrEqualTo(viewport.bottom));
@@ -6828,7 +6797,6 @@ void main() {
       repository: repository,
       commits: commits,
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     addTearDown(session.dispose);
     await session.initialize();
@@ -6844,7 +6812,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    const targetKey = Key('hunk-card-surface-hunk-1-0-500');
+    const targetKey = Key('unified-hunk-1');
     expect(find.byKey(targetKey), findsNothing);
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
@@ -6855,7 +6823,7 @@ void main() {
     expect(session.state.activeAnchor?.hunkIndex, 1);
     final target = find.byKey(targetKey);
     expect(target, findsOneWidget);
-    final viewport = tester.getRect(find.byKey(const Key('hunk-list')));
+    final viewport = tester.getRect(find.byKey(const Key('unified-list')));
     final targetRect = tester.getRect(target);
     expect(targetRect.top, greaterThanOrEqualTo(viewport.top));
     expect(targetRect.bottom, lessThanOrEqualTo(viewport.bottom));
@@ -6916,11 +6884,10 @@ void main() {
       repository: repository,
       commits: commits,
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     addTearDown(session.dispose);
     await session.initialize();
-    session.setPresentation(DiffPresentation.inline);
+    session.setLayout(DiffLayout.unified);
     await tester.pumpWidget(
       MaterialApp(
         home: DiffScreen(
@@ -7047,13 +7014,12 @@ void main() {
       repository: repository,
       commits: commits,
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     addTearDown(session.dispose);
     await session.initialize();
     session
       ..setView(FullDiffView.history)
-      ..setPresentation(DiffPresentation.inline)
+      ..setLayout(DiffLayout.unified)
       ..setFocusMode(true);
     await tester.pumpWidget(
       MaterialApp(
@@ -7135,7 +7101,6 @@ void main() {
       repository: repository,
       commits: commits,
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     addTearDown(session.dispose);
     await session.initialize();
@@ -7151,7 +7116,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     final scroll = tester
-        .widget<ListView>(find.byKey(const Key('hunk-list')))
+        .widget<ListView>(find.byKey(const Key('unified-list')))
         .controller!;
     final selectedCommit = session.state.selectedCommit;
     final selectedFile = session.state.selectedFile;
@@ -7322,7 +7287,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.byKey(const Key('hunk-list')), findsOneWidget);
+    expect(find.byKey(const Key('unified-list')), findsOneWidget);
     expect(find.textContaining('change 1 of 1'), findsOneWidget);
     expect(find.text('diff --git a/x b/x'), findsNothing);
     expect(tester.takeException(), isNull);

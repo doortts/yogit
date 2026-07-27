@@ -9,16 +9,14 @@ import 'external_editor.dart';
 import 'full_blame_view.dart';
 import 'full_diff_controller.dart';
 import 'full_diff_header.dart';
-import 'full_diff_hunk_view.dart';
-import 'full_diff_inline_view.dart';
 import 'full_diff_minimap.dart';
 import 'full_diff_model.dart';
 import 'full_diff_selectable_row.dart';
-import 'full_diff_split_view.dart';
+import 'full_diff_side_by_side_view.dart';
 import 'full_diff_syntax.dart';
 import 'full_diff_theme.dart';
+import 'full_diff_unified_view.dart';
 import 'full_diff_unavailable_panel.dart';
-import 'full_file_view.dart';
 import 'full_history_view.dart';
 import 'full_history_workspace.dart';
 import 'git.dart';
@@ -62,7 +60,7 @@ class DiffScreen extends StatefulWidget {
     required this.repository,
     required this.commits,
     required this.initialIndex,
-    this.initialView = FullDiffInitialView.hunk,
+    this.initialPreferences = const FullDiffPreferences(),
     this.controller,
     this.columnWidths = const FullDiffColumnWidths(),
     this.onColumnWidthsChanged,
@@ -75,7 +73,7 @@ class DiffScreen extends StatefulWidget {
   final FullDiffRepository repository;
   final List<GitCommit> commits;
   final int initialIndex;
-  final FullDiffInitialView initialView;
+  final FullDiffPreferences initialPreferences;
   final FullDiffSessionController? controller;
   final FullDiffColumnWidths columnWidths;
   final ValueChanged<FullDiffColumnWidths>? onColumnWidthsChanged;
@@ -134,7 +132,7 @@ class _DiffScreenState extends State<DiffScreen> {
           repository: widget.repository,
           commits: widget.commits,
           initialIndex: widget.initialIndex,
-          initialView: widget.initialView,
+          initialPreferences: widget.initialPreferences,
         );
   }
 
@@ -167,7 +165,7 @@ class _DiffScreenState extends State<DiffScreen> {
         (!identical(widget.repository, oldWidget.repository) ||
             !identical(widget.commits, oldWidget.commits) ||
             widget.initialIndex != oldWidget.initialIndex ||
-            widget.initialView != oldWidget.initialView);
+            widget.initialPreferences != oldWidget.initialPreferences);
     if (editorContextChanged || controllerChanged || ownedInputsChanged) {
       _invalidateEditorRequest();
     }
@@ -214,8 +212,7 @@ class _DiffScreenState extends State<DiffScreen> {
         previous.selectedFile?.path != next.selectedFile?.path;
     final changedDocument = !identical(previous.patch.data, next.patch.data);
     final enteredSourceView =
-        previous.view != next.view &&
-        (next.view == FullDiffView.file || next.view == FullDiffView.blame);
+        previous.view != next.view && next.view == FullDiffView.blame;
     final previousIndex = previous.activeAnchor?.hunkIndex ?? 0;
     final nextIndex = next.activeAnchor?.hunkIndex ?? 0;
     final navigationRequested =
@@ -233,9 +230,7 @@ class _DiffScreenState extends State<DiffScreen> {
     }
     if (nextAnchor != null &&
         (enteredSourceView ||
-            (changedDocument &&
-                (next.view == FullDiffView.file ||
-                    next.view == FullDiffView.blame)))) {
+            (changedDocument && next.view == FullDiffView.blame))) {
       _pendingAnchorId = nextAnchor.id;
       _pendingAnchorDirection = nextIndex.compareTo(previousIndex);
     }
@@ -317,11 +312,10 @@ class _DiffScreenState extends State<DiffScreen> {
         _pendingAnchorId = null;
         _programmaticAnchorScroll = true;
         final state = _controller.state;
-        final alignment = switch ((state.view, state.presentation)) {
-          (FullDiffView.file || FullDiffView.blame, _) => 0.2,
-          (FullDiffView.diff, DiffPresentation.inline) ||
-          (FullDiffView.diff, DiffPresentation.split) => 0.0,
-          _ => 0.1,
+        final alignment = switch (state.view) {
+          FullDiffView.blame => 0.2,
+          FullDiffView.diff => 0.0,
+          FullDiffView.history => 0.1,
         };
         unawaited(
           _contentScroll.position
@@ -361,7 +355,7 @@ class _DiffScreenState extends State<DiffScreen> {
     DiffAnchor anchor,
     FullDiffSessionState state,
   ) {
-    if (state.view == FullDiffView.file || state.view == FullDiffView.blame) {
+    if (state.view == FullDiffView.blame) {
       final deleted = state.selectedFile?.status.startsWith('D') ?? false;
       final line = deleted ? anchor.oldLine : anchor.newLine;
       final lineCount =
@@ -651,14 +645,26 @@ class _DiffScreenState extends State<DiffScreen> {
                       ),
                       GlobalDiffToolbar(
                         view: state.view,
-                        presentation: state.presentation,
+                        layout: state.layout,
+                        hunkEnabled: state.requestedScope == DiffScope.hunks,
                         activeIndex: state.activeAnchor?.hunkIndex ?? 0,
                         anchorCount: state.patch.data?.hunks.length ?? 0,
                         algorithm: state.requestedAlgorithm,
                         ignoreWhitespace: state.requestedIgnoreWhitespace,
                         wrapLines: state.wrapLines,
                         loadingPatch: state.patch.loading,
-                        onPresentationSelected: _controller.setPresentation,
+                        onLayoutSelected: _controller.setLayout,
+                        onHunkChanged: (enabled) {
+                          unawaited(
+                            _controller
+                                .setScope(
+                                  enabled
+                                      ? DiffScope.hunks
+                                      : DiffScope.fullFile,
+                                )
+                                .catchError((_) {}),
+                          );
+                        },
                         onPrevious: () => _controller.stepAnchor(-1),
                         onNext: () => _controller.stepAnchor(1),
                         onAlgorithmSelected: (algorithm) {
@@ -962,7 +968,6 @@ class _DiffScreenState extends State<DiffScreen> {
                   sourceLineCount: _minimapSourceLineCount(state),
                   sourceSide: _minimapSourceSide(state),
                   view: state.view,
-                  presentation: state.presentation,
                   scrollController: _contentScroll,
                   onAnchorSelected: _controller.selectAnchor,
                   onScrollFractionChanged: _scrollContentToFraction,
@@ -991,50 +996,10 @@ class _DiffScreenState extends State<DiffScreen> {
 
   Widget _contentFor(FullDiffSessionState state, double viewportWidth) =>
       switch (state.view) {
-        FullDiffView.file => _fileContent(state),
         FullDiffView.diff => _diffContent(state, viewportWidth),
         FullDiffView.blame => _blameContent(state),
         FullDiffView.history => _historyContent(state),
       };
-
-  Widget _fileContent(FullDiffSessionState state) {
-    final file = state.file.data;
-    if (file == null) {
-      final selectedFile = state.selectedFile;
-      if (selectedFile != null && state.file.error != null) {
-        return _unavailablePanel(
-          state,
-          reason: FullDiffUnavailableReason.gitError,
-          path: selectedFile.status.startsWith('D')
-              ? selectedFile.oldPath ?? selectedFile.path
-              : selectedFile.path,
-          error: state.file.error,
-          onRetry: () => unawaited(_controller.retryFile()),
-        );
-      }
-      return _resourceStatus(state.file, '파일을 읽는 중입니다');
-    }
-    final unavailableReason = _unavailableReasonFor(file);
-    if (unavailableReason != null) {
-      return _unavailablePanel(
-        state,
-        reason: unavailableReason,
-        path: file.path,
-      );
-    }
-    return FullFileView(
-      document: file,
-      hunks: state.patch.data?.hunks ?? const [],
-      path: file.path,
-      activeAnchor: state.activeAnchor,
-      wrapLines: state.wrapLines,
-      highlighter: _highlighter,
-      anchorKeys: _anchorKeys,
-      onAnchorProbeAttached: _attachAnchorProbe,
-      onAnchorProbeDetached: _detachAnchorProbe,
-      controller: _contentScroll,
-    );
-  }
 
   Widget _diffContent(FullDiffSessionState state, double viewportWidth) {
     final patch = state.patch.data;
@@ -1092,8 +1057,8 @@ class _DiffScreenState extends State<DiffScreen> {
         state.patch.error,
       );
     }
-    final presentation = switch (state.presentation) {
-      DiffPresentation.hunk => HunkPresentationView(
+    final presentation = switch (state.layout) {
+      DiffLayout.unified => UnifiedPresentationView(
         document: patch,
         activeAnchor: state.activeAnchor,
         path: selectedFile.path,
@@ -1105,19 +1070,7 @@ class _DiffScreenState extends State<DiffScreen> {
         onAnchorProbeDetached: _detachAnchorProbe,
         controller: _contentScroll,
       ),
-      DiffPresentation.inline => InlinePresentationView(
-        document: patch,
-        activeAnchor: state.activeAnchor,
-        path: selectedFile.path,
-        wrapLines: state.wrapLines,
-        highlighter: _highlighter,
-        anchorKeys: _anchorKeys,
-        richRenderingEnabled: state.richRenderingEnabled,
-        onAnchorProbeAttached: _attachAnchorProbe,
-        onAnchorProbeDetached: _detachAnchorProbe,
-        controller: _contentScroll,
-      ),
-      DiffPresentation.split => SplitPresentationView(
+      DiffLayout.sideBySide => SideBySidePresentationView(
         document: patch,
         activeAnchor: state.activeAnchor,
         oldPath: selectedFile.oldPath ?? selectedFile.path,

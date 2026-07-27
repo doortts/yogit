@@ -298,7 +298,6 @@ void main() {
             sourceLineCount: 100,
             sourceSide: FileDocumentSide.result,
             view: FullDiffView.history,
-            presentation: DiffPresentation.hunk,
             scrollController: scrollController,
             onAnchorSelected: (_) {},
             onScrollFractionChanged: (_) {},
@@ -335,7 +334,6 @@ void main() {
                   sourceLineCount: 100,
                   sourceSide: FileDocumentSide.result,
                   view: FullDiffView.diff,
-                  presentation: DiffPresentation.inline,
                   scrollController: scrollController,
                   onAnchorSelected: (_) {},
                   onScrollFractionChanged: (_) => scrollCallbacks++,
@@ -402,7 +400,6 @@ void main() {
                 sourceLineCount: 2000,
                 sourceSide: FileDocumentSide.result,
                 view: FullDiffView.diff,
-                presentation: DiffPresentation.inline,
                 scrollController: scrollController,
                 onAnchorSelected: (_) {},
                 onScrollFractionChanged: (_) {},
@@ -441,7 +438,6 @@ void main() {
               sourceLineCount: 30,
               sourceSide: FileDocumentSide.result,
               view: FullDiffView.diff,
-              presentation: DiffPresentation.inline,
               scrollController: scrollController,
               onAnchorSelected: selected.add,
               onScrollFractionChanged: (_) {},
@@ -484,7 +480,6 @@ void main() {
               sourceLineCount: 30,
               sourceSide: FileDocumentSide.result,
               view: FullDiffView.diff,
-              presentation: DiffPresentation.inline,
               scrollController: scrollController,
               onAnchorSelected: (anchor) {
                 selected.add(anchor);
@@ -537,7 +532,6 @@ void main() {
                 sourceLineCount: 30,
                 sourceSide: FileDocumentSide.result,
                 view: FullDiffView.diff,
-                presentation: DiffPresentation.inline,
                 scrollController: scrollController,
                 onAnchorSelected: (anchor) {
                   selected.add(anchor);
@@ -582,7 +576,6 @@ void main() {
             sourceLineCount: 0,
             sourceSide: FileDocumentSide.result,
             view: FullDiffView.diff,
-            presentation: DiffPresentation.hunk,
             scrollController: scrollController,
             onAnchorSelected: (_) => anchorCallbacks++,
             onScrollFractionChanged: (_) => scrollCallbacks++,
@@ -600,7 +593,9 @@ void main() {
     expect(scrollCallbacks, 0);
   });
 
-  testWidgets('empty hunk minimap paints no viewport or ring', (tester) async {
+  testWidgets('empty diff minimap paints the full available viewport', (
+    tester,
+  ) async {
     final scrollController = ScrollController();
     addTearDown(scrollController.dispose);
 
@@ -614,7 +609,6 @@ void main() {
             sourceLineCount: 0,
             sourceSide: FileDocumentSide.result,
             view: FullDiffView.diff,
-            presentation: DiffPresentation.hunk,
             scrollController: scrollController,
             onAnchorSelected: (_) {},
             onScrollFractionChanged: (_) {},
@@ -628,23 +622,19 @@ void main() {
       painter.paint(canvas, const Size(fullDiffMinimapWidth, 100));
     }
 
-    expect(painter.viewport, isNull);
+    expect(painter.viewport?.top, 0);
+    expect(painter.viewport?.height, 100);
     expect(
       paint,
       paints
         ..rect(color: fullDiffMinimapTrack)
-        ..line(color: fullDiffDivider, strokeWidth: 1),
-    );
-    expect(paint, isNot(paints..rect(color: fullDiffMinimapViewport)));
-    expect(
-      paint,
-      isNot(
-        paints..rect(
+        ..line(color: fullDiffDivider, strokeWidth: 1)
+        ..rect(color: fullDiffMinimapViewport)
+        ..rect(
           color: fullDiffMinimapRing,
           strokeWidth: 1,
           style: PaintingStyle.stroke,
         ),
-      ),
     );
   });
 
@@ -674,7 +664,6 @@ void main() {
                 sourceLineCount: 100,
                 sourceSide: FileDocumentSide.result,
                 view: FullDiffView.diff,
-                presentation: DiffPresentation.inline,
                 scrollController: scrollController,
                 onAnchorSelected: (_) => anchorCallbacks++,
                 onScrollFractionChanged: fractions.add,
@@ -702,36 +691,8 @@ void main() {
   });
 
   for (final scenario in [
-    (
-      label: 'hunk',
-      view: FullDiffView.diff,
-      presentation: DiffPresentation.hunk,
-      scrolls: false,
-    ),
-    (
-      label: 'inline',
-      view: FullDiffView.diff,
-      presentation: DiffPresentation.inline,
-      scrolls: true,
-    ),
-    (
-      label: 'split',
-      view: FullDiffView.diff,
-      presentation: DiffPresentation.split,
-      scrolls: true,
-    ),
-    (
-      label: 'file',
-      view: FullDiffView.file,
-      presentation: DiffPresentation.hunk,
-      scrolls: true,
-    ),
-    (
-      label: 'blame',
-      view: FullDiffView.blame,
-      presentation: DiffPresentation.hunk,
-      scrolls: true,
-    ),
+    (label: 'diff', view: FullDiffView.diff),
+    (label: 'blame', view: FullDiffView.blame),
   ]) {
     testWidgets('${scenario.label} viewport drag uses the correct callback', (
       tester,
@@ -759,7 +720,6 @@ void main() {
                   sourceLineCount: 100,
                   sourceSide: FileDocumentSide.result,
                   view: scenario.view,
-                  presentation: scenario.presentation,
                   scrollController: scrollController,
                   onAnchorSelected: selected.add,
                   onScrollFractionChanged: fractions.add,
@@ -779,8 +739,8 @@ void main() {
       await tester.pump();
       await gesture.up();
 
-      expect(fractions, scenario.scrolls ? isNotEmpty : isEmpty);
-      expect(selected, scenario.scrolls ? isEmpty : isNotEmpty);
+      expect(fractions, isNotEmpty);
+      expect(selected, isEmpty);
     });
   }
 }

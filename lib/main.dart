@@ -280,7 +280,7 @@ class _YogitAppState extends State<YogitApp> {
         preferredPreviewPlacement: _settings.previewPlacement,
         columnWidths: _settings.columnWidths,
         fullDiffColumnWidths: _settings.fullDiffColumnWidths,
-        fullDiffInitialView: _settings.fullDiffInitialView,
+        fullDiffPreferences: _settings.fullDiffPreferences,
         previewWidth: _settings.previewWidth,
         previewHeight: _settings.previewHeight,
         onOpenSettings: _settingsLoaded ? () => _openSettings(context) : null,

@@ -7,13 +7,9 @@ import 'package:yogit/git.dart';
 
 export 'package:yogit/full_diff_limits.dart';
 
-enum FullDiffView { file, diff, blame, history }
+enum FullDiffView { diff, blame, history }
 
 enum DiffLayout { unified, sideBySide }
-
-enum DiffPresentation { hunk, inline, split }
-
-enum FullDiffInitialView { hunk, fullFile }
 
 @immutable
 class FullDiffPreferences {

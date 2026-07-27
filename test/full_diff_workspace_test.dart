@@ -80,7 +80,6 @@ void main() {
       repository: repository,
       commits: const [commitA],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     await controller.initialize();
     return (controller: controller, repository: repository);
@@ -89,7 +88,7 @@ void main() {
   Future<
     ({FullDiffSessionController controller, FakeFullDiffRepository repository})
   >
-  distantChangeFixture(FullDiffInitialView initialView) async {
+  distantChangeFixture(FullDiffPreferences initialPreferences) async {
     final repository = FakeFullDiffRepository();
     final source = [
       for (var line = 1; line <= 180; line++) 'source line $line',
@@ -119,7 +118,7 @@ void main() {
       repository: repository,
       commits: const [commitA],
       initialIndex: 0,
-      initialView: initialView,
+      initialPreferences: initialPreferences,
     );
     await controller.initialize();
     return (controller: controller, repository: repository);
@@ -168,7 +167,6 @@ void main() {
       repository: repository,
       commits: const [commitA],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     await controller.initialize();
     controller.setView(FullDiffView.history);
@@ -217,7 +215,6 @@ void main() {
       repository: repository,
       commits: commits,
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     await controller.initialize();
     controller.setView(FullDiffView.history);
@@ -241,7 +238,6 @@ void main() {
       repository: controller.repository,
       commits: controller.state.nearbyCommits,
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
       controller: controller,
       editorService: editorService,
     );
@@ -320,14 +316,48 @@ void main() {
     return position.pixels;
   }
 
-  testWidgets('keeps presentation and anchor while switching main views', (
+  testWidgets('full diff exposes only Diff Blame History and one layout', (
+    tester,
+  ) async {
+    final fixture = await workspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1070, 842),
+    );
+
+    expect(find.text('File'), findsNothing);
+    expect(find.text('Diff'), findsOneWidget);
+    expect(find.text('Blame'), findsOneWidget);
+    expect(find.text('History'), findsOneWidget);
+    expect(find.text('Unified'), findsOneWidget);
+    expect(find.text('Side-by-side'), findsOneWidget);
+    expect(find.text('Hunk'), findsOneWidget);
+
+    expect(find.text('first new'), findsOneWidget);
+    expect(find.text('second new'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('next-hunk')));
+    await tester.pumpAndSettle();
+    expect(fixture.controller.state.activeAnchor?.hunkIndex, 1);
+    expect(find.text('first new'), findsOneWidget);
+    expect(find.text('second new'), findsOneWidget);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+    await tester.pumpAndSettle();
+    expect(fixture.controller.state.activeAnchor?.hunkIndex, 0);
+  });
+
+  testWidgets('keeps layout and anchor while switching main views', (
     tester,
   ) async {
     final fixture = await workspaceFixture();
     addTearDown(fixture.controller.dispose);
     final controller = fixture.controller
       ..setView(FullDiffView.diff)
-      ..setPresentation(DiffPresentation.hunk)
+      ..setLayout(DiffLayout.unified)
       ..selectAnchor(twoHunkDocument.hunks[1].anchor);
     await pumpWorkspace(
       tester,
@@ -335,9 +365,7 @@ void main() {
       size: const Size(1070, 842),
     );
 
-    await tester.tap(find.text('Split'));
-    await tester.tap(find.text('File'));
-    await tester.pumpAndSettle();
+    await tester.tap(find.text('Side-by-side'));
     await tester.tap(find.text('Blame'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('History'));
@@ -345,7 +373,7 @@ void main() {
     await tester.tap(find.text('Diff'));
     await tester.pumpAndSettle();
 
-    expect(controller.state.presentation, DiffPresentation.split);
+    expect(controller.state.layout, DiffLayout.sideBySide);
     expect(controller.state.activeAnchor?.hunkIndex, 1);
     expect(fixture.repository.diffRequests, hasLength(1));
   });
@@ -353,7 +381,9 @@ void main() {
   testWidgets('initial Full File aligns the first change in the viewport', (
     tester,
   ) async {
-    final fixture = await distantChangeFixture(FullDiffInitialView.fullFile);
+    final fixture = await distantChangeFixture(
+      const FullDiffPreferences(scope: DiffScope.fullFile),
+    );
     addTearDown(fixture.controller.dispose);
 
     await pumpWorkspace(
@@ -362,19 +392,19 @@ void main() {
       size: const Size(1070, 520),
     );
 
-    final target = find.byKey(const Key('file-current-line-120'));
+    final target = find.byKey(const Key('unified-line-0-0'));
     expect(target, findsOneWidget);
-    final viewport = tester.getRect(find.byKey(const Key('file-list')));
+    final viewport = tester.getRect(find.byType(ListView).last);
     final targetRect = tester.getRect(target);
     expect(targetRect.top, greaterThanOrEqualTo(viewport.top));
     expect(targetRect.bottom, lessThanOrEqualTo(viewport.bottom));
   });
 
-  for (final view in [FullDiffView.file, FullDiffView.blame]) {
+  for (final view in [FullDiffView.blame]) {
     testWidgets('switching into ${view.name} aligns the active change', (
       tester,
     ) async {
-      final fixture = await distantChangeFixture(FullDiffInitialView.hunk);
+      final fixture = await distantChangeFixture(const FullDiffPreferences());
       addTearDown(fixture.controller.dispose);
       await pumpWorkspace(
         tester,
@@ -382,19 +412,11 @@ void main() {
         size: const Size(1070, 520),
       );
 
-      await tester.tap(find.text(view == FullDiffView.file ? 'File' : 'Blame'));
+      await tester.tap(find.text('Blame'));
       await tester.pumpAndSettle();
 
-      final list = find.byKey(
-        Key(view == FullDiffView.file ? 'file-list' : 'blame-list'),
-      );
-      final target = find.byKey(
-        Key(
-          view == FullDiffView.file
-              ? 'file-current-line-120'
-              : 'blame-current-line-120',
-        ),
-      );
+      final list = find.byKey(const Key('blame-list'));
+      final target = find.byKey(const Key('blame-current-line-120'));
       expect(target, findsOneWidget);
       final viewport = tester.getRect(list);
       final targetRect = tester.getRect(target);
@@ -456,21 +478,20 @@ void main() {
         repository: repository,
         commits: const [merge],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
       addTearDown(controller.dispose);
       await controller.initialize();
       controller
-        ..setView(FullDiffView.file)
-        ..setPresentation(DiffPresentation.split);
+        ..setView(FullDiffView.diff)
+        ..setLayout(DiffLayout.sideBySide);
 
       await controller.selectParent('parent-2');
 
       expect(repository.fileRequests.last.parent, 'parent-2');
       expect(repository.diffRequests.last.parent, 'parent-2');
       expect(repository.contentRequests.last.parent, 'parent-2');
-      expect(controller.state.view, FullDiffView.file);
-      expect(controller.state.presentation, DiffPresentation.split);
+      expect(controller.state.view, FullDiffView.diff);
+      expect(controller.state.layout, DiffLayout.sideBySide);
     },
   );
 
@@ -483,7 +504,7 @@ void main() {
     testWidgets('responsive width ${scenario.width}', (tester) async {
       final fixture = await workspaceFixture();
       addTearDown(fixture.controller.dispose);
-      fixture.controller.setPresentation(DiffPresentation.split);
+      fixture.controller.setLayout(DiffLayout.sideBySide);
       await pumpWorkspace(
         tester,
         controller: fixture.controller,
@@ -548,7 +569,6 @@ void main() {
       repository: repository,
       commits: const [commitA],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
       encodingCache: FullDiffEncodingCache(),
     );
     addTearDown(controller.dispose);
@@ -659,7 +679,6 @@ void main() {
         repository: repository,
         commits: const [commitA],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
       addTearDown(controller.dispose);
       await controller.initialize();
@@ -756,7 +775,7 @@ void main() {
     expect(surface.focused, isTrue);
     expect(find.text('+'), findsWidgets);
     expect(find.text('−'), findsWidgets);
-    expect(find.byKey(const Key('code-row-current-marker')), findsOneWidget);
+    expect(find.byKey(const Key('code-row-current-marker')), findsNWidgets(2));
   });
 
   testWidgets(
@@ -879,7 +898,7 @@ void main() {
       ]) {
         final fixture = await historyWorkspaceFixture();
         addTearDown(fixture.controller.dispose);
-        fixture.controller.setPresentation(DiffPresentation.split);
+        fixture.controller.setLayout(DiffLayout.sideBySide);
         await pumpWorkspace(
           tester,
           controller: fixture.controller,
@@ -891,10 +910,13 @@ void main() {
             .width;
         if (scenario.showsOldSide) {
           expect(detailWidth, greaterThan(480));
-          expect(find.byKey(const Key('split-old-pane')), findsOneWidget);
+          expect(
+            find.byKey(const Key('side-by-side-old-pane')),
+            findsOneWidget,
+          );
         } else {
           expect(detailWidth, lessThan(480));
-          expect(find.byKey(const Key('split-old-pane')), findsNothing);
+          expect(find.byKey(const Key('side-by-side-old-pane')), findsNothing);
         }
       }
     },
@@ -1098,7 +1120,7 @@ void main() {
     expect(find.text('historical change'), findsOneWidget);
   });
 
-  testWidgets('history detail supports inline and split presentations', (
+  testWidgets('history detail supports unified and side-by-side layouts', (
     tester,
   ) async {
     final fixture = await historyWorkspaceFixture();
@@ -1110,13 +1132,13 @@ void main() {
       size: const Size(1070, 842),
     );
 
-    await tester.tap(find.text('Inline'));
+    await tester.tap(find.text('Unified'));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('inline-hunk-0')), findsOneWidget);
+    expect(find.byKey(const Key('unified-hunk-0')), findsOneWidget);
 
-    await tester.tap(find.text('Split'));
+    await tester.tap(find.text('Side-by-side'));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('split-old-pane')), findsOneWidget);
+    expect(find.byKey(const Key('side-by-side-old-pane')), findsOneWidget);
   });
 
   testWidgets('history keeps its list while detail loading fails and retries', (
@@ -1209,7 +1231,6 @@ void main() {
         repository: repository,
         commits: const [commitA],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
       addTearDown(controller.dispose);
       await controller.initialize();
@@ -1388,7 +1409,6 @@ void main() {
       repository: repository,
       commits: const [merge],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     addTearDown(controller.dispose);
     await controller.initialize();
@@ -1426,7 +1446,6 @@ void main() {
       repository: repository,
       commits: [commitA, historyEntries[1].commit],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     addTearDown(controller.dispose);
     await controller.initialize();
@@ -1505,7 +1524,6 @@ void main() {
       repository: repository,
       commits: const [commitA],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     addTearDown(controller.dispose);
     await controller.initialize();
@@ -1644,7 +1662,7 @@ void main() {
   ) async {
     final fixture = await workspaceFixture();
     addTearDown(fixture.controller.dispose);
-    fixture.controller.setView(FullDiffView.file);
+    fixture.controller.setView(FullDiffView.diff);
     await pumpWorkspace(
       tester,
       controller: fixture.controller,
@@ -1665,7 +1683,13 @@ void main() {
       shift: true,
     );
     await tester.pump(const Duration(milliseconds: 100));
-    expect(position.pixels, closeTo(before + 48, 0.5));
+    expect(
+      position.pixels,
+      closeTo(
+        (before + 48).clamp(position.minScrollExtent, position.maxScrollExtent),
+        0.5,
+      ),
+    );
 
     await tester.tap(find.byKey(const Key('diff-algorithm')));
     await tester.pumpAndSettle();
@@ -1679,10 +1703,10 @@ void main() {
     expect(position.pixels, menuPosition);
   });
 
-  testWidgets('minimap receives the active diff presentation', (tester) async {
+  testWidgets('minimap uses the active diff scroll position', (tester) async {
     final fixture = await workspaceFixture();
     addTearDown(fixture.controller.dispose);
-    fixture.controller.setPresentation(DiffPresentation.split);
+    fixture.controller.setLayout(DiffLayout.sideBySide);
     await pumpWorkspace(
       tester,
       controller: fixture.controller,
@@ -1690,8 +1714,11 @@ void main() {
     );
 
     expect(
-      tester.widget<FullDiffMinimap>(find.byType(FullDiffMinimap)).presentation,
-      DiffPresentation.split,
+      tester
+          .widget<FullDiffMinimap>(find.byType(FullDiffMinimap))
+          .scrollController
+          .positions,
+      hasLength(1),
     );
   });
 
@@ -1705,7 +1732,7 @@ void main() {
       bool,
     )?
     diff,
-    FullDiffInitialView initialView = FullDiffInitialView.hunk,
+    FullDiffPreferences initialPreferences = const FullDiffPreferences(),
   }) async {
     final repository = FakeFullDiffRepository()
       ..files = ((_, _) async => const [fileA])
@@ -1715,7 +1742,7 @@ void main() {
       repository: repository,
       commits: const [commitA],
       initialIndex: 0,
-      initialView: initialView,
+      initialPreferences: initialPreferences,
     );
     await controller.initialize();
     return controller;
@@ -1794,7 +1821,7 @@ void main() {
     final controller = await unavailableController(
       bytes: Uint8List.fromList([0x80, 0x81]),
       diff: (_, _, _, _, _) async => twoHunkLines,
-      initialView: FullDiffInitialView.fullFile,
+      initialPreferences: const FullDiffPreferences(scope: DiffScope.fullFile),
     );
     addTearDown(controller.dispose);
     await pumpWorkspace(
@@ -1843,9 +1870,9 @@ void main() {
     expect(find.text('first new'), findsOneWidget);
   });
 
-  for (final view in [FullDiffView.file, FullDiffView.diff]) {
+  for (final scope in DiffScope.values) {
     testWidgets(
-      '${view.name} view byte failures use the structured panel and retry only content',
+      '${scope.name} scope byte failures use the structured panel and retry only content',
       (tester) async {
         var contentLoads = 0;
         final repository = FakeFullDiffRepository()
@@ -1862,9 +1889,7 @@ void main() {
           repository: repository,
           commits: const [commitA],
           initialIndex: 0,
-          initialView: view == FullDiffView.file
-              ? FullDiffInitialView.fullFile
-              : FullDiffInitialView.hunk,
+          initialPreferences: FullDiffPreferences(scope: scope),
         );
         addTearDown(controller.dispose);
         await controller.initialize();
@@ -1889,14 +1914,7 @@ void main() {
         expect(repository.contentRequests, hasLength(2));
         expect(repository.diffRequests, hasLength(1));
         expect(find.byKey(const Key('full-diff-unavailable')), findsNothing);
-        expect(
-          find.byKey(
-            view == FullDiffView.file
-                ? const Key('file-list')
-                : const Key('hunk-list'),
-          ),
-          findsOneWidget,
-        );
+        expect(find.byKey(const Key('unified-list')), findsOneWidget);
       },
     );
   }
@@ -1928,7 +1946,6 @@ void main() {
         repository: repository,
         commits: const [commitA],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
       addTearDown(controller.dispose);
       await controller.initialize();
@@ -1955,7 +1972,7 @@ void main() {
       expect(repository.diffRequests, hasLength(1));
       expect(controller.state.file.data?.path, 'src/deleted-original.pas');
       expect(find.byKey(const Key('full-diff-unavailable')), findsNothing);
-      expect(find.byKey(const Key('hunk-list')), findsOneWidget);
+      expect(find.byKey(const Key('unified-list')), findsOneWidget);
     },
   );
 
@@ -1990,7 +2007,6 @@ void main() {
           repository: repository,
           commits: const [commitA],
           initialIndex: 0,
-          initialView: FullDiffInitialView.hunk,
         );
         addTearDown(controller.dispose);
         await controller.initialize();
@@ -2023,7 +2039,6 @@ void main() {
       repository: repository,
       commits: const [commitA],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     addTearDown(controller.dispose);
     await controller.initialize();
@@ -2045,7 +2060,7 @@ void main() {
     expect(find.byKey(const Key('files-empty')), findsOneWidget);
   });
 
-  for (final view in [FullDiffView.file, FullDiffView.blame]) {
+  for (final view in [FullDiffView.blame]) {
     testWidgets('manual ${view.name} scroll synchronizes the active hunk', (
       tester,
     ) async {
@@ -2091,7 +2106,6 @@ void main() {
         repository: repository,
         commits: const [commitA],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
       addTearDown(controller.dispose);
       await controller.initialize();
@@ -2101,8 +2115,8 @@ void main() {
         controller: controller,
         size: const Size(1070, 650),
       );
-      final listKey = view == FullDiffView.file
-          ? const Key('file-list')
+      final listKey = view == FullDiffView.diff
+          ? const Key('unified-list')
           : const Key('blame-list');
       final scrollable = find
           .descendant(
@@ -2183,7 +2197,6 @@ void main() {
       repository: repository,
       commits: const [workingTree],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     addTearDown(controller.dispose);
     await controller.initialize();
@@ -2231,7 +2244,6 @@ void main() {
         repository: repository,
         commits: const [workingTree],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
       await controller.initialize();
       return controller;
@@ -2310,7 +2322,6 @@ void main() {
         repository: repository,
         commits: const [workingTree],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
       addTearDown(controller.dispose);
       await controller.initialize();
@@ -2358,10 +2369,7 @@ void main() {
     },
   );
 
-  for (final presentation in [
-    DiffPresentation.inline,
-    DiffPresentation.split,
-  ]) {
+  for (final presentation in [DiffLayout.unified, DiffLayout.sideBySide]) {
     testWidgets(
       '${presentation.name} keeps viewport anchors stable across long wrapped hunks',
       (tester) async {
@@ -2416,11 +2424,10 @@ void main() {
           repository: repository,
           commits: const [commitA],
           initialIndex: 0,
-          initialView: FullDiffInitialView.hunk,
         );
         addTearDown(controller.dispose);
         await controller.initialize();
-        controller.setPresentation(presentation);
+        controller.setLayout(presentation);
         await pumpWorkspace(
           tester,
           controller: controller,
@@ -2429,9 +2436,9 @@ void main() {
         final target = controller.state.patch.data!.hunks.last.anchor;
         final targetFinder = find.byKey(
           Key(
-            presentation == DiffPresentation.inline
-                ? 'inline-hunk-1'
-                : 'split-hunk-1',
+            presentation == DiffLayout.unified
+                ? 'unified-hunk-1'
+                : 'side-by-side-hunk-1',
           ),
         );
         final viewportRect = tester.getRect(
@@ -2439,9 +2446,9 @@ void main() {
         );
         final firstRow = find.byKey(
           Key(
-            presentation == DiffPresentation.inline
-                ? 'inline-line-0-0'
-                : 'split-row-0-0',
+            presentation == DiffLayout.unified
+                ? 'unified-line-0-0'
+                : 'side-by-side-row-0-0',
           ),
         );
         expect(tester.getRect(firstRow).height, greaterThan(27));
@@ -2497,7 +2504,6 @@ void main() {
       repository: repository,
       commits: const [workingTree],
       initialIndex: 0,
-      initialView: FullDiffInitialView.hunk,
     );
     addTearDown(controller.dispose);
     await controller.initialize();
@@ -2567,7 +2573,6 @@ void main() {
         repository: workingRepository,
         commits: const [workingTree],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
       addTearDown(workingController.dispose);
       await workingController.initialize();
@@ -2608,7 +2613,6 @@ void main() {
         repository: deletedRepository,
         commits: const [workingTree],
         initialIndex: 0,
-        initialView: FullDiffInitialView.hunk,
       );
       addTearDown(deletedController.dispose);
       await deletedController.initialize();
