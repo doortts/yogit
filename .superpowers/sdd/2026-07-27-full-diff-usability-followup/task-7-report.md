@@ -5,7 +5,8 @@
 Task 7 is complete.
 
 - Refreshed the intentionally stale implementation captures `00`–`12`.
-- Kept approved reference images `00`–`12` byte-for-byte unchanged.
+- At the Task 7 checkpoint, kept approved reference images `00`–`12`
+  byte-for-byte unchanged.
 - Added reviewed reference, actual, difference, and side-by-side assets for
   captures `13`–`17`.
 - Corrected the stale focus-mode assertion for the restored leading back
@@ -14,6 +15,13 @@ Task 7 is complete.
   issue found by that review.
 - Passed formatting, analysis, visual tests, both full test configurations,
   checksum verification, and the macOS release build.
+
+> Superseding note after `38bc5be`: the later whole-branch fix changed History
+> responsiveness and the algorithm explanation. Capture 17 now keeps Split
+> selected but renders only the result side in its 467 px detail. References
+> 05, 14, and 17 were intentionally refreshed; the `00`–`12` immutability
+> statements below describe the original Task 7 checkpoint, and only 05 later
+> changed in that range.
 
 ## Visual QA implementation
 
@@ -81,7 +89,9 @@ Two fixture reductions produced deliberate old-golden failures:
 - final revision: capture 16 changed by `4,592` pixels (`0.51%`) and capture 17
   by `4,249` pixels (`0.47%`).
 
-The final fixture shows every QA source line in both panes.
+At the Task 7 checkpoint, the final fixture showed every QA source line in
+both panes. The later whole-branch fix supersedes that layout with the
+result-only fallback described above.
 
 ### GREEN
 
@@ -98,8 +108,9 @@ dart run tool/full_diff_visual_diff.dart
 Result:
 
 - captures `13`–`17`: `0` changed pixels;
-- captures `00`–`12`: comparison images regenerated against the unchanged
-  approved references.
+- captures `00`–`12`: comparison images regenerated against the references
+  that were unchanged at the Task 7 checkpoint. The later whole-branch fix
+  intentionally refreshed capture 05.
 
 ## Per-image inspection
 
@@ -137,9 +148,8 @@ Result:
 ### 17 — History Split detail
 
 - The selected History row and divider remain clear.
-- Old and result panes, line numbers, signs, and the central divider are all
-  visible.
-- Every QA source line fits inside the History detail width.
+- Split remains selected, while the 467 px detail renders only the result side.
+- Result line numbers, signs, and every QA source line fit without clipping.
 
 ## Independent follow-up review
 
@@ -225,8 +235,9 @@ git diff --exit-code c2219a8 -- <approved reference images 00-12>
 git diff --check
 ```
 
-Result: approved reference images `00`–`12` are unchanged and no whitespace
-errors remain.
+Result at the Task 7 checkpoint: approved reference images `00`–`12` were
+unchanged and no whitespace errors remained. The later whole-branch fix
+intentionally changed only capture 05 within that range.
 
 ## Commits
 

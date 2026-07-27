@@ -7,9 +7,12 @@ All nine follow-up findings against base commit `07e9ce5` are fixed.
 - Implementation commit: `38bc5be` (`fix: close full diff follow-up findings`)
 - Focused controller/header/workspace suite: 85 tests passed.
 - Visual suite: 36 tests passed.
-- Both full configurations: 427 tests passed in each configuration.
+- Both full configurations: 428 tests passed in each configuration after the
+  final characterization test.
 - macOS release build: passed.
-- Independent code review: no findings.
+- Initial independent code review: no product findings. A final re-review
+  found one stale documentation record and one explicit deleted-file coverage
+  gap; both are addressed in the final follow-up below.
 
 ## Finding-to-change map
 
@@ -20,7 +23,7 @@ All nine follow-up findings against base commit `07e9ce5` are fixed.
 | 3 | Escape could pop the Full Diff route while an algorithm tooltip was visible. | The Full Diff Escape action calls `Tooltip.dismissAllToolTips()` first. The back button remains unaffected, and popup-menu Escape precedence is preserved. | `a visible algorithm tooltip consumes Escape before route navigation`, plus the existing popup-menu Escape test. |
 | 4 | History Split used the whole window width instead of the local detail width. | The History detail is now wrapped in a `LayoutBuilder`, and `_diffContent` receives the detail pane's actual width. A local detail at or below 480 px hides the old Split side; wider details still show both sides. | Integrated 782/1440 px History test plus unchanged standalone 651/650/481/480 px Split tests. Captures 05 and 17 record the narrow-detail behavior. |
 | 5 | History retries could discard the retained list/context or retry the wrong resource. | `retryFiles()` now reselects the retained History entry when History context exists. Patch errors always call `retryPatch()`, while file-list errors call context-sensitive `retryFiles()`. | Controller and widget tests cover unmatched current patches, historical file-list failures, list identity, context identity, and selection retention. |
-| 6 | Selected-file byte-load failures appeared as generic loading/error output and broad History retries. | Added `retryFile()`. File and Diff views now render the structured unavailable panel with path, stats, `Git error`, reason, details, and a direct content-only retry. Deleted files use their old path. | File/Diff widget matrix verifies two content requests, one unchanged patch request, structured details, and recovery. A controller test covers historical context retention. |
+| 6 | Selected-file byte-load failures appeared as generic loading/error output and broad History retries. | Added `retryFile()`. File and Diff views now render the structured unavailable panel with path, stats, `Git error`, reason, details, and a direct content-only retry. Deleted files use their old path. | File/Diff widget matrix verifies two content requests, one unchanged patch request, structured details, and recovery. A controller test covers historical context retention, and final characterization coverage explicitly covers the distinct-old-path deletion contract. |
 | 7 | A failed algorithm refresh over an empty preserved document hid the refresh error. | `_withRefreshError()` now wraps both normal presentations and the no-changes panel, preserving the empty document below the compact error overlay. | `an empty preserved patch keeps refresh errors visible and can recover` |
 | 8 | History list scroll position survived file/commit/parent/session context changes. | Added a pending History scroll reset that is triggered by History context changes or controller replacement, but not by selecting another row in the same History list. | Tests cover same-list row selection, file change, commit change, parent change, and controller replacement. RED assertions observed 300 px where 0 was required; GREEN assertions now pass. |
 | 9 | The follow-up design still documented a stale 100,000-line limit. | Corrected the design to the enforced 200,000-line limit and documented the local History Split rule and intentional visual baseline scope. | Repository-wide text search finds no stale `100,000줄` or `100,000행` references in docs, production, tests, tools, or benchmarks. |
@@ -105,12 +108,12 @@ Integrity checks confirmed:
 
 ## Review
 
-The complete uncommitted change set was independently reviewed against
-`07e9ce5`, including production code, tests, Korean documentation, and visual
-assets.
+The complete product change set was independently reviewed against `07e9ce5`,
+including production code, tests, Korean documentation, and visual assets.
 
-- Findings: none.
-- Material test-quality concerns: none.
+- The first review found no product correctness issues.
+- The final re-review found a stale visual-review description and a missing
+  explicit deleted-file edge assertion. It did not find another product bug.
 - Self-review found one consistency improvement before the final gates:
   History detail file-list errors now call context-sensitive `retryFiles()`
   instead of the broader legacy retry method. Its focused controller and widget
@@ -147,3 +150,48 @@ No blockers or known correctness issues remain.
 The responsive contract is intentional: Split remains the selected
 presentation at a local detail width of 480 px or less, but only the result side
 is rendered to prevent clipping. Wider History details render both Split sides.
+
+## Final re-review follow-up
+
+The final re-review did not find another product defect. It found one important
+documentation inconsistency and one minor explicit edge-case coverage gap.
+
+Documentation corrections:
+
+- `docs/superpowers/verification/full-diff-qa/followup-review.md` now records
+  capture 17's 467 px result-only fallback instead of old/result panes and a
+  central divider.
+- The same review now records that the later whole-branch fix intentionally
+  refreshed references 05, 14, and 17. Only 05 changed within the `00`–`12`
+  range; 00–04 and 06–12 remain byte-identical to `07e9ce5`.
+- The Task 7 report now has an explicit superseding note, qualifies its original
+  `00`–`12` immutability statements as Task 7 checkpoint results, and describes
+  the current capture 17 result-side fallback.
+
+Deleted-file characterization coverage:
+
+- Added `deleted Diff content failure retries the old-side file resource`.
+- The test uses distinct `path` and `oldPath` values and verifies that the
+  structured unavailable panel shows the old path.
+- It verifies that both content attempts target the old path, the recovered
+  `FileDocument` keeps that path, content requests increase from one to two,
+  and patch requests remain at one.
+- The new test passed immediately against `38bc5be`. This is characterization
+  coverage of existing correct behavior, not RED evidence, so no product code
+  changed.
+
+Fresh test evidence for this follow-up:
+
+| Command | Result |
+| --- | --- |
+| Focused deleted-file test | Passed: 1 test. |
+| `flutter test test/full_diff_workspace_test.dart --reporter expanded` | Passed: 54 tests. |
+| `flutter test --reporter compact` | Passed: 428 tests. |
+| `flutter test --dart-define=YOGIT_EXTENDED_SYNTAX=false --reporter compact` | Passed: 428 tests. |
+| `dart format --output=none --set-exit-if-changed lib test tool benchmark` | Passed: 51 files, 0 changed. |
+| `flutter analyze` | Passed: no issues. |
+| `shasum -a 256 -c SHA256SUMS` | Passed: all 21 files. |
+| Relative Markdown link check | Passed for the QA README, both review reports, and this report. |
+
+No visual baseline or release build was rerun because this follow-up changes
+only tests and documentation.

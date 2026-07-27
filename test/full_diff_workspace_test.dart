@@ -1600,6 +1600,64 @@ void main() {
     );
   }
 
+  testWidgets(
+    'deleted Diff content failure retries the old-side file resource',
+    (tester) async {
+      const deletedFile = GitFileChange(
+        path: 'src/deleted-result.pas',
+        oldPath: 'src/deleted-original.pas',
+        status: 'D',
+        additions: 0,
+        deletions: 2,
+      );
+      var contentLoads = 0;
+      final requestedPaths = <String>[];
+      final repository = FakeFullDiffRepository()
+        ..files = ((_, _) async => const [deletedFile])
+        ..diff = ((_, _, _, _, _) async => twoHunkLines)
+        ..content = ((_, file, _) async {
+          requestedPaths.add(file.oldPath ?? file.path);
+          contentLoads++;
+          if (contentLoads == 1) {
+            throw const GitRepositoryException('/repo', 'content failed');
+          }
+          return resultFile.bytes;
+        });
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [commitA],
+        initialIndex: 0,
+        initialView: FullDiffInitialView.hunk,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await pumpWorkspace(
+        tester,
+        controller: controller,
+        size: const Size(1070, 650),
+      );
+
+      expect(find.byKey(const Key('full-diff-unavailable')), findsOneWidget);
+      expect(find.text('src/deleted-original.pas'), findsOneWidget);
+      expect(requestedPaths, ['src/deleted-original.pas']);
+      expect(repository.contentRequests, hasLength(1));
+      expect(repository.diffRequests, hasLength(1));
+
+      await tester.tap(find.text('다시 시도'));
+      await tester.pumpAndSettle();
+
+      expect(requestedPaths, [
+        'src/deleted-original.pas',
+        'src/deleted-original.pas',
+      ]);
+      expect(repository.contentRequests, hasLength(2));
+      expect(repository.diffRequests, hasLength(1));
+      expect(controller.state.file.data?.path, 'src/deleted-original.pas');
+      expect(find.byKey(const Key('full-diff-unavailable')), findsNothing);
+      expect(find.byKey(const Key('hunk-list')), findsOneWidget);
+    },
+  );
+
   final tooManyLines = Uint8List((fullDiffTextLineLimit + 1) * 2);
   for (var index = 0; index < tooManyLines.length; index += 2) {
     tooManyLines[index] = 0x78;
