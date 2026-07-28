@@ -32,6 +32,82 @@ void main() {
     ]);
   });
 
+  test('resolves a saved local branch before current and first local', () {
+    const refs = RepoRefs(local: ['main', 'release'], current: 'main');
+    expect(resolveBaseBranch(refs, 'release'), 'release');
+    expect(resolveBaseBranch(refs, 'deleted'), 'main');
+    expect(
+      resolveBaseBranch(
+        const RepoRefs(local: ['release'], current: null),
+        null,
+      ),
+      'release',
+    );
+    expect(resolveBaseBranch(const RepoRefs(), null), isNull);
+  });
+
+  test('preferred tip reserves lane zero across newer branch commits', () {
+    final commits = [
+      _commit('feature-tip', ['base']),
+      _commit('main-tip', ['main-parent']),
+      _commit('main-parent', ['base']),
+      _commit('base', const []),
+    ];
+
+    final rows = layoutGraph(commits, preferredTip: 'main-tip');
+
+    expect([for (final row in rows) row.lane], [1, 0, 0, 0]);
+    expect([for (final row in layoutGraph(commits)) row.lane], [0, 1, 1, 0]);
+  });
+
+  test('working tree uses lane zero only when its parent is preferred', () {
+    final current = layoutGraph([
+      _commit('', ['main-tip']),
+      _commit('main-tip', ['root']),
+      _commit('root', const []),
+    ], preferredTip: 'main-tip');
+    expect([for (final row in current) row.lane], [0, 0, 0]);
+
+    final other = layoutGraph([
+      _commit('', ['feature-tip']),
+      _commit('feature-tip', ['root']),
+      _commit('main-tip', ['root']),
+      _commit('root', const []),
+    ], preferredTip: 'main-tip');
+    expect(other.first.lane, greaterThan(0));
+    expect(other[2].lane, 0);
+  });
+
+  test('merge-parent edge to unloaded preferred tip uses lane zero', () {
+    final row = layoutGraph([
+      _commit('merge', ['main', 'preferred']),
+    ], preferredTip: 'preferred').single;
+
+    expect(row.lane, 1);
+    expect(row.parentLanes, [1, 0]);
+    expect(row.nextLaneShas, {0: 'preferred', 1: 'main'});
+    expect(row.transitions, [(from: 1, to: 0, sha: 'preferred')]);
+  });
+
+  test('first-parent edge to unloaded preferred tip uses lane zero', () {
+    final page = layoutGraph([
+      _commit('child', ['preferred']),
+    ], preferredTip: 'preferred');
+    final full = layoutGraph([
+      _commit('child', ['preferred']),
+      _commit('preferred', ['root']),
+      _commit('root', const []),
+    ], preferredTip: 'preferred');
+
+    expect(page.single.lane, 1);
+    expect(page.single.parentLanes, [0]);
+    expect(page.single.nextLaneShas, {0: 'preferred'});
+    expect(page.single.transitions, [(from: 1, to: 0, sha: 'preferred')]);
+    expect(page.single.lane, full.first.lane);
+    expect(page.single.branch, full.first.branch);
+    expect(page.single.transitions, full.first.transitions);
+  });
+
   test('a first-parent chain keeps a single column', () {
     // Main is the first parent all the way down, so it never leaves column 0 —
     // not even across the merge that pulls in the side branch.
@@ -237,6 +313,25 @@ void main() {
       [for (final row in full.take(page.length)) row.branch],
     );
     expect([for (final row in full) row.branch], [0, 1, 0, 0, 2, 3]);
+
+    final preferredPage = layoutGraph(
+      commits.take(4).toList(),
+      preferredTip: 'P',
+    );
+    final preferredFull = layoutGraph(commits, preferredTip: 'P');
+    final preferredPrefix = preferredFull.take(preferredPage.length);
+    expect(
+      [for (final row in preferredPage) row.lane],
+      [for (final row in preferredPrefix) row.lane],
+    );
+    expect(
+      [for (final row in preferredPage) row.branch],
+      [for (final row in preferredPrefix) row.branch],
+    );
+    expect(
+      [for (final row in preferredPage) row.transitions],
+      [for (final row in preferredPrefix) row.transitions],
+    );
   });
 
   test('lays out a real repository by the straight-branch rules', () async {

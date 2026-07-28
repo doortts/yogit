@@ -311,12 +311,20 @@ class _RowBuffer {
 /// because the painter splits a transition across two rows, that is why rows are
 /// buffered here and materialized at the end.
 ///
+/// When a preferred tip is known, column 0 is reserved for it. An edge to that
+/// tip can therefore be materialized as soon as its child is placed instead of
+/// waiting for the tip row; short and extended pages then share the same
+/// transition and line identity.
+///
 /// Every continuous occupancy of a column is one branch line and gets an id in
 /// birth order, so a first-parent chain keeps one id for its whole life and
 /// colors uniformly. Ids only ever come from placements already made, so
 /// appending a page never renumbers the rows above it.
-List<GraphRow> layoutGraph(List<GitCommit> commits) {
-  final columns = <_Column>[];
+List<GraphRow> layoutGraph(List<GitCommit> commits, {String? preferredTip}) {
+  final columns = <_Column>[
+    if (preferredTip != null) (sha: null, row: -1, line: -1),
+  ];
+  var preferredStarted = false;
   final mergeChildRows = <String, List<int>>{};
   final rows = <_RowBuffer>[];
   var lines = 0;
@@ -337,11 +345,32 @@ List<GraphRow> layoutGraph(List<GitCommit> commits) {
           : state.sha == commit.sha && state.row <= span;
     }
 
-    var lane = -1;
-    for (var column = 0; column < columns.length && lane < 0; column++) {
+    final workingTreeStartsPreferred =
+        !preferredStarted &&
+        index == 0 &&
+        commit.sha.isEmpty &&
+        commit.parents.isNotEmpty &&
+        commit.parents.first == preferredTip;
+    final startsPreferred =
+        !preferredStarted &&
+        (commit.sha == preferredTip || workingTreeStartsPreferred);
+    final firstCandidate =
+        preferredTip != null && !preferredStarted && !startsPreferred ? 1 : 0;
+
+    var lane = startsPreferred ? 0 : -1;
+    if (startsPreferred) preferredStarted = true;
+    for (
+      var column = firstCandidate;
+      column < columns.length && lane < 0;
+      column++
+    ) {
       if (columns[column].sha == commit.sha && clear(column)) lane = column;
     }
-    for (var column = 0; column < columns.length && lane < 0; column++) {
+    for (
+      var column = firstCandidate;
+      column < columns.length && lane < 0;
+      column++
+    ) {
       if (columns[column].sha == null && clear(column)) lane = column;
     }
     if (lane < 0) {
@@ -382,6 +411,19 @@ List<GraphRow> layoutGraph(List<GitCommit> commits) {
     columns[lane] = commit.parents.isEmpty
         ? (sha: null, row: index, line: -1)
         : (sha: commit.parents.first, row: index, line: branch);
+    final preferredParent = preferredTip != null && !preferredStarted
+        ? commit.parents.indexOf(preferredTip)
+        : -1;
+    if (preferredParent >= 0) {
+      if (preferredParent == 0) {
+        columns[lane] = (sha: null, row: index, line: -1);
+      }
+      if (columns[0].sha == null) {
+        columns[0] = (sha: preferredTip, row: index, line: lines++);
+      }
+    }
+    final parentLanes = [for (final _ in commit.parents) lane];
+    if (preferredParent >= 0) parentLanes[preferredParent] = 0;
     rows.add(
       _RowBuffer(
         commit: commit,
@@ -400,11 +442,14 @@ List<GraphRow> layoutGraph(List<GitCommit> commits) {
         // One entry per parent. Both a first parent continuing this column and a
         // parent that never loads read as this row's own lane; the entry is
         // patched to the parent's real column when the parent is placed.
-        parentLanes: [for (final _ in commit.parents) lane],
+        parentLanes: parentLanes,
       ),
     );
+    if (preferredParent >= 0 && lane != 0) {
+      rows.last.transitions.add((from: lane, to: 0, sha: preferredTip!));
+    }
 
-    // The merge edges waiting above only learn their column here.
+    // Ordinary merge edges waiting above only learn their column here.
     for (final child in mergeChildren) {
       for (var row = child; row < index; row++) {
         rows[row].leaving[lane] = commit.sha;
@@ -426,6 +471,7 @@ List<GraphRow> layoutGraph(List<GitCommit> commits) {
       }
     }
     for (final parent in commit.parents.skip(1)) {
+      if (parent == preferredTip) continue;
       final children = mergeChildRows[parent] ??= [];
       if (children.isEmpty || children.last != index) children.add(index);
     }
@@ -665,6 +711,15 @@ class RepoRefs {
 
   /// Short ref name → tip commit sha, for every entry in the three lists.
   final Map<String, String> tips;
+}
+
+String? resolveBaseBranch(RepoRefs refs, String? savedBranch) {
+  if (savedBranch != null && refs.local.contains(savedBranch)) {
+    return savedBranch;
+  }
+  final current = refs.current;
+  if (current != null && refs.local.contains(current)) return current;
+  return refs.local.isEmpty ? null : refs.local.first;
 }
 
 abstract interface class FullDiffRepository {
