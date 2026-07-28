@@ -314,7 +314,8 @@ class _RowBuffer {
 /// When a preferred tip is known, column 0 is reserved for it. An edge to that
 /// tip can therefore be materialized as soon as its child is placed instead of
 /// waiting for the tip row; short and extended pages then share the same
-/// transition and line identity.
+/// transition and line identity. The reservation lasts for the whole layout, so
+/// disconnected history cannot reuse column 0 after the preferred root.
 ///
 /// Every continuous occupancy of a column is one branch line and gets an id in
 /// birth order, so a first-parent chain keeps one id for its whole life and
@@ -355,10 +356,10 @@ List<GraphRow> layoutGraph(List<GitCommit> commits, {String? preferredTip}) {
     final startsPreferred =
         !preferredNodePlaced &&
         (commit.sha == preferredTip || workingTreeStartsPreferred);
+    final continuesPreferred =
+        preferredTip != null && columns[0].sha == commit.sha;
     final firstCandidate =
-        preferredTip != null && !preferredNodePlaced && !startsPreferred
-        ? 1
-        : 0;
+        preferredTip != null && !startsPreferred && !continuesPreferred ? 1 : 0;
 
     var lane = startsPreferred ? 0 : -1;
     if (startsPreferred) preferredNodePlaced = true;
@@ -704,6 +705,7 @@ class RepoRefs {
     this.tags = const [],
     this.current,
     this.tips = const {},
+    this.localTips = const {},
     this.birthTimes = const {},
   });
 
@@ -718,6 +720,10 @@ class RepoRefs {
 
   /// Short ref name → tip commit sha, for every entry in the three lists.
   final Map<String, String> tips;
+
+  /// Local branch name → tip commit sha. Unlike [tips], this map cannot be
+  /// overwritten by a same-named remote branch or tag.
+  final Map<String, String> localTips;
 }
 
 String? resolveBaseBranch(RepoRefs refs, String? savedBranch) {
@@ -1185,6 +1191,7 @@ class GitRepository implements FullDiffRepository {
     final remote = <String>[];
     final tags = <String>[];
     final tips = <String, String>{};
+    final localTips = <String, String>{};
     final buckets = {
       'refs/heads/': local,
       'refs/remotes/': remote,
@@ -1200,6 +1207,7 @@ class GitRepository implements FullDiffRepository {
         if (bucket.value == remote && short.endsWith('/HEAD')) break;
         bucket.value.add(short);
         tips[short] = sha;
+        if (bucket.value == local) localTips[short] = sha;
         break;
       }
     }
@@ -1211,6 +1219,7 @@ class GitRepository implements FullDiffRepository {
       tags: tags,
       current: current.isEmpty ? null : current,
       tips: tips,
+      localTips: localTips,
       birthTimes: {
         for (var index = 0; index < local.length; index++)
           local[index]: ?births[index],

@@ -60,6 +60,20 @@ void main() {
     expect([for (final row in layoutGraph(commits)) row.lane], [0, 1, 1, 0]);
   });
 
+  test('preferred lane zero stays reserved after its root', () {
+    final commits = [
+      _commit('P', ['R']),
+      _commit('R', const []),
+      _commit('O', const []),
+    ];
+
+    final preferred = layoutGraph(commits, preferredTip: 'P');
+    final legacy = layoutGraph(commits);
+
+    expect([for (final row in preferred) row.lane], [0, 0, 1]);
+    expect([for (final row in legacy) row.lane], [0, 0, 0]);
+  });
+
   test('working tree uses lane zero only when its parent is preferred', () {
     final current = layoutGraph([
       _commit('', ['main-tip']),
@@ -962,6 +976,7 @@ void main() {
       'origin/main': 'aaa3',
       'v0.1.0': 'aaa4',
     });
+    expect(refs.localTips, {'main': 'aaa1', 'feature/x': 'aaa2'});
     // Only local branches have a birth time, and an empty reflog just has none.
     expect(refs.birthTimes, {'main': 1700000100});
     expect(calls, [

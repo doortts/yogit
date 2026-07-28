@@ -284,6 +284,7 @@ class _YogitAppState extends State<YogitApp> {
         preferredBranch: _settingsLoaded
             ? _settings.baseBranches[_repository.root]
             : null,
+        preferredBranchReady: _settingsLoaded,
         columnWidths: _settings.columnWidths,
         fullDiffColumnWidths: _settings.fullDiffColumnWidths,
         fullDiffPreferences: _settings.fullDiffPreferences,

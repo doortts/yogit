@@ -3097,7 +3097,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('full-diff-back')));
       await tester.pumpAndSettle();
-      expect(store.saveCount, 2);
+      expect(store.saveCount, 3);
+      expect(store.current.baseBranches, {'.': 'main'});
       expect(
         store.current.fullDiffPreferences,
         const FullDiffPreferences(layout: DiffLayout.sideBySide),
@@ -3183,7 +3184,8 @@ void main() {
       store.completeLoad();
       await tester.pumpAndSettle();
 
-      expect(store.saveCount, 2);
+      expect(store.saveCount, 3);
+      expect(store.current.baseBranches, {'.': 'main'});
       expect(
         store.current.fullDiffPreferences,
         const FullDiffPreferences(layout: DiffLayout.sideBySide),
@@ -4969,6 +4971,76 @@ void main() {
     });
   });
 
+  testWidgets(
+    'YogitApp persists a fallback resolved before settings finish loading',
+    (tester) async {
+      final store = DelayedMemorySettingsStore();
+      await tester.pumpWidget(
+        YogitApp(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('tip', 'tip')],
+            root: '/repos/one',
+            refs: const RepoRefs(
+              local: ['main'],
+              current: 'main',
+              tips: {'main': 'tip'},
+            ),
+          ),
+          settingsStore: store,
+          discoverAvatars: false,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('main'), findsWidgets);
+      expect(store.saveCount, 0);
+
+      store.completeLoad();
+      await tester.pumpAndSettle();
+
+      expect(store.current.baseBranches, {'/repos/one': 'main'});
+      expect(store.saveCount, 1);
+    },
+  );
+
+  testWidgets(
+    'YogitApp keeps a base branch selected before settings finish loading',
+    (tester) async {
+      final store = DelayedMemorySettingsStore()
+        ..current = const AppSettings(baseBranches: {'/repos/one': 'main'});
+      await tester.pumpWidget(
+        YogitApp(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('tip', 'tip')],
+            root: '/repos/one',
+            refs: const RepoRefs(
+              local: ['main', 'release'],
+              current: 'main',
+              tips: {'main': 'tip', 'release': 'tip'},
+            ),
+          ),
+          settingsStore: store,
+          discoverAvatars: false,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('base-branch-selector')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('base-branch-menu-release')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('release'), findsWidgets);
+      expect(store.saveCount, 0);
+
+      store.completeLoad();
+      await tester.pumpAndSettle();
+
+      expect(find.text('release'), findsWidgets);
+      expect(store.current.baseBranches, {'/repos/one': 'release'});
+      expect(store.saveCount, 1);
+    },
+  );
+
   testWidgets('a failed settings write keeps the selected base branch', (
     tester,
   ) async {
@@ -5331,7 +5403,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(requests, 0);
     expect(tester.getSize(find.byKey(const Key('graph-painter-0'))).width, 220);
-    expect(store.saveCount, 0);
+    expect(store.saveCount, 1);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -6973,6 +7045,75 @@ void main() {
     expect(top('zeta'), lessThan(top('alpha')));
     expect(top('alpha'), lessThan(top('gone')));
   });
+
+  testWidgets(
+    'preferred local branch ignores a same-named tag at another commit',
+    (tester) async {
+      late Directory root;
+      late String localRelease;
+      late String tagRelease;
+      late RepoRefs refs;
+      late List<GitCommit> commits;
+      await tester.runAsync(() async {
+        root = await Directory.systemTemp.createTemp(
+          'yogit_local_tag_collision_',
+        );
+        Future<String> git(List<String> arguments) async {
+          final result = await Process.run(
+            'git',
+            arguments,
+            workingDirectory: root.path,
+          );
+          expect(result.exitCode, 0, reason: result.stderr.toString());
+          return result.stdout.toString().trim();
+        }
+
+        await git(['init', '-b', 'main']);
+        await git(['config', 'user.name', 'Test User']);
+        await git(['config', 'user.email', 'test@example.com']);
+        await File('${root.path}/history.txt').writeAsString('local release\n');
+        await git(['add', 'history.txt']);
+        await git(['commit', '-m', 'local release tip']);
+        localRelease = await git(['rev-parse', 'HEAD']);
+        await git(['branch', 'release']);
+        await File(
+          '${root.path}/history.txt',
+        ).writeAsString('same-named tag\n');
+        await git(['commit', '-am', 'same-named tag tip']);
+        tagRelease = await git(['rev-parse', 'HEAD']);
+        await git(['tag', 'release']);
+        final repository = GitRepository(root.path);
+        refs = await repository.loadRefs();
+        commits = await repository.loadHistory();
+      });
+      addTearDown(() => root.delete(recursive: true));
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TimelineScreen(
+            repository: FakeGitRepository(
+              (_, _) async => commits,
+              root: root.path,
+              refs: refs,
+            ),
+            preferredBranch: 'release',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final rows = {
+        for (final paint in tester.widgetList<CustomPaint>(
+          find.byType(CustomPaint),
+        ))
+          if (paint.painter case final CommitGraphPainter painter)
+            painter.row.commit.sha: painter.row.lane,
+      };
+      expect(rows[localRelease], 0);
+      expect(rows[tagRelease], greaterThanOrEqualTo(1));
+    },
+  );
+
   // ------------------------------------------------------------------ C1/C2
   testWidgets('preview file and diff panes scroll independently', (
     tester,

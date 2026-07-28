@@ -309,6 +309,7 @@ class TimelineScreen extends StatefulWidget {
     this.onOpenSettings,
     this.onOpenRepository,
     this.preferredBranch,
+    this.preferredBranchReady = true,
     this.onPreferredBranchChanged,
     this.avatarService,
     this.showRemoteAvatars = true,
@@ -337,6 +338,9 @@ class TimelineScreen extends StatefulWidget {
   /// Called with the validated root of a repository the user picked.
   final ValueChanged<String>? onOpenRepository;
   final String? preferredBranch;
+
+  /// Whether [preferredBranch] has finished loading from persistent settings.
+  final bool preferredBranchReady;
   final ValueChanged<String>? onPreferredBranchChanged;
   final AvatarService? avatarService;
   final bool showRemoteAvatars;
@@ -409,9 +413,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
   var _refsLoadFailed = false;
   var _refsLoaded = false;
   String? _baseBranch;
+  String? _pendingBaseBranch;
+  var _pendingBaseBranchIsUserSelection = false;
 
-  String? get _preferredTip =>
-      _baseBranch == null ? null : _refs.tips[_baseBranch!];
+  String? get _preferredTip => _baseBranch == null
+      ? null
+      : _refs.localTips[_baseBranch!] ?? _refs.tips[_baseBranch!];
 
   /// Which way the cursor last travelled, so the ref modal opens on the side the
   /// cursor came from. Null after a click or a jump, which have no direction.
@@ -467,7 +474,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
     try {
       final refs = await widget.repository.loadRefs();
       if (!mounted) return;
-      final branch = resolveBaseBranch(refs, widget.preferredBranch);
+      final branch = resolveBaseBranch(
+        refs,
+        widget.preferredBranchReady ? widget.preferredBranch : null,
+      );
+      if (!widget.preferredBranchReady) {
+        _pendingBaseBranch = branch;
+        _pendingBaseBranchIsUserSelection = false;
+      }
       setState(() {
         _refs = refs;
         _refsLoading = false;
@@ -477,7 +491,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
         _rebuildGraph();
       });
       _scheduleRatchetUpdate();
-      if (branch != null && branch != widget.preferredBranch) {
+      if (widget.preferredBranchReady &&
+          branch != null &&
+          branch != widget.preferredBranch) {
         widget.onPreferredBranchChanged?.call(branch);
       }
     } catch (_) {
@@ -514,8 +530,23 @@ class _TimelineScreenState extends State<TimelineScreen> {
       _previewWidth = widget.previewWidth;
       _previewHeight = widget.previewHeight;
     }
-    if (_refsLoaded && widget.preferredBranch != oldWidget.preferredBranch) {
-      final branch = resolveBaseBranch(_refs, widget.preferredBranch);
+    final preferredBranchBecameReady =
+        widget.preferredBranchReady && !oldWidget.preferredBranchReady;
+    if (_refsLoaded &&
+        (preferredBranchBecameReady ||
+            (widget.preferredBranchReady &&
+                widget.preferredBranch != oldWidget.preferredBranch))) {
+      final pendingUserSelection =
+          preferredBranchBecameReady &&
+          _pendingBaseBranchIsUserSelection &&
+          _refs.local.contains(_pendingBaseBranch);
+      final branch = pendingUserSelection
+          ? _pendingBaseBranch
+          : resolveBaseBranch(_refs, widget.preferredBranch);
+      if (preferredBranchBecameReady) {
+        _pendingBaseBranch = null;
+        _pendingBaseBranchIsUserSelection = false;
+      }
       if (branch != _baseBranch) {
         setState(() {
           _baseBranch = branch;
@@ -523,8 +554,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
         });
         _scheduleRatchetUpdate();
       }
-      if (branch != null && branch != widget.preferredBranch) {
-        widget.onPreferredBranchChanged?.call(branch);
+      if (branch != null &&
+          (pendingUserSelection || branch != widget.preferredBranch)) {
+        final onChanged = widget.onPreferredBranchChanged;
+        if (onChanged != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) onChanged(branch);
+          });
+        }
       }
     }
   }
@@ -1139,7 +1176,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
       _rebuildGraph();
     });
     _scheduleRatchetUpdate();
-    widget.onPreferredBranchChanged?.call(branch);
+    if (widget.preferredBranchReady) {
+      widget.onPreferredBranchChanged?.call(branch);
+    } else {
+      _pendingBaseBranch = branch;
+      _pendingBaseBranchIsUserSelection = true;
+    }
     _focusNode.requestFocus();
   }
 
