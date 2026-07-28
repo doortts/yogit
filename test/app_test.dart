@@ -2807,7 +2807,7 @@ void main() {
       tester
           .getSemantics(find.bySemanticsLabel('History'))
           .flagsCollection
-          .isSelected,
+          .isToggled,
       ui.Tristate.isTrue,
     );
     expect(
@@ -2837,7 +2837,7 @@ void main() {
       tester
           .getSemantics(find.bySemanticsLabel('History'))
           .flagsCollection
-          .isSelected,
+          .isToggled,
       ui.Tristate.isTrue,
     );
     expect(
