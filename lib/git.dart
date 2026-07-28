@@ -324,7 +324,8 @@ List<GraphRow> layoutGraph(List<GitCommit> commits, {String? preferredTip}) {
   final columns = <_Column>[
     if (preferredTip != null) (sha: null, row: -1, line: -1),
   ];
-  var preferredStarted = false;
+  var preferredNodePlaced = false;
+  var preferredTipLoaded = false;
   final mergeChildRows = <String, List<int>>{};
   final rows = <_RowBuffer>[];
   var lines = 0;
@@ -346,19 +347,21 @@ List<GraphRow> layoutGraph(List<GitCommit> commits, {String? preferredTip}) {
     }
 
     final workingTreeStartsPreferred =
-        !preferredStarted &&
+        !preferredNodePlaced &&
         index == 0 &&
         commit.sha.isEmpty &&
         commit.parents.isNotEmpty &&
         commit.parents.first == preferredTip;
     final startsPreferred =
-        !preferredStarted &&
+        !preferredNodePlaced &&
         (commit.sha == preferredTip || workingTreeStartsPreferred);
     final firstCandidate =
-        preferredTip != null && !preferredStarted && !startsPreferred ? 1 : 0;
+        preferredTip != null && !preferredNodePlaced && !startsPreferred
+        ? 1
+        : 0;
 
     var lane = startsPreferred ? 0 : -1;
-    if (startsPreferred) preferredStarted = true;
+    if (startsPreferred) preferredNodePlaced = true;
     for (
       var column = firstCandidate;
       column < columns.length && lane < 0;
@@ -411,7 +414,11 @@ List<GraphRow> layoutGraph(List<GitCommit> commits, {String? preferredTip}) {
     columns[lane] = commit.parents.isEmpty
         ? (sha: null, row: index, line: -1)
         : (sha: commit.parents.first, row: index, line: branch);
-    final preferredParent = preferredTip != null && !preferredStarted
+    if (preferredTip != null && commit.sha == preferredTip) {
+      preferredTipLoaded = true;
+    }
+    final preferredParent =
+        preferredTip != null && !preferredTipLoaded && lane != 0
         ? commit.parents.indexOf(preferredTip)
         : -1;
     if (preferredParent >= 0) {

@@ -78,6 +78,117 @@ void main() {
     expect(other[2].lane, 0);
   });
 
+  test('working tree preserves an unloaded preferred first-parent edge', () {
+    final commits = [
+      _commit('', ['preferred']),
+      _commit('child', ['preferred']),
+      _commit('side', ['side-root']),
+      _commit('preferred', const []),
+      _commit('side-root', const []),
+    ];
+    final page = layoutGraph(
+      commits.take(3).toList(),
+      preferredTip: 'preferred',
+    );
+    final full = layoutGraph(commits, preferredTip: 'preferred');
+    final prefix = full.take(3);
+
+    expect([for (final row in page) row.lane], [0, 1, 1]);
+    expect([for (final row in page) row.branch], [0, 1, 2]);
+    expect(
+      [for (final row in page) row.parentLanes],
+      [
+        [0],
+        [0],
+        [1],
+      ],
+    );
+    expect(
+      [for (final row in page) row.transitions],
+      [
+        const <LaneTransition>[],
+        [(from: 1, to: 0, sha: 'preferred')],
+        const <LaneTransition>[],
+      ],
+    );
+    expect([for (final row in page) row.nextLaneBranches[0]], [0, 0, 0]);
+    expect(
+      [for (final row in page) row.lane],
+      [for (final row in prefix) row.lane],
+    );
+    expect(
+      [for (final row in page) row.branch],
+      [for (final row in prefix) row.branch],
+    );
+    expect(
+      [for (final row in page) row.parentLanes],
+      [for (final row in prefix) row.parentLanes],
+    );
+    expect(
+      [for (final row in page) row.transitions],
+      [for (final row in prefix) row.transitions],
+    );
+    expect(
+      [for (final row in page) row.nextLaneBranches[0]],
+      [for (final row in prefix) row.nextLaneBranches[0]],
+    );
+  });
+
+  test('working tree preserves an unloaded preferred merge-parent edge', () {
+    final commits = [
+      _commit('', ['preferred']),
+      _commit('merge', ['main', 'preferred']),
+      _commit('main', const []),
+      _commit('preferred', const []),
+    ];
+    final page = layoutGraph(
+      commits.take(3).toList(),
+      preferredTip: 'preferred',
+    );
+    final full = layoutGraph(commits, preferredTip: 'preferred');
+    final prefix = full.take(3);
+
+    expect([for (final row in page) row.lane], [0, 1, 1]);
+    expect([for (final row in page) row.branch], [0, 1, 1]);
+    expect(
+      [for (final row in page) row.parentLanes],
+      [
+        [0],
+        [1, 0],
+        const <int>[],
+      ],
+    );
+    expect(
+      [for (final row in page) row.transitions],
+      [
+        const <LaneTransition>[],
+        [(from: 1, to: 0, sha: 'preferred')],
+        const <LaneTransition>[],
+      ],
+    );
+    expect([for (final row in page) row.nextLaneBranches[0]], [0, 0, 0]);
+    expect(
+      [for (final row in page) row.lane],
+      [for (final row in prefix) row.lane],
+    );
+    expect(
+      [for (final row in page) row.branch],
+      [for (final row in prefix) row.branch],
+    );
+    expect(
+      [for (final row in page) row.parentLanes],
+      [for (final row in prefix) row.parentLanes],
+    );
+    expect(
+      [for (final row in page) row.transitions],
+      [for (final row in prefix) row.transitions],
+    );
+    expect(
+      [for (final row in page) row.nextLaneBranches[0]],
+      [for (final row in prefix) row.nextLaneBranches[0]],
+    );
+  });
+
   test('merge-parent edge to unloaded preferred tip uses lane zero', () {
     final row = layoutGraph([
       _commit('merge', ['main', 'preferred']),
