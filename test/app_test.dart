@@ -1951,103 +1951,182 @@ void main() {
     },
   );
 
-  testWidgets('sidebar lists refs, filters them, and moves the selection', (
-    tester,
-  ) async {
+  testWidgets(
+    'sidebar lists refs as collapsible trees, filters them, and moves the selection',
+    (tester) async {
+      await tester.pumpWidget(
+        app(
+          FakeGitRepository(
+            (_, _) async => [
+              commit('1', 'first commit'),
+              commit(
+                '2',
+                'second commit',
+                refs: const [GitRef(name: 'feature/login')],
+              ),
+            ],
+            refs: const RepoRefs(
+              local: ['main', 'feature/login', 'feature/payments/api'],
+              remote: ['origin/main', 'origin/hotfix/urgent'],
+              tags: ['release/v1.0.0'],
+              current: 'main',
+            ),
+          ),
+          controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      for (final (section, heading, count) in [
+        ('local', 'LOCAL', '3'),
+        ('remote', 'REMOTE', '2'),
+        ('tags', 'TAGS', '1'),
+      ]) {
+        expect(find.text(heading), findsOneWidget);
+        expect(find.byKey(Key('sidebar-section-$section')), findsOneWidget);
+        expect(
+          find.byKey(Key('sidebar-section-icon-$section')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: find.byKey(Key('sidebar-section-count-$section')),
+            matching: find.text(count),
+          ),
+          findsOneWidget,
+        );
+      }
+      expect(
+        find.byKey(const Key('sidebar-folder-local-feature')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('sidebar-folder-local-feature/payments')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('sidebar-folder-remote-origin')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('sidebar-ref-feature/payments/api')),
+        findsOneWidget,
+      );
+      expect(find.text('api'), findsOneWidget);
+      // The checked-out branch leads LOCAL.
+      expect(
+        tester.getTopLeft(find.byKey(const Key('sidebar-ref-main'))).dy,
+        lessThan(
+          tester
+              .getTopLeft(find.byKey(const Key('sidebar-ref-feature/login')))
+              .dy,
+        ),
+      );
+
+      final current = tester.widget<Container>(
+        find
+            .descendant(
+              of: find.byKey(const Key('sidebar-ref-main')),
+              matching: find.byType(Container),
+            )
+            .first,
+      );
+      expect(
+        (current.decoration! as BoxDecoration).color,
+        const Color(0xFF263246),
+      );
+
+      await tester.tap(find.byKey(const Key('ref-filter')));
+      expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
+      var typed = '';
+      for (final (key, character) in [
+        (LogicalKeyboardKey.keyH, 'h'),
+        (LogicalKeyboardKey.keyJ, 'j'),
+        (LogicalKeyboardKey.keyK, 'k'),
+        (LogicalKeyboardKey.keyL, 'l'),
+      ]) {
+        // Widget tests deliver hardware and platform text-editing messages
+        // separately. The timeline must leave the hardware event unhandled before
+        // the engine can insert its character into the focused editable.
+        expect(await tester.sendKeyEvent(key), isFalse);
+        typed += character;
+        tester.testTextInput.updateEditingValue(
+          TextEditingValue(
+            text: typed,
+            selection: TextSelection.collapsed(offset: typed.length),
+          ),
+        );
+        await tester.pump();
+        expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
+      }
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('ref-filter')))
+            .controller!
+            .text,
+        'hjkl',
+      );
+
+      await tester.enterText(find.byKey(const Key('ref-filter')), '');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('sidebar-folder-local-feature')));
+      await tester.pump();
+      expect(find.byKey(const Key('sidebar-ref-feature/login')), findsNothing);
+      expect(
+        find.byKey(const Key('sidebar-ref-feature/payments/api')),
+        findsNothing,
+      );
+
+      await tester.enterText(find.byKey(const Key('ref-filter')), 'login');
+      await tester.pump();
+      expect(find.byKey(const Key('sidebar-ref-main')), findsNothing);
+      expect(find.byKey(const Key('sidebar-ref-origin/main')), findsNothing);
+      expect(
+        find.byKey(const Key('sidebar-ref-feature/login')),
+        findsOneWidget,
+      );
+
+      await tester.enterText(find.byKey(const Key('ref-filter')), '');
+      await tester.pump();
+      expect(find.byKey(const Key('sidebar-ref-feature/login')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('sidebar-folder-local-feature')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('sidebar-section-remote')));
+      await tester.pump();
+      expect(find.byKey(const Key('sidebar-ref-origin/main')), findsNothing);
+      await tester.tap(find.byKey(const Key('sidebar-section-remote')));
+      await tester.pump();
+      expect(find.byKey(const Key('sidebar-ref-origin/main')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('sidebar-ref-feature/login')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('selected-row-2')), findsOneWidget);
+    },
+  );
+
+  testWidgets('empty ref trees keep their section headers', (tester) async {
     await tester.pumpWidget(
       app(
         FakeGitRepository(
-          (_, _) async => [
-            commit('1', 'first commit'),
-            commit(
-              '2',
-              'second commit',
-              refs: const [GitRef(name: 'feature/timeline')],
-            ),
-          ],
-          refs: const RepoRefs(
-            local: ['main', 'feature/timeline'],
-            remote: ['origin/main'],
-            tags: ['v0.1.0'],
-            current: 'main',
-          ),
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(),
         ),
         controller,
       ),
     );
     await tester.pumpAndSettle();
 
-    for (final heading in ['LOCAL', 'REMOTE', 'TAGS']) {
-      expect(find.text(heading), findsOneWidget);
-    }
-    // The checked-out branch leads LOCAL.
-    expect(
-      tester.getTopLeft(find.byKey(const Key('sidebar-ref-main'))).dy,
-      lessThan(
-        tester
-            .getTopLeft(find.byKey(const Key('sidebar-ref-feature/timeline')))
-            .dy,
-      ),
-    );
-    expect(find.text('origin/main'), findsOneWidget);
-    expect(find.text('v0.1.0'), findsOneWidget);
-
-    final current = tester.widget<Container>(
-      find
-          .descendant(
-            of: find.byKey(const Key('sidebar-ref-main')),
-            matching: find.byType(Container),
-          )
-          .first,
-    );
-    expect(
-      (current.decoration! as BoxDecoration).color,
-      const Color(0xFF263246),
-    );
-
-    await tester.tap(find.byKey(const Key('ref-filter')));
-    expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
-    var typed = '';
-    for (final (key, character) in [
-      (LogicalKeyboardKey.keyH, 'h'),
-      (LogicalKeyboardKey.keyJ, 'j'),
-      (LogicalKeyboardKey.keyK, 'k'),
-      (LogicalKeyboardKey.keyL, 'l'),
-    ]) {
-      // Widget tests deliver hardware and platform text-editing messages
-      // separately. The timeline must leave the hardware event unhandled before
-      // the engine can insert its character into the focused editable.
-      expect(await tester.sendKeyEvent(key), isFalse);
-      typed += character;
-      tester.testTextInput.updateEditingValue(
-        TextEditingValue(
-          text: typed,
-          selection: TextSelection.collapsed(offset: typed.length),
+    for (final section in ['local', 'remote', 'tags']) {
+      expect(find.byKey(Key('sidebar-section-$section')), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(Key('sidebar-section-count-$section')),
+          matching: find.text('0'),
         ),
+        findsOneWidget,
       );
-      await tester.pump();
-      expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
     }
-    expect(
-      tester
-          .widget<TextField>(find.byKey(const Key('ref-filter')))
-          .controller!
-          .text,
-      'hjkl',
-    );
-
-    await tester.enterText(find.byKey(const Key('ref-filter')), 'feature');
-    await tester.pump();
-    expect(find.byKey(const Key('sidebar-ref-main')), findsNothing);
-    expect(find.byKey(const Key('sidebar-ref-origin/main')), findsNothing);
-    expect(
-      find.byKey(const Key('sidebar-ref-feature/timeline')),
-      findsOneWidget,
-    );
-
-    await tester.tap(find.byKey(const Key('sidebar-ref-feature/timeline')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('selected-row-2')), findsOneWidget);
   });
 
   testWidgets(
@@ -3328,7 +3407,12 @@ void main() {
     expect(find.text('—'), findsOneWidget);
     expect(skips, [0]);
 
-    final hash = tester.widget<Text>(find.text('1'));
+    final hash = tester.widget<Text>(
+      find.descendant(
+        of: find.byKey(const Key('timeline-list')),
+        matching: find.text('1'),
+      ),
+    );
     expect(hash.style?.color, const Color(0xFFEF6C63));
 
     final wipRow =
@@ -7645,7 +7729,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final hash = tester.widget<Text>(find.text('1').first);
+    final hash = tester.widget<Text>(
+      find.descendant(
+        of: find.byKey(const Key('selected-row-1')),
+        matching: find.text('1'),
+      ),
+    );
     expect(hash.style?.fontFamily, technicalFontFamily);
     expect(hash.style?.fontFamilyFallback, technicalFontFallback);
 

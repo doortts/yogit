@@ -12,6 +12,7 @@ import 'external_editor.dart';
 import 'full_diff_model.dart';
 import 'git.dart';
 import 'page_scroll_shortcuts.dart';
+import 'ref_tree.dart';
 import 'repository_branch_selector.dart';
 import 'settings.dart';
 import 'typography.dart';
@@ -73,6 +74,17 @@ String dateGroupLabel(DateTime day, DateTime now) {
 /// group below it. [rowIndex] indexes the commit rows and is -1 on a heading,
 /// which instead carries a synthetic pass-through row.
 typedef TimelineEntry = ({int rowIndex, String? label, GraphRow row});
+
+enum _RefSection {
+  local('LOCAL', Icons.computer_outlined),
+  remote('REMOTE', Icons.cloud_outlined),
+  tags('TAGS', Icons.sell_outlined);
+
+  const _RefSection(this.label, this.icon);
+
+  final String label;
+  final IconData icon;
+}
 
 /// A line born from a merge commit bends beside its source. All other
 /// transitions keep their lane until they reach the parent row.
@@ -425,6 +437,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
   bool? _arrivedGoingDown;
   final _filterController = TextEditingController();
   var _filter = '';
+  final _collapsedRefSections = <_RefSection>{};
+  final _collapsedRefFolders = <String>{};
 
   late final Map<String, double> _widths = _widthMap(widget.columnWidths);
   late double? _commitWidth = widget.columnWidths.commit;
@@ -1350,14 +1364,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 8),
             children: [
               // The checked-out branch leads the local list.
-              ..._sidebarSection('LOCAL', _localBranches, _refs.current, null),
-              ..._sidebarSection(
-                'REMOTE',
-                _refs.remote,
-                null,
-                Icons.cloud_outlined,
-              ),
-              ..._sidebarSection('TAGS', _refs.tags, null, Icons.sell_outlined),
+              ..._refSection(_RefSection.local, _localBranches),
+              ..._refSection(_RefSection.remote, _refs.remote),
+              ..._refSection(_RefSection.tags, _refs.tags),
             ],
           ),
         ),
@@ -1391,28 +1400,98 @@ class _TimelineScreenState extends State<TimelineScreen> {
     return [if (_refs.local.contains(_refs.current)) _refs.current!, ...rest];
   }
 
-  Iterable<Widget> _sidebarSection(
-    String heading,
-    List<String> names,
-    String? current,
-    IconData? icon,
-  ) => [
-    Padding(
-      padding: const EdgeInsets.fromLTRB(8, 10, 8, 5),
-      child: Text(
-        heading,
-        style: const TextStyle(
-          color: _muted,
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-          letterSpacing: 0.8,
+  Iterable<Widget> _refSection(_RefSection section, List<String> names) sync* {
+    final query = _filter.trim().toLowerCase();
+    final filtering = query.isNotEmpty;
+    final collapsed = !filtering && _collapsedRefSections.contains(section);
+    yield GestureDetector(
+      key: Key('sidebar-section-${section.name}'),
+      behavior: HitTestBehavior.opaque,
+      onTap: () => setState(() {
+        if (!_collapsedRefSections.remove(section)) {
+          _collapsedRefSections.add(section);
+        }
+      }),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(4, 10, 4, 5),
+        child: SizedBox(
+          height: 20,
+          child: Row(
+            children: [
+              Icon(
+                collapsed ? Icons.chevron_right : Icons.expand_more,
+                size: 16,
+                color: _muted,
+              ),
+              const SizedBox(width: 2),
+              Icon(
+                section.icon,
+                key: Key('sidebar-section-icon-${section.name}'),
+                size: 14,
+                color: _muted,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  section.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _muted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+              ),
+              SizedBox(
+                key: Key('sidebar-section-count-${section.name}'),
+                child: Text(
+                  '${names.length}',
+                  style: const TextStyle(
+                    color: _muted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-    ),
-    for (final name in names)
-      if (_filter.isEmpty || name.toLowerCase().contains(_filter.toLowerCase()))
-        _sidebarItem(name, icon: icon, current: name == current),
-  ];
+    );
+    if (collapsed) return;
+
+    final visibleNames = filtering
+        ? names.where((name) => name.toLowerCase().contains(query)).toList()
+        : names;
+    yield* _refTreeRows(section, buildRefTree(visibleNames));
+  }
+
+  Iterable<Widget> _refTreeRows(
+    _RefSection section,
+    List<RefTreeNode> nodes, {
+    int depth = 0,
+    String parentPath = '',
+  }) sync* {
+    final filtering = _filter.trim().isNotEmpty;
+    for (final node in nodes) {
+      final path = parentPath.isEmpty
+          ? node.segment
+          : '$parentPath/${node.segment}';
+      yield _refTreeRow(section, node, path, depth);
+      final folderKey = '${section.name}:$path';
+      final collapsed = !filtering && _collapsedRefFolders.contains(folderKey);
+      if (node.children.isNotEmpty && !collapsed) {
+        yield* _refTreeRows(
+          section,
+          node.children,
+          depth: depth + 1,
+          parentPath: path,
+        );
+      }
+    }
+  }
 
   /// The dot takes the color of the branch line the ref tip sits on. Muted while
   /// that commit is still unloaded.
@@ -1427,59 +1506,103 @@ class _TimelineScreenState extends State<TimelineScreen> {
     return _muted;
   }
 
-  Widget _sidebarItem(String name, {IconData? icon, required bool current}) {
-    final birth = _refs.birthTimes[name];
-    return GestureDetector(
-      key: Key('sidebar-ref-$name'),
-      behavior: HitTestBehavior.opaque,
-      onTap: () => _selectRef(name, remote: icon == Icons.cloud_outlined),
-      child: Container(
-        height: birth == null ? 28 : 40,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        decoration: BoxDecoration(
-          color: current ? _accent : null,
-          borderRadius: BorderRadius.circular(5),
-        ),
+  Widget _refTreeRow(
+    _RefSection section,
+    RefTreeNode node,
+    String path,
+    int depth,
+  ) {
+    final name = node.fullName;
+    final hasChildren = node.children.isNotEmpty;
+    final folderKey = '${section.name}:$path';
+    final folderCollapsed = _collapsedRefFolders.contains(folderKey);
+    final birth = name == null ? null : _refs.birthTimes[name];
+    final current =
+        section == _RefSection.local && name != null && name == _refs.current;
+    final icon = name == null
+        ? Icons.folder_outlined
+        : section == _RefSection.tags
+        ? Icons.sell_outlined
+        : Icons.call_split;
+    final iconColor = name != null && section != _RefSection.tags
+        ? _refTipColor(name)
+        : _muted;
+
+    void toggleFolder() => setState(() {
+      if (!_collapsedRefFolders.remove(folderKey)) {
+        _collapsedRefFolders.add(folderKey);
+      }
+    });
+
+    return SizedBox(
+      height: birth == null ? 28 : 40,
+      child: Padding(
+        padding: EdgeInsets.only(left: 4 + depth * 16.0, right: 4),
         child: Row(
           children: [
-            if (icon != null)
-              Icon(icon, size: 12, color: _muted)
-            else
-              Container(
-                width: 7,
-                height: 7,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: _refTipColor(name), width: 2),
-                ),
-              ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: current ? _text : _muted,
-                      fontSize: 13,
-                    ),
+            if (hasChildren)
+              GestureDetector(
+                key: Key('sidebar-folder-${section.name}-$path'),
+                behavior: HitTestBehavior.opaque,
+                onTap: toggleFolder,
+                child: SizedBox(
+                  width: 18,
+                  height: double.infinity,
+                  child: Icon(
+                    folderCollapsed ? Icons.chevron_right : Icons.expand_more,
+                    size: 16,
+                    color: _muted,
                   ),
-                  // When the branch was cut, in the Date column's own words.
-                  if (birth != null)
-                    Text(
-                      socialTimeLabel(
-                        DateTime.fromMillisecondsSinceEpoch(birth * 1000),
-                        DateTime.now(),
+                ),
+              )
+            else
+              const SizedBox(width: 18),
+            Icon(icon, size: 13, color: iconColor),
+            const SizedBox(width: 7),
+            Expanded(
+              child: GestureDetector(
+                key: name == null ? null : Key('sidebar-ref-$name'),
+                behavior: HitTestBehavior.opaque,
+                onTap: name == null
+                    ? toggleFolder
+                    : () => _selectRef(
+                        name,
+                        remote: section == _RefSection.remote,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: _muted, fontSize: 11),
-                    ),
-                ],
+                child: Container(
+                  height: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 5),
+                  decoration: BoxDecoration(
+                    color: current ? _accent : null,
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        node.segment,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: current ? _text : _muted,
+                          fontSize: 13,
+                        ),
+                      ),
+                      // When the branch was cut, in the Date column's own words.
+                      if (birth != null)
+                        Text(
+                          socialTimeLabel(
+                            DateTime.fromMillisecondsSinceEpoch(birth * 1000),
+                            DateTime.now(),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: _muted, fontSize: 11),
+                        ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ],
