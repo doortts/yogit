@@ -5107,6 +5107,83 @@ void main() {
     },
   );
 
+  testWidgets('YogitApp restores manual graph width only for its repository', (
+    tester,
+  ) async {
+    final store = MemorySettingsStore();
+    GitRepository repository(String root) =>
+        FakeGitRepository((_, _) async => [commit('1', root)], root: root);
+    double graphWidth() =>
+        tester.getSize(find.byKey(const Key('graph-header'))).width;
+
+    await tester.pumpWidget(
+      YogitApp(
+        repository: repository('/repo/a'),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.drag(
+      find.byKey(const Key('graph-resizer')),
+      const Offset(44, 0),
+    );
+    await tester.pumpAndSettle();
+    final savedA = graphWidth();
+    expect(store.current.repositoryGraphWidths['/repo/a'], savedA);
+
+    await tester.pumpWidget(
+      YogitApp(
+        key: const Key('restart-a'),
+        repository: repository('/repo/a'),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(graphWidth(), savedA);
+
+    await tester.pumpWidget(
+      YogitApp(
+        key: const Key('open-b'),
+        repository: repository('/repo/b'),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(graphWidth(), 96);
+  });
+
+  testWidgets('YogitApp migrates legacy graph width to the first repository', (
+    tester,
+  ) async {
+    final store = MemorySettingsStore()
+      ..current = const AppSettings(
+        columnWidths: TimelineColumnWidths(graph: 180),
+      );
+
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository(
+          (_, _) async => [commit('1', 'first')],
+          root: '/repo/first',
+        ),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(store.current.columnWidths.graph, isNull);
+    expect(store.current.repositoryGraphWidths, {'/repo/first': 180});
+    expect(tester.getSize(find.byKey(const Key('graph-header'))).width, 180);
+  });
+
   testWidgets('settings toggle preserves timeline state and graph geometry', (
     tester,
   ) async {
@@ -5218,7 +5295,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(requests, 0);
     expect(tester.getSize(find.byKey(const Key('graph-painter-0'))).width, 220);
-    expect(store.saveCount, 0);
+    expect(store.saveCount, 1);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
