@@ -150,6 +150,7 @@ class _DiffScreenState extends State<DiffScreen> {
   late double _historyWidth;
   late double _sideBySideRatio;
   _FullDiffNavigationPane _lastNavigationPane = _FullDiffNavigationPane.files;
+  double? _lastResponsiveWidth;
 
   bool _effectScheduled = false;
   bool _scrollSyncScheduled = false;
@@ -329,6 +330,11 @@ class _DiffScreenState extends State<DiffScreen> {
         (next.fullFileScrollTarget != null || previous.patch.data == null);
 
     if (changedDocument) _reconcileAnchorKeys(next.patch.data);
+    if (previous.history.data == null &&
+        next.history.data != null &&
+        next.view == FullDiffView.history) {
+      _restoreNavigationFocus();
+    }
     if (previous.historyContext != next.historyContext) {
       _pendingHistoryScrollToTop = true;
     }
@@ -705,17 +711,35 @@ class _DiffScreenState extends State<DiffScreen> {
   void _restoreNavigationFocus() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _controller.state.focusMode) return;
-      if (_controller.state.view == FullDiffView.history &&
-          _lastNavigationPane == _FullDiffNavigationPane.history &&
-          _historyListFocus.context != null) {
-        _historyListFocus.requestFocus();
-        return;
-      }
-      if (_fileListFocus.context != null) {
-        _lastNavigationPane = _FullDiffNavigationPane.files;
-        _fileListFocus.requestFocus();
-      }
+      final historyConnected =
+          _controller.state.view == FullDiffView.history &&
+          (_historyListFocus.context?.mounted ?? false);
+      final filesConnected = _fileListFocus.context?.mounted ?? false;
+      final target = _lastNavigationPane == _FullDiffNavigationPane.history
+          ? historyConnected
+                ? (_historyListFocus, _FullDiffNavigationPane.history)
+                : filesConnected
+                ? (_fileListFocus, _FullDiffNavigationPane.files)
+                : null
+          : filesConnected
+          ? (_fileListFocus, _FullDiffNavigationPane.files)
+          : historyConnected
+          ? (_historyListFocus, _FullDiffNavigationPane.history)
+          : null;
+      if (target == null) return;
+      _lastNavigationPane = target.$2;
+      target.$1.requestFocus();
     });
+  }
+
+  void _observeResponsiveWidth(double width) {
+    if (_lastResponsiveWidth == null) {
+      _lastResponsiveWidth = width;
+      return;
+    }
+    if (_lastResponsiveWidth == width) return;
+    _lastResponsiveWidth = width;
+    _restoreNavigationFocus();
   }
 
   void _selectPrimaryView(FullDiffView view) {
@@ -1074,6 +1098,7 @@ class _DiffScreenState extends State<DiffScreen> {
                       Expanded(
                         child: LayoutBuilder(
                           builder: (context, constraints) {
+                            _observeResponsiveWidth(constraints.maxWidth);
                             final viewportWidth = MediaQuery.sizeOf(
                               context,
                             ).width;

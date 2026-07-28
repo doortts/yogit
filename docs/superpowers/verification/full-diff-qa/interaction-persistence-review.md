@@ -9,16 +9,19 @@
 
 | 이미지 | 크기 | 조작과 확인 결과 | 판정 |
 | --- | ---: | --- | --- |
-| [24-unified-hunks](actual/24-unified-hunks.png) | 1070×842 | Hunk를 껐다가 다시 켰다. Unified와 Hunk가 각각 선택되어 있고, `State.Init`, `SetupBase`, `LoadCurrent` 등 여러 Hunk가 한 스크롤에 소스 순서대로 이어진다. 상단 화면 선택에는 Diff·Blame·History만 있으며 File 버튼은 없다. | PASS |
+| [24-unified-hunks](actual/24-unified-hunks.png) | 1070×842 | Hunk를 껐다가 다시 켰다. 첫째 줄에는 연결형 Diff \| Blame 선택 묶음이 있고, 둘째 줄에는 Unified \| Side-by-side 선택 묶음과 Hunk 바로 오른쪽의 History 토글이 있다. Unified와 Hunk가 각각 선택되어 있고, `State.Init`, `SetupBase`, `LoadCurrent` 등 여러 Hunk가 한 스크롤에 소스 순서대로 이어진다. File 버튼은 없다. | PASS |
 | [25-side-by-side-full-file](actual/25-side-by-side-full-file.png) | 1280×842 | Unified를 선택한 뒤 Side-by-side로 되돌렸다. Side-by-side만 선택되고 Hunk는 독립적으로 꺼져 있다. 하나로 합쳐진 `Full file` 범위 안에 이전·결과 열, 가운데 경계, 변경 사이의 연속 문맥이 함께 보인다. | PASS |
-| [26-shortcut-hints](actual/26-shortcut-hints.png) | 1280×842 | Command 키를 누른 상태를 캡처했다. `⌘⇧F`, `⌘1`~`⌘3`, `⌘⇧A`, `⌘⇧Space`, `⌘⇧L`, `⌘U`, `⌘⇧H`가 각 조작부 바로 아래에 겹쳐 표시되며, 표시 전후 Unified 조작부의 위치는 바뀌지 않는다. | PASS |
+| [26-shortcut-hints](actual/26-shortcut-hints.png) | 1280×842 | Command 키를 누른 상태를 캡처했다. 첫째 줄 Diff \| Blame에는 `⌘1`·`⌘2`, 둘째 줄 Hunk 옆 History에는 `⌘3`이 표시된다. `⌘⇧F`, `⌘⇧A`, `⌘⇧Space`, `⌘⇧L`, `⌘U`, `⌘⇧H`도 각 조작부 바로 아래에 겹쳐 표시되며, 표시 전후 Unified 조작부의 위치는 바뀌지 않는다. | PASS |
 | [27-algorithm-chooser](actual/27-algorithm-chooser.png) | 1280×842 | 알고리즘 선택기를 열고 Histogram을 적용했다. 왼쪽의 Git setting·Myers·Minimal·Patience·Histogram 목록과 오른쪽 설명이 모두 보이고, Histogram에만 선택 표시가 있다. 팝오버 어느 쪽도 잘리지 않는다. | PASS |
-| [28-blame-selection](actual/28-blame-selection.png) | 1280×842 | 294행을 마우스로 선택했다. 커밋 카드는 선택 행에서 두 행 높이 아래인 296행 위치에서 시작한다. 295행은 가리지 않고 296행부터 아래 콘텐츠 위에 겹치며 뒤 행의 위치도 그대로다. 제목·작성자·날짜 같은 본문 정보는 UI 글꼴을 물려받고 SHA는 의도대로 기술 글꼴(`technicalFontFamily`)을 쓴다. | PASS |
+| [28-blame-selection](actual/28-blame-selection.png) | 1280×842 | Blame을 선택하면 둘째 줄의 Diff 전용 조작부인 Unified·Side-by-side·Hunk·History가 모두 숨는다. 294행을 마우스로 선택하자 커밋 카드는 선택 행에서 두 행 높이 아래인 296행 위치에서 시작한다. 295행은 가리지 않고 296행부터 아래 콘텐츠 위에 겹치며 뒤 행의 위치도 그대로다. 제목·작성자·날짜 같은 본문 정보는 UI 글꼴을 물려받고 SHA는 의도대로 기술 글꼴(`technicalFontFamily`)을 쓴다. | PASS |
 | [29-history-resizers](actual/29-history-resizers.png) | 1280×842 | Files 경계를 20px, History 경계를 24px 옮겼다. Files·History·diff 사이의 1px 세로선이 끊기지 않으며, 콜백에 저장된 너비와 화면 너비가 같다. 선택된 History 행의 배경은 위·왼쪽·오른쪽 패널 가장자리에 닿는다. | PASS |
 
 ## 수동 확인 항목
 
-1. File 버튼 없음: 24~29 모두 Diff·Blame·History만 표시한다. **PASS**
+1. 헤더 구조와 File 버튼 없음: 첫째 줄에는 연결형 Diff | Blame 선택
+   묶음만 있다. 둘째 줄에서는 History 토글이 Hunk 바로 오른쪽에 놓인다.
+   Blame에서는 Unified·Side-by-side·Hunk·History가 모두 숨으며 File
+   버튼은 어느 화면에도 없다. **PASS**
 2. Unified·Side-by-side 상호 배타성: 24는 Unified만, 25와 29는
    Side-by-side만 선택되어 있다. **PASS**
 3. Hunk 독립 토글: 24에서는 Hunk가 켜지고 25에서는 꺼지며, 레이아웃
@@ -42,9 +45,10 @@
 1. Preview의 파일 목록과 diff를 따로 스크롤할 수 있다. `preview file and
    diff panes scroll independently` 테스트에서 두 스크롤 위치를 따로
    움직여 확인했다. **PASS**
-2. Full Diff에는 Diff·Blame·History만 있고 File 화면은 없다. 24~29와
-   `full diff exposes only Diff Blame History and one layout` 테스트에서
-   확인했다. **PASS**
+2. Full Diff의 첫째 줄에는 Diff | Blame 선택 묶음만 있고 File 화면은 없다.
+   History는 둘째 줄 Hunk 옆의 독립 토글이다. Blame에서는 Diff 전용
+   조작부인 Unified·Side-by-side·Hunk·History가 모두 숨는다. 24~29와
+   헤더 위젯 테스트에서 확인했다. **PASS**
 3. Full Diff를 다시 열면 마지막 화면과 옵션이 복원된다. `reopening full
    diff restores the last successful options`와 설정 JSON 왕복 테스트가
    화면·레이아웃·범위·알고리즘·공백·줄바꿈 값을 확인한다. **PASS**

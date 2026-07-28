@@ -330,6 +330,7 @@ void main() {
     FullDiffColumnWidths columnWidths = const FullDiffColumnWidths(),
     ValueChanged<FullDiffColumnWidths>? onColumnWidthsChanged,
     bool routeBacked = false,
+    bool settle = true,
   }) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = size;
@@ -368,7 +369,11 @@ void main() {
     if (routeBacked) {
       await tester.tap(find.byKey(const Key('launch-full-diff')));
     }
-    await tester.pumpAndSettle();
+    if (settle) {
+      await tester.pumpAndSettle();
+    } else {
+      await tester.pump();
+    }
   }
 
   Future<void> sendChord(
@@ -2815,6 +2820,104 @@ void main() {
     expect(
       fixture.controller.state.selectedFile,
       fixture.controller.state.files[1],
+    );
+  });
+
+  testWidgets('650px History start focuses its asynchronously created list', (
+    tester,
+  ) async {
+    final pendingHistory = Completer<List<GitFileHistoryRecord>>();
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..diff = ((_, _, _, _, _) async => twoHunkLines)
+      ..content = ((_, _, _) async => resultFile.bytes)
+      ..history = ((_, _) => pendingHistory.future);
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.setView(FullDiffView.history);
+    expect(controller.state.history.loading, isTrue);
+    await pumpWorkspace(
+      tester,
+      controller: controller,
+      size: const Size(650, 842),
+      settle: false,
+    );
+    expect(find.byKey(const Key('history-list-focus')), findsNothing);
+
+    pendingHistory.complete([
+      for (final entry in historyEntries)
+        GitFileHistoryRecord(
+          commit: entry.commit,
+          path: entry.path,
+          oldPath: entry.oldPath,
+          status: entry.status,
+        ),
+    ]);
+    await tester.pumpAndSettle();
+
+    final historyFocus = tester.widget<Focus>(
+      find.byKey(const Key('history-list-focus')),
+    );
+    expect(historyFocus.focusNode!.hasFocus, isTrue);
+  });
+
+  testWidgets('History focus replaces hidden Files focus at 650px', (
+    tester,
+  ) async {
+    final fixture = await historyWorkspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(700, 842),
+    );
+    final filesFocus = tester.widget<Focus>(
+      find.byKey(const Key('changed-files-focus')),
+    );
+    filesFocus.focusNode!.requestFocus();
+    await tester.pump();
+    expect(filesFocus.focusNode!.hasFocus, isTrue);
+
+    tester.view.physicalSize = const Size(650, 842);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('changed-files-focus')), findsNothing);
+    final historyFocus = tester.widget<Focus>(
+      find.byKey(const Key('history-list-focus')),
+    );
+    expect(historyFocus.focusNode!.hasFocus, isTrue);
+  });
+
+  testWidgets('650px History arrows resume after a header click', (
+    tester,
+  ) async {
+    final fixture = await historyWorkspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(650, 842),
+    );
+    final selectedBefore =
+        fixture.controller.state.selectedHistoryEntry!.commit.sha;
+
+    await tester.tap(find.text('Side-by-side'));
+    await tester.pumpAndSettle();
+    final historyFocus = tester.widget<Focus>(
+      find.byKey(const Key('history-list-focus')),
+    );
+    expect(historyFocus.focusNode!.hasFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+
+    expect(
+      fixture.controller.state.selectedHistoryEntry!.commit.sha,
+      isNot(selectedBefore),
     );
   });
 

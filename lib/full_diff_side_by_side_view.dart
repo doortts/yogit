@@ -64,7 +64,13 @@ class SideBySidePresentationView extends StatelessWidget {
       );
     }
 
-    final items = _SideBySideDocumentIndex(document);
+    return _SideBySideDocumentIndexCache(
+      document: document,
+      builder: _buildIndexed,
+    );
+  }
+
+  Widget _buildIndexed(BuildContext context, _SideBySideDocumentIndex items) {
     final scrollTargetIndex = items.indexForTarget(scrollTarget);
     final list = FullDiffSelectionArea(
       allSourceTextBuilder: () {
@@ -178,6 +184,42 @@ class SideBySidePresentationView extends StatelessWidget {
   GlobalKey _anchorKey(DiffAnchor anchor) =>
       anchorKeys[anchor.id] ??
       (throw StateError('Missing GlobalKey for ${anchor.id}'));
+}
+
+class _SideBySideDocumentIndexCache extends StatefulWidget {
+  const _SideBySideDocumentIndexCache({
+    required this.document,
+    required this.builder,
+  });
+
+  final DiffDocument document;
+  final Widget Function(BuildContext, _SideBySideDocumentIndex) builder;
+
+  @override
+  State<_SideBySideDocumentIndexCache> createState() =>
+      _SideBySideDocumentIndexCacheState();
+}
+
+class _SideBySideDocumentIndexCacheState
+    extends State<_SideBySideDocumentIndexCache> {
+  late _SideBySideDocumentIndex _index;
+
+  @override
+  void initState() {
+    super.initState();
+    _index = _SideBySideDocumentIndex(widget.document);
+  }
+
+  @override
+  void didUpdateWidget(covariant _SideBySideDocumentIndexCache oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(widget.document, oldWidget.document)) {
+      _index = _SideBySideDocumentIndex(widget.document);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context, _index);
 }
 
 class _SideBySideDocumentIndex {

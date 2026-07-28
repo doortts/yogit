@@ -366,6 +366,7 @@ class GlobalDiffToolbar extends StatelessWidget {
         value: hunkEnabled,
         icon: Icons.segment,
         onChanged: onHunkChanged,
+        compact: compact,
         semanticsHint: 'Hunk 켜기 또는 끄기, 단축키 Command Shift H',
       ),
     );
@@ -381,6 +382,7 @@ class GlobalDiffToolbar extends StatelessWidget {
           value: historySelected,
           icon: Icons.history,
           onChanged: onHistoryChanged,
+          compact: compact,
           semanticsHint: 'History 켜기 또는 끄기, 단축키 Command 3',
         ),
       ),
@@ -548,7 +550,7 @@ class _SegmentButton extends StatelessWidget {
           onPressed: onPressed,
           borderRadius: radius,
           border: segmentBorder,
-          padding: EdgeInsets.only(left: first ? 8 : 0, right: last ? 8 : 0),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
         ),
       ),
     );

@@ -40,7 +40,7 @@ void main() {
     expect(calls, 1);
   });
 
-  testWidgets('Diff controls use two exclusive connected groups', (
+  testWidgets('connected groups preserve label padding at shared borders', (
     tester,
   ) async {
     await pumpHeaders(tester);
@@ -52,13 +52,26 @@ void main() {
       ),
       findsNothing,
     );
-    final diff = tester.getRect(find.text('Diff'));
-    final blame = tester.getRect(find.text('Blame'));
-    expect((diff.right - blame.left).abs(), lessThanOrEqualTo(1));
 
-    final unified = tester.getRect(find.text('Unified'));
-    final sideBySide = tester.getRect(find.text('Side-by-side'));
-    expect((unified.right - sideBySide.left).abs(), lessThanOrEqualTo(1));
+    void expectConnected(String firstLabel, String lastLabel) {
+      final firstText = tester.getRect(find.text(firstLabel));
+      final lastText = tester.getRect(find.text(lastLabel));
+      final firstSurface = tester.getRect(
+        find.byWidget(_headerControl(tester, firstLabel)),
+      );
+      final lastSurface = tester.getRect(
+        find.byWidget(_headerControl(tester, lastLabel)),
+      );
+
+      expect((firstSurface.right - lastSurface.left).abs(), lessThan(0.01));
+      expect(firstText.left - firstSurface.left, greaterThanOrEqualTo(7.5));
+      expect(firstSurface.right - firstText.right, greaterThanOrEqualTo(7.5));
+      expect(lastText.left - lastSurface.left, greaterThanOrEqualTo(7.5));
+      expect(lastSurface.right - lastText.right, greaterThanOrEqualTo(7.5));
+    }
+
+    expectConnected('Diff', 'Blame');
+    expectConnected('Unified', 'Side-by-side');
     expect(
       tester.getCenter(find.byKey(const Key('focus-mode'))).dx,
       lessThan(tester.getCenter(find.byKey(const Key('open-editor'))).dx),

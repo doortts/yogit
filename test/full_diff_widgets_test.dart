@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -739,6 +740,138 @@ void main() {
     expect(tester.getSize(cellFor('first new')).width, closeTo(320, 0.01));
   });
 
+  testWidgets('wrapped side-by-side rows follow a 65 percent divider', (
+    tester,
+  ) async {
+    final oldText = 'old ${'wrapped source segment ' * 18}';
+    final newText = 'new ${'wrapped replacement segment ' * 18}';
+    final document = DiffDocument.fromLines([
+      const DiffLine(
+        kind: DiffLineKind.hunk,
+        text: '@@ -1 +1 @@ wrapped ratio',
+      ),
+      DiffLine(kind: DiffLineKind.delete, text: oldText, oldNumber: 1),
+      DiffLine(kind: DiffLineKind.add, text: newText, newNumber: 1),
+    ]);
+    await tester.pumpWidget(
+      qaApp(
+        SizedBox(
+          width: 800,
+          height: 300,
+          child: SideBySidePresentationView(
+            document: document,
+            activeAnchor: document.hunks.single.anchor,
+            oldPath: 'old.pas',
+            newPath: 'new.pas',
+            wrapLines: true,
+            showOldSide: true,
+            highlighter: fakeHighlighter,
+            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
+            splitRatio: 0.65,
+          ),
+        ),
+      ),
+    );
+
+    Finder cellFor(String text) => find
+        .ancestor(of: find.text(text), matching: find.byType(FullDiffCodeRow))
+        .first;
+    final pane = tester.getRect(find.byKey(const Key('side-by-side-old-pane')));
+    final oldCell = tester.getRect(cellFor(oldText));
+    final newCell = tester.getRect(cellFor(newText));
+    final divider = tester.getRect(
+      find.byKey(const Key('side-by-side-divider')),
+    );
+
+    expect(oldCell.width, closeTo(pane.width * 0.65, 0.01));
+    expect(newCell.width, closeTo(pane.width * 0.35, 0.01));
+    expect(divider.left, closeTo(oldCell.right, 0.01));
+    expect(newCell.left, closeTo(divider.left, 0.01));
+    expect(oldCell.height, greaterThan(27));
+    expect(newCell.height, oldCell.height);
+  });
+
+  testWidgets('side-by-side drag reuses its document index and full scan', (
+    tester,
+  ) async {
+    final parsed = DiffDocument.fromLines([
+      const DiffLine(
+        kind: DiffLineKind.hunk,
+        text: '@@ -1,400 +1,400 @@ measured',
+      ),
+      for (var index = 1; index <= 400; index++)
+        DiffLine(
+          kind: DiffLineKind.context,
+          text: 'source $index',
+          oldNumber: index,
+          newNumber: index,
+        ),
+    ]);
+    final parsedHunk = parsed.hunks.single;
+    final measuredLines = _MeasuredList<DiffLine>(parsedHunk.lines);
+    final measuredHunks = _MeasuredList<DiffHunk>([
+      DiffHunk(
+        index: parsedHunk.index,
+        oldStart: parsedHunk.oldStart,
+        oldCount: parsedHunk.oldCount,
+        newStart: parsedHunk.newStart,
+        newCount: parsedHunk.newCount,
+        context: parsedHunk.context,
+        lines: measuredLines,
+        anchor: parsedHunk.anchor,
+      ),
+    ]);
+    final document = DiffDocument(
+      headers: parsed.headers,
+      hunks: measuredHunks,
+      rows: parsed.rows,
+    );
+    var ratio = 0.5;
+
+    await tester.pumpWidget(
+      qaApp(
+        StatefulBuilder(
+          builder: (context, setState) => SizedBox(
+            width: 800,
+            height: 200,
+            child: SideBySidePresentationView(
+              document: document,
+              activeAnchor: measuredHunks.single.anchor,
+              oldPath: 'old.pas',
+              newPath: 'new.pas',
+              wrapLines: false,
+              showOldSide: true,
+              highlighter: fakeHighlighter,
+              anchorKeys: {measuredHunks.single.anchor.id: GlobalKey()},
+              splitRatio: ratio,
+              onSplitRatioChanged: (value) {
+                setState(() => ratio = value);
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    final indexBuilds = measuredHunks.iterationCount;
+    final fullScanTailReads = measuredLines.tailReadCount;
+    expect(indexBuilds, 1);
+    expect(fullScanTailReads, greaterThan(0));
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const Key('side-by-side-resizer'))),
+    );
+    for (var update = 0; update < 5; update++) {
+      await gesture.moveBy(const Offset(8, 0));
+      await tester.pump();
+    }
+    await gesture.up();
+    await tester.pump();
+
+    expect(measuredHunks.iterationCount, indexBuilds);
+    expect(measuredLines.tailReadCount, fullScanTailReads);
+    expect(ratio, closeTo(0.55, 0.01));
+  });
+
   testWidgets('side-by-side divider is hidden with the old side', (
     tester,
   ) async {
@@ -1435,6 +1568,36 @@ void main() {
     expect(copied, ['alpha source\nbeta source', 'gamma source\nbeta source']);
     expect(find.text('alpha source'), findsNothing);
   });
+}
+
+class _MeasuredList<E> extends ListBase<E> {
+  _MeasuredList(Iterable<E> values) : _values = List<E>.of(values);
+
+  final List<E> _values;
+  int iterationCount = 0;
+  int tailReadCount = 0;
+
+  @override
+  int get length => _values.length;
+
+  @override
+  set length(int value) => throw UnsupportedError('fixed test fixture');
+
+  @override
+  E operator [](int index) {
+    if (index == _values.length - 1) tailReadCount++;
+    return _values[index];
+  }
+
+  @override
+  void operator []=(int index, E value) =>
+      throw UnsupportedError('fixed test fixture');
+
+  @override
+  Iterator<E> get iterator {
+    iterationCount++;
+    return _values.iterator;
+  }
 }
 
 Future<void> _pumpToolbar(
