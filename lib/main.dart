@@ -7,6 +7,7 @@ import 'avatars.dart';
 import 'git.dart';
 import 'settings.dart';
 import 'timeline.dart';
+import 'timeline_theme.dart';
 import 'window_frame.dart';
 
 void main(List<String> args) {
@@ -276,60 +277,68 @@ class _YogitAppState extends State<YogitApp> {
     debugShowCheckedModeBanner: false,
     theme: yogitTheme(),
     home: Builder(
-      builder: (context) => TimelineScreen(
-        key: Key('timeline-screen-${_repository.root}'),
-        repository: _repository,
-        controller: widget.windowFrameController,
-        onOpenRepository: _openRepository,
-        avatarService: _avatarService,
-        showRemoteAvatars: _settingsLoaded && _settings.showAvatars,
-        preferredPreviewPlacement: _settings.previewPlacement,
-        preferredBranch: _settingsLoaded
-            ? _settings.baseBranches[_repository.root]
-            : null,
-        preferredBranchReady: _settingsLoaded,
-        columnWidths: _settings.columnWidthsForRepository(_repository.root),
-        fullDiffColumnWidths: _settings.fullDiffColumnWidths,
-        fullDiffPreferences: _settings.fullDiffPreferences,
-        previewWidth: _settings.previewWidth,
-        previewHeight: _settings.previewHeight,
-        onOpenSettings: _settingsLoaded ? () => _openSettings(context) : null,
-        onPreviewPlacementChanged: _settingsLoaded
-            ? (placement) => _changeSettings(
-                _settings.copyWith(previewPlacement: placement),
-              )
-            : null,
-        onPreferredBranchChanged: _settingsLoaded
-            ? (branch) {
-                final baseBranches = Map<String, String>.of(
-                  _settings.baseBranches,
-                )..[_repository.root] = branch;
-                _changeSettings(_settings.copyWith(baseBranches: baseBranches));
-              }
-            : null,
-        onColumnWidthsChanged: _settingsLoaded
-            ? (widths) => _changeSettings(
-                _settings.withRepositoryColumnWidths(_repository.root, widths),
-              )
-            : null,
-        onFullDiffColumnWidthsChanged: _settingsLoaded
-            ? (widths) => _changeSettings(
-                _settings.copyWith(fullDiffColumnWidths: widths),
-              )
-            : null,
-        onFullDiffPreferencesChanged: _settingsLoaded
-            ? (preferences) => _changeSettings(
-                _settings.copyWith(fullDiffPreferences: preferences),
-              )
-            : null,
-        onPreviewSizeChanged: _settingsLoaded
-            ? (size) => _changeSettings(
-                _settings.copyWith(
-                  previewWidth: size.width,
-                  previewHeight: size.height,
-                ),
-              )
-            : null,
+      builder: (context) => Theme(
+        data: timelineThemeData(Theme.of(context), _settings.timelineTheme),
+        child: TimelineScreen(
+          key: Key('timeline-screen-${_repository.root}'),
+          repository: _repository,
+          controller: widget.windowFrameController,
+          onOpenRepository: _openRepository,
+          avatarService: _avatarService,
+          showRemoteAvatars: _settingsLoaded && _settings.showAvatars,
+          preferredPreviewPlacement: _settings.previewPlacement,
+          preferredBranch: _settingsLoaded
+              ? _settings.baseBranches[_repository.root]
+              : null,
+          preferredBranchReady: _settingsLoaded,
+          columnWidths: _settings.columnWidthsForRepository(_repository.root),
+          fullDiffColumnWidths: _settings.fullDiffColumnWidths,
+          fullDiffPreferences: _settings.fullDiffPreferences,
+          previewWidth: _settings.previewWidth,
+          previewHeight: _settings.previewHeight,
+          onOpenSettings: _settingsLoaded ? () => _openSettings(context) : null,
+          onPreviewPlacementChanged: _settingsLoaded
+              ? (placement) => _changeSettings(
+                  _settings.copyWith(previewPlacement: placement),
+                )
+              : null,
+          onPreferredBranchChanged: _settingsLoaded
+              ? (branch) {
+                  final baseBranches = Map<String, String>.of(
+                    _settings.baseBranches,
+                  )..[_repository.root] = branch;
+                  _changeSettings(
+                    _settings.copyWith(baseBranches: baseBranches),
+                  );
+                }
+              : null,
+          onColumnWidthsChanged: _settingsLoaded
+              ? (widths) => _changeSettings(
+                  _settings.withRepositoryColumnWidths(
+                    _repository.root,
+                    widths,
+                  ),
+                )
+              : null,
+          onFullDiffColumnWidthsChanged: _settingsLoaded
+              ? (widths) => _changeSettings(
+                  _settings.copyWith(fullDiffColumnWidths: widths),
+                )
+              : null,
+          onFullDiffPreferencesChanged: _settingsLoaded
+              ? (preferences) => _changeSettings(
+                  _settings.copyWith(fullDiffPreferences: preferences),
+                )
+              : null,
+          onPreviewSizeChanged: _settingsLoaded
+              ? (size) => _changeSettings(
+                  _settings.copyWith(
+                    previewWidth: size.width,
+                    previewHeight: size.height,
+                  ),
+                )
+              : null,
+        ),
       ),
     ),
   );

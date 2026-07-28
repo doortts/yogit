@@ -33,6 +33,72 @@ void main() {
     controller = WindowFrameController(channel: channel);
   });
 
+  testWidgets(
+    'the timeline uses System Graphite by default and a stored theme',
+    (tester) async {
+      final store = MemorySettingsStore();
+      await tester.pumpWidget(
+        YogitApp(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+          ),
+          settingsStore: store,
+          discoverAvatars: false,
+          windowFrameController: controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      Color toolbarColor() =>
+          tester.widget<Container>(find.byKey(const Key('toolbar'))).color!;
+      Color scaffoldColor() =>
+          tester.widget<Scaffold>(find.byType(Scaffold).first).backgroundColor!;
+
+      expect(scaffoldColor(), TimelineThemePalette.systemGraphite.background);
+      expect(toolbarColor(), TimelineThemePalette.systemGraphite.surface);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(
+        (tester
+                    .widget<Container>(find.byKey(const Key('preview-surface')))
+                    .decoration!
+                as BoxDecoration)
+            .color,
+        TimelineThemePalette.systemGraphite.surface,
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await controller.setPreview(PreviewPlacement.closed);
+      store.current = const AppSettings(
+        timelineTheme: TimelineThemeKind.carbon,
+      );
+      await tester.pumpWidget(
+        YogitApp(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+          ),
+          settingsStore: store,
+          discoverAvatars: false,
+          windowFrameController: controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(scaffoldColor(), TimelineThemePalette.carbon.background);
+      expect(toolbarColor(), TimelineThemePalette.carbon.surface);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(
+        (tester
+                    .widget<Container>(find.byKey(const Key('preview-surface')))
+                    .decoration!
+                as BoxDecoration)
+            .color,
+        TimelineThemePalette.carbon.surface,
+      );
+    },
+  );
+
   testWidgets('keyboard and pointer control selection and preview', (
     tester,
   ) async {
@@ -78,7 +144,7 @@ void main() {
     expect(selected, findsOneWidget);
     final selectedBase =
         tester.widget<GestureDetector>(selected).child! as ColoredBox;
-    expect(selectedBase.color, const Color(0xFF15171E));
+    expect(selectedBase.color, TimelineThemePalette.systemGraphite.background);
 
     final band = find.byKey(const Key('selection-band-2'));
     final bandRect = tester.getRect(band);
@@ -1182,16 +1248,22 @@ void main() {
     );
 
     expect(painter.workingTreeRingColor, AvatarService.branchColor(3));
-    expect(painter.workingTreeRingColor, isNot(const Color(0xFF15171E)));
+    expect(
+      painter.workingTreeRingColor,
+      isNot(TimelineThemePalette.systemGraphite.background),
+    );
     // The fill hides the rail behind the node, so it follows the row color.
-    expect(painter.nodeFillColor, const Color(0xFF1F4D8F));
+    expect(
+      painter.nodeFillColor,
+      TimelineThemePalette.systemGraphite.selectedRow,
+    );
     expect(
       CommitGraphPainter(
         row: wip,
         selected: false,
         committerColor: AvatarService.branchColor(3),
       ).nodeFillColor,
-      const Color(0xFF15171E),
+      TimelineThemePalette.systemGraphite.background,
     );
     // Without branch ids it degrades to the old committer color.
     expect(
@@ -2029,7 +2101,7 @@ void main() {
       );
       expect(
         (current.decoration! as BoxDecoration).color,
-        const Color(0xFF263246),
+        TimelineThemePalette.systemGraphite.neutralChip,
       );
 
       await tester.tap(find.byKey(const Key('ref-filter')));
@@ -2286,7 +2358,7 @@ void main() {
                     .decoration!
                 as BoxDecoration)
             .color;
-    expect(chip('lib/a.dart'), const Color(0xFF263246));
+    expect(chip('lib/a.dart'), TimelineThemePalette.systemGraphite.neutralChip);
     expect(chip('lib/b.dart'), const Color(0xFF8AD6A1).withValues(alpha: 0.2));
     expect(
       fileStateChipColor('D').background,
@@ -6060,7 +6132,7 @@ void main() {
           )
           .first,
     );
-    expect(band.color, const Color(0xFF1F4D8F));
+    expect(band.color, TimelineThemePalette.systemGraphite.selectedRow);
 
     // It has no commit, so the preview falls back to its empty state.
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -7781,7 +7853,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-a')), findsNothing);
-    expect(background(), const Color(0xFF252936));
+    expect(background(), TimelineThemePalette.systemGraphite.raised);
     expect(
       tester
           .widget<GestureDetector>(

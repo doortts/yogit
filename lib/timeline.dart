@@ -15,20 +15,12 @@ import 'page_scroll_shortcuts.dart';
 import 'ref_tree.dart';
 import 'repository_branch_selector.dart';
 import 'settings.dart';
+import 'timeline_theme.dart';
 import 'typography.dart';
 import 'vim_navigation.dart';
 import 'window_frame.dart';
 
-const _background = Color(0xFF15171E);
-const _surface = Color(0xFF1D2029);
-const _panelSoft = Color(0xFF1A1D25);
-const _raised = Color(0xFF252936);
-const _border = Color(0xFF343946);
-const _text = Color(0xFFE8EAF2);
-const _muted = Color(0xFF8D94A8);
 const _hash = Color(0xFFEF6C63);
-const _accent = Color(0xFF263246);
-const _selectedRow = Color(0xFF1F4D8F);
 const _deleted = Color(0xFFF29AB2);
 const _renamed = Color(0xFFB6A0EA);
 
@@ -378,6 +370,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
   static const _pageSize = 500;
 
   static const _sidebarRange = (min: 120.0, max: 320.0);
+
+  TimelineThemePalette get _palette => context.timelineTheme;
 
   /// The window drag stretch the path keeps for itself before the wordmark is
   /// allowed any room.
@@ -964,7 +958,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    backgroundColor: _background,
+    backgroundColor: _palette.background,
     body: Focus(
       autofocus: true,
       focusNode: _focusNode,
@@ -972,7 +966,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       child: Column(
         children: [
           _toolbar(),
-          const Divider(height: 1, color: _border),
+          Divider(height: 1, color: _palette.border),
           Expanded(
             child: Row(
               children: [
@@ -1091,7 +1085,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   Widget _toolbar() => Container(
     key: const Key('toolbar'),
     height: 56,
-    color: _surface,
+    color: _palette.surface,
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14),
       // Decoration goes before anything functional when the window narrows:
@@ -1211,16 +1205,19 @@ class _TimelineScreenState extends State<TimelineScreen> {
       if (showShortcuts) ...[_shortcutHint(), const SizedBox(width: 12)],
       // The caption sits beside the box, not inside it.
       if (showPreviewLabel)
-        const Padding(
-          padding: EdgeInsets.only(right: 8),
-          child: Text('미리보기', style: TextStyle(color: _muted, fontSize: 14)),
+        Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: Text(
+            '미리보기',
+            style: TextStyle(color: _palette.muted, fontSize: 14),
+          ),
         ),
       Container(
         key: const Key('preview-placement'),
         padding: const EdgeInsets.all(3),
         decoration: BoxDecoration(
-          color: _panelSoft,
-          border: Border.all(color: _border),
+          color: _palette.panel,
+          border: Border.all(color: _palette.border),
           borderRadius: BorderRadius.circular(6),
         ),
         child: Row(
@@ -1239,7 +1236,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         tooltip: 'Settings',
         visualDensity: VisualDensity.compact,
         onPressed: widget.onOpenSettings,
-        icon: const Icon(Icons.settings_outlined, size: 22, color: _muted),
+        icon: Icon(Icons.settings_outlined, size: 22, color: _palette.muted),
       ),
     ],
   );
@@ -1269,13 +1266,13 @@ class _TimelineScreenState extends State<TimelineScreen> {
         alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(horizontal: 11),
         decoration: BoxDecoration(
-          color: pressed ? _selectedRow : null,
+          color: pressed ? _palette.selectedRow : null,
           borderRadius: BorderRadius.circular(5),
         ),
         child: Text(
           label,
           style: TextStyle(
-            color: pressed ? Colors.white : _muted,
+            color: pressed ? Colors.white : _palette.muted,
             fontSize: 14,
           ),
         ),
@@ -1286,7 +1283,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   Widget _shortcutHint() => Row(
     key: const Key('shortcut-hint'),
     children: [
-      const Text('상세', style: TextStyle(color: _muted, fontSize: 14)),
+      Text('상세', style: TextStyle(color: _palette.muted, fontSize: 14)),
       const SizedBox(width: 6),
       _KeyCap(
         label: 'Enter',
@@ -1335,9 +1332,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
   );
 
   Widget _sidebarBody() => Container(
-    decoration: const BoxDecoration(
-      color: _panelSoft,
-      border: Border(right: BorderSide(color: _border)),
+    decoration: BoxDecoration(
+      color: _palette.panel,
+      border: Border(right: BorderSide(color: _palette.border)),
     ),
     child: Column(
       children: [
@@ -1347,20 +1344,20 @@ class _TimelineScreenState extends State<TimelineScreen> {
             key: const Key('ref-filter'),
             controller: _filterController,
             onChanged: (value) => setState(() => _filter = value),
-            style: const TextStyle(color: _text, fontSize: 13),
+            style: TextStyle(color: _palette.text, fontSize: 13),
             decoration: InputDecoration(
               isDense: true,
               hintText: '브랜치와 태그 찾기',
-              hintStyle: const TextStyle(color: _muted, fontSize: 13),
+              hintStyle: TextStyle(color: _palette.muted, fontSize: 13),
               filled: true,
-              fillColor: _raised,
+              fillColor: _palette.raised,
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 8,
                 vertical: 7,
               ),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(5),
-                borderSide: const BorderSide(color: _border),
+                borderSide: BorderSide(color: _palette.border),
               ),
             ),
           ),
@@ -1427,14 +1424,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
               Icon(
                 collapsed ? Icons.chevron_right : Icons.expand_more,
                 size: 16,
-                color: _muted,
+                color: _palette.muted,
               ),
               const SizedBox(width: 2),
               Icon(
                 section.icon,
                 key: Key('sidebar-section-icon-${section.name}'),
                 size: 14,
-                color: _muted,
+                color: _palette.muted,
               ),
               const SizedBox(width: 6),
               Expanded(
@@ -1442,8 +1439,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   section.label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: _muted,
+                  style: TextStyle(
+                    color: _palette.muted,
                     fontSize: 11,
                     fontWeight: FontWeight.w500,
                     letterSpacing: 0.8,
@@ -1454,8 +1451,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 key: Key('sidebar-section-count-${section.name}'),
                 child: Text(
                   '${names.length}',
-                  style: const TextStyle(
-                    color: _muted,
+                  style: TextStyle(
+                    color: _palette.muted,
                     fontSize: 11,
                     fontWeight: FontWeight.w500,
                   ),
@@ -1502,7 +1499,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             Icon(
               _showAllTags ? Icons.expand_less : Icons.expand_more,
               size: 16,
-              color: _muted,
+              color: _palette.muted,
             ),
             const SizedBox(width: 6),
             Expanded(
@@ -1510,7 +1507,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 _showAllTags ? '태그 접기' : '나머지 $hiddenTagCount개',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: _muted, fontSize: 12),
+                style: TextStyle(color: _palette.muted, fontSize: 12),
               ),
             ),
           ],
@@ -1554,7 +1551,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         return AvatarService.branchColor(row.branch);
       }
     }
-    return _muted;
+    return _palette.muted;
   }
 
   Widget _refTreeRow(
@@ -1578,7 +1575,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         : Icons.call_split;
     final iconColor = name != null && section != _RefSection.tags
         ? _refTipColor(name)
-        : _muted;
+        : _palette.muted;
 
     void toggleFolder() => setState(() {
       if (!_collapsedRefFolders.remove(folderKey)) {
@@ -1590,7 +1587,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       key: name == null ? null : Key('sidebar-row-$name'),
       height: birth == null ? 28 : 40,
       decoration: BoxDecoration(
-        color: current ? _accent : null,
+        color: current ? _palette.neutralChip : null,
         borderRadius: BorderRadius.circular(5),
       ),
       child: Padding(
@@ -1608,7 +1605,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   child: Icon(
                     folderCollapsed ? Icons.chevron_right : Icons.expand_more,
                     size: 16,
-                    color: _muted,
+                    color: _palette.muted,
                   ),
                 ),
               )
@@ -1638,7 +1635,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: current ? _text : _muted,
+                          color: current ? _palette.text : _palette.muted,
                           fontSize: 13,
                         ),
                       ),
@@ -1651,7 +1648,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: _muted, fontSize: 11),
+                          style: TextStyle(color: _palette.muted, fontSize: 11),
                         ),
                     ],
                   ),
@@ -1668,9 +1665,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   Widget _statusBar() => Container(
     height: 29,
-    decoration: const BoxDecoration(
-      color: _panelSoft,
-      border: Border(top: BorderSide(color: _border)),
+    decoration: BoxDecoration(
+      color: _palette.panel,
+      border: Border(top: BorderSide(color: _palette.border)),
     ),
     child: Stack(
       children: [
@@ -1709,11 +1706,15 @@ class _TimelineScreenState extends State<TimelineScreen> {
                         name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: _muted, fontSize: 11),
+                        style: TextStyle(color: _palette.muted, fontSize: 11),
                       ),
                     ),
                     const SizedBox(width: 6),
-                    _CopyButton(text: name, color: _muted, slot: 'status-copy'),
+                    _CopyButton(
+                      text: name,
+                      color: _palette.muted,
+                      slot: 'status-copy',
+                    ),
                   ],
                 );
               },
@@ -1735,8 +1736,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   commit == null || commit.isWorkingTree || !_showTime
                       ? ''
                       : exactCommitTime(commit.committerTimestamp),
-                  style: const TextStyle(
-                    color: _muted,
+                  style: TextStyle(
+                    color: _palette.muted,
                     fontSize: 11,
                     fontFamily: 'monospace',
                   ),
@@ -1755,7 +1756,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       children: [
         dot,
         const SizedBox(width: 5),
-        Text(label, style: const TextStyle(color: _muted, fontSize: 10)),
+        Text(label, style: TextStyle(color: _palette.muted, fontSize: 10)),
       ],
     ),
   );
@@ -1788,7 +1789,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       _dateColumnLeft =
           _sidebarWidth + _w('refs') + graphWidth + _w('hash') + commitWidth;
       return ColoredBox(
-        color: _background,
+        color: _palette.background,
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: SizedBox(
@@ -1861,11 +1862,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   : null,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 9),
-                decoration: const BoxDecoration(
-                  color: _panelSoft,
+                decoration: BoxDecoration(
+                  color: _palette.panel,
                   border: Border(
-                    bottom: BorderSide(color: _border),
-                    right: BorderSide(color: _border),
+                    bottom: BorderSide(color: _palette.border),
+                    right: BorderSide(color: _palette.border),
                   ),
                 ),
                 child: Row(
@@ -1879,7 +1880,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
                           softWrap: false,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: hovered == column ? _text : _muted,
+                            color: hovered == column
+                                ? _palette.text
+                                : _palette.muted,
                             fontSize: 12,
                             fontFamily: 'monospace',
                             fontWeight: FontWeight.w500,
@@ -1940,7 +1943,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
           _saveColumnWidths();
         },
         style: TextButton.styleFrom(
-          foregroundColor: _muted,
+          foregroundColor: _palette.muted,
           padding: EdgeInsets.zero,
           minimumSize: Size.zero,
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -2146,7 +2149,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
           behavior: HitTestBehavior.opaque,
           onTap: () => _select(index),
           child: ColoredBox(
-            color: selected ? _selectedRow : _background,
+            color: selected ? _palette.selectedRow : _palette.background,
             child: _dateRowContent(index, entry, graphWidth),
           ),
         ),
@@ -2240,6 +2243,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
     compact: graphWidth <= CommitGraphPainter.compactWidth,
     refConnector: refConnector,
     passThrough: entry.rowIndex < 0,
+    backgroundColor: _palette.background,
+    selectedRowColor: _palette.selectedRow,
   );
 
   Widget _rowContent(
@@ -2282,10 +2287,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
         onTap: () => _select(index),
         child: ColoredBox(
           color: selected
-              ? _background
+              ? _palette.background
               : hovered
-              ? _accent.withValues(alpha: 0.48)
-              : _background,
+              ? _palette.neutralChip.withValues(alpha: 0.48)
+              : _palette.background,
           child: Stack(
             children: [
               if (selected)
@@ -2296,7 +2301,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   bottom: 0,
                   child: ColoredBox(
                     key: Key('selection-band-${commit.sha}'),
-                    color: _selectedRow,
+                    color: _palette.selectedRow,
                   ),
                 ),
               Row(
@@ -2327,7 +2332,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     Text(
                       commit.isWorkingTree ? '·······' : commit.shortSha,
                       style: TextStyle(
-                        color: selected ? _text : _hash,
+                        color: selected ? _palette.text : _hash,
                         fontSize: 12,
                         fontFamily: technicalFontFamily,
                         fontFamilyFallback: technicalFontFallback,
@@ -2343,7 +2348,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                       commit.subject,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: _text, fontSize: 14),
+                      style: TextStyle(color: _palette.text, fontSize: 14),
                     ),
                   ),
                   if (_showTime)
@@ -2361,7 +2366,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: selected ? _text : _muted,
+                            color: selected ? _palette.text : _palette.muted,
                             fontSize: 12,
                           ),
                         ),
@@ -2371,9 +2376,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     _cell(
                       _w('name'),
                       commit.isWorkingTree
-                          ? const Text(
+                          ? Text(
                               '—',
-                              style: TextStyle(color: _muted, fontSize: 12),
+                              style: TextStyle(
+                                color: _palette.muted,
+                                fontSize: 12,
+                              ),
                             )
                           : Row(
                               children: [
@@ -2394,8 +2402,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
                                       color: selected
-                                          ? _text
-                                          : Color.lerp(_text, _main, 0.12),
+                                          ? _palette.text
+                                          : Color.lerp(
+                                              _palette.text,
+                                              _main,
+                                              0.12,
+                                            ),
                                       fontSize: 12,
                                       fontWeight: FontWeight.w500,
                                     ),
@@ -2471,7 +2483,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
           padding: const EdgeInsets.only(right: 3),
           child: Text(
             ref.isHead ? '✓' : '◇',
-            style: TextStyle(color: selected ? _text : color, fontSize: 10),
+            style: TextStyle(
+              color: selected ? _palette.text : color,
+              fontSize: 10,
+            ),
           ),
         )
       : const SizedBox.shrink();
@@ -2492,7 +2507,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       maxLines: 1,
       softWrap: false,
       overflow: ellipsis ? TextOverflow.ellipsis : TextOverflow.visible,
-      style: _refNameStyle(selected ? _text : color),
+      style: _refNameStyle(selected ? _palette.text : color),
     );
     return ellipsis ? Expanded(child: text) : text;
   }
@@ -2508,7 +2523,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     var longest = 0.0;
     for (final ref in refs) {
       final painter = TextPainter(
-        text: TextSpan(text: ref.name, style: _refNameStyle(_text)),
+        text: TextSpan(text: ref.name, style: _refNameStyle(_palette.text)),
         textDirection: TextDirection.ltr,
       )..layout();
       final glyph = ref.isHead || ref.isTag ? 16.0 : 0.0;
@@ -2559,8 +2574,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 4),
             decoration: BoxDecoration(
-              color: _raised,
-              border: Border.all(color: _border),
+              color: _palette.raised,
+              border: Border.all(color: _palette.border),
               borderRadius: BorderRadius.circular(8),
               boxShadow: const [
                 BoxShadow(
@@ -2640,14 +2655,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
   Widget _footer() => Container(
     alignment: Alignment.centerLeft,
     padding: const EdgeInsets.symmetric(horizontal: 12),
-    decoration: const BoxDecoration(
-      color: _surface,
-      border: Border(top: BorderSide(color: _border)),
+    decoration: BoxDecoration(
+      color: _palette.surface,
+      border: Border(top: BorderSide(color: _palette.border)),
     ),
     child: _loading
-        ? const Text(
+        ? Text(
             'Loading more…',
-            style: TextStyle(color: _muted, fontSize: 11),
+            style: TextStyle(color: _palette.muted, fontSize: 11),
           )
         : _loadError != null
         ? Row(
@@ -2663,7 +2678,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         : _end
         ? Text(
             _commits.isEmpty ? 'No commits' : 'End of history',
-            style: const TextStyle(color: _muted, fontSize: 11),
+            style: TextStyle(color: _palette.muted, fontSize: 11),
           )
         : const SizedBox.shrink(),
   );
@@ -2737,17 +2752,18 @@ class _TimelineScreenState extends State<TimelineScreen> {
   Widget _previewFor(GitCommit? commit) {
     final placement = _previewController.previewPlacement;
     return Container(
+      key: const Key('preview-surface'),
       decoration: BoxDecoration(
-        color: _surface,
+        color: _palette.surface,
         border: Border(
           left: placement == PreviewPlacement.right
-              ? const BorderSide(color: _border)
+              ? BorderSide(color: _palette.border)
               : BorderSide.none,
           right: placement == PreviewPlacement.left
-              ? const BorderSide(color: _border)
+              ? BorderSide(color: _palette.border)
               : BorderSide.none,
           top: placement == PreviewPlacement.bottom
-              ? const BorderSide(color: _border)
+              ? BorderSide(color: _palette.border)
               : BorderSide.none,
         ),
       ),
@@ -2766,12 +2782,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   height: 24,
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   alignment: Alignment.centerLeft,
-                  child: const Text(
+                  child: Text(
                     '파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: _muted,
+                      color: _palette.muted,
                       fontSize: 10,
                       fontFamily: technicalFontFamily,
                       fontFamilyFallback: technicalFontFallback,
@@ -2780,10 +2796,13 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 ),
                 Expanded(
                   child: commit == null
-                      ? const Center(
+                      ? Center(
                           child: Text(
                             'No commit selected',
-                            style: TextStyle(color: _muted, fontSize: 13),
+                            style: TextStyle(
+                              color: _palette.muted,
+                              fontSize: 13,
+                            ),
                           ),
                         )
                       : _previewBody(
@@ -2803,20 +2822,20 @@ class _TimelineScreenState extends State<TimelineScreen> {
   Widget _previewHeader(GitCommit? commit) => Container(
     height: 36,
     padding: const EdgeInsets.only(left: 12, right: 6),
-    decoration: const BoxDecoration(
-      border: Border(bottom: BorderSide(color: _border)),
+    decoration: BoxDecoration(
+      border: Border(bottom: BorderSide(color: _palette.border)),
     ),
     child: Row(
       children: [
         // Expanded, not Flexible plus a Spacer: the label is what yields when the
         // panel is dragged narrow.
-        const Expanded(
+        Expanded(
           child: Text(
             'Commit & Diff',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: _muted,
+              color: _palette.muted,
               fontSize: 12,
               fontWeight: FontWeight.w500,
               letterSpacing: 0.66,
@@ -2843,8 +2862,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 : commit.shortSha,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: _muted,
+            style: TextStyle(
+              color: _palette.muted,
               fontSize: 11,
               fontFamily: technicalFontFamily,
               fontFamilyFallback: technicalFontFallback,
@@ -2946,8 +2965,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 commit.subject,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: _text,
+                style: TextStyle(
+                  color: _palette.text,
                   fontSize: 14,
                   fontWeight: FontWeight.w500,
                 ),
@@ -2959,8 +2978,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     : 'commit ${commit.sha}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: _muted,
+                style: TextStyle(
+                  color: _palette.muted,
                   fontSize: 12,
                   fontFamily: 'monospace',
                 ),
@@ -2981,10 +3000,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
           child: Container(
             key: const Key('preview-diff'),
             child: selectedPath == null
-                ? const Center(
+                ? Center(
                     child: Text(
                       'Select a file to load its diff.',
-                      style: TextStyle(color: _muted, fontSize: 12),
+                      style: TextStyle(color: _palette.muted, fontSize: 12),
                     ),
                   )
                 : _previewDiff(commit, selectedFile!),
@@ -2994,14 +3013,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
             ? Row(
                 children: [
                   SizedBox(width: 240, child: _previewScrollableInfo(info)),
-                  const VerticalDivider(width: 1, color: _border),
+                  VerticalDivider(width: 1, color: _palette.border),
                   Expanded(child: _previewScrollableDiff(diff)),
                 ],
               )
             : Column(
                 children: [
                   Expanded(child: _previewScrollableInfo(info)),
-                  const Divider(height: 1, color: _border),
+                  Divider(height: 1, color: _palette.border),
                   Expanded(child: _previewScrollableDiff(diff)),
                 ],
               );
@@ -3051,10 +3070,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 12),
       padding: const EdgeInsets.symmetric(vertical: 10),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(
-          top: BorderSide(color: _border),
-          bottom: BorderSide(color: _border),
+          top: BorderSide(color: _palette.border),
+          bottom: BorderSide(color: _palette.border),
         ),
       ),
       child: Column(
@@ -3096,7 +3115,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 height: 42,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: _border),
+                  border: Border.all(color: _palette.border),
                 ),
               )
             : CommitAvatarStack(
@@ -3117,8 +3136,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 commit.isWorkingTree ? 'Not committed' : identity.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: _text,
+                style: TextStyle(
+                  color: _palette.text,
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                 ),
@@ -3131,14 +3150,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     : 'Author',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: _muted, fontSize: 12),
+                style: TextStyle(color: _palette.muted, fontSize: 12),
               ),
               if (timestamp != null)
                 Text(
                   exactCommitTime(timestamp),
                   maxLines: 1,
-                  style: const TextStyle(
-                    color: _muted,
+                  style: TextStyle(
+                    color: _palette.muted,
                     fontSize: 13,
                     fontFamily: 'monospace',
                   ),
@@ -3163,7 +3182,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
               '${changes?.length == 1 ? 'file' : 'files'} changed',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: _muted, fontSize: 12),
+              style: TextStyle(color: _palette.muted, fontSize: 12),
             ),
           ),
           const Spacer(),
@@ -3212,10 +3231,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
             ),
           )
         : changes.isEmpty
-        ? const Center(
+        ? Center(
             child: Text(
               'No changed files',
-              style: TextStyle(color: _muted, fontSize: 12),
+              style: TextStyle(color: _palette.muted, fontSize: 12),
             ),
           )
         : Column(
@@ -3235,7 +3254,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
           onTap: () => _selectPreviewFile(commit, file.path),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: selected ? _accent : null,
+              color: selected ? _palette.neutralChip : null,
               border: const Border(top: BorderSide(color: Color(0x66343946))),
             ),
             child: Row(
@@ -3246,14 +3265,20 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   height: 20,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: fileStateChipColor(file.status).background,
+                    color: fileStateChipColor(
+                      file.status,
+                      palette: _palette,
+                    ).background,
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
                     file.status,
                     maxLines: 1,
                     style: TextStyle(
-                      color: fileStateChipColor(file.status).letter,
+                      color: fileStateChipColor(
+                        file.status,
+                        palette: _palette,
+                      ).letter,
                       fontSize: 10,
                     ),
                   ),
@@ -3265,7 +3290,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: selected ? _text : _muted,
+                      color: selected ? _palette.text : _palette.muted,
                       fontSize: 12,
                       fontFamily: 'monospace',
                     ),
@@ -3292,8 +3317,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
             path,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: _text,
+            style: TextStyle(
+              color: _palette.text,
               fontSize: 12,
               fontFamily: 'monospace',
             ),
@@ -3355,7 +3380,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          color: line.kind == DiffLineKind.hunk ? _muted : _text,
+          color: line.kind == DiffLineKind.hunk
+              ? _palette.muted
+              : _palette.text,
           fontSize: 11,
           fontFamily: 'monospace',
         ),
@@ -3619,28 +3646,33 @@ class _KeyCapState extends State<_KeyCap> {
   var _hovered = false;
 
   @override
-  Widget build(BuildContext context) => MouseRegion(
-    cursor: SystemMouseCursors.click,
-    onEnter: (_) => setState(() => _hovered = true),
-    onExit: (_) => setState(() => _hovered = false),
-    child: GestureDetector(
-      key: Key('keycap-${widget.label}'),
-      behavior: HitTestBehavior.opaque,
-      onTap: widget.onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-        decoration: BoxDecoration(
-          color: _hovered ? _selectedRow : _panelSoft,
-          border: Border.all(color: _hovered ? _muted : _border),
-          borderRadius: BorderRadius.circular(5),
-        ),
-        child: Text(
-          widget.label,
-          style: const TextStyle(color: _text, fontSize: 13),
+  Widget build(BuildContext context) {
+    final palette = context.timelineTheme;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        key: Key('keycap-${widget.label}'),
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+          decoration: BoxDecoration(
+            color: _hovered ? palette.selectedRow : palette.panel,
+            border: Border.all(
+              color: _hovered ? palette.muted : palette.border,
+            ),
+            borderRadius: BorderRadius.circular(5),
+          ),
+          child: Text(
+            widget.label,
+            style: TextStyle(color: palette.text, fontSize: 13),
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _WindowButton extends StatefulWidget {
@@ -3715,7 +3747,8 @@ class _ShowDiffButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ink = onTap == null ? _muted : AvatarService.onColor(green);
+    final palette = context.timelineTheme;
+    final ink = onTap == null ? palette.muted : AvatarService.onColor(green);
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
@@ -3724,7 +3757,7 @@ class _ShowDiffButton extends StatelessWidget {
         padding: EdgeInsets.symmetric(horizontal: height * 0.3),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: onTap == null ? _raised : green,
+          color: onTap == null ? palette.raised : green,
           borderRadius: BorderRadius.circular(6),
         ),
         child: Column(
@@ -3796,24 +3829,27 @@ class _CopyButtonState extends State<_CopyButton> {
   }
 
   @override
-  Widget build(BuildContext context) => MouseRegion(
-    onEnter: (_) => setState(() => _hovered = true),
-    onExit: (_) => setState(() => _hovered = false),
-    child: GestureDetector(
-      key: Key('${widget.slot}-${widget.text}'),
-      behavior: HitTestBehavior.opaque,
-      onTap: () => unawaited(_copy()),
-      child: Icon(
-        _copied ? Icons.check : Icons.copy_outlined,
-        size: 16,
-        color: _copied
-            ? widget.color
-            : _hovered
-            ? _text
-            : _muted,
+  Widget build(BuildContext context) {
+    final palette = context.timelineTheme;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        key: Key('${widget.slot}-${widget.text}'),
+        behavior: HitTestBehavior.opaque,
+        onTap: () => unawaited(_copy()),
+        child: Icon(
+          _copied ? Icons.check : Icons.copy_outlined,
+          size: 16,
+          color: _copied
+              ? widget.color
+              : _hovered
+              ? palette.text
+              : palette.muted,
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 /// Rebuilds one row only when *its* selected or hovered state flips. Every row
@@ -3891,6 +3927,8 @@ class CommitGraphPainter extends CustomPainter {
     this.compact = false,
     this.refConnector = false,
     this.passThrough = false,
+    this.backgroundColor = const Color(0xFF1C1C1E),
+    this.selectedRowColor = const Color(0xFF234D72),
   });
 
   static const laneInset = 28.0;
@@ -3941,6 +3979,8 @@ class CommitGraphPainter extends CustomPainter {
 
   final GraphRow row;
   final bool selected;
+  final Color backgroundColor;
+  final Color selectedRowColor;
 
   /// The color of the branch line this row's node sits on: `row.branch` through
   /// the settings palette. Named for history — nothing here is per-committer.
@@ -4169,8 +4209,8 @@ class CommitGraphPainter extends CustomPainter {
   }
 
   /// The node fill hides the rail behind it, so it has to match the row it sits
-  /// on rather than the global background — a selected row is blue.
-  Color get nodeFillColor => selected ? _selectedRow : _background;
+  /// on rather than the global background.
+  Color get nodeFillColor => selected ? selectedRowColor : backgroundColor;
 
   /// The working tree node is a dashed ring, so it reads as pending next to the
   /// avatars that mark real commits.
@@ -4257,7 +4297,9 @@ class CommitGraphPainter extends CustomPainter {
       oldDelegate.laneSpacing != laneSpacing ||
       oldDelegate.compact != compact ||
       oldDelegate.refConnector != refConnector ||
-      oldDelegate.passThrough != passThrough;
+      oldDelegate.passThrough != passThrough ||
+      oldDelegate.backgroundColor != backgroundColor ||
+      oldDelegate.selectedRowColor != selectedRowColor;
 }
 
 void drawDashedRing(
@@ -4322,14 +4364,15 @@ class _LegendDotPainter extends CustomPainter {
 }
 
 /// Per-state color for the 18px file chips in the preview.
-({Color background, Color letter}) fileStateChipColor(String status) =>
-    switch (status.isEmpty ? '' : status[0]) {
-      'A' => (background: _main.withValues(alpha: 0.2), letter: _main),
-      'D' => (background: _deleted.withValues(alpha: 0.2), letter: _deleted),
-      'R' ||
-      'C' => (background: _renamed.withValues(alpha: 0.2), letter: _renamed),
-      _ => (background: _accent, letter: _text),
-    };
+({Color background, Color letter}) fileStateChipColor(
+  String status, {
+  TimelineThemePalette palette = TimelineThemePalette.systemGraphite,
+}) => switch (status.isEmpty ? '' : status[0]) {
+  'A' => (background: _main.withValues(alpha: 0.2), letter: _main),
+  'D' => (background: _deleted.withValues(alpha: 0.2), letter: _deleted),
+  'R' || 'C' => (background: _renamed.withValues(alpha: 0.2), letter: _renamed),
+  _ => (background: palette.neutralChip, letter: palette.text),
+};
 
 /// The commit's own moment, local and zero-padded, for the places where "2 hours
 /// ago" is not precise enough.
