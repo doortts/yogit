@@ -92,12 +92,23 @@ void main() {
   );
 
   test(
-    'reports a Git algorithm setting load failure before loading files',
+    'retries a failed Git algorithm setting load before loading files',
     () async {
+      var settingFails = true;
       final repository = FakeFullDiffRepository()
         ..diffAlgorithmSetting = (() async {
-          throw const FormatException('unsupported diff.algorithm');
-        });
+          if (settingFails) {
+            throw const FormatException('unsupported diff.algorithm');
+          }
+          return const GitDiffAlgorithmSetting(
+            algorithm: DiffAlgorithm.histogram,
+            configuredValue: 'histogram',
+          );
+        })
+        ..files = ((_, _) async => const [fileA])
+        ..diff = ((_, _, _, _, _) async => twoHunkLines)
+        ..content = ((_, _, _) async =>
+            Uint8List.fromList(utf8.encode('current\n')));
       final controller = FullDiffSessionController(
         repository: repository,
         commits: const [commitA],
@@ -108,8 +119,23 @@ void main() {
       await controller.initialize();
 
       expect(controller.state.filesResource.error, isA<FormatException>());
+      expect(controller.state.gitDiffAlgorithmSetting, isNull);
       expect(repository.fileRequests, isEmpty);
       expect(repository.diffRequests, isEmpty);
+
+      settingFails = false;
+      await controller.retryFiles();
+
+      expect(repository.diffAlgorithmSettingRequests, 2);
+      expect(repository.fileRequests, hasLength(1));
+      expect(
+        controller.state.appliedConcreteAlgorithm,
+        DiffAlgorithm.histogram,
+      );
+      expect(
+        repository.diffRequests.single.algorithm,
+        DiffAlgorithm.gitSetting,
+      );
     },
   );
 

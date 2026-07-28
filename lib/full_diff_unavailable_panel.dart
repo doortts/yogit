@@ -30,7 +30,7 @@ class FullDiffUnavailablePanel extends StatelessWidget {
   final GitFileChange file;
   final String path;
   final FullDiffUnavailableReason reason;
-  final DiffAlgorithm algorithm;
+  final DiffAlgorithm? algorithm;
   final bool ignoreWhitespace;
   final Object? error;
   final VoidCallback? onRetry;
@@ -118,7 +118,7 @@ class FullDiffUnavailablePanel extends StatelessWidget {
                   if (reason == FullDiffUnavailableReason.noChanges) ...[
                     const SizedBox(height: 8),
                     Text(
-                      '${algorithm.label} · '
+                      '${algorithm?.label ?? '알고리즘 알 수 없음'} · '
                       '${ignoreWhitespace ? '공백 무시' : '공백 포함'}',
                       textAlign: TextAlign.center,
                       style: technical.copyWith(

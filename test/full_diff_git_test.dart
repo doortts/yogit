@@ -301,7 +301,18 @@ void main() {
   test('reads the effective repository diff algorithm setting', () async {
     final root = await createGitFixture();
     addTearDown(() => root.delete(recursive: true));
-    final repository = GitRepository(root.path);
+    final repository = GitRepository(
+      root.path,
+      runner: (executable, arguments, {workingDirectory}) => Process.run(
+        executable,
+        arguments,
+        workingDirectory: workingDirectory,
+        environment: {
+          'GIT_CONFIG_NOSYSTEM': '1',
+          'GIT_CONFIG_GLOBAL': '${root.path}/empty-global-gitconfig',
+        },
+      ),
+    );
 
     final unset = await repository.loadDiffAlgorithmSetting();
     expect(unset.algorithm, DiffAlgorithm.myers);
@@ -311,6 +322,17 @@ void main() {
     final configured = await repository.loadDiffAlgorithmSetting();
     expect(configured.algorithm, DiffAlgorithm.histogram);
     expect(configured.configuredValue, 'histogram');
+  });
+
+  test('rejects an explicitly empty repository diff algorithm', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await runGit(root, ['config', 'diff.algorithm', '']);
+
+    await expectLater(
+      GitRepository(root.path).loadDiffAlgorithmSetting(),
+      throwsA(isA<FormatException>()),
+    );
   });
 
   test('rejects an unsupported repository diff algorithm setting', () async {

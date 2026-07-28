@@ -505,10 +505,12 @@ void main() {
   });
 
   test('rejects unsupported Git diff algorithm settings', () {
-    expect(
-      () => parseGitDiffAlgorithmSetting('unknown'),
-      throwsA(isA<FormatException>()),
-    );
+    for (final value in ['', 'unknown']) {
+      expect(
+        () => parseGitDiffAlgorithmSetting(value),
+        throwsA(isA<FormatException>()),
+      );
+    }
   });
 
   test(

@@ -210,6 +210,28 @@ void main() {
     expect(find.text('diff.algorithm 미설정'), findsOneWidget);
   });
 
+  testWidgets('does not guess an algorithm before Git settings load', (
+    tester,
+  ) async {
+    await pumpHeaders(tester, gitDiffAlgorithmSetting: null);
+
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('diff-algorithm')),
+        matching: find.text('알 수 없음'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .getSemantics(find.byKey(const Key('diff-algorithm')))
+          .getSemanticsData()
+          .flagsCollection
+          .isEnabled,
+      ui.Tristate.isFalse,
+    );
+  });
+
   testWidgets('keeps applied selection separate from the current Git setting', (
     tester,
   ) async {
@@ -628,7 +650,7 @@ Future<void> pumpHeaders(
   bool focusMode = false,
   bool ignoreWhitespace = false,
   DiffAlgorithm algorithm = DiffAlgorithm.histogram,
-  GitDiffAlgorithmSetting gitDiffAlgorithmSetting =
+  GitDiffAlgorithmSetting? gitDiffAlgorithmSetting =
       const GitDiffAlgorithmSetting.gitDefault(),
   String encodingLabel = 'UTF-8',
   bool showShortcutHints = false,

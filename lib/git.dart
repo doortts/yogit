@@ -620,7 +620,7 @@ class GitDiffAlgorithmSetting {
 GitDiffAlgorithmSetting parseGitDiffAlgorithmSetting(String? value) {
   final normalized = value?.trim().toLowerCase();
   return switch (normalized) {
-    null || '' => const GitDiffAlgorithmSetting.gitDefault(),
+    null => const GitDiffAlgorithmSetting.gitDefault(),
     'default' => const GitDiffAlgorithmSetting(
       algorithm: DiffAlgorithm.myers,
       configuredValue: 'default',

@@ -121,7 +121,7 @@ class FullDiffSessionState {
   final DiffScope appliedScope;
   final DiffAlgorithm requestedAlgorithm;
   final DiffAlgorithm appliedAlgorithm;
-  final GitDiffAlgorithmSetting gitDiffAlgorithmSetting;
+  final GitDiffAlgorithmSetting? gitDiffAlgorithmSetting;
   final bool requestedIgnoreWhitespace;
   final bool appliedIgnoreWhitespace;
   final bool wrapLines;
@@ -153,11 +153,11 @@ class FullDiffSessionState {
   FullDiffView get primaryView =>
       view == FullDiffView.blame ? FullDiffView.blame : FullDiffView.diff;
 
-  DiffAlgorithm get requestedConcreteAlgorithm =>
-      gitDiffAlgorithmSetting.resolveSelection(requestedAlgorithm);
+  DiffAlgorithm? get requestedConcreteAlgorithm =>
+      gitDiffAlgorithmSetting?.resolveSelection(requestedAlgorithm);
 
-  DiffAlgorithm get appliedConcreteAlgorithm =>
-      gitDiffAlgorithmSetting.resolveSelection(appliedAlgorithm);
+  DiffAlgorithm? get appliedConcreteAlgorithm =>
+      gitDiffAlgorithmSetting?.resolveSelection(appliedAlgorithm);
 
   FullDiffPreferences get preferences => FullDiffPreferences(
     view: view,
@@ -342,7 +342,7 @@ FullDiffSessionState _initialState(
     appliedScope: initialPreferences.scope,
     requestedAlgorithm: initialPreferences.algorithm,
     appliedAlgorithm: initialPreferences.algorithm,
-    gitDiffAlgorithmSetting: const GitDiffAlgorithmSetting.gitDefault(),
+    gitDiffAlgorithmSetting: null,
     requestedIgnoreWhitespace: initialPreferences.ignoreWhitespace,
     appliedIgnoreWhitespace: initialPreferences.ignoreWhitespace,
     wrapLines: initialPreferences.wrapLines,
@@ -429,9 +429,19 @@ class FullDiffSessionController extends ChangeNotifier {
   int _nextCacheTick() => ++_cacheClock;
 
   Future<void> initialize() async {
+    if (!await _loadDiffAlgorithmSetting()) return;
+    await _loadFiles();
+  }
+
+  Future<bool> _loadDiffAlgorithmSetting() async {
+    _replace(
+      state.copyWith(
+        filesResource: state.filesResource.copyWith(loading: true, error: null),
+      ),
+    );
     try {
       final setting = await repository.loadDiffAlgorithmSetting();
-      if (_disposed) return;
+      if (_disposed) return false;
       final normalized = setting.normalizeSelection(state.appliedAlgorithm);
       _replace(
         state.copyWith(
@@ -440,16 +450,17 @@ class FullDiffSessionController extends ChangeNotifier {
           appliedAlgorithm: normalized,
         ),
       );
+      return true;
     } catch (error) {
       if (!_disposed) {
         _replace(state.copyWith(filesResource: AsyncResource(error: error)));
       }
-      return;
+      return false;
     }
-    await _loadFiles();
   }
 
   Future<void> retryFiles() {
+    if (state.gitDiffAlgorithmSetting == null) return initialize();
     final entry = state.selectedHistoryEntry;
     if (entry != null && state.historyContext != null) {
       return selectHistoryEntry(entry);

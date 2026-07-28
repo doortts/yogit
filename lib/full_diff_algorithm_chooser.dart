@@ -55,7 +55,7 @@ class FullDiffAlgorithmChooser extends StatefulWidget {
   });
 
   final DiffAlgorithm algorithm;
-  final GitDiffAlgorithmSetting gitDiffAlgorithmSetting;
+  final GitDiffAlgorithmSetting? gitDiffAlgorithmSetting;
   final ValueChanged<DiffAlgorithm> onSelected;
   final bool enabled;
   final bool compact;
@@ -86,7 +86,13 @@ class FullDiffAlgorithmChooserState extends State<FullDiffAlgorithmChooser> {
   }
 
   Future<void> show() async {
-    if (_menuOpen || !widget.enabled || _suppressedApplyKey != null) return;
+    final gitDiffAlgorithmSetting = widget.gitDiffAlgorithmSetting;
+    if (_menuOpen ||
+        !widget.enabled ||
+        gitDiffAlgorithmSetting == null ||
+        _suppressedApplyKey != null) {
+      return;
+    }
     final buttonContext = _buttonKey.currentContext;
     if (buttonContext == null) return;
     final button = buttonContext.findRenderObject()! as RenderBox;
@@ -115,7 +121,7 @@ class FullDiffAlgorithmChooserState extends State<FullDiffAlgorithmChooser> {
         items: [
           _AlgorithmChooserEntry(
             appliedAlgorithm: widget.algorithm,
-            gitDiffAlgorithmSetting: widget.gitDiffAlgorithmSetting,
+            gitDiffAlgorithmSetting: gitDiffAlgorithmSetting,
             onApplyKeyDown: (key) => _suppressedApplyKey = key,
           ),
         ],
@@ -140,27 +146,30 @@ class FullDiffAlgorithmChooserState extends State<FullDiffAlgorithmChooser> {
 
   @override
   Widget build(BuildContext context) {
-    final displayedAlgorithm = widget.gitDiffAlgorithmSetting.resolveSelection(
+    final displayedAlgorithm = widget.gitDiffAlgorithmSetting?.resolveSelection(
       widget.algorithm,
     );
+    final enabled = widget.enabled && displayedAlgorithm != null;
+    final label = displayedAlgorithm?.label ?? '알 수 없음';
     return Semantics(
       key: const Key('diff-algorithm'),
       container: true,
       button: true,
-      enabled: widget.enabled,
+      enabled: enabled,
       excludeSemantics: true,
-      label: 'diff 알고리즘: ${displayedAlgorithm.label}',
-      hint:
-          'Git이 변경 구간을 나누는 방식을 정합니다. '
-          '${diffAlgorithmDescription(displayedAlgorithm)} '
-          '단축키 Command Shift A',
-      onTap: widget.enabled ? show : null,
+      label: 'diff 알고리즘: $label',
+      hint: displayedAlgorithm == null
+          ? 'Git diff 알고리즘 설정을 읽지 못했습니다.'
+          : 'Git이 변경 구간을 나누는 방식을 정합니다. '
+                '${diffAlgorithmDescription(displayedAlgorithm)} '
+                '단축키 Command Shift A',
+      onTap: enabled ? show : null,
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           key: _buttonKey,
           focusNode: _buttonFocus,
-          onTap: widget.enabled ? show : null,
+          onTap: enabled ? show : null,
           borderRadius: BorderRadius.circular(fullDiffControlRadius),
           child: Container(
             key: const Key('diff-algorithm-value'),
@@ -176,7 +185,7 @@ class FullDiffAlgorithmChooserState extends State<FullDiffAlgorithmChooser> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(displayedAlgorithm.label),
+                Text(label),
                 SizedBox(width: widget.compact ? 2 : 4),
                 const Icon(Icons.arrow_drop_down, size: 16),
               ],

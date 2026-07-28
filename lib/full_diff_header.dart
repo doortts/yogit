@@ -225,7 +225,7 @@ class GlobalDiffToolbar extends StatelessWidget {
   final int activeIndex;
   final int anchorCount;
   final DiffAlgorithm algorithm;
-  final GitDiffAlgorithmSetting gitDiffAlgorithmSetting;
+  final GitDiffAlgorithmSetting? gitDiffAlgorithmSetting;
   final bool ignoreWhitespace;
   final bool wrapLines;
   final bool loadingPatch;
