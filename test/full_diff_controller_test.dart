@@ -55,6 +55,65 @@ void main() {
   }
 
   test(
+    'initializes the effective Git algorithm and normalizes duplicates',
+    () async {
+      final repository = FakeFullDiffRepository()
+        ..gitDiffAlgorithmSetting = const GitDiffAlgorithmSetting(
+          algorithm: DiffAlgorithm.histogram,
+          configuredValue: 'histogram',
+        )
+        ..files = ((_, _) async => const [fileA])
+        ..diff = ((_, _, _, _, _) async => twoHunkLines)
+        ..content = ((_, _, _) async =>
+            Uint8List.fromList(utf8.encode('current\n')));
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [commitA],
+        initialIndex: 0,
+        initialPreferences: const FullDiffPreferences(
+          algorithm: DiffAlgorithm.histogram,
+        ),
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+
+      expect(repository.diffAlgorithmSettingRequests, 1);
+      expect(controller.state.appliedAlgorithm, DiffAlgorithm.gitSetting);
+      expect(
+        controller.state.appliedConcreteAlgorithm,
+        DiffAlgorithm.histogram,
+      );
+      expect(
+        repository.diffRequests.single.algorithm,
+        DiffAlgorithm.gitSetting,
+      );
+    },
+  );
+
+  test(
+    'reports a Git algorithm setting load failure before loading files',
+    () async {
+      final repository = FakeFullDiffRepository()
+        ..diffAlgorithmSetting = (() async {
+          throw const FormatException('unsupported diff.algorithm');
+        });
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [commitA],
+        initialIndex: 0,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+
+      expect(controller.state.filesResource.error, isA<FormatException>());
+      expect(repository.fileRequests, isEmpty);
+      expect(repository.diffRequests, isEmpty);
+    },
+  );
+
+  test(
     'loads patch and content together and keeps views independent',
     () async {
       final patch = Completer<List<DiffLine>>();
@@ -375,6 +434,7 @@ void main() {
       expect(controller.state.patch.data, same(successful));
       expect(controller.state.requestedAlgorithm, DiffAlgorithm.gitSetting);
       expect(controller.state.appliedAlgorithm, DiffAlgorithm.gitSetting);
+      expect(controller.state.appliedConcreteAlgorithm, DiffAlgorithm.myers);
       expect(calls, 2);
     },
   );

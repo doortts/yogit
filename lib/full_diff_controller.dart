@@ -90,6 +90,7 @@ class FullDiffSessionState {
     required this.appliedScope,
     required this.requestedAlgorithm,
     required this.appliedAlgorithm,
+    required this.gitDiffAlgorithmSetting,
     required this.requestedIgnoreWhitespace,
     required this.appliedIgnoreWhitespace,
     required this.wrapLines,
@@ -120,6 +121,7 @@ class FullDiffSessionState {
   final DiffScope appliedScope;
   final DiffAlgorithm requestedAlgorithm;
   final DiffAlgorithm appliedAlgorithm;
+  final GitDiffAlgorithmSetting gitDiffAlgorithmSetting;
   final bool requestedIgnoreWhitespace;
   final bool appliedIgnoreWhitespace;
   final bool wrapLines;
@@ -151,6 +153,12 @@ class FullDiffSessionState {
   FullDiffView get primaryView =>
       view == FullDiffView.blame ? FullDiffView.blame : FullDiffView.diff;
 
+  DiffAlgorithm get requestedConcreteAlgorithm =>
+      gitDiffAlgorithmSetting.resolveSelection(requestedAlgorithm);
+
+  DiffAlgorithm get appliedConcreteAlgorithm =>
+      gitDiffAlgorithmSetting.resolveSelection(appliedAlgorithm);
+
   FullDiffPreferences get preferences => FullDiffPreferences(
     view: view,
     historySelected: historySelected,
@@ -176,6 +184,7 @@ class FullDiffSessionState {
     DiffScope? appliedScope,
     DiffAlgorithm? requestedAlgorithm,
     DiffAlgorithm? appliedAlgorithm,
+    GitDiffAlgorithmSetting? gitDiffAlgorithmSetting,
     bool? requestedIgnoreWhitespace,
     bool? appliedIgnoreWhitespace,
     bool? wrapLines,
@@ -211,6 +220,8 @@ class FullDiffSessionState {
     appliedScope: appliedScope ?? this.appliedScope,
     requestedAlgorithm: requestedAlgorithm ?? this.requestedAlgorithm,
     appliedAlgorithm: appliedAlgorithm ?? this.appliedAlgorithm,
+    gitDiffAlgorithmSetting:
+        gitDiffAlgorithmSetting ?? this.gitDiffAlgorithmSetting,
     requestedIgnoreWhitespace:
         requestedIgnoreWhitespace ?? this.requestedIgnoreWhitespace,
     appliedIgnoreWhitespace:
@@ -331,6 +342,7 @@ FullDiffSessionState _initialState(
     appliedScope: initialPreferences.scope,
     requestedAlgorithm: initialPreferences.algorithm,
     appliedAlgorithm: initialPreferences.algorithm,
+    gitDiffAlgorithmSetting: const GitDiffAlgorithmSetting.gitDefault(),
     requestedIgnoreWhitespace: initialPreferences.ignoreWhitespace,
     appliedIgnoreWhitespace: initialPreferences.ignoreWhitespace,
     wrapLines: initialPreferences.wrapLines,
@@ -416,7 +428,26 @@ class FullDiffSessionController extends ChangeNotifier {
 
   int _nextCacheTick() => ++_cacheClock;
 
-  Future<void> initialize() => _loadFiles();
+  Future<void> initialize() async {
+    try {
+      final setting = await repository.loadDiffAlgorithmSetting();
+      if (_disposed) return;
+      final normalized = setting.normalizeSelection(state.appliedAlgorithm);
+      _replace(
+        state.copyWith(
+          gitDiffAlgorithmSetting: setting,
+          requestedAlgorithm: normalized,
+          appliedAlgorithm: normalized,
+        ),
+      );
+    } catch (error) {
+      if (!_disposed) {
+        _replace(state.copyWith(filesResource: AsyncResource(error: error)));
+      }
+      return;
+    }
+    await _loadFiles();
+  }
 
   Future<void> retryFiles() {
     final entry = state.selectedHistoryEntry;
