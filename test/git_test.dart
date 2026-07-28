@@ -8,6 +8,23 @@ import 'package:yogit/git.dart';
 import 'package:yogit/timeline.dart';
 
 void main() {
+  test('loads the complete commit message body', () async {
+    late List<String> arguments;
+    final repository = GitRepository(
+      '/repo',
+      runner: (executable, args, {workingDirectory}) async {
+        arguments = args;
+        return ProcessResult(1, 0, 'Subject\n\nBody line\n', '');
+      },
+    );
+
+    expect(
+      await repository.loadCommitMessage('40aff6d'),
+      'Subject\n\nBody line\n',
+    );
+    expect(arguments, ['show', '-s', '--format=%B', '40aff6d']);
+  });
+
   test('parses a merge log record with identities and refs', () {
     const log =
         'b561300abcde0000000000000000000000000000\x1f'

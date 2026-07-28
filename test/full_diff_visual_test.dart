@@ -493,6 +493,17 @@ Future<void> prepareFunctionalCapture(
           1,
         ),
       );
+      final lineNumber = find.byKey(const Key('blame-line-number-294'));
+      expect(
+        tester.getTopLeft(card).dx,
+        closeTo(tester.getTopLeft(lineNumber).dx, 0.5),
+      );
+      final message = find.descendant(
+        of: card,
+        matching: find.byKey(const Key('full-diff-commit-message')),
+      );
+      expect(message, findsOneWidget);
+      expect(tester.widget<Text>(message).maxLines, 8);
       expect(tester.getTopLeft(coveredRow).dy, coveredRowTop);
     case '29-history-resizers':
       final filesPane = find.byKey(const Key('details-files-column'));
@@ -513,6 +524,22 @@ Future<void> prepareFunctionalCapture(
       expect(tester.getSize(historyPane).width, historyBefore + 24);
       expect(savedWidths()?.files, filesBefore + 20);
       expect(savedWidths()?.history, historyBefore + 24);
+      final selectedSha = controller.state.selectedHistoryEntry!.commit.sha;
+      final nextRow = find.byKey(
+        Key('history-row-${qaHistoryRecords[1].commit.sha}'),
+      );
+      final nextRowTop = tester.getTopLeft(nextRow).dy;
+      final historyFocus = tester
+          .widget<Focus>(find.byKey(const Key('history-list-focus')))
+          .focusNode!;
+      historyFocus.requestFocus();
+      await tester.pump();
+      expect(historyFocus.hasPrimaryFocus, isTrue);
+      expect(
+        find.byKey(Key('history-commit-details-$selectedSha')),
+        findsOneWidget,
+      );
+      expect(tester.getTopLeft(nextRow).dy, nextRowTop);
     default:
       break;
   }

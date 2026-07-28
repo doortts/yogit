@@ -27,6 +27,7 @@ class FakeFullDiffRepository implements FullDiffRepository {
   final contentRequests = <({String sha, String path, String? parent})>[];
   final blameRequests = <({String sha, String path, String? parent})>[];
   final historyRequests = <({String sha, String path})>[];
+  final commitMessageRequests = <String>[];
 
   Future<List<GitFileChange>> Function(GitCommit, String?)? files;
   Future<List<DiffLine>> Function(
@@ -56,6 +57,13 @@ class FakeFullDiffRepository implements FullDiffRepository {
   blame;
   Future<List<GitFileHistoryRecord>> Function(GitCommit, GitFileChange)?
   history;
+  Future<String> Function(String sha)? commitMessage;
+
+  @override
+  Future<String> loadCommitMessage(String sha) {
+    commitMessageRequests.add(sha);
+    return commitMessage?.call(sha) ?? Future.value('');
+  }
 
   @override
   Future<List<GitFileChange>> loadFiles(GitCommit commit, {String? parent}) {

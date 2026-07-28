@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -9,6 +10,7 @@ import 'package:yogit/avatars.dart';
 import 'package:yogit/full_diff_anchor_probe.dart';
 import 'package:yogit/full_blame_view.dart';
 import 'package:yogit/full_diff_code_row.dart';
+import 'package:yogit/full_diff_commit_info_card.dart';
 import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/full_diff_selectable_row.dart';
 import 'package:yogit/full_diff_side_by_side_view.dart';
@@ -31,6 +33,11 @@ void main() {
     Key? viewKey,
     bool wrapLines = false,
     String Function(int line)? sourceForLine,
+    FocusNode? focusNode,
+    VoidCallback? onMoveToFiles,
+    DiffAnchor? activeAnchor,
+    FullDiffCommitMessageLoader? loadCommitMessage,
+    GitBlameLine Function(int line)? blameForLine,
   }) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = size;
@@ -51,26 +58,35 @@ void main() {
     );
     final blame = BlameDocument.fromGitLines(file, [
       for (var line = 1; line <= file.lines.length; line++)
-        GitBlameLine(
-          lineNumber: line,
-          sha: '40aff6d123456789',
-          author: 'Suwon Chae',
-          authorEmail: 'suwon@example.com',
-          authorTimestamp: 1704067200,
-          summary: emptyThirdSummary && line == 3 ? '' : 'Commit summary $line',
-          uncommitted: false,
-        ),
+        blameForLine?.call(line) ??
+            GitBlameLine(
+              lineNumber: line,
+              sha: '40aff6d123456789',
+              author: 'Suwon Chae',
+              authorEmail: 'suwon@example.com',
+              authorTimestamp: 1704067200,
+              summary: emptyThirdSummary && line == 3
+                  ? ''
+                  : 'Commit summary $line',
+              uncommitted: false,
+            ),
     ]);
 
     Widget view = FullBlameView(
       key: viewKey,
       document: blame,
       hunks: const [],
-      activeAnchor: null,
+      activeAnchor: activeAnchor,
       wrapLines: wrapLines,
       highlighter: fakeHighlighter,
-      anchorKeys: const {},
+      anchorKeys: {
+        if (activeAnchor != null)
+          activeAnchor.id: GlobalKey(debugLabel: activeAnchor.id),
+      },
       controller: controller,
+      focusNode: focusNode,
+      onMoveToFiles: onMoveToFiles,
+      loadCommitMessage: loadCommitMessage,
       showRemoteAvatars: false,
     );
     if (onOuterKeyEvent != null) {
@@ -381,6 +397,88 @@ void main() {
     expect(find.text('No file history'), findsOneWidget);
     expect(find.byKey(const Key('history-list')), findsNothing);
   });
+
+  testWidgets(
+    'history shows focused selected commit details without moving rows',
+    (tester) async {
+      final historyFocus = FocusNode();
+      final filesFocus = FocusNode();
+      final messages = <String, Completer<String>>{};
+      addTearDown(historyFocus.dispose);
+      addTearDown(filesFocus.dispose);
+      var selected = historyEntries.first;
+      await tester.pumpWidget(
+        qaApp(
+          StatefulBuilder(
+            builder: (context, setState) => Column(
+              children: [
+                Focus(focusNode: filesFocus, child: const SizedBox(height: 1)),
+                Expanded(
+                  child: FullHistoryView(
+                    entries: historyEntries,
+                    selected: selected,
+                    focusNode: historyFocus,
+                    onSelected: (entry) => setState(() => selected = entry),
+                    loadCommitMessage: (sha) =>
+                        messages.putIfAbsent(sha, Completer<String>.new).future,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      final secondRow = find.byKey(
+        Key('history-row-${historyEntries[1].commit.sha}'),
+      );
+      final secondRowTopBeforeFocus = tester.getTopLeft(secondRow).dy;
+      expect(
+        find.byKey(Key('history-commit-details-${commitA.sha}')),
+        findsNothing,
+      );
+
+      historyFocus.requestFocus();
+      await tester.pump();
+
+      final firstCard = find.byKey(
+        Key('history-commit-details-${commitA.sha}'),
+      );
+      final firstRow = find.byKey(Key('history-row-${commitA.sha}'));
+      expect(firstCard, findsOneWidget);
+      expect(
+        tester.getTopLeft(firstCard).dy,
+        closeTo(tester.getBottomLeft(firstRow).dy + 4, 0.5),
+      );
+      expect(tester.getTopLeft(secondRow).dy, secondRowTopBeforeFocus);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump();
+
+      final secondCard = find.byKey(
+        Key('history-commit-details-${historyEntries[1].commit.sha}'),
+      );
+      expect(selected, same(historyEntries[1]));
+      expect(secondCard, findsOneWidget);
+      expect(
+        find.descendant(
+          of: secondCard,
+          matching: find.text(historyEntries[1].commit.subject),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester.getTopLeft(secondCard).dy,
+        closeTo(tester.getBottomLeft(secondRow).dy + 4, 0.5),
+      );
+
+      filesFocus.requestFocus();
+      await tester.pumpAndSettle();
+
+      expect(secondCard, findsNothing);
+      expect(selected, same(historyEntries[1]));
+    },
+  );
 
   testWidgets('history arrows immediately commit the controlled selection', (
     tester,
@@ -1654,33 +1752,60 @@ void main() {
     );
   });
 
-  testWidgets('blame details card keeps the inherited UI font', (tester) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: ThemeData(brightness: Brightness.dark, fontFamily: 'QaUi'),
-        home: const Scaffold(
-          body: BlameCommitDetailsCard(
-            blame: BlameLine(
-              lineNumber: 3,
-              sha: '40aff6d',
-              author: 'Suwon Chae',
-              authorEmail: 'suwon.chae@example.com',
-              authorTimestamp: 1704067200,
-              summary: 'Commit summary',
-              uncommitted: false,
-            ),
-            lineNumber: 3,
-          ),
-        ),
-      ),
+  testWidgets('blame details load the full commit message', (tester) async {
+    final requestedShas = <String>[];
+    await pumpInteractiveBlameView(
+      tester,
+      loadCommitMessage: (sha) async {
+        requestedShas.add(sha);
+        return 'Full commit message';
+      },
     );
 
-    final summary = find.byKey(const Key('blame-commit-summary-3'));
+    await tester.tap(find.byKey(const Key('blame-line-3')));
+    await tester.pump();
+    await tester.pump();
+
+    final details = find.byKey(const Key('blame-commit-details-3'));
+    expect(requestedShas, ['40aff6d123456789']);
     expect(
-      DefaultTextStyle.of(tester.element(summary)).style.fontFamily,
-      'QaUi',
+      find.descendant(of: details, matching: find.text('Full commit message')),
+      findsOneWidget,
     );
   });
+
+  testWidgets(
+    'uncommitted zero-SHA blame keeps fallback without requesting a message',
+    (tester) async {
+      final requestedShas = <String>[];
+      await pumpInteractiveBlameView(
+        tester,
+        lineCount: 1,
+        blameForLine: (line) => GitBlameLine(
+          lineNumber: line,
+          sha: '0000000000000000000000000000000000000000',
+          author: 'Not Committed Yet',
+          summary: 'Uncommitted change',
+          uncommitted: true,
+        ),
+        loadCommitMessage: (sha) async {
+          requestedShas.add(sha);
+          return 'Unexpected repository message';
+        },
+      );
+
+      await tester.tap(find.byKey(const Key('blame-line-1')));
+      await tester.pump();
+      await tester.pump();
+
+      final details = find.byKey(const Key('blame-commit-details-1'));
+      expect(requestedShas, isEmpty);
+      expect(
+        find.descendant(of: details, matching: find.text('Uncommitted change')),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets('blame hover and selection keep row geometry stable', (
     tester,
@@ -1701,27 +1826,37 @@ void main() {
     await tester.tap(row3);
     await tester.pump();
     expect(find.byKey(const Key('blame-selected-3')), findsOneWidget);
-    final details = find.byKey(const Key('blame-commit-details-3'));
-    expect(details, findsOneWidget);
+    final card = find.byKey(const Key('blame-commit-details-3'));
+    final numberColumn = find.byKey(const Key('blame-line-number-3'));
+    expect(card, findsOneWidget);
+    expect(
+      tester.getTopLeft(card).dx,
+      closeTo(tester.getTopLeft(numberColumn).dx, 0.5),
+    );
+    final surface = tester.widget<DecoratedBox>(
+      find.descendant(
+        of: card,
+        matching: find.byKey(const Key('full-diff-commit-card-surface')),
+      ),
+    );
+    final border = (surface.decoration as BoxDecoration).border as Border;
+    expect(border.top.width, 1);
+    expect(border.top.color, fullDiffAccent.withValues(alpha: 0.72));
     expect(tester.getTopLeft(row4), beforeRow4);
     expect(
-      tester.getTopLeft(details).dy,
+      tester.getTopLeft(card).dy,
       closeTo(tester.getTopLeft(row3).dy + fullDiffSourceRowHeight * 2, 1),
     );
     expect(
-      find.descendant(of: details, matching: find.text('40aff6d')),
+      find.descendant(of: card, matching: find.text('40aff6d')),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: details, matching: find.text('Suwon Chae')),
+      find.descendant(of: card, matching: find.text('Suwon Chae')),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: details, matching: find.text('2024-01-01')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: details, matching: find.text('Commit summary 3')),
+      find.descendant(of: card, matching: find.text('Commit summary 3')),
       findsOneWidget,
     );
 
@@ -1761,6 +1896,98 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.pump();
     expect(find.byKey(const Key('blame-selected-1')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('blame-line-8')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(find.byKey(const Key('blame-selected-8')), findsOneWidget);
+  });
+
+  testWidgets(
+    'narrow blame keeps the offset commit card inside the list viewport',
+    (tester) async {
+      await pumpInteractiveBlameView(
+        tester,
+        size: const Size(300, 240),
+        lineCount: 3,
+        loadCommitMessage: (_) async =>
+            List.filled(20, 'wide commit message').join(' '),
+      );
+
+      await tester.tap(find.byKey(const Key('blame-line-1')));
+      await tester.pump();
+      await tester.pump();
+
+      final viewport = tester.getRect(find.byKey(const Key('blame-list')));
+      final card = tester.getRect(
+        find.byKey(const Key('blame-commit-details-1')),
+      );
+      final numberColumn = tester.getRect(
+        find.byKey(const Key('blame-line-number-1')),
+      );
+      expect(card.left, closeTo(numberColumn.left, 0.5));
+      expect(card.right, lessThanOrEqualTo(viewport.right + 0.5));
+      expect(
+        card.width,
+        lessThanOrEqualTo(viewport.width - fullBlameAvatarWidth + 0.5),
+      );
+      expect(tester.takeException(), isNull);
+
+      tester.view.physicalSize = const Size(1000, 240);
+      await tester.pump();
+      final wideCard = tester.getRect(
+        find.byKey(const Key('blame-commit-details-1')),
+      );
+      final wideNumberColumn = tester.getRect(
+        find.byKey(const Key('blame-line-number-1')),
+      );
+      expect(wideCard.left, closeTo(wideNumberColumn.left, 0.5));
+      expect(wideCard.width, lessThanOrEqualTo(420));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('blame focus selects, navigates, and returns to files', (
+    tester,
+  ) async {
+    final blameFocus = FocusNode();
+    addTearDown(blameFocus.dispose);
+    var movedToFiles = false;
+    await pumpInteractiveBlameView(
+      tester,
+      focusNode: blameFocus,
+      onMoveToFiles: () => movedToFiles = true,
+    );
+
+    blameFocus.requestFocus();
+    await tester.pump();
+    expect(find.byKey(const Key('blame-list-focus')), findsOneWidget);
+    expect(find.byKey(const Key('blame-selected-1')), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(find.byKey(const Key('blame-selected-2')), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    expect(movedToFiles, isTrue);
+  });
+
+  testWidgets('blame focus initially selects the active anchor line', (
+    tester,
+  ) async {
+    final blameFocus = FocusNode();
+    addTearDown(blameFocus.dispose);
+    const activeAnchor = DiffAnchor(hunkIndex: 0, oldLine: 4, newLine: 4);
+    await pumpInteractiveBlameView(
+      tester,
+      focusNode: blameFocus,
+      activeAnchor: activeAnchor,
+    );
+
+    blameFocus.requestFocus();
+    await tester.pump();
+
+    expect(find.byKey(const Key('blame-selected-4')), findsOneWidget);
   });
 
   testWidgets('blame arrow selection scrolls only the next row into view', (
@@ -2036,7 +2263,7 @@ void main() {
   });
 
   testWidgets(
-    'blame details omit an empty summary and expose fallback semantics',
+    'blame details preserve an empty fallback and expose fallback semantics',
     (tester) async {
       await pumpInteractiveBlameView(tester, emptyThirdSummary: true);
 
@@ -2045,13 +2272,13 @@ void main() {
 
       final details = find.byKey(const Key('blame-commit-details-3'));
       expect(details, findsOneWidget);
-      expect(
+      final message = tester.widget<Text>(
         find.descendant(
           of: details,
-          matching: find.byKey(const Key('blame-commit-summary-3')),
+          matching: find.byKey(const Key('full-diff-commit-message')),
         ),
-        findsNothing,
       );
+      expect(message.data, isEmpty);
       expect(
         tester.getSemantics(find.byKey(const Key('blame-line-3'))).label,
         contains('40aff6d'),

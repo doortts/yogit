@@ -8,6 +8,7 @@ import 'avatars.dart';
 import 'external_editor.dart';
 import 'full_diff_algorithm_chooser.dart';
 import 'full_blame_view.dart';
+import 'full_diff_commit_message_cache.dart';
 import 'full_diff_controller.dart';
 import 'full_diff_header.dart';
 import 'full_diff_minimap.dart';
@@ -78,7 +79,7 @@ class _StepPrimaryFileIntent extends Intent {
   final int delta;
 }
 
-enum _FullDiffNavigationPane { files, history }
+enum _FullDiffNavigationPane { files, history, blame }
 
 @visibleForTesting
 class FullDiffScrollController extends ScrollController {
@@ -107,6 +108,7 @@ class DiffScreen extends StatefulWidget {
     this.onPreferencesChanged,
     this.editorService,
     this.avatarService,
+    this.commitMessageCache,
     this.showRemoteAvatars = true,
     super.key,
   });
@@ -121,6 +123,7 @@ class DiffScreen extends StatefulWidget {
   final ValueChanged<FullDiffPreferences>? onPreferencesChanged;
   final ExternalEditorService? editorService;
   final AvatarService? avatarService;
+  final FullDiffCommitMessageCache? commitMessageCache;
   final bool showRemoteAvatars;
 
   @override
@@ -132,6 +135,8 @@ class _DiffScreenState extends State<DiffScreen> {
   final _historyScroll = ScrollController();
   final _fileListFocus = FocusNode(debugLabel: 'full diff files');
   final _historyListFocus = FocusNode(debugLabel: 'full diff history');
+  final _blameListFocus = FocusNode(debugLabel: 'full diff blame');
+  late final Listenable _detailNavigationFocus;
   final _algorithmChooserKey = GlobalKey<FullDiffAlgorithmChooserState>();
   final _contentViewportKey = GlobalKey();
   final _fullFileScrollTargetKey = GlobalKey(
@@ -149,7 +154,10 @@ class _DiffScreenState extends State<DiffScreen> {
   late double _filesWidth;
   late double _historyWidth;
   late double _sideBySideRatio;
-  _FullDiffNavigationPane _lastNavigationPane = _FullDiffNavigationPane.files;
+  _FullDiffNavigationPane _lastDiffHistoryNavigationPane =
+      _FullDiffNavigationPane.files;
+  _FullDiffNavigationPane _lastBlameNavigationPane =
+      _FullDiffNavigationPane.files;
   double? _lastResponsiveWidth;
 
   bool _effectScheduled = false;
@@ -167,12 +175,26 @@ class _DiffScreenState extends State<DiffScreen> {
   bool _commandHeld = false;
   int _editorRequestSerial = 0;
 
+  FullDiffCommitMessageCache get _commitMessageCache =>
+      widget.commitMessageCache ?? FullDiffCommitMessageCache.shared;
+
+  Future<String> _loadCommitMessage(String sha) =>
+      _commitMessageCache.getOrLoad(
+        repositoryRoot: widget.repository.root,
+        sha: sha,
+        loader: () => widget.repository.loadCommitMessage(sha),
+      );
+
   @override
   void initState() {
     super.initState();
     _contentScroll = FullDiffScrollController(
       onAttach: (_) => _handleContentScrollAttached(),
     );
+    _detailNavigationFocus = Listenable.merge([
+      _historyListFocus,
+      _blameListFocus,
+    ]);
     _filesWidth = widget.columnWidths.files;
     _historyWidth = widget.columnWidths.history;
     _sideBySideRatio = widget.columnWidths.sideBySideRatio;
@@ -184,6 +206,7 @@ class _DiffScreenState extends State<DiffScreen> {
     _contentScroll.addListener(_handleContentScrolled);
     _fileListFocus.addListener(_handleFileListFocusChanged);
     _historyListFocus.addListener(_handleHistoryListFocusChanged);
+    _blameListFocus.addListener(_handleBlameListFocusChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _restoreNavigationFocus();
     });
@@ -267,8 +290,10 @@ class _DiffScreenState extends State<DiffScreen> {
     _historyScroll.dispose();
     _fileListFocus.removeListener(_handleFileListFocusChanged);
     _historyListFocus.removeListener(_handleHistoryListFocusChanged);
+    _blameListFocus.removeListener(_handleBlameListFocusChanged);
     _fileListFocus.dispose();
     _historyListFocus.dispose();
+    _blameListFocus.dispose();
     if (_ownsController) _controller.dispose();
     super.dispose();
   }
@@ -333,6 +358,10 @@ class _DiffScreenState extends State<DiffScreen> {
     if (previous.history.data == null &&
         next.history.data != null &&
         next.view == FullDiffView.history) {
+      _restoreNavigationFocus();
+    }
+    if (!identical(previous.blame.data, next.blame.data) &&
+        next.view == FullDiffView.blame) {
       _restoreNavigationFocus();
     }
     if (previous.historyContext != next.historyContext) {
@@ -697,15 +726,46 @@ class _DiffScreenState extends State<DiffScreen> {
   }
 
   void _handleFileListFocusChanged() {
-    if (_fileListFocus.hasFocus) {
-      _lastNavigationPane = _FullDiffNavigationPane.files;
+    if (!_fileListFocus.hasFocus) return;
+    switch (_controller.state.view) {
+      case FullDiffView.diff:
+        _lastDiffHistoryNavigationPane = _FullDiffNavigationPane.files;
+      case FullDiffView.history:
+        if (_historyListFocus.context?.mounted ?? false) {
+          _lastDiffHistoryNavigationPane = _FullDiffNavigationPane.files;
+        }
+      case FullDiffView.blame:
+        if ((_controller.state.blame.data?.lines.isNotEmpty ?? false) &&
+            (_blameListFocus.context?.mounted ?? false)) {
+          _lastBlameNavigationPane = _FullDiffNavigationPane.files;
+        }
     }
   }
 
   void _handleHistoryListFocusChanged() {
-    if (_historyListFocus.hasFocus) {
-      _lastNavigationPane = _FullDiffNavigationPane.history;
+    if (_historyListFocus.hasFocus &&
+        (_fileListFocus.context?.mounted ?? false)) {
+      _lastDiffHistoryNavigationPane = _FullDiffNavigationPane.history;
     }
+  }
+
+  void _handleBlameListFocusChanged() {
+    if (_blameListFocus.hasFocus &&
+        (_fileListFocus.context?.mounted ?? false)) {
+      _lastBlameNavigationPane = _FullDiffNavigationPane.blame;
+    }
+  }
+
+  FocusNode? _navigationTarget({
+    required _FullDiffNavigationPane remembered,
+    required _FullDiffNavigationPane detailPane,
+    required FocusNode detailFocus,
+    required bool detailConnected,
+    required bool filesConnected,
+  }) {
+    if (remembered == detailPane && detailConnected) return detailFocus;
+    if (filesConnected) return _fileListFocus;
+    return detailConnected ? detailFocus : null;
   }
 
   void _restoreNavigationFocus() {
@@ -714,21 +774,29 @@ class _DiffScreenState extends State<DiffScreen> {
       final historyConnected =
           _controller.state.view == FullDiffView.history &&
           (_historyListFocus.context?.mounted ?? false);
+      final blameConnected =
+          _controller.state.view == FullDiffView.blame &&
+          (_controller.state.blame.data?.lines.isNotEmpty ?? false) &&
+          (_blameListFocus.context?.mounted ?? false);
       final filesConnected = _fileListFocus.context?.mounted ?? false;
-      final target = _lastNavigationPane == _FullDiffNavigationPane.history
-          ? historyConnected
-                ? (_historyListFocus, _FullDiffNavigationPane.history)
-                : filesConnected
-                ? (_fileListFocus, _FullDiffNavigationPane.files)
-                : null
-          : filesConnected
-          ? (_fileListFocus, _FullDiffNavigationPane.files)
-          : historyConnected
-          ? (_historyListFocus, _FullDiffNavigationPane.history)
-          : null;
-      if (target == null) return;
-      _lastNavigationPane = target.$2;
-      target.$1.requestFocus();
+      final target = switch (_controller.state.view) {
+        FullDiffView.history => _navigationTarget(
+          remembered: _lastDiffHistoryNavigationPane,
+          detailPane: _FullDiffNavigationPane.history,
+          detailFocus: _historyListFocus,
+          detailConnected: historyConnected,
+          filesConnected: filesConnected,
+        ),
+        FullDiffView.blame => _navigationTarget(
+          remembered: _lastBlameNavigationPane,
+          detailPane: _FullDiffNavigationPane.blame,
+          detailFocus: _blameListFocus,
+          detailConnected: blameConnected,
+          filesConnected: filesConnected,
+        ),
+        FullDiffView.diff => filesConnected ? _fileListFocus : null,
+      };
+      target?.requestFocus();
     });
   }
 
@@ -744,8 +812,8 @@ class _DiffScreenState extends State<DiffScreen> {
 
   void _selectPrimaryView(FullDiffView view) {
     _controller.setPrimaryView(view);
-    if (_controller.state.view != FullDiffView.history) {
-      _lastNavigationPane = _FullDiffNavigationPane.files;
+    if (_controller.state.view == FullDiffView.diff) {
+      _lastDiffHistoryNavigationPane = _FullDiffNavigationPane.files;
     }
     _restoreNavigationFocus();
   }
@@ -758,7 +826,7 @@ class _DiffScreenState extends State<DiffScreen> {
   void _selectHistory(bool selected) {
     _controller.setHistorySelected(selected);
     if (!selected) {
-      _lastNavigationPane = _FullDiffNavigationPane.files;
+      _lastDiffHistoryNavigationPane = _FullDiffNavigationPane.files;
     }
     _restoreNavigationFocus();
   }
@@ -788,6 +856,13 @@ class _DiffScreenState extends State<DiffScreen> {
         unawaited(_controller.selectHistoryEntry(entries.first));
       }
       _historyListFocus.requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowRight &&
+        _controller.state.view == FullDiffView.blame) {
+      if (_controller.state.blame.data?.lines.isNotEmpty ?? false) {
+        _blameListFocus.requestFocus();
+      }
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -1243,7 +1318,7 @@ class _DiffScreenState extends State<DiffScreen> {
                                 }
                               },
                               child: ListenableBuilder(
-                                listenable: _historyListFocus,
+                                listenable: _detailNavigationFocus,
                                 builder: (context, _) => FullDiffSelectableRowSurface(
                                   key: selected
                                       ? Key('selected-file-${file.path}')
@@ -1251,8 +1326,13 @@ class _DiffScreenState extends State<DiffScreen> {
                                   selected: selected,
                                   focused:
                                       selected &&
-                                      (state.view != FullDiffView.history ||
-                                          !_historyListFocus.hasFocus),
+                                      switch (state.view) {
+                                        FullDiffView.history =>
+                                          !_historyListFocus.hasFocus,
+                                        FullDiffView.blame =>
+                                          !_blameListFocus.hasFocus,
+                                        FullDiffView.diff => true,
+                                      },
                                   child: Padding(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 10,
@@ -1601,6 +1681,9 @@ class _DiffScreenState extends State<DiffScreen> {
       controller: _contentScroll,
       avatarService: widget.avatarService,
       showRemoteAvatars: widget.showRemoteAvatars,
+      focusNode: _blameListFocus,
+      onMoveToFiles: _fileListFocus.requestFocus,
+      loadCommitMessage: _loadCommitMessage,
     );
   }
 
@@ -1624,6 +1707,7 @@ class _DiffScreenState extends State<DiffScreen> {
         controller: _historyScroll,
         focusNode: _historyListFocus,
         onMoveToFiles: _fileListFocus.requestFocus,
+        loadCommitMessage: _loadCommitMessage,
       ),
       detail: LayoutBuilder(
         builder: (context, constraints) =>
