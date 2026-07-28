@@ -347,6 +347,10 @@ final qaWhitespacePatchLines = List<DiffLine>.unmodifiable(
   ),
 );
 
+final qaFullFilePatchLines = List<DiffLine>.unmodifiable(
+  _qaFullFilePatchLines(),
+);
+
 final Uint8List qaFileBytes = Uint8List.fromList(
   utf8.encode('${_qaSourceLines().join('\n')}\n'),
 );
@@ -475,9 +479,10 @@ Future<FullDiffSessionController> qaControllerFor({
   final repository = FakeFullDiffRepository()
     ..files = ((commit, _) async =>
         commit.sha == historicalRevision ? qaHistoricalFiles : qaFiles)
-    ..diff = ((commit, _, _, _, whitespace) async {
+    ..scopedDiff = ((commit, _, _, _, whitespace, requestedScope) async {
       if (emptyPatch) return const <DiffLine>[];
       if (commit.sha == historicalRevision) return qaHistoricalPatchLines;
+      if (requestedScope == DiffScope.fullFile) return qaFullFilePatchLines;
       return whitespace ? qaWhitespacePatchLines : qaPatchLines;
     })
     ..content = ((_, _, _) async => qaFileBytes)
@@ -515,7 +520,9 @@ Future<FullDiffSessionController> qaControllerFor({
     await controller.selectHistoryEntry(controller.state.history.data![1]);
   }
   final document = controller.state.patch.data;
-  if (document != null && document.hunks.isNotEmpty) {
+  if (scope != DiffScope.fullFile &&
+      document != null &&
+      document.hunks.isNotEmpty) {
     controller.selectAnchor(
       document
           .hunks[activeHunkIndex.clamp(0, document.hunks.length - 1)]
@@ -534,6 +541,7 @@ class FullDiffQaProductShell extends StatelessWidget {
     this.finalPolishGeometry = false,
     this.viewportWidth,
     this.showRemoteAvatars = true,
+    this.onColumnWidthsChanged,
     super.key,
   });
 
@@ -542,6 +550,7 @@ class FullDiffQaProductShell extends StatelessWidget {
   final bool finalPolishGeometry;
   final double? viewportWidth;
   final bool showRemoteAvatars;
+  final ValueChanged<FullDiffColumnWidths>? onColumnWidthsChanged;
 
   @override
   Widget build(BuildContext context) => RepaintBoundary(
@@ -556,6 +565,7 @@ class FullDiffQaProductShell extends StatelessWidget {
             columnWidths: finalPolishGeometry
                 ? const FullDiffColumnWidths(files: 278)
                 : _qaColumnWidths(viewportWidth),
+            onColumnWidthsChanged: onColumnWidthsChanged,
             showRemoteAvatars: showRemoteAvatars,
           ),
   );
@@ -568,6 +578,7 @@ class FullDiffQaComparisonCanvas extends StatelessWidget {
     this.finalPolishGeometry = false,
     this.surfaceSize,
     this.showRemoteAvatars = true,
+    this.onColumnWidthsChanged,
     super.key,
   });
 
@@ -576,6 +587,7 @@ class FullDiffQaComparisonCanvas extends StatelessWidget {
   final bool finalPolishGeometry;
   final Size? surfaceSize;
   final bool showRemoteAvatars;
+  final ValueChanged<FullDiffColumnWidths>? onColumnWidthsChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -585,6 +597,7 @@ class FullDiffQaComparisonCanvas extends StatelessWidget {
       finalPolishGeometry: finalPolishGeometry,
       viewportWidth: surfaceSize?.width,
       showRemoteAvatars: showRemoteAvatars,
+      onColumnWidthsChanged: onColumnWidthsChanged,
     );
     final sizedWorkspace = switch ((surfaceSize, detailOnly)) {
       (final Size size, false) when finalPolishGeometry => Align(
@@ -823,6 +836,65 @@ List<String> _qaSourceLines() {
   set(438, 'procedure Finalize;');
   set(440, 'WindowPixelRatio := 1.0;');
   set(441, 'end;');
+  return lines;
+}
+
+List<DiffLine> _qaFullFilePatchLines() {
+  final source = _qaSourceLines();
+  const replacements = <int, String>{
+    294: "  LuaSystem.Get('VERSION_MODULE');",
+    314: 'Scale := WindowScale;',
+    320: 'WindowWidth := SavedWidth;',
+    347: 'WindowWidth := SavedWidth;',
+    404: 'WindowData.Width := WindowWidth;',
+  };
+  const additions = <int>{295, 313, 321, 348, 373, 374, 405, 440};
+  final lines = <DiffLine>[
+    const DiffLine(
+      kind: DiffLineKind.hunk,
+      text: '@@ -1,442 +1,450 @@ Full file',
+    ),
+  ];
+  var oldNumber = 1;
+  for (var newNumber = 1; newNumber <= 450; newNumber++) {
+    if (replacements[newNumber] case final oldText?) {
+      lines
+        ..add(
+          DiffLine(
+            kind: DiffLineKind.delete,
+            text: oldText,
+            oldNumber: oldNumber,
+          ),
+        )
+        ..add(
+          DiffLine(
+            kind: DiffLineKind.add,
+            text: source[newNumber - 1],
+            newNumber: newNumber,
+          ),
+        );
+      oldNumber++;
+      continue;
+    }
+    if (additions.contains(newNumber)) {
+      lines.add(
+        DiffLine(
+          kind: DiffLineKind.add,
+          text: source[newNumber - 1],
+          newNumber: newNumber,
+        ),
+      );
+      continue;
+    }
+    lines.add(
+      DiffLine(
+        kind: DiffLineKind.context,
+        text: source[newNumber - 1],
+        oldNumber: oldNumber++,
+        newNumber: newNumber,
+      ),
+    );
+  }
   return lines;
 }
 

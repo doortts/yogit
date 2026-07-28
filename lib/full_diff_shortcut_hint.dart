@@ -37,36 +37,40 @@ class _FullDiffShortcutHintState extends State<FullDiffShortcutHint> {
     child: OverlayPortal(
       controller: _controller,
       overlayChildBuilder: (context) => widget.visible
-          ? CompositedTransformFollower(
-              link: _link,
-              showWhenUnlinked: false,
-              targetAnchor: Alignment.bottomCenter,
-              followerAnchor: Alignment.topCenter,
-              offset: const Offset(0, 4),
-              child: IgnorePointer(
-                child: ExcludeSemantics(
-                  child: UnconstrainedBox(
-                    child: Material(
-                      color: Colors.transparent,
-                      child: Container(
-                        key: widget.hintKey,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 5,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: fullDiffHeader,
-                          borderRadius: BorderRadius.circular(
-                            fullDiffControlRadius,
+          ? Positioned(
+              left: 0,
+              top: 0,
+              child: CompositedTransformFollower(
+                link: _link,
+                showWhenUnlinked: false,
+                targetAnchor: Alignment.bottomCenter,
+                followerAnchor: Alignment.topCenter,
+                offset: const Offset(0, 4),
+                child: IgnorePointer(
+                  child: ExcludeSemantics(
+                    child: UnconstrainedBox(
+                      child: Material(
+                        color: Colors.transparent,
+                        child: Container(
+                          key: widget.hintKey,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 3,
                           ),
-                          border: Border.all(color: fullDiffDivider),
-                        ),
-                        child: Text(
-                          widget.label,
-                          style: technicalTextStyle.copyWith(
-                            color: Colors.white,
-                            fontSize: 10,
-                            height: 1,
+                          decoration: BoxDecoration(
+                            color: fullDiffHeader,
+                            borderRadius: BorderRadius.circular(
+                              fullDiffControlRadius,
+                            ),
+                            border: Border.all(color: fullDiffDivider),
+                          ),
+                          child: Text(
+                            widget.label,
+                            style: technicalTextStyle.copyWith(
+                              color: Colors.white,
+                              fontSize: 10,
+                              height: 1,
+                            ),
                           ),
                         ),
                       ),

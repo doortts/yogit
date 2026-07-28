@@ -493,7 +493,7 @@ class BlameCommitDetailsCard extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        child: DefaultTextStyle(
+        child: DefaultTextStyle.merge(
           style: const TextStyle(color: Colors.white, fontSize: 11),
           child: Column(
             mainAxisSize: MainAxisSize.min,

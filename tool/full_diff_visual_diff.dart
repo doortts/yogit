@@ -7,7 +7,6 @@ const fullDiffVisualNames = <String>[
   '00-overview-hunk',
   '01-diff-inline',
   '02-diff-split',
-  '03-file-view',
   '04-blame-view',
   '05-history-view',
   '06-focus-mode',

@@ -1654,6 +1654,34 @@ void main() {
     );
   });
 
+  testWidgets('blame details card keeps the inherited UI font', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(brightness: Brightness.dark, fontFamily: 'QaUi'),
+        home: const Scaffold(
+          body: BlameCommitDetailsCard(
+            blame: BlameLine(
+              lineNumber: 3,
+              sha: '40aff6d',
+              author: 'Suwon Chae',
+              authorEmail: 'suwon.chae@example.com',
+              authorTimestamp: 1704067200,
+              summary: 'Commit summary',
+              uncommitted: false,
+            ),
+            lineNumber: 3,
+          ),
+        ),
+      ),
+    );
+
+    final summary = find.byKey(const Key('blame-commit-summary-3'));
+    expect(
+      DefaultTextStyle.of(tester.element(summary)).style.fontFamily,
+      'QaUi',
+    );
+  });
+
   testWidgets('blame hover and selection keep row geometry stable', (
     tester,
   ) async {
