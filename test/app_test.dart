@@ -3322,6 +3322,8 @@ void main() {
 
     await tester.tap(find.byKey(const Key('toolbar-full-diff')));
     await tester.pumpAndSettle();
+    final diffContext = tester.element(find.byType(DiffScreen));
+    expect(Theme.of(diffContext).extension<TimelineThemePalette>(), isNull);
     expect(
       tester.widget<Scaffold>(find.byType(Scaffold).last).backgroundColor,
       fullDiffCanvas,
@@ -5874,10 +5876,16 @@ void main() {
   testWidgets('changing the timeline theme preserves selection and scroll', (
     tester,
   ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 500);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
     final store = MemorySettingsStore();
     final commits = [
       for (var index = 0; index < 30; index++)
-        commit('$index', 'commit $index'),
+        commit('$index', 'message $index'),
     ];
     await tester.pumpWidget(
       YogitApp(
@@ -5893,6 +5901,15 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     }
     await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    final preview = find.byKey(const Key('preview-surface'));
+    final previewSubject = find.descendant(
+      of: preview,
+      matching: find.text('message 12'),
+    );
+    expect(preview, findsOneWidget);
+    expect(previewSubject, findsOneWidget);
     final before = tester
         .state<ScrollableState>(
           find.descendant(
@@ -5902,6 +5919,7 @@ void main() {
         )
         .position
         .pixels;
+    expect(before, greaterThan(0));
 
     await tester.tap(find.byKey(const Key('open-settings')));
     await tester.pumpAndSettle();
@@ -5909,11 +5927,13 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('timeline-theme-card-carbon')));
     await tester.pumpAndSettle();
+    expect(store.current.timelineTheme, TimelineThemeKind.carbon);
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
 
-    expect(store.current.timelineTheme, TimelineThemeKind.carbon);
     expect(find.byKey(const Key('selected-row-12')), findsOneWidget);
+    expect(preview, findsOneWidget);
+    expect(previewSubject, findsOneWidget);
     expect(
       tester
           .state<ScrollableState>(
