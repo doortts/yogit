@@ -60,8 +60,10 @@ expect(layoutHintRect.top, closeTo(layoutControlRect.bottom - 4, 0.5));
 Run:
 
 ```bash
-flutter test test/full_diff_header_test.dart test/full_diff_visual_test.dart \
-  --plain-name "shortcut hints"
+flutter test test/full_diff_header_test.dart \
+  --plain-name "shortcut hints overlay controls"
+flutter test test/full_diff_visual_test.dart \
+  --plain-name "capture 26-shortcut-hints"
 ```
 
 Expected: 현재 배지는 버튼 하단보다 4픽셀 아래에서 시작하므로 `bottom - 4` 기대값에서 실패한다.
