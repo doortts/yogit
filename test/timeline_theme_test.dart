@@ -125,6 +125,8 @@ void main() {
     );
     expect(inside.scaffoldBackgroundColor, const Color(0xFF121213));
     expect(inside.colorScheme.surface, const Color(0xFF1C1C1E));
+    expect(inside.colorScheme.surfaceContainer, const Color(0xFF1C1C1E));
+    expect(inside.colorScheme.onSurface, const Color(0xFFF5F5F7));
     expect(inside.colorScheme.primary, const Color(0xFF64D2FF));
   });
 }

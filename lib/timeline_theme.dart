@@ -172,6 +172,8 @@ ThemeData timelineThemeData(ThemeData base, TimelineThemeKind kind) {
     scaffoldBackgroundColor: palette.background,
     colorScheme: base.colorScheme.copyWith(
       surface: palette.surface,
+      surfaceContainer: palette.surface,
+      onSurface: palette.text,
       primary: palette.interactive,
     ),
     extensions: [

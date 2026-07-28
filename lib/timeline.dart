@@ -3255,7 +3255,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: selected ? _palette.neutralChip : null,
-              border: const Border(top: BorderSide(color: Color(0x66343946))),
+              border: Border(top: BorderSide(color: _palette.border)),
             ),
             child: Row(
               children: [

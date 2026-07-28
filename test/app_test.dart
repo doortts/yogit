@@ -76,6 +76,14 @@ void main() {
         YogitApp(
           repository: FakeGitRepository(
             (_, _) async => [commit('1', 'first commit')],
+            files: (_, _) async => const [
+              GitFileChange(
+                path: 'lib/a.dart',
+                status: 'M',
+                additions: 1,
+                deletions: 1,
+              ),
+            ],
           ),
           settingsStore: store,
           discoverAvatars: false,
@@ -96,8 +104,60 @@ void main() {
             .color,
         TimelineThemePalette.carbon.surface,
       );
+      final fileRow =
+          tester
+                  .widget<InkWell>(
+                    find.ancestor(
+                      of: find.byKey(const Key('preview-state-lib/a.dart')),
+                      matching: find.byType(InkWell),
+                    ),
+                  )
+                  .child!
+              as DecoratedBox;
+      expect(
+        ((fileRow.decoration as BoxDecoration).border! as Border).top.color,
+        const Color(0xFF303033),
+      );
     },
   );
+
+  testWidgets('the stored timeline theme colors the base-branch popup', (
+    tester,
+  ) async {
+    final store = MemorySettingsStore()
+      ..current = const AppSettings(timelineTheme: TimelineThemeKind.carbon);
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository(
+          (_, _) async => [commit('tip', 'tip')],
+          refs: const RepoRefs(
+            local: ['main', 'release'],
+            current: 'main',
+            tips: {'main': 'tip', 'release': 'tip'},
+          ),
+        ),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('base-branch-selector')));
+    await tester.pumpAndSettle();
+
+    final item = find.byKey(const Key('base-branch-menu-release'));
+    final menuMaterial = tester.widget<Material>(
+      find.ancestor(of: item, matching: find.byType(Material)).last,
+    );
+    expect(menuMaterial.color, const Color(0xFF1C1C1E));
+
+    final text = find.descendant(of: item, matching: find.text('release'));
+    expect(
+      DefaultTextStyle.of(tester.element(text)).style.color,
+      const Color(0xFFF5F5F7),
+    );
+  });
 
   testWidgets('keyboard and pointer control selection and preview', (
     tester,
