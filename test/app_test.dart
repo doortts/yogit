@@ -17,6 +17,7 @@ import 'package:yogit/git.dart';
 import 'package:yogit/main.dart';
 import 'package:yogit/settings.dart';
 import 'package:yogit/timeline.dart';
+import 'package:yogit/timeline_theme.dart';
 import 'package:yogit/typography.dart';
 import 'package:yogit/window_frame.dart';
 
@@ -2475,6 +2476,26 @@ void main() {
       }).baseBranches,
       {'/repos/one': 'main'},
     );
+  });
+
+  test('timeline theme settings round-trip and reject unknown values', () {
+    const settings = AppSettings(timelineTheme: TimelineThemeKind.carbon);
+    expect(AppSettings.fromJson(settings.toJson()), settings);
+    expect(settings.toJson()['timelineTheme'], 'carbon');
+    expect(
+      AppSettings.fromJson(const {}).timelineTheme,
+      TimelineThemeKind.systemGraphite,
+    );
+    expect(
+      AppSettings.fromJson(const {'timelineTheme': 'sepia'}).timelineTheme,
+      TimelineThemeKind.systemGraphite,
+    );
+
+    final changed = settings.copyWith(
+      timelineTheme: TimelineThemeKind.warmGraphite,
+    );
+    expect(changed.timelineTheme, TimelineThemeKind.warmGraphite);
+    expect(changed.copyWith(), changed);
   });
 
   test(
@@ -5094,6 +5115,7 @@ void main() {
     expect(await store.load(), const AppSettings());
     const saved = AppSettings(
       showAvatars: false,
+      timelineTheme: TimelineThemeKind.warmGraphite,
       previewPlacement: PreviewPlacement.bottom,
       columnWidths: TimelineColumnWidths(graph: 220),
       baseBranches: {'/repos/one': 'main', '/repos/two': 'release'},
@@ -5102,10 +5124,12 @@ void main() {
 
     final restored = await store.load();
     expect(restored.showAvatars, isFalse);
+    expect(restored.timelineTheme, TimelineThemeKind.warmGraphite);
     expect(restored.previewPlacement, PreviewPlacement.bottom);
     expect(restored.columnWidths.graph, isNull);
     final json = jsonDecode(await store.file.readAsString());
     expect(json['showAvatars'], isFalse);
+    expect(json['timelineTheme'], 'warmGraphite');
     expect(json['columnWidths'], isNot(contains('graph')));
     expect(json, isNot(contains('token')));
 

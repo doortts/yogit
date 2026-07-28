@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'avatars.dart';
 import 'full_diff_model.dart';
 import 'git.dart';
+import 'timeline_theme.dart';
 import 'window_frame.dart';
 
 class TimelineColumnWidths {
@@ -228,6 +229,7 @@ Map<String, double> _parseRepositoryGraphWidths(Object? value) {
 class AppSettings {
   const AppSettings({
     this.showAvatars = true,
+    this.timelineTheme = TimelineThemeKind.systemGraphite,
     this.previewPlacement = PreviewPlacement.right,
     this.columnWidths = const TimelineColumnWidths(),
     this.repositoryGraphWidths = const {},
@@ -266,6 +268,7 @@ class AppSettings {
   ];
 
   final bool showAvatars;
+  final TimelineThemeKind timelineTheme;
   final PreviewPlacement previewPlacement;
   final TimelineColumnWidths columnWidths;
   final Map<String, double> repositoryGraphWidths;
@@ -320,6 +323,7 @@ class AppSettings {
 
   AppSettings copyWith({
     bool? showAvatars,
+    TimelineThemeKind? timelineTheme,
     PreviewPlacement? previewPlacement,
     TimelineColumnWidths? columnWidths,
     Map<String, double>? repositoryGraphWidths,
@@ -331,6 +335,7 @@ class AppSettings {
     Map<String, String>? baseBranches,
   }) => AppSettings(
     showAvatars: showAvatars ?? this.showAvatars,
+    timelineTheme: timelineTheme ?? this.timelineTheme,
     previewPlacement: previewPlacement ?? this.previewPlacement,
     columnWidths: columnWidths ?? this.columnWidths,
     repositoryGraphWidths: repositoryGraphWidths ?? this.repositoryGraphWidths,
@@ -364,6 +369,7 @@ class AppSettings {
       showAvatars: value['showAvatars'] is bool
           ? value['showAvatars'] as bool
           : true,
+      timelineTheme: TimelineThemeKind.parse(value['timelineTheme']),
       previewPlacement: switch (value['previewPlacement']) {
         'bottom' => PreviewPlacement.bottom,
         'left' => PreviewPlacement.left,
@@ -388,6 +394,7 @@ class AppSettings {
 
   Map<String, Object> toJson() => {
     'showAvatars': showAvatars,
+    'timelineTheme': timelineTheme.storageValue,
     'previewPlacement': previewPlacement.name,
     'columnWidths': columnWidths.withGraph(null).toJson(),
     'repositoryGraphWidths': repositoryGraphWidths,
@@ -403,6 +410,7 @@ class AppSettings {
   bool operator ==(Object other) =>
       other is AppSettings &&
       showAvatars == other.showAvatars &&
+      timelineTheme == other.timelineTheme &&
       previewPlacement == other.previewPlacement &&
       columnWidths == other.columnWidths &&
       mapEquals(repositoryGraphWidths, other.repositoryGraphWidths) &&
@@ -416,6 +424,7 @@ class AppSettings {
   @override
   int get hashCode => Object.hash(
     showAvatars,
+    timelineTheme,
     previewPlacement,
     columnWidths,
     Object.hashAllUnordered(
