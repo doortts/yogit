@@ -85,6 +85,9 @@ Run:
 ```bash
 flutter test test/full_diff_header_test.dart
 flutter test test/full_diff_visual_test.dart \
+  --plain-name "capture 26-shortcut-hints" \
+  --update-goldens
+flutter test test/full_diff_visual_test.dart \
   --plain-name "capture 26-shortcut-hints"
 flutter test test/full_diff_workspace_test.dart
 ```

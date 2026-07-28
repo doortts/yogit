@@ -464,7 +464,7 @@ Future<void> prepareFunctionalCapture(
       );
       expect(overlayRect.contains(layoutControlRect.center), isTrue);
       expect(overlayRect.contains(layoutHintRect.center), isTrue);
-      expect(layoutHintRect.top, closeTo(layoutControlRect.bottom + 4, 0.5));
+      expect(layoutHintRect.top, closeTo(layoutControlRect.bottom - 4, 0.5));
     case '27-algorithm-chooser':
       await tester.tap(find.byKey(const Key('diff-algorithm')));
       await tester.pump();

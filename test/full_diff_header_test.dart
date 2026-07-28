@@ -655,6 +655,18 @@ void main() {
     expect(tester.widget<Text>(find.text('⌘1')).style?.fontSize, 11);
     expect(tester.widget<Text>(find.text('⌘U')).style?.fontSize, 11);
     expect(tester.getRect(find.text('Unified')), before);
+    final layoutControlRect = tester.getRect(
+      find.ancestor(
+        of: find.text('Unified'),
+        matching: find.byWidgetPredicate(
+          (widget) => widget is FullDiffSegmentedControl<DiffLayout>,
+        ),
+      ),
+    );
+    final layoutHintRect = tester.getRect(
+      find.byKey(const Key('shortcut-hint-layout')),
+    );
+    expect(layoutHintRect.top, closeTo(layoutControlRect.bottom - 4, 0.5));
 
     await pumpHeaders(tester);
     expect(find.byKey(const Key('shortcut-hint-layout')), findsNothing);
