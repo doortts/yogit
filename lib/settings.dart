@@ -236,6 +236,7 @@ class AppSettings {
     this.laneColors = defaultLaneColors,
     this.previewWidth = 288,
     this.previewHeight = 280,
+    this.baseBranches = const {},
   });
 
   /// The neon palette, as stored.
@@ -271,6 +272,7 @@ class AppSettings {
   final FullDiffColumnWidths fullDiffColumnWidths;
   final FullDiffPreferences fullDiffPreferences;
   final List<String> laneColors;
+  final Map<String, String> baseBranches;
 
   /// The detail panel's size, per placement axis.
   final double previewWidth;
@@ -326,6 +328,7 @@ class AppSettings {
     List<String>? laneColors,
     double? previewWidth,
     double? previewHeight,
+    Map<String, String>? baseBranches,
   }) => AppSettings(
     showAvatars: showAvatars ?? this.showAvatars,
     previewPlacement: previewPlacement ?? this.previewPlacement,
@@ -336,10 +339,18 @@ class AppSettings {
     laneColors: laneColors ?? this.laneColors,
     previewWidth: previewWidth ?? this.previewWidth,
     previewHeight: previewHeight ?? this.previewHeight,
+    baseBranches: baseBranches ?? this.baseBranches,
   );
 
   factory AppSettings.fromJson(Object? value) {
     if (value is! Map<String, dynamic>) return const AppSettings();
+    final storedBaseBranches = value['baseBranches'];
+    final baseBranches = <String, String>{
+      if (storedBaseBranches is Map)
+        for (final entry in storedBaseBranches.entries)
+          if (entry.key is String && entry.value is String)
+            entry.key as String: entry.value as String,
+    };
     final entries = value['laneColors'];
     final laneColors = [
       if (entries is List)
@@ -371,6 +382,7 @@ class AppSettings {
       laneColors: valid ? laneColors : defaultLaneColors,
       previewWidth: _clamped(value['previewWidth'], 288, 240, 560),
       previewHeight: _clamped(value['previewHeight'], 280, 200, 480),
+      baseBranches: baseBranches,
     );
   }
 
@@ -384,6 +396,7 @@ class AppSettings {
     'laneColors': laneColors,
     'previewWidth': previewWidth,
     'previewHeight': previewHeight,
+    'baseBranches': baseBranches,
   };
 
   @override
@@ -397,7 +410,8 @@ class AppSettings {
       fullDiffPreferences == other.fullDiffPreferences &&
       listEquals(laneColors, other.laneColors) &&
       previewWidth == other.previewWidth &&
-      previewHeight == other.previewHeight;
+      previewHeight == other.previewHeight &&
+      mapEquals(baseBranches, other.baseBranches);
 
   @override
   int get hashCode => Object.hash(
@@ -414,6 +428,9 @@ class AppSettings {
     Object.hashAll(laneColors),
     previewWidth,
     previewHeight,
+    Object.hashAllUnordered(
+      baseBranches.entries.map((entry) => Object.hash(entry.key, entry.value)),
+    ),
   );
 }
 

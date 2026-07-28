@@ -284,6 +284,10 @@ class _YogitAppState extends State<YogitApp> {
         avatarService: _avatarService,
         showRemoteAvatars: _settingsLoaded && _settings.showAvatars,
         preferredPreviewPlacement: _settings.previewPlacement,
+        preferredBranch: _settingsLoaded
+            ? _settings.baseBranches[_repository.root]
+            : null,
+        preferredBranchReady: _settingsLoaded,
         columnWidths: _settings.columnWidthsForRepository(_repository.root),
         fullDiffColumnWidths: _settings.fullDiffColumnWidths,
         fullDiffPreferences: _settings.fullDiffPreferences,
@@ -294,6 +298,14 @@ class _YogitAppState extends State<YogitApp> {
             ? (placement) => _changeSettings(
                 _settings.copyWith(previewPlacement: placement),
               )
+            : null,
+        onPreferredBranchChanged: _settingsLoaded
+            ? (branch) {
+                final baseBranches = Map<String, String>.of(
+                  _settings.baseBranches,
+                )..[_repository.root] = branch;
+                _changeSettings(_settings.copyWith(baseBranches: baseBranches));
+              }
             : null,
         onColumnWidthsChanged: _settingsLoaded
             ? (widths) => _changeSettings(

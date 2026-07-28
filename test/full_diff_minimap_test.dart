@@ -466,6 +466,14 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.pump();
     expect(selected.last, same(twoHunkDocument.hunks.first.anchor));
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
+    await tester.pump();
+    expect(selected.last, same(twoHunkDocument.hunks.last.anchor));
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    await tester.pump();
+    expect(selected.last, same(twoHunkDocument.hunks.first.anchor));
   });
 
   testWidgets('empty documents ignore track clicks and drags', (tester) async {

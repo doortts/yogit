@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:yogit/vim_navigation.dart';
 
 import 'avatars.dart';
 import 'full_diff_anchor_probe.dart';
@@ -258,19 +259,26 @@ class FullBlameViewState extends State<FullBlameView> {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
-    if (HardwareKeyboard.instance.isMetaPressed ||
-        HardwareKeyboard.instance.isAltPressed ||
-        HardwareKeyboard.instance.isShiftPressed ||
-        HardwareKeyboard.instance.isControlPressed) {
+    final keyboard = HardwareKeyboard.instance;
+    final hasModifier =
+        keyboard.isMetaPressed ||
+        keyboard.isAltPressed ||
+        keyboard.isShiftPressed ||
+        keyboard.isControlPressed;
+    final key = normalizeNavigationKey(
+      event.logicalKey,
+      hasModifier: hasModifier,
+    );
+    if (hasModifier) {
       return KeyEventResult.ignored;
     }
-    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+    if (key == LogicalKeyboardKey.arrowLeft) {
       widget.onMoveToFiles?.call();
       return KeyEventResult.handled;
     }
-    final delta = event.logicalKey == LogicalKeyboardKey.arrowUp
+    final delta = key == LogicalKeyboardKey.arrowUp
         ? -1
-        : event.logicalKey == LogicalKeyboardKey.arrowDown
+        : key == LogicalKeyboardKey.arrowDown
         ? 1
         : 0;
     if (delta == 0 || widget.document.lines.isEmpty) {

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:yogit/vim_navigation.dart';
 
 import 'full_diff_model.dart';
 import 'full_diff_theme.dart';
@@ -326,11 +327,20 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
-    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+    final keyboard = HardwareKeyboard.instance;
+    final key = normalizeNavigationKey(
+      event.logicalKey,
+      hasModifier:
+          keyboard.isMetaPressed ||
+          keyboard.isAltPressed ||
+          keyboard.isShiftPressed ||
+          keyboard.isControlPressed,
+    );
+    if (key == LogicalKeyboardKey.arrowUp) {
       _stepAnchor(-1);
       return KeyEventResult.handled;
     }
-    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+    if (key == LogicalKeyboardKey.arrowDown) {
       _stepAnchor(1);
       return KeyEventResult.handled;
     }

@@ -12,8 +12,10 @@ import 'external_editor.dart';
 import 'full_diff_model.dart';
 import 'git.dart';
 import 'page_scroll_shortcuts.dart';
+import 'repository_branch_selector.dart';
 import 'settings.dart';
 import 'typography.dart';
+import 'vim_navigation.dart';
 import 'window_frame.dart';
 
 const _background = Color(0xFF15171E);
@@ -306,6 +308,9 @@ class TimelineScreen extends StatefulWidget {
     this.onOpenFullDiff,
     this.onOpenSettings,
     this.onOpenRepository,
+    this.preferredBranch,
+    this.preferredBranchReady = true,
+    this.onPreferredBranchChanged,
     this.avatarService,
     this.showRemoteAvatars = true,
     this.preferredPreviewPlacement = PreviewPlacement.right,
@@ -332,6 +337,11 @@ class TimelineScreen extends StatefulWidget {
 
   /// Called with the validated root of a repository the user picked.
   final ValueChanged<String>? onOpenRepository;
+  final String? preferredBranch;
+
+  /// Whether [preferredBranch] has finished loading from persistent settings.
+  final bool preferredBranchReady;
+  final ValueChanged<String>? onPreferredBranchChanged;
   final AvatarService? avatarService;
   final bool showRemoteAvatars;
   final PreviewPlacement preferredPreviewPlacement;
@@ -399,6 +409,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
   final _previewPaths = <String, String>{};
 
   var _refs = const RepoRefs();
+  var _refsLoading = true;
+  var _refsLoadFailed = false;
+  var _refsLoaded = false;
+  String? _baseBranch;
+  String? _pendingBaseBranch;
+  var _pendingBaseBranchIsUserSelection = false;
+
+  String? get _preferredTip => _baseBranch == null
+      ? null
+      : _refs.localTips[_baseBranch!] ?? _refs.tips[_baseBranch!];
 
   /// Which way the cursor last travelled, so the ref modal opens on the side the
   /// cursor came from. Null after a click or a jump, which have no direction.
@@ -453,9 +473,36 @@ class _TimelineScreenState extends State<TimelineScreen> {
   Future<void> _loadRefs() async {
     try {
       final refs = await widget.repository.loadRefs();
-      if (mounted) setState(() => _refs = refs);
+      if (!mounted) return;
+      final branch = resolveBaseBranch(
+        refs,
+        widget.preferredBranchReady ? widget.preferredBranch : null,
+      );
+      if (!widget.preferredBranchReady) {
+        _pendingBaseBranch = branch;
+        _pendingBaseBranchIsUserSelection = false;
+      }
+      setState(() {
+        _refs = refs;
+        _refsLoading = false;
+        _refsLoadFailed = false;
+        _refsLoaded = true;
+        _baseBranch = branch;
+        _rebuildGraph();
+      });
+      _scheduleRatchetUpdate();
+      if (widget.preferredBranchReady &&
+          branch != null &&
+          branch != widget.preferredBranch) {
+        widget.onPreferredBranchChanged?.call(branch);
+      }
     } catch (_) {
-      // The sidebar just stays empty; the timeline does not depend on refs.
+      if (!mounted) return;
+      setState(() {
+        _refsLoading = false;
+        _refsLoadFailed = true;
+        _refsLoaded = false;
+      });
     }
   }
 
@@ -482,6 +529,40 @@ class _TimelineScreenState extends State<TimelineScreen> {
         widget.previewHeight != oldWidget.previewHeight) {
       _previewWidth = widget.previewWidth;
       _previewHeight = widget.previewHeight;
+    }
+    final preferredBranchBecameReady =
+        widget.preferredBranchReady && !oldWidget.preferredBranchReady;
+    if (_refsLoaded &&
+        (preferredBranchBecameReady ||
+            (widget.preferredBranchReady &&
+                widget.preferredBranch != oldWidget.preferredBranch))) {
+      final pendingUserSelection =
+          preferredBranchBecameReady &&
+          _pendingBaseBranchIsUserSelection &&
+          _refs.local.contains(_pendingBaseBranch);
+      final branch = pendingUserSelection
+          ? _pendingBaseBranch
+          : resolveBaseBranch(_refs, widget.preferredBranch);
+      if (preferredBranchBecameReady) {
+        _pendingBaseBranch = null;
+        _pendingBaseBranchIsUserSelection = false;
+      }
+      if (branch != _baseBranch) {
+        setState(() {
+          _baseBranch = branch;
+          _rebuildGraph();
+        });
+        _scheduleRatchetUpdate();
+      }
+      if (branch != null &&
+          (pendingUserSelection || branch != widget.preferredBranch)) {
+        final onChanged = widget.onPreferredBranchChanged;
+        if (onChanged != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) onChanged(branch);
+          });
+        }
+      }
     }
   }
 
@@ -555,6 +636,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
     if (deepest != _ratchetLane) setState(() => _ratchetLane = deepest);
   }
 
+  void _scheduleRatchetUpdate() {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _updateRatchet());
+  }
+
   void _maybeLoadNextPage() {
     _updateRatchet();
     if (!_scrollController.hasClients || _end || _inFlight != null) return;
@@ -577,6 +662,15 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// Commits actually read from `git log`, so the working tree row never shifts
   /// the paging offset.
   int get _historyCount => _commits.length - (_hasWorkingTree ? 1 : 0);
+
+  void _rebuildGraph() {
+    _rows = layoutGraph(_commits, preferredTip: _preferredTip);
+    _entries = timelineEntries(_rows, DateTime.now());
+    AvatarService.branchAssignments = assignBranchColors(
+      _rows,
+      widget.repository.root.hashCode,
+    );
+  }
 
   Future<void> _fetchNextPage() async {
     setState(() {
@@ -617,15 +711,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
         _committersBySha.addEntries(
           page.map((commit) => MapEntry(commit.sha, commit.committer)),
         );
-        _rows = layoutGraph(_commits);
-        _entries = timelineEntries(_rows, DateTime.now());
-        AvatarService.branchAssignments = assignBranchColors(
-          _rows,
-          widget.repository.root.hashCode,
-        );
+        _rebuildGraph();
         // A heading never holds the selection across a load — including the
         // very first one, so the app opens on a commit.
-        if (_entries[_selectedIndex.value].rowIndex < 0) {
+        if (_entries.isNotEmpty &&
+            _entries[_selectedIndex.value].rowIndex < 0) {
           _selectedIndex.value = _entries.indexWhere(
             (entry) => entry.rowIndex >= 0,
           );
@@ -652,13 +742,21 @@ class _TimelineScreenState extends State<TimelineScreen> {
     }
   }
 
+  bool get _editableDescendantHasFocus {
+    final context = FocusManager.instance.primaryFocus?.context;
+    if (context == null) return false;
+    return context.widget is EditableText ||
+        context.findAncestorWidgetOfExactType<EditableText>() != null;
+  }
+
   KeyEventResult _onKeyEvent(FocusNode _, KeyEvent event) {
     // Holding an arrow keeps moving; everything else acts once per press.
     if (event is KeyDownEvent || event is KeyRepeatEvent) {
+      final keyboard = HardwareKeyboard.instance;
       final pageScrollIntent = pageScrollIntentFor(
         event,
-        metaPressed: HardwareKeyboard.instance.isMetaPressed,
-        shiftPressed: HardwareKeyboard.instance.isShiftPressed,
+        metaPressed: keyboard.isMetaPressed,
+        shiftPressed: keyboard.isShiftPressed,
       );
       if (pageScrollIntent != null) {
         if (_previewController.previewPlacement != PreviewPlacement.closed) {
@@ -670,15 +768,26 @@ class _TimelineScreenState extends State<TimelineScreen> {
         }
         return KeyEventResult.handled;
       }
-      final step = switch (event.logicalKey) {
+      final key = normalizeNavigationKey(
+        event.logicalKey,
+        hasModifier:
+            keyboard.isMetaPressed ||
+            keyboard.isAltPressed ||
+            keyboard.isShiftPressed ||
+            keyboard.isControlPressed ||
+            _editableDescendantHasFocus,
+      );
+      final step = switch (key) {
         LogicalKeyboardKey.arrowDown => 1,
         LogicalKeyboardKey.arrowUp => -1,
         _ => 0,
       };
       // Meta without Shift walks preview files.
       if (step != 0 &&
-          HardwareKeyboard.instance.isMetaPressed &&
-          !HardwareKeyboard.instance.isShiftPressed) {
+          (event.logicalKey == LogicalKeyboardKey.arrowDown ||
+              event.logicalKey == LogicalKeyboardKey.arrowUp) &&
+          keyboard.isMetaPressed &&
+          !keyboard.isShiftPressed) {
         if (_previewController.previewPlacement != PreviewPlacement.closed) {
           _stepPreviewFile(step);
         }
@@ -1016,33 +1125,29 @@ class _TimelineScreenState extends State<TimelineScreen> {
   Widget _toolbarLeft() => Row(
     children: [
       _windowButtons(),
-      IconButton(
-        key: const Key('pick-repository'),
-        tooltip: '저장소 열기',
-        visualDensity: VisualDensity.compact,
-        onPressed: () => unawaited(_pickRepository()),
-        icon: const Icon(Icons.folder_open_outlined, size: 24, color: _muted),
+      RepositoryBranchSelector(
+        repositoryName: _repositoryName,
+        repositoryPath: widget.repository.root,
+        localBranches: _refs.local,
+        selectedBranch: _baseBranch,
+        refsLoading: _refsLoading,
+        refsLoadFailed: _refsLoadFailed,
+        onRepositoryPressed: () => unawaited(_pickRepository()),
+        onBranchSelected: _selectBaseBranch,
       ),
-      Expanded(child: _pathAndWordmark()),
+      Expanded(child: _dragAndWordmark()),
     ],
   );
 
-  /// The path and the wordmark share whatever the two clusters leave. Measuring
-  /// here means the right cluster's width never has to be guessed: the wordmark
-  /// keeps its intrinsic slot, the path takes the rest, and the drag stretch wins
-  /// the tie — the wordmark steps down to 20px and then goes rather than squeeze
-  /// it. Landing near the bar's centre is a happy side effect, not a promise.
-  Widget _pathAndWordmark() => LayoutBuilder(
+  /// The drag stretch and wordmark share whatever the functional clusters
+  /// leave. The wordmark steps down to 20px and then goes rather than squeeze
+  /// the drag target.
+  Widget _dragAndWordmark() => LayoutBuilder(
     builder: (context, constraints) {
-      // fontSize * 5 over-states 'Yogit' in DancingScript, so this errs toward
-      // leaving the path room.
       final size = [26.0, 20.0].firstWhere(
         (size) => constraints.maxWidth - (size * 5 + 24) >= _minDragWidth,
         orElse: () => 0.0,
       );
-      // The whole leftover is the window's drag handle — the name is short now,
-      // so the empty space beside it has to count. Nothing here takes a tap: the
-      // wordmark ignores pointers and the tooltip only wants hover.
       return GestureDetector(
         key: const Key('toolbar-drag'),
         behavior: HitTestBehavior.opaque,
@@ -1050,21 +1155,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
         onDoubleTap: () => unawaited(_previewController.toggleZoom()),
         child: Row(
           children: [
-            Expanded(
-              flex: 5,
-              child: Tooltip(
-                message: widget.repository.root,
-                child: Text(
-                  _repositoryName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: _muted, fontSize: 18),
-                ),
-              ),
-            ),
+            const Spacer(flex: 5),
             if (size > 0) ...[
-              // Equal shares either side: the wordmark centres in what the name
-              // leaves, not on the bar.
               const Spacer(flex: 2),
               IgnorePointer(
                 child: _Wordmark(key: const Key('wordmark'), fontSize: size),
@@ -1076,6 +1168,22 @@ class _TimelineScreenState extends State<TimelineScreen> {
       );
     },
   );
+
+  void _selectBaseBranch(String branch) {
+    if (!_refs.local.contains(branch) || branch == _baseBranch) return;
+    setState(() {
+      _baseBranch = branch;
+      _rebuildGraph();
+    });
+    _scheduleRatchetUpdate();
+    if (widget.preferredBranchReady) {
+      widget.onPreferredBranchChanged?.call(branch);
+    } else {
+      _pendingBaseBranch = branch;
+      _pendingBaseBranchIsUserSelection = true;
+    }
+    _focusNode.requestFocus();
+  }
 
   Widget _toolbarRight(bool showPreviewLabel, bool showShortcuts) => Row(
     mainAxisAlignment: MainAxisAlignment.end,
@@ -1681,7 +1789,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
       focusNode: _resizerFocus[column],
       onKeyEvent: (node, event) {
         if (event is KeyUpEvent) return KeyEventResult.ignored;
-        final delta = switch (event.logicalKey) {
+        final keyboard = HardwareKeyboard.instance;
+        final key = normalizeNavigationKey(
+          event.logicalKey,
+          hasModifier:
+              keyboard.isMetaPressed ||
+              keyboard.isAltPressed ||
+              keyboard.isShiftPressed ||
+              keyboard.isControlPressed,
+        );
+        final delta = switch (key) {
           LogicalKeyboardKey.arrowLeft => -8.0,
           LogicalKeyboardKey.arrowRight => 8.0,
           _ => null,

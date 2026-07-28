@@ -1709,6 +1709,18 @@ void main() {
       tester.getSize(find.byKey(const Key('details-files-column'))).width,
       318,
     );
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+    await tester.pump();
+    expect(
+      tester.getSize(find.byKey(const Key('details-files-column'))).width,
+      326,
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
+    await tester.pump();
+    expect(
+      tester.getSize(find.byKey(const Key('details-files-column'))).width,
+      318,
+    );
 
     final historyResizer = find.byKey(const Key('history-list-column-resizer'));
     Focus.of(tester.element(historyResizer)).requestFocus();
@@ -2453,6 +2465,14 @@ void main() {
     await controller.selectFile(fileA);
     await tester.pumpAndSettle();
 
+    await sendChord(tester, LogicalKeyboardKey.keyJ);
+    await tester.pumpAndSettle();
+    expect(controller.state.selectedFile, fileB);
+
+    await sendChord(tester, LogicalKeyboardKey.keyK);
+    await tester.pumpAndSettle();
+    expect(controller.state.selectedFile, fileA);
+
     Focus.of(
       tester.element(find.byKey(const Key('content-scrollable'))),
     ).requestFocus();
@@ -2488,6 +2508,12 @@ void main() {
 
       await sendChord(tester, LogicalKeyboardKey.keyA, meta: true, shift: true);
       expect(find.byKey(const Key('algorithm-details-myers')), findsOneWidget);
+
+      final selectedFile = fixture.controller.state.selectedFile;
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
+      await tester.pump();
+      expect(find.byKey(const Key('algorithm-details-myers')), findsOneWidget);
+      expect(fixture.controller.state.selectedFile, selectedFile);
 
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pump();
@@ -3032,7 +3058,7 @@ void main() {
       isTrue,
     );
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
     await tester.pumpAndSettle();
     final historyFocus = tester.widget<Focus>(
       find.byKey(const Key('history-list-focus')),
@@ -3066,7 +3092,7 @@ void main() {
     expect(controller.state.selectedFile!.path, selectedFilePath);
     expect(find.text('historical detail'), findsOneWidget);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
     await tester.pump();
     expect(filesFocus.focusNode!.hasFocus, isTrue);
   });

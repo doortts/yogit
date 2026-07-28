@@ -55,6 +55,19 @@ void main() {
     expect(TimelineScreen.rowHeight, 32);
     expect(list.itemExtent, TimelineScreen.rowHeight);
 
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
+    await tester.pump();
+    expect(find.byKey(const Key('selected-row-2')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    await tester.pump();
+    expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+    expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
+
     // The preview starts hidden and only a key opens it.
     expect(find.text('Commit & Diff'), findsNothing);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
@@ -239,6 +252,18 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyJ);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyJ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyJ);
+    await tester.pump();
+    expect(find.byKey(const Key('selected-row-2')), findsOneWidget);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyK);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyK);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyK);
+    await tester.pump();
+    expect(find.byKey(const Key('selected-row-0')), findsOneWidget);
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
     await tester.pump();
@@ -1631,6 +1656,15 @@ void main() {
     expect(saved?.time, 124);
     expect(tester.getSize(find.byKey(const Key('time-header'))).width, 124);
 
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+    await tester.pump();
+    expect(saved?.time, 132);
+    expect(tester.getSize(find.byKey(const Key('time-header'))).width, 132);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
+    await tester.pump();
+    expect(saved?.time, 124);
+    expect(tester.getSize(find.byKey(const Key('time-header'))).width, 124);
+
     for (var press = 0; press < 13; press++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
       await tester.pump();
@@ -1971,6 +2005,37 @@ void main() {
       const Color(0xFF263246),
     );
 
+    await tester.tap(find.byKey(const Key('ref-filter')));
+    expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
+    var typed = '';
+    for (final (key, character) in [
+      (LogicalKeyboardKey.keyH, 'h'),
+      (LogicalKeyboardKey.keyJ, 'j'),
+      (LogicalKeyboardKey.keyK, 'k'),
+      (LogicalKeyboardKey.keyL, 'l'),
+    ]) {
+      // Widget tests deliver hardware and platform text-editing messages
+      // separately. The timeline must leave the hardware event unhandled before
+      // the engine can insert its character into the focused editable.
+      expect(await tester.sendKeyEvent(key), isFalse);
+      typed += character;
+      tester.testTextInput.updateEditingValue(
+        TextEditingValue(
+          text: typed,
+          selection: TextSelection.collapsed(offset: typed.length),
+        ),
+      );
+      await tester.pump();
+      expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
+    }
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('ref-filter')))
+          .controller!
+          .text,
+      'hjkl',
+    );
+
     await tester.enterText(find.byKey(const Key('ref-filter')), 'feature');
     await tester.pump();
     expect(find.byKey(const Key('sidebar-ref-main')), findsNothing);
@@ -2253,6 +2318,32 @@ void main() {
       AppSettings.defaultLaneColors,
     );
   });
+
+  test('base branches round-trip per repository', () {
+    const settings = AppSettings(
+      baseBranches: {'/repos/one': 'main', '/repos/two': 'release'},
+    );
+    expect(AppSettings.fromJson(settings.toJson()), settings);
+    expect(AppSettings.fromJson(const {}).baseBranches, isEmpty);
+    expect(
+      AppSettings.fromJson({
+        'baseBranches': {'/repos/one': 'main', '/repos/bad': 42},
+      }).baseBranches,
+      {'/repos/one': 'main'},
+    );
+  });
+
+  test(
+    'copyWith replaces the base branch map without losing other settings',
+    () {
+      const settings = AppSettings(showAvatars: false);
+      final changed = settings.copyWith(
+        baseBranches: {'/repos/one': 'develop'},
+      );
+      expect(changed.showAvatars, isFalse);
+      expect(changed.baseBranches, {'/repos/one': 'develop'});
+    },
+  );
 
   testWidgets('the initials avatar is a filled disc with contrasting ink', (
     tester,
@@ -3097,7 +3188,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('full-diff-back')));
       await tester.pumpAndSettle();
-      expect(store.saveCount, 2);
+      expect(store.saveCount, 3);
+      expect(store.current.baseBranches, {'.': 'main'});
       expect(
         store.current.fullDiffPreferences,
         const FullDiffPreferences(layout: DiffLayout.sideBySide),
@@ -3183,7 +3275,8 @@ void main() {
       store.completeLoad();
       await tester.pumpAndSettle();
 
-      expect(store.saveCount, 2);
+      expect(store.saveCount, 3);
+      expect(store.current.baseBranches, {'.': 'main'});
       expect(
         store.current.fullDiffPreferences,
         const FullDiffPreferences(layout: DiffLayout.sideBySide),
@@ -3629,6 +3722,19 @@ void main() {
     // Timeline row plus the opened preview title.
     expect(find.text('recovered commit'), findsNWidgets(2));
     expect(find.text('End of history'), findsOneWidget);
+  });
+
+  testWidgets('empty history shows its end state without a load error', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(FakeGitRepository((_, _) async => const []), controller),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('No commits'), findsOneWidget);
+    expect(find.text('Could not load history'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('opens the full diff and preserves timeline state on escape', (
@@ -4841,6 +4947,7 @@ void main() {
       showAvatars: false,
       previewPlacement: PreviewPlacement.bottom,
       columnWidths: TimelineColumnWidths(graph: 220),
+      baseBranches: {'/repos/one': 'main', '/repos/two': 'release'},
     );
     await store.save(saved);
 
@@ -4923,6 +5030,140 @@ void main() {
       ),
       throwsA(isA<GitRepositoryException>()),
     );
+  });
+
+  testWidgets('YogitApp persists base branches independently by repository', (
+    tester,
+  ) async {
+    final store = MemorySettingsStore()
+      ..current = const AppSettings(
+        baseBranches: {'/repos/one': 'release', '/repos/two': 'main'},
+      );
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository(
+          (_, _) async => [commit('tip', 'tip')],
+          root: '/repos/one',
+          refs: const RepoRefs(
+            local: ['main', 'release'],
+            current: 'main',
+            tips: {'main': 'tip', 'release': 'tip'},
+          ),
+        ),
+        settingsStore: store,
+        discoverAvatars: false,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('base-branch-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('base-branch-menu-main')));
+    await tester.pumpAndSettle();
+
+    expect(store.current.baseBranches, {
+      '/repos/one': 'main',
+      '/repos/two': 'main',
+    });
+  });
+
+  testWidgets(
+    'YogitApp persists a fallback resolved before settings finish loading',
+    (tester) async {
+      final store = DelayedMemorySettingsStore();
+      await tester.pumpWidget(
+        YogitApp(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('tip', 'tip')],
+            root: '/repos/one',
+            refs: const RepoRefs(
+              local: ['main'],
+              current: 'main',
+              tips: {'main': 'tip'},
+            ),
+          ),
+          settingsStore: store,
+          discoverAvatars: false,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('main'), findsWidgets);
+      expect(store.saveCount, 0);
+
+      store.completeLoad();
+      await tester.pumpAndSettle();
+
+      expect(store.current.baseBranches, {'/repos/one': 'main'});
+      expect(store.saveCount, 1);
+    },
+  );
+
+  testWidgets(
+    'YogitApp keeps a base branch selected before settings finish loading',
+    (tester) async {
+      final store = DelayedMemorySettingsStore()
+        ..current = const AppSettings(baseBranches: {'/repos/one': 'main'});
+      await tester.pumpWidget(
+        YogitApp(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('tip', 'tip')],
+            root: '/repos/one',
+            refs: const RepoRefs(
+              local: ['main', 'release'],
+              current: 'main',
+              tips: {'main': 'tip', 'release': 'tip'},
+            ),
+          ),
+          settingsStore: store,
+          discoverAvatars: false,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('base-branch-selector')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('base-branch-menu-release')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('release'), findsWidgets);
+      expect(store.saveCount, 0);
+
+      store.completeLoad();
+      await tester.pumpAndSettle();
+
+      expect(find.text('release'), findsWidgets);
+      expect(store.current.baseBranches, {'/repos/one': 'release'});
+      expect(store.saveCount, 1);
+    },
+  );
+
+  testWidgets('a failed settings write keeps the selected base branch', (
+    tester,
+  ) async {
+    final store = FailingSettingsStore()
+      ..current = const AppSettings(baseBranches: {'/repos/one': 'main'});
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository(
+          (_, _) async => [commit('tip', 'tip')],
+          root: '/repos/one',
+          refs: const RepoRefs(
+            local: ['main', 'release'],
+            current: 'main',
+            tips: {'main': 'tip', 'release': 'tip'},
+          ),
+        ),
+        settingsStore: store,
+        discoverAvatars: false,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('base-branch-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('base-branch-menu-release')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('release'), findsWidgets);
+    expect(find.byType(TimelineScreen), findsOneWidget);
   });
 
   test('yo launcher builds once and passes the resolved repository path', () {
@@ -5334,7 +5575,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(requests, 0);
     expect(tester.getSize(find.byKey(const Key('graph-painter-0'))).width, 220);
-    expect(store.saveCount, 1);
+    expect(store.saveCount, 2);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -5914,6 +6155,65 @@ void main() {
     await tester.pumpAndSettle();
     expect(graphWidth(), 96);
   });
+
+  testWidgets('async base branch relayout ratchets to newly visible lanes', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1000, 600);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final refs = Completer<RepoRefs>();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [
+              commit(
+                'merge',
+                'four-parent merge',
+                parents: const ['a', 'b', 'c', 'd'],
+              ),
+              commit('a', 'a'),
+              commit('b', 'b'),
+              commit('c', 'c'),
+              commit('d', 'd'),
+            ],
+            refsLoader: () => refs.future,
+          ),
+          preferredBranch: 'main',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    double graphWidth() =>
+        tester.getSize(find.byKey(const Key('graph-header'))).width;
+
+    // The unpreferred merge exposes lanes 0..3.
+    expect(graphWidth(), 132);
+
+    // This unloaded tip reserves lane 0, shifting the visible merge to lanes
+    // 1..4 after the asynchronous refs result arrives.
+    refs.complete(
+      const RepoRefs(
+        local: ['main'],
+        current: 'main',
+        tips: {'main': 'unloaded-preferred'},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final painter =
+        tester
+                .widget<CustomPaint>(find.byKey(const Key('graph-painter-0')))
+                .painter
+            as CommitGraphPainter;
+    expect(painter.row.nextLanes, contains(4));
+    expect(graphWidth(), 162);
+  });
+
   // ------------------------------------------------------------------ §18.1
   test('a date heading carries a non-main lane through, not just lane 0', () {
     const size = Size(168, 36);
@@ -6122,8 +6422,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Only the last segment shows; the full path lives in the tooltip.
-    expect(tester.widget<Text>(find.text('project')).style?.fontSize, 18);
+    // The selector shows the last segment and keeps the full path in a tooltip.
+    expect(find.text('저장소'), findsOneWidget);
+    expect(find.text('기준 브랜치'), findsOneWidget);
+    expect(find.text('project'), findsOneWidget);
     expect(find.text('/Users/ada/project'), findsNothing);
     expect(
       tester
@@ -6149,10 +6451,8 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('/'), findsOneWidget);
-    expect(
-      tester.widget<Icon>(find.byIcon(Icons.folder_open_outlined)).size,
-      24,
-    );
+    expect(find.byIcon(Icons.folder_open_outlined), findsNothing);
+    expect(find.byKey(const Key('base-branch-selector')), findsOneWidget);
     expect(tester.getSize(find.byKey(const Key('toolbar'))).height, 56);
   });
 
@@ -6354,7 +6654,18 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(tester.widget<Text>(find.text('main')).style?.fontSize, 13);
+    expect(
+      tester
+          .widget<Text>(
+            find.descendant(
+              of: find.byKey(const Key('sidebar-ref-main')),
+              matching: find.text('main'),
+            ),
+          )
+          .style
+          ?.fontSize,
+      13,
+    );
     expect(tester.widget<Text>(find.text('LOCAL')).style?.fontSize, 11);
     expect(
       tester
@@ -6906,6 +7217,75 @@ void main() {
     expect(top('zeta'), lessThan(top('alpha')));
     expect(top('alpha'), lessThan(top('gone')));
   });
+
+  testWidgets(
+    'preferred local branch ignores a same-named tag at another commit',
+    (tester) async {
+      late Directory root;
+      late String localRelease;
+      late String tagRelease;
+      late RepoRefs refs;
+      late List<GitCommit> commits;
+      await tester.runAsync(() async {
+        root = await Directory.systemTemp.createTemp(
+          'yogit_local_tag_collision_',
+        );
+        Future<String> git(List<String> arguments) async {
+          final result = await Process.run(
+            'git',
+            arguments,
+            workingDirectory: root.path,
+          );
+          expect(result.exitCode, 0, reason: result.stderr.toString());
+          return result.stdout.toString().trim();
+        }
+
+        await git(['init', '-b', 'main']);
+        await git(['config', 'user.name', 'Test User']);
+        await git(['config', 'user.email', 'test@example.com']);
+        await File('${root.path}/history.txt').writeAsString('local release\n');
+        await git(['add', 'history.txt']);
+        await git(['commit', '-m', 'local release tip']);
+        localRelease = await git(['rev-parse', 'HEAD']);
+        await git(['branch', 'release']);
+        await File(
+          '${root.path}/history.txt',
+        ).writeAsString('same-named tag\n');
+        await git(['commit', '-am', 'same-named tag tip']);
+        tagRelease = await git(['rev-parse', 'HEAD']);
+        await git(['tag', 'release']);
+        final repository = GitRepository(root.path);
+        refs = await repository.loadRefs();
+        commits = await repository.loadHistory();
+      });
+      addTearDown(() => root.delete(recursive: true));
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TimelineScreen(
+            repository: FakeGitRepository(
+              (_, _) async => commits,
+              root: root.path,
+              refs: refs,
+            ),
+            preferredBranch: 'release',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final rows = {
+        for (final paint in tester.widgetList<CustomPaint>(
+          find.byType(CustomPaint),
+        ))
+          if (paint.painter case final CommitGraphPainter painter)
+            painter.row.commit.sha: painter.row.lane,
+      };
+      expect(rows[localRelease], 0);
+      expect(rows[tagRelease], greaterThanOrEqualTo(1));
+    },
+  );
+
   // ------------------------------------------------------------------ C1/C2
   testWidgets('preview file and diff panes scroll independently', (
     tester,
@@ -7463,6 +7843,175 @@ void main() {
       findsNothing,
     );
   });
+  testWidgets('base branch restores a valid choice and falls back to current', (
+    tester,
+  ) async {
+    final changes = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [
+              commit('feature-tip', 'feature'),
+              commit('main-tip', 'main'),
+            ],
+            refs: const RepoRefs(
+              local: ['main', 'feature'],
+              current: 'main',
+              tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+            ),
+          ),
+          preferredBranch: 'deleted',
+          onPreferredBranchChanged: changes.add,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('main'), findsWidgets);
+    expect(changes, ['main']);
+    final featurePainter =
+        tester
+                .widget<CustomPaint>(find.byKey(const Key('graph-painter-0')))
+                .painter
+            as CommitGraphPainter;
+    expect(featurePainter.row.lane, 1);
+  });
+
+  testWidgets('base branch refs failure keeps timeline history visible', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('tip', 'timeline survives')],
+            refsLoader: () => Future<RepoRefs>.error(StateError('refs failed')),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('불러오기 실패'), findsOneWidget);
+    expect(find.text('timeline survives'), findsOneWidget);
+  });
+
+  testWidgets(
+    'base branch applies a delayed setting without losing selection or scroll',
+    (tester) async {
+      final repository = FakeGitRepository(
+        (_, _) async => [
+          commit('feature-tip', 'feature'),
+          commit('main-tip', 'main'),
+          for (var index = 0; index < 40; index++)
+            commit('older-$index', 'older $index'),
+        ],
+        refs: const RepoRefs(
+          local: ['main', 'feature'],
+          current: 'main',
+          tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+        ),
+      );
+      String? preferredBranch;
+      late StateSetter updateHarness;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              updateHarness = setState;
+              return TimelineScreen(
+                repository: repository,
+                preferredBranch: preferredBranch,
+              );
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
+      await tester.pump();
+      expect(find.byKey(const Key('selected-row-main-tip')), findsOneWidget);
+      final scrollable = tester.state<ScrollableState>(
+        find.descendant(
+          of: find.byKey(const Key('timeline-list')),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      scrollable.position.jumpTo(32);
+      await tester.pump();
+      final before = scrollable.position.pixels;
+
+      updateHarness(() => preferredBranch = 'feature');
+      await tester.pump();
+
+      expect(find.byKey(const Key('selected-row-main-tip')), findsOneWidget);
+      expect(scrollable.position.pixels, before);
+      expect(find.text('feature'), findsWidgets);
+      final featurePainter =
+          tester
+                  .widget<CustomPaint>(find.byKey(const Key('graph-painter-0')))
+                  .painter
+              as CommitGraphPainter;
+      expect(featurePainter.row.lane, 0);
+    },
+  );
+
+  testWidgets(
+    'base branch selector relayout preserves preview and loaded history pages',
+    (tester) async {
+      final historyCalls = <int>[];
+      final firstPage = [
+        for (var index = 0; index < 500; index++)
+          commit('$index', 'commit $index'),
+      ];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TimelineScreen(
+            repository: FakeGitRepository(
+              (skip, _) async {
+                historyCalls.add(skip);
+                return skip == 0 ? firstPage : [commit('500', 'commit 500')];
+              },
+              refs: const RepoRefs(
+                local: ['main', 'feature'],
+                current: 'main',
+                tips: {'main': '499', 'feature': '0'},
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final scrollable = tester.state<ScrollableState>(
+        find.descendant(
+          of: find.byKey(const Key('timeline-list')),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(historyCalls, [0, 500]);
+      await tester.tap(find.text('commit 500'));
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('selected-row-500')), findsOneWidget);
+      expect(find.text('Commit & Diff'), findsOneWidget);
+      final before = scrollable.position.pixels;
+
+      await tester.tap(find.byKey(const Key('base-branch-selector')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('base-branch-menu-feature')));
+      await tester.pumpAndSettle();
+
+      expect(historyCalls, [0, 500]);
+      expect(find.byKey(const Key('selected-row-500')), findsOneWidget);
+      expect(find.text('Commit & Diff'), findsOneWidget);
+      expect(scrollable.position.pixels, before);
+      expect(find.text('feature'), findsWidgets);
+    },
+  );
+
   // ------------------------------------------------------------------ F3
   testWidgets('full diff steps hunks and toggles focus from the keyboard', (
     tester,
@@ -8624,9 +9173,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(
-      tester
-          .widget<IconButton>(find.byKey(const Key('pick-repository')))
-          .onPressed,
+      tester.widget<InkWell>(find.byKey(const Key('pick-repository'))).onTap,
       isNotNull,
     );
   });
@@ -8785,12 +9332,14 @@ class FakeGitRepository extends GitRepository {
     this.workingTree,
     this.refs = const RepoRefs(local: ['main'], current: 'main'),
     this.gitDiffAlgorithmSetting = const GitDiffAlgorithmSetting.gitDefault(),
+    this.refsLoader,
     String root = '.',
     CommandRunner runner = runProcess,
   }) : super(root, runner: runner);
 
   final RepoRefs refs;
   final GitDiffAlgorithmSetting gitDiffAlgorithmSetting;
+  final Future<RepoRefs> Function()? refsLoader;
   final Future<List<GitCommit>> Function(int skip, int limit) loader;
   final Future<GitCommit?> Function()? workingTree;
   final Future<List<GitFileChange>> Function(GitCommit commit, String? parent)?
@@ -8827,7 +9376,8 @@ class FakeGitRepository extends GitRepository {
       loader(skip, limit);
 
   @override
-  Future<RepoRefs> loadRefs() async => refs;
+  Future<RepoRefs> loadRefs() =>
+      refsLoader?.call() ?? Future<RepoRefs>.value(refs);
 
   @override
   Future<GitCommit?> loadWorkingTree() =>
