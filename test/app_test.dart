@@ -13,6 +13,7 @@ import 'package:yogit/diff_screen.dart';
 import 'package:yogit/full_blame_view.dart';
 import 'package:yogit/full_diff_controller.dart';
 import 'package:yogit/full_diff_model.dart';
+import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/main.dart';
 import 'package:yogit/settings.dart';
@@ -3292,6 +3293,41 @@ void main() {
     );
   });
 
+  testWidgets('timeline themes do not recolor Settings or Full Diff', (
+    tester,
+  ) async {
+    final store = MemorySettingsStore()
+      ..current = const AppSettings(timelineTheme: TimelineThemeKind.carbon);
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository(
+          (_, _) async => [commit('1', 'commit')],
+          files: (_, _) async => const [],
+        ),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('open-settings')));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<Scaffold>(find.byType(Scaffold).last).backgroundColor,
+      const Color(0xFF15171E),
+    );
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<Scaffold>(find.byType(Scaffold).last).backgroundColor,
+      fullDiffCanvas,
+    );
+  });
+
   testWidgets('reopening full diff restores the last successful options', (
     tester,
   ) async {
@@ -5833,6 +5869,67 @@ void main() {
     expect(store.current.columnWidths.graph, isNull);
     expect(store.current.repositoryGraphWidths, {'/repo/first': 180});
     expect(tester.getSize(find.byKey(const Key('graph-header'))).width, 180);
+  });
+
+  testWidgets('changing the timeline theme preserves selection and scroll', (
+    tester,
+  ) async {
+    final store = MemorySettingsStore();
+    final commits = [
+      for (var index = 0; index < 30; index++)
+        commit('$index', 'commit $index'),
+    ];
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository((_, _) async => commits),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    for (var index = 0; index < 12; index++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    }
+    await tester.pumpAndSettle();
+    final before = tester
+        .state<ScrollableState>(
+          find.descendant(
+            of: find.byKey(const Key('timeline-list')),
+            matching: find.byType(Scrollable),
+          ),
+        )
+        .position
+        .pixels;
+
+    await tester.tap(find.byKey(const Key('open-settings')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('settings-section-appearance')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('timeline-theme-card-carbon')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+
+    expect(store.current.timelineTheme, TimelineThemeKind.carbon);
+    expect(find.byKey(const Key('selected-row-12')), findsOneWidget);
+    expect(
+      tester
+          .state<ScrollableState>(
+            find.descendant(
+              of: find.byKey(const Key('timeline-list')),
+              matching: find.byType(Scrollable),
+            ),
+          )
+          .position
+          .pixels,
+      before,
+    );
+    expect(
+      tester.widget<Container>(find.byKey(const Key('toolbar'))).color,
+      TimelineThemePalette.carbon.surface,
+    );
   });
 
   testWidgets('settings toggle preserves timeline state and graph geometry', (
