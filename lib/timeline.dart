@@ -476,6 +476,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         _baseBranch = branch;
         _rebuildGraph();
       });
+      _scheduleRatchetUpdate();
       if (branch != null && branch != widget.preferredBranch) {
         widget.onPreferredBranchChanged?.call(branch);
       }
@@ -520,6 +521,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
           _baseBranch = branch;
           _rebuildGraph();
         });
+        _scheduleRatchetUpdate();
       }
       if (branch != null && branch != widget.preferredBranch) {
         widget.onPreferredBranchChanged?.call(branch);
@@ -597,6 +599,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
     if (deepest != _ratchetLane) setState(() => _ratchetLane = deepest);
   }
 
+  void _scheduleRatchetUpdate() {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _updateRatchet());
+  }
+
   void _maybeLoadNextPage() {
     _updateRatchet();
     if (!_scrollController.hasClients || _end || _inFlight != null) return;
@@ -671,7 +677,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
         _rebuildGraph();
         // A heading never holds the selection across a load — including the
         // very first one, so the app opens on a commit.
-        if (_entries[_selectedIndex.value].rowIndex < 0) {
+        if (_entries.isNotEmpty &&
+            _entries[_selectedIndex.value].rowIndex < 0) {
           _selectedIndex.value = _entries.indexWhere(
             (entry) => entry.rowIndex >= 0,
           );
@@ -1131,6 +1138,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       _baseBranch = branch;
       _rebuildGraph();
     });
+    _scheduleRatchetUpdate();
     widget.onPreferredBranchChanged?.call(branch);
     _focusNode.requestFocus();
   }

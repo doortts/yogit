@@ -3631,6 +3631,19 @@ void main() {
     expect(find.text('End of history'), findsOneWidget);
   });
 
+  testWidgets('empty history shows its end state without a load error', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(FakeGitRepository((_, _) async => const []), controller),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('No commits'), findsOneWidget);
+    expect(find.text('Could not load history'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('opens the full diff and preserves timeline state on escape', (
     tester,
   ) async {
@@ -5834,6 +5847,65 @@ void main() {
     await tester.pumpAndSettle();
     expect(graphWidth(), 96);
   });
+
+  testWidgets('async base branch relayout ratchets to newly visible lanes', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1000, 600);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final refs = Completer<RepoRefs>();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [
+              commit(
+                'merge',
+                'four-parent merge',
+                parents: const ['a', 'b', 'c', 'd'],
+              ),
+              commit('a', 'a'),
+              commit('b', 'b'),
+              commit('c', 'c'),
+              commit('d', 'd'),
+            ],
+            refsLoader: () => refs.future,
+          ),
+          preferredBranch: 'main',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    double graphWidth() =>
+        tester.getSize(find.byKey(const Key('graph-header'))).width;
+
+    // The unpreferred merge exposes lanes 0..3.
+    expect(graphWidth(), 131);
+
+    // This unloaded tip reserves lane 0, shifting the visible merge to lanes
+    // 1..4 after the asynchronous refs result arrives.
+    refs.complete(
+      const RepoRefs(
+        local: ['main'],
+        current: 'main',
+        tips: {'main': 'unloaded-preferred'},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final painter =
+        tester
+                .widget<CustomPaint>(find.byKey(const Key('graph-painter-0')))
+                .painter
+            as CommitGraphPainter;
+    expect(painter.row.nextLanes, contains(4));
+    expect(graphWidth(), 161);
+  });
+
   // ------------------------------------------------------------------ §18.1
   test('a date heading carries a non-main lane through, not just lane 0', () {
     const size = Size(168, 36);
