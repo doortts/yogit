@@ -909,11 +909,9 @@ void main() {
     await tester.pump();
 
     final back = tester.getRect(find.byKey(const Key('full-diff-back')));
-    final fileIcon = tester.getRect(find.byIcon(Icons.code));
     final path = tester.getRect(find.byKey(const Key('file-path-chip')));
     expect(back.left, lessThan(80));
-    expect(back.right, lessThan(fileIcon.left));
-    expect(fileIcon.right, lessThan(path.left));
+    expect(back.right, lessThan(path.left));
     final focus = tester.getRect(find.text('탐색 패널'));
     final editor = tester.getRect(find.text('편집기로 열기'));
     expect(focus.right, lessThan(editor.left));

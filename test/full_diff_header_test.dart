@@ -40,6 +40,24 @@ void main() {
     expect(calls, 1);
   });
 
+  testWidgets('file identity text is larger and has no unexplained code icon', (
+    tester,
+  ) async {
+    await pumpHeaders(tester);
+
+    expect(find.byIcon(Icons.code), findsNothing);
+    expect(tester.widget<Text>(find.text('src/drlua.pas')).style?.fontSize, 13);
+    expect(
+      tester.widget<Text>(find.text('M · +12 −4 · 1.5 KB')).style?.fontSize,
+      11,
+    );
+    expect(tester.widget<Text>(find.text('UTF-8')).style?.fontSize, 11);
+
+    final back = tester.getRect(find.byKey(const Key('full-diff-back')));
+    final path = tester.getRect(find.byKey(const Key('file-path-chip')));
+    expect(back.right, lessThan(path.left));
+  });
+
   testWidgets('connected groups preserve label padding at shared borders', (
     tester,
   ) async {
@@ -483,7 +501,7 @@ void main() {
     expect(path.maxLines, 1);
     expect(path.overflow, TextOverflow.ellipsis);
     expect(path.style?.fontFamily, technicalFontFamily);
-    expect(path.style?.fontSize, 11);
+    expect(path.style?.fontSize, 13);
 
     for (final key in [
       'open-editor',
