@@ -3253,6 +3253,71 @@ void main() {
     expect(blameFocus.focusNode!.hasFocus, isTrue);
   });
 
+  testWidgets('blame metadata completion preserves toolbar focus', (
+    tester,
+  ) async {
+    final pendingBlame = Completer<List<GitBlameLine>>();
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [_sizedFile])
+      ..diff = ((_, _, _, _, _) async => const [])
+      ..content = ((_, _, _) async => resultFile.bytes)
+      ..blame = ((_, _, _, _) => pendingBlame.future);
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.setPrimaryView(FullDiffView.blame);
+    await pumpWorkspace(
+      tester,
+      controller: controller,
+      size: const Size(1070, 842),
+      settle: false,
+    );
+    await tester.pump();
+
+    final filesFocus = tester.widget<Focus>(
+      find.byKey(const Key('changed-files-focus')),
+    );
+    filesFocus.focusNode!.requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+
+    final blameFocus = tester.widget<Focus>(
+      find.byKey(const Key('blame-list-focus')),
+    );
+    expect(blameFocus.focusNode!.hasFocus, isTrue);
+    expect(find.byKey(const Key('blame-loading-1')), findsOneWidget);
+
+    final algorithmButton = tester.widget<InkWell>(
+      find.descendant(
+        of: find.byKey(const Key('diff-algorithm')),
+        matching: find.byType(InkWell),
+      ),
+    );
+    algorithmButton.focusNode!.requestFocus();
+    await tester.pump();
+    expect(algorithmButton.focusNode!.hasFocus, isTrue);
+    expect(blameFocus.focusNode!.hasFocus, isFalse);
+
+    pendingBlame.complete([
+      for (var index = 0; index < resultFile.lines.length; index++)
+        GitBlameLine(
+          lineNumber: index + 1,
+          sha: commitA.sha,
+          author: fixtureIdentity.name,
+          uncommitted: false,
+        ),
+    ]);
+    await tester.pumpAndSettle();
+
+    expect(algorithmButton.focusNode!.hasFocus, isTrue);
+    expect(blameFocus.focusNode!.hasFocus, isFalse);
+  });
+
   testWidgets('History and Blame restore their independent detail-list focus', (
     tester,
   ) async {

@@ -387,9 +387,7 @@ class _DiffScreenState extends State<DiffScreen> {
         });
       });
     }
-    if (blameFileBecameReady ||
-        (!identical(previous.blame.data, next.blame.data) &&
-            next.view == FullDiffView.blame)) {
+    if (blameFileBecameReady) {
       _restoreNavigationFocus();
     }
     if (previous.historyContext != next.historyContext) {
