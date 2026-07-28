@@ -68,7 +68,7 @@ class _FullDiffShortcutHintState extends State<FullDiffShortcutHint> {
                             widget.label,
                             style: technicalTextStyle.copyWith(
                               color: Colors.white,
-                              fontSize: 10,
+                              fontSize: 11,
                               height: 1,
                             ),
                           ),

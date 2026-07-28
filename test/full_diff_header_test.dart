@@ -40,37 +40,25 @@ void main() {
     expect(calls, 1);
   });
 
-  testWidgets('global bars keep the approved labels in exact order', (
+  testWidgets('Diff controls use two exclusive connected groups', (
     tester,
   ) async {
     await pumpHeaders(tester);
-    final labels = tester
-        .widgetList<Text>(find.byType(Text))
-        .map((widget) => widget.data)
-        .whereType<String>()
-        .toList();
 
     expect(
-      labels,
-      containsAllInOrder([
-        'src/drlua.pas',
-        'M · +12 −4 · 1.5 KB',
-        'UTF-8',
-        '집중 모드',
-        '편집기로 열기',
-        'Diff',
-        'Blame',
-        'History',
-        'diff 알고리즘',
-        'Histogram',
-        '공백 무시',
-        '줄바꿈',
-        '2 / 7',
-        'Unified',
-        'Side-by-side',
-        'Hunk',
-      ]),
+      find.descendant(
+        of: find.byKey(const Key('main-view-controls')),
+        matching: find.text('History'),
+      ),
+      findsNothing,
     );
+    final diff = tester.getRect(find.text('Diff'));
+    final blame = tester.getRect(find.text('Blame'));
+    expect((diff.right - blame.left).abs(), lessThanOrEqualTo(1));
+
+    final unified = tester.getRect(find.text('Unified'));
+    final sideBySide = tester.getRect(find.text('Side-by-side'));
+    expect((unified.right - sideBySide.left).abs(), lessThanOrEqualTo(1));
     expect(
       tester.getCenter(find.byKey(const Key('focus-mode'))).dx,
       lessThan(tester.getCenter(find.byKey(const Key('open-editor'))).dx),
@@ -79,6 +67,57 @@ void main() {
       tester.getCenter(find.byKey(const Key('open-editor'))).dx,
       lessThan(tester.getCenter(find.text('Diff')).dx),
     );
+  });
+
+  testWidgets('History follows Hunk and only Diff tools hide in Blame', (
+    tester,
+  ) async {
+    await pumpHeaders(tester, historySelected: true);
+
+    expect(
+      tester.getCenter(find.text('Hunk')).dx,
+      lessThan(tester.getCenter(find.text('History')).dx),
+    );
+
+    await pumpHeaders(tester, view: FullDiffView.blame, historySelected: true);
+
+    for (final label in ['Unified', 'Side-by-side', 'Hunk', 'History']) {
+      expect(find.text(label), findsNothing);
+    }
+    for (final label in ['diff 알고리즘', 'Histogram', '공백 무시', '줄바꿈']) {
+      expect(find.text(label), findsOneWidget);
+    }
+  });
+
+  testWidgets('History view selects Diff and its own toggle', (tester) async {
+    final semantics = tester.ensureSemantics();
+    await pumpHeaders(
+      tester,
+      view: FullDiffView.history,
+      historySelected: true,
+    );
+
+    expect(
+      find.semantics
+          .byLabel('Diff')
+          .evaluate()
+          .single
+          .getSemanticsData()
+          .flagsCollection
+          .isSelected,
+      ui.Tristate.isTrue,
+    );
+    expect(
+      find.semantics
+          .byLabel('History')
+          .evaluate()
+          .single
+          .getSemanticsData()
+          .flagsCollection
+          .isToggled,
+      ui.Tristate.isTrue,
+    );
+    semantics.dispose();
   });
 
   testWidgets('algorithm chooser marks only its applied value as selected', (
@@ -479,6 +518,8 @@ void main() {
     expect(find.text('⌘2'), findsOneWidget);
     expect(find.text('⌘3'), findsOneWidget);
     expect(find.text('⌘U'), findsOneWidget);
+    expect(tester.widget<Text>(find.text('⌘1')).style?.fontSize, 11);
+    expect(tester.widget<Text>(find.text('⌘U')).style?.fontSize, 11);
     expect(tester.getRect(find.text('Unified')), before);
 
     await pumpHeaders(tester);
@@ -489,6 +530,7 @@ void main() {
 Future<void> pumpHeaders(
   WidgetTester tester, {
   FullDiffView view = FullDiffView.diff,
+  bool? historySelected,
   bool focusMode = false,
   bool ignoreWhitespace = false,
   DiffAlgorithm algorithm = DiffAlgorithm.histogram,
@@ -523,9 +565,11 @@ Future<void> pumpHeaders(
           ignoreWhitespace: ignoreWhitespace,
           wrapLines: false,
           loadingPatch: false,
+          historySelected: historySelected ?? view == FullDiffView.history,
           showShortcutHints: showShortcutHints,
           onLayoutSelected: (_) {},
           onHunkChanged: (_) {},
+          onHistoryChanged: (_) {},
           onPrevious: () {},
           onNext: () {},
           onAlgorithmSelected: onAlgorithmSelected ?? (_) {},

@@ -685,6 +685,7 @@ class _FullDiffQaDetailState extends State<FullDiffQaDetail> {
                   view: state.view,
                   layout: state.layout,
                   hunkEnabled: state.requestedScope == DiffScope.hunks,
+                  historySelected: state.historySelected,
                   activeIndex: state.activeAnchor?.hunkIndex ?? 0,
                   anchorCount: patch.hunks.length,
                   algorithm: state.requestedAlgorithm,
@@ -696,6 +697,7 @@ class _FullDiffQaDetailState extends State<FullDiffQaDetail> {
                   onHunkChanged: (enabled) => controller.setScope(
                     enabled ? DiffScope.hunks : DiffScope.fullFile,
                   ),
+                  onHistoryChanged: controller.setHistorySelected,
                   onPrevious: () => controller.stepAnchor(-1),
                   onNext: () => controller.stepAnchor(1),
                   onAlgorithmSelected: controller.selectAlgorithm,

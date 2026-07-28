@@ -167,17 +167,17 @@ class GlobalFileBar extends StatelessWidget {
               FullDiffSegmentedControl<FullDiffView>(
                 key: const Key('main-view-controls'),
                 groupLabel: '주 화면',
-                values: FullDiffView.values,
-                selected: view,
+                values: const [FullDiffView.diff, FullDiffView.blame],
+                selected: view == FullDiffView.blame
+                    ? FullDiffView.blame
+                    : FullDiffView.diff,
                 labelFor: _viewLabel,
                 onSelected: onViewSelected,
-                tooltipFor: (value) =>
-                    value == FullDiffView.history ? '파일의 변경 이력을 보여줍니다' : null,
                 showShortcutHints: showShortcutHints,
                 shortcutLabelFor: (value) => switch (value) {
                   FullDiffView.diff => '⌘1',
                   FullDiffView.blame => '⌘2',
-                  FullDiffView.history => '⌘3',
+                  FullDiffView.history => null,
                 },
                 semanticsHintFor: (value) =>
                     '${_viewLabel(value)} 화면으로 전환, 단축키 Command ${value.index + 1}',
@@ -195,6 +195,7 @@ class GlobalDiffToolbar extends StatelessWidget {
     required this.view,
     required this.layout,
     required this.hunkEnabled,
+    required this.historySelected,
     required this.activeIndex,
     required this.anchorCount,
     required this.algorithm,
@@ -203,6 +204,7 @@ class GlobalDiffToolbar extends StatelessWidget {
     required this.loadingPatch,
     required this.onLayoutSelected,
     required this.onHunkChanged,
+    required this.onHistoryChanged,
     required this.onPrevious,
     required this.onNext,
     required this.onAlgorithmSelected,
@@ -218,6 +220,7 @@ class GlobalDiffToolbar extends StatelessWidget {
   final FullDiffView view;
   final DiffLayout layout;
   final bool hunkEnabled;
+  final bool historySelected;
   final int activeIndex;
   final int anchorCount;
   final DiffAlgorithm algorithm;
@@ -226,6 +229,7 @@ class GlobalDiffToolbar extends StatelessWidget {
   final bool loadingPatch;
   final ValueChanged<DiffLayout> onLayoutSelected;
   final ValueChanged<bool> onHunkChanged;
+  final ValueChanged<bool> onHistoryChanged;
   final VoidCallback onPrevious;
   final VoidCallback onNext;
   final ValueChanged<DiffAlgorithm> onAlgorithmSelected;
@@ -365,6 +369,22 @@ class GlobalDiffToolbar extends StatelessWidget {
         semanticsHint: 'Hunk 켜기 또는 끄기, 단축키 Command Shift H',
       ),
     );
+    final historyControl = FullDiffShortcutHint(
+      visible: showShortcutHints,
+      label: '⌘3',
+      child: Tooltip(
+        message: '파일의 변경 이력을 보여줍니다',
+        waitDuration: const Duration(milliseconds: 500),
+        child: _HeaderToggle(
+          controlKey: const Key('history-toggle'),
+          label: 'History',
+          value: historySelected,
+          icon: Icons.history,
+          onChanged: onHistoryChanged,
+          semanticsHint: 'History 켜기 또는 끄기, 단축키 Command 3',
+        ),
+      ),
+    );
 
     return _HeaderBar(
       child: Wrap(
@@ -375,12 +395,12 @@ class GlobalDiffToolbar extends StatelessWidget {
         children: [
           algorithmControls,
           navigationControls,
-          if (showLeadingControls)
+          if (showLeadingControls && view != FullDiffView.blame)
             Wrap(
               spacing: 6,
               runSpacing: 6,
               crossAxisAlignment: WrapCrossAlignment.center,
-              children: [layoutHint, hunkControl],
+              children: [layoutHint, hunkControl, historyControl],
             ),
         ],
       ),
@@ -423,32 +443,35 @@ class FullDiffSegmentedControl<T> extends StatelessWidget {
       explicitChildNodes: true,
       label: groupLabel,
       hint: groupHint,
-      child: Wrap(
-        spacing: 6,
-        runSpacing: 6,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          for (final value in values)
-            if (shortcutLabelFor?.call(value) case final shortcut?)
+          for (var index = 0; index < values.length; index++)
+            if (shortcutLabelFor?.call(values[index]) case final shortcut?)
               FullDiffShortcutHint(
                 visible: showShortcutHints,
                 label: shortcut,
                 child: _SegmentButton(
-                  label: labelFor(value),
-                  selected: value == selected,
-                  enabled: isEnabled?.call(value) ?? true,
-                  onPressed: () => onSelected(value),
-                  tooltip: tooltipFor?.call(value),
-                  semanticsHint: semanticsHintFor?.call(value),
+                  label: labelFor(values[index]),
+                  selected: values[index] == selected,
+                  enabled: isEnabled?.call(values[index]) ?? true,
+                  first: index == 0,
+                  last: index == values.length - 1,
+                  onPressed: () => onSelected(values[index]),
+                  tooltip: tooltipFor?.call(values[index]),
+                  semanticsHint: semanticsHintFor?.call(values[index]),
                 ),
               )
             else
               _SegmentButton(
-                label: labelFor(value),
-                selected: value == selected,
-                enabled: isEnabled?.call(value) ?? true,
-                onPressed: () => onSelected(value),
-                tooltip: tooltipFor?.call(value),
-                semanticsHint: semanticsHintFor?.call(value),
+                label: labelFor(values[index]),
+                selected: values[index] == selected,
+                enabled: isEnabled?.call(values[index]) ?? true,
+                first: index == 0,
+                last: index == values.length - 1,
+                onPressed: () => onSelected(values[index]),
+                tooltip: tooltipFor?.call(values[index]),
+                semanticsHint: semanticsHintFor?.call(values[index]),
               ),
         ],
       ),
@@ -479,6 +502,8 @@ class _SegmentButton extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.enabled,
+    required this.first,
+    required this.last,
     required this.onPressed,
     this.tooltip,
     this.semanticsHint,
@@ -487,12 +512,25 @@ class _SegmentButton extends StatelessWidget {
   final String label;
   final bool selected;
   final bool enabled;
+  final bool first;
+  final bool last;
   final VoidCallback onPressed;
   final String? tooltip;
   final String? semanticsHint;
 
   @override
   Widget build(BuildContext context) {
+    final radius = BorderRadius.horizontal(
+      left: first ? const Radius.circular(fullDiffControlRadius) : Radius.zero,
+      right: last ? const Radius.circular(fullDiffControlRadius) : Radius.zero,
+    );
+    const side = BorderSide(color: _fullDiffInputBorder);
+    final segmentBorder = Border(
+      left: first ? side : BorderSide.none,
+      top: side,
+      right: side,
+      bottom: side,
+    );
     final button = Semantics(
       container: true,
       button: true,
@@ -508,6 +546,9 @@ class _SegmentButton extends StatelessWidget {
           selected: selected,
           enabled: enabled,
           onPressed: onPressed,
+          borderRadius: radius,
+          border: segmentBorder,
+          padding: EdgeInsets.only(left: first ? 8 : 0, right: last ? 8 : 0),
         ),
       ),
     );
@@ -531,6 +572,9 @@ class _HeaderButton extends StatelessWidget {
     this.enabled = true,
     this.controlKey,
     this.compact = false,
+    this.borderRadius,
+    this.border,
+    this.padding,
   });
 
   final String label;
@@ -540,12 +584,18 @@ class _HeaderButton extends StatelessWidget {
   final VoidCallback onPressed;
   final Key? controlKey;
   final bool compact;
+  final BorderRadius? borderRadius;
+  final Border? border;
+  final EdgeInsets? padding;
 
   @override
   Widget build(BuildContext context) {
     final foreground = selected ? Colors.black : Colors.white;
     final disabledForeground = fullDiffMuted.withValues(alpha: 0.5);
-    final radius = BorderRadius.circular(fullDiffControlRadius);
+    final effectiveRadius =
+        borderRadius ?? BorderRadius.circular(fullDiffControlRadius);
+    final effectiveBorder =
+        border ?? (selected ? null : Border.all(color: _fullDiffInputBorder));
     return Semantics(
       button: true,
       enabled: enabled,
@@ -553,18 +603,19 @@ class _HeaderButton extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: radius,
+          borderRadius: effectiveRadius,
           onTap: enabled ? onPressed : null,
           child: Container(
             key: controlKey,
             height: fullDiffControlHeight,
-            padding: EdgeInsets.symmetric(horizontal: compact ? 4 : 8),
+            padding:
+                padding ?? EdgeInsets.symmetric(horizontal: compact ? 4 : 8),
             decoration: BoxDecoration(
               color: enabled
                   ? (selected ? Colors.white : fullDiffControl)
                   : fullDiffControl.withValues(alpha: 0.5),
-              borderRadius: radius,
-              border: selected ? null : Border.all(color: _fullDiffInputBorder),
+              borderRadius: effectiveRadius,
+              border: effectiveBorder,
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,

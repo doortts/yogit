@@ -953,7 +953,7 @@ class _DiffScreenState extends State<DiffScreen> {
                         editorError: _editorError,
                         onBack: _returnToTimeline,
                         onOpenEditor: _openEditor,
-                        onViewSelected: _controller.setView,
+                        onViewSelected: _controller.setPrimaryView,
                         onFocusModeChanged: _controller.setFocusMode,
                       ),
                       GlobalDiffToolbar(
@@ -963,6 +963,7 @@ class _DiffScreenState extends State<DiffScreen> {
                         view: state.view,
                         layout: state.layout,
                         hunkEnabled: state.requestedScope == DiffScope.hunks,
+                        historySelected: state.historySelected,
                         activeIndex: state.activeAnchor?.hunkIndex ?? 0,
                         anchorCount: state.patch.data?.hunks.length ?? 0,
                         algorithm: state.appliedAlgorithm,
@@ -982,6 +983,7 @@ class _DiffScreenState extends State<DiffScreen> {
                                 .catchError((_) {}),
                           );
                         },
+                        onHistoryChanged: _controller.setHistorySelected,
                         onPrevious: () => _controller.stepAnchor(-1),
                         onNext: () => _controller.stepAnchor(1),
                         onAlgorithmSelected: (algorithm) {
