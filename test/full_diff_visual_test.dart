@@ -503,7 +503,14 @@ Future<void> prepareFunctionalCapture(
         matching: find.byKey(const Key('full-diff-commit-message')),
       );
       expect(message, findsOneWidget);
-      expect(tester.widget<Text>(message).maxLines, 8);
+      expect(
+        find.descendant(
+          of: card,
+          matching: find.byKey(const Key('full-diff-commit-message-scroll')),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.widget<Text>(message).maxLines, isNull);
       expect(tester.getTopLeft(coveredRow).dy, coveredRowTop);
     case '29-history-resizers':
       final filesPane = find.byKey(const Key('details-files-column'));
