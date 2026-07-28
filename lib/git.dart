@@ -38,7 +38,7 @@ Future<ProcessResult> runRawProcess(
   final stderr = process.stderr.transform(utf8.decoder).join();
   final stdout = BytesBuilder(copy: false);
   var captured = 0;
-  const captureLimit = fullDiffTextByteLimit + 1;
+  const captureLimit = fullDiffPatchByteLimit + 1;
   await for (final chunk in process.stdout) {
     final remaining = captureLimit - captured;
     if (remaining <= 0) continue;
@@ -111,6 +111,23 @@ class GitRepositoryException implements Exception {
 
   @override
   String toString() => message.isEmpty ? path : '$path: $message';
+}
+
+enum FullDiffPatchOutputLimitReason { byteLimit, lineLimit }
+
+class FullDiffPatchOutputLimitException implements Exception {
+  const FullDiffPatchOutputLimitException(this.path, this.reason);
+
+  final String path;
+  final FullDiffPatchOutputLimitReason reason;
+
+  @override
+  String toString() => switch (reason) {
+    FullDiffPatchOutputLimitReason.byteLimit =>
+      '$path: 전체 파일 diff 결과가 처리할 수 있는 크기를 초과했습니다.',
+    FullDiffPatchOutputLimitReason.lineLimit =>
+      '$path: 전체 파일 diff 결과가 처리할 수 있는 줄 수를 초과했습니다.',
+  };
 }
 
 class GitIdentity {
@@ -700,7 +717,7 @@ class GitRepository implements FullDiffRepository {
     RawCommandRunner? rawRunner,
   }) : runner = runner ?? runProcess,
        rawRunner = rawRunner ?? runRawProcess,
-       _diffRunner = runner ?? rawRunner ?? runRawProcess;
+       _diffRunner = rawRunner ?? runRawProcess;
 
   @override
   final String root;
@@ -936,7 +953,7 @@ class GitRepository implements FullDiffRepository {
       return parseUnifiedDiff(await _run(args));
     }
     final output = await _runDiff(args);
-    return output == null ? const <DiffLine>[] : parseUnifiedDiff(output);
+    return parseUnifiedDiff(output);
   }
 
   @override
@@ -1195,7 +1212,7 @@ class GitRepository implements FullDiffRepository {
     return result.stdout.toString();
   }
 
-  Future<String?> _runDiff(List<String> args) async {
+  Future<String> _runDiff(List<String> args) async {
     final result = await _diffRunner(
       gitExecutable,
       args,
@@ -1215,9 +1232,17 @@ class GitRepository implements FullDiffRepository {
         : stdout is List<int>
         ? stdout
         : utf8.encode(stdout.toString());
-    if (bytes.length > fullDiffTextByteLimit ||
-        _exceedsFullDiffLineLimit(bytes)) {
-      return null;
+    if (bytes.length > fullDiffPatchByteLimit) {
+      throw FullDiffPatchOutputLimitException(
+        root,
+        FullDiffPatchOutputLimitReason.byteLimit,
+      );
+    }
+    if (_exceedsLineLimit(bytes, fullDiffPatchLineLimit)) {
+      throw FullDiffPatchOutputLimitException(
+        root,
+        FullDiffPatchOutputLimitReason.lineLimit,
+      );
     }
     return utf8.decode(bytes, allowMalformed: true);
   }
@@ -1367,14 +1392,12 @@ bool _sameBytes(List<int> left, List<int> right) {
 
 typedef _WorktreeSnapshot = ({Uint8List bytes, bool exceeded});
 
-bool _exceedsFullDiffLineLimit(List<int> bytes) {
+bool _exceedsLineLimit(List<int> bytes, int limit) {
   var lineCount = 0;
   for (final byte in bytes) {
-    if (byte == 0x0A && ++lineCount > fullDiffTextLineLimit) return true;
+    if (byte == 0x0A && ++lineCount > limit) return true;
   }
-  return lineCount == fullDiffTextLineLimit &&
-      bytes.isNotEmpty &&
-      bytes.last != 0x0A;
+  return lineCount == limit && bytes.isNotEmpty && bytes.last != 0x0A;
 }
 
 _WorktreeSnapshot _snapshotForBytes(Uint8List bytes) {

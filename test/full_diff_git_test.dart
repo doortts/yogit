@@ -101,32 +101,89 @@ Future<Set<String>> blameTemporaryDirectories() async => {
 };
 
 void main() {
-  test('oversized full-file diff output becomes an empty patch', () async {
-    final byteOverflow = Uint8List(fullDiffTextByteLimit + 1)
-      ..fillRange(0, fullDiffTextByteLimit + 1, 0x61);
-    final lineOverflow = Uint8List((fullDiffTextLineLimit + 1) * 2);
+  test(
+    'valid near-line-limit full-file diff keeps its single real change',
+    () async {
+      const lineCount = fullDiffTextLineLimit - 1;
+      const changedIndex = lineCount ~/ 2;
+      final before = List<String>.filled(lineCount, 'same');
+      before[changedIndex] = 'old';
+      final root = await createGitFixture();
+      addTearDown(() => root.delete(recursive: true));
+      await writeAndCommit(
+        root,
+        'near-limit.txt',
+        '${before.join('\n')}\n',
+        'base',
+      );
+      final after = List<String>.of(before);
+      after[changedIndex] = 'new';
+      await File(
+        '${root.path}/near-limit.txt',
+      ).writeAsString('${after.join('\n')}\n');
+      await runGit(root, ['commit', '-am', 'change one line']);
+      final repository = GitRepository(root.path);
+      final commit = (await repository.loadHistory()).first;
+      final file = (await repository.loadFiles(commit)).single;
+
+      final lines = await repository.loadDiff(
+        commit,
+        file,
+        scope: DiffScope.fullFile,
+      );
+
+      expect(
+        lines.where((line) => line.kind == DiffLineKind.delete),
+        hasLength(1),
+      );
+      expect(
+        lines.where((line) => line.kind == DiffLineKind.add),
+        hasLength(1),
+      );
+      expect(
+        lines.where((line) => line.kind == DiffLineKind.context),
+        hasLength(lineCount - 1),
+      );
+    },
+  );
+
+  test('full-file patch envelope overflow is a structured error', () async {
+    final byteOverflow = Uint8List(fullDiffPatchByteLimit + 1)
+      ..fillRange(0, fullDiffPatchByteLimit + 1, 0x61);
+    final lineOverflow = Uint8List((fullDiffPatchLineLimit + 1) * 2);
     for (var index = 0; index < lineOverflow.length; index += 2) {
       lineOverflow[index] = 0x78;
       lineOverflow[index + 1] = 0x0A;
     }
 
-    for (final output in [byteOverflow, lineOverflow]) {
+    for (final scenario in [
+      (output: byteOverflow, reason: FullDiffPatchOutputLimitReason.byteLimit),
+      (output: lineOverflow, reason: FullDiffPatchOutputLimitReason.lineLimit),
+    ]) {
       var rawCalls = 0;
       final repository = GitRepository(
         '/unused',
         rawRunner: (executable, arguments, {workingDirectory}) async {
           rawCalls++;
-          return ProcessResult(1, 0, output, '');
+          return ProcessResult(1, 0, scenario.output, '');
         },
       );
 
-      final lines = await repository.loadDiff(
-        _boundedDiffCommit,
-        _boundedDiffFile,
-        scope: DiffScope.fullFile,
+      await expectLater(
+        repository.loadDiff(
+          _boundedDiffCommit,
+          _boundedDiffFile,
+          scope: DiffScope.fullFile,
+        ),
+        throwsA(
+          isA<FullDiffPatchOutputLimitException>().having(
+            (error) => error.reason,
+            'reason',
+            scenario.reason,
+          ),
+        ),
       );
 
-      expect(lines, isEmpty);
       expect(rawCalls, 1);
     }
   });
@@ -193,6 +250,14 @@ void main() {
         runner: (executable, arguments, {workingDirectory}) {
           calls.add(List.unmodifiable(arguments));
           return runProcess(
+            executable,
+            arguments,
+            workingDirectory: workingDirectory,
+          );
+        },
+        rawRunner: (executable, arguments, {workingDirectory}) {
+          calls.add(List.unmodifiable(arguments));
+          return runRawProcess(
             executable,
             arguments,
             workingDirectory: workingDirectory,

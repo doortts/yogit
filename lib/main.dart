@@ -77,6 +77,7 @@ class YogitBootstrap extends StatefulWidget {
     required this.gitExecutable,
     this.ghExecutable,
     this.runner = runProcess,
+    this.rawRunner = runRawProcess,
     this.windowFrameController,
     super.key,
   });
@@ -85,6 +86,7 @@ class YogitBootstrap extends StatefulWidget {
   final String gitExecutable;
   final String? ghExecutable;
   final CommandRunner runner;
+  final RawCommandRunner rawRunner;
   final WindowFrameController? windowFrameController;
 
   @override
@@ -137,6 +139,7 @@ class _YogitBootstrapState extends State<YogitBootstrap> {
             root,
             gitExecutable: widget.gitExecutable,
             runner: widget.runner,
+            rawRunner: widget.rawRunner,
           ),
           ghExecutable: widget.ghExecutable,
           windowFrameController: _windowFrameController,

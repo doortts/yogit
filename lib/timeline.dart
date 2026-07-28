@@ -425,6 +425,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
   var _commitAvailableWidth = 0.0;
   late double _previewWidth = widget.previewWidth;
   late double _previewHeight = widget.previewHeight;
+  _FullDiffRouteSession? _fullDiffRouteSession;
+  FullDiffPreferences? _pendingFullDiffPreferences;
+  FullDiffColumnWidths? _pendingFullDiffColumnWidths;
+  var _fullDiffPersistenceFlushScheduled = false;
 
   /// Deepest lane the viewport has shown so far. It only grows, so the column
   /// never shrinks under the user mid-session; a new repository remounts.
@@ -458,6 +462,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
   @override
   void didUpdateWidget(covariant TimelineScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(widget.repository, oldWidget.repository)) {
+      _clearFullDiffRouteSession();
+    } else if (widget.onFullDiffPreferencesChanged !=
+            oldWidget.onFullDiffPreferencesChanged ||
+        widget.onFullDiffColumnWidthsChanged !=
+            oldWidget.onFullDiffColumnWidthsChanged) {
+      _scheduleFullDiffPersistenceFlush();
+    }
     if (widget.columnWidths != oldWidget.columnWidths) {
       _widths.addAll(_widthMap(widget.columnWidths));
       _commitWidth = widget.columnWidths.commit;
@@ -475,6 +487,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   @override
   void dispose() {
+    _clearFullDiffRouteSession();
     if (_ownsPreviewController) _previewController.dispose();
     _selectedIndex.dispose();
     _hoverIndex.dispose();
@@ -3026,14 +3039,88 @@ class _TimelineScreenState extends State<TimelineScreen> {
     );
   }
 
-  void _forwardFullDiffPreferences(FullDiffPreferences preferences) {
-    if (!mounted) return;
-    widget.onFullDiffPreferencesChanged?.call(preferences);
+  bool _acceptsFullDiffRouteEvents(_FullDiffRouteSession session) =>
+      mounted &&
+      identical(_fullDiffRouteSession, session) &&
+      identical(widget.repository, session.repository) &&
+      session.route?.isActive == true;
+
+  bool _canFlushFullDiffPersistence(_FullDiffRouteSession session) =>
+      mounted &&
+      identical(_fullDiffRouteSession, session) &&
+      identical(widget.repository, session.repository);
+
+  void _forwardFullDiffPreferences(
+    _FullDiffRouteSession session,
+    FullDiffPreferences preferences,
+  ) {
+    if (!_acceptsFullDiffRouteEvents(session)) return;
+    if (widget.onFullDiffPreferencesChanged case final callback?
+        when _pendingFullDiffPreferences == null &&
+            !_fullDiffPersistenceFlushScheduled) {
+      callback(preferences);
+      return;
+    }
+    _pendingFullDiffPreferences = preferences;
+    _scheduleFullDiffPersistenceFlush();
   }
 
-  void _forwardFullDiffColumnWidths(FullDiffColumnWidths widths) {
-    if (!mounted) return;
-    widget.onFullDiffColumnWidthsChanged?.call(widths);
+  void _forwardFullDiffColumnWidths(
+    _FullDiffRouteSession session,
+    FullDiffColumnWidths widths,
+  ) {
+    if (!_acceptsFullDiffRouteEvents(session)) return;
+    if (widget.onFullDiffColumnWidthsChanged case final callback?
+        when _pendingFullDiffColumnWidths == null &&
+            !_fullDiffPersistenceFlushScheduled) {
+      callback(widths);
+      return;
+    }
+    _pendingFullDiffColumnWidths = widths;
+    _scheduleFullDiffPersistenceFlush();
+  }
+
+  void _scheduleFullDiffPersistenceFlush() {
+    final session = _fullDiffRouteSession;
+    if (session == null ||
+        _fullDiffPersistenceFlushScheduled ||
+        (_pendingFullDiffPreferences == null &&
+            _pendingFullDiffColumnWidths == null) ||
+        (widget.onFullDiffPreferencesChanged == null &&
+            widget.onFullDiffColumnWidthsChanged == null)) {
+      return;
+    }
+    _fullDiffPersistenceFlushScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fullDiffPersistenceFlushScheduled = false;
+      if (!_canFlushFullDiffPersistence(session)) {
+        _scheduleFullDiffPersistenceFlush();
+        return;
+      }
+
+      final preferences = _pendingFullDiffPreferences;
+      final preferencesCallback = widget.onFullDiffPreferencesChanged;
+      if (preferences != null && preferencesCallback != null) {
+        _pendingFullDiffPreferences = null;
+        preferencesCallback(preferences);
+      }
+
+      if (!_canFlushFullDiffPersistence(session)) return;
+      final widths = _pendingFullDiffColumnWidths;
+      final widthsCallback = widget.onFullDiffColumnWidthsChanged;
+      if (widths != null && widthsCallback != null) {
+        _pendingFullDiffColumnWidths = null;
+        widthsCallback(widths);
+      }
+    });
+  }
+
+  void _clearFullDiffRouteSession([_FullDiffRouteSession? session]) {
+    if (session != null && !identical(_fullDiffRouteSession, session)) return;
+    _fullDiffRouteSession = null;
+    _pendingFullDiffPreferences = null;
+    _pendingFullDiffColumnWidths = null;
+    _fullDiffPersistenceFlushScheduled = false;
   }
 
   void _openFullDiff() {
@@ -3045,27 +3132,41 @@ class _TimelineScreenState extends State<TimelineScreen> {
     final repository = widget.repository;
     final commits = List<GitCommit>.unmodifiable(_commits);
     final initialIndex = _commits.indexOf(commit);
-    final initialPreferences = widget.fullDiffPreferences;
-    final columnWidths = widget.fullDiffColumnWidths;
+    final initialPreferences =
+        _pendingFullDiffPreferences ?? widget.fullDiffPreferences;
+    final columnWidths =
+        _pendingFullDiffColumnWidths ?? widget.fullDiffColumnWidths;
     final avatarService = widget.avatarService;
     final showRemoteAvatars = widget.showRemoteAvatars;
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => DiffScreen(
-          repository: repository,
-          commits: commits,
-          initialIndex: initialIndex,
-          initialPreferences: initialPreferences,
-          onPreferencesChanged: _forwardFullDiffPreferences,
-          columnWidths: columnWidths,
-          onColumnWidthsChanged: _forwardFullDiffColumnWidths,
-          editorService: ExternalEditorService(repositoryRoot: repository.root),
-          avatarService: avatarService,
-          showRemoteAvatars: showRemoteAvatars,
-        ),
+    final session = _FullDiffRouteSession(repository);
+    late final MaterialPageRoute<void> route;
+    route = MaterialPageRoute<void>(
+      builder: (context) => DiffScreen(
+        repository: repository,
+        commits: commits,
+        initialIndex: initialIndex,
+        initialPreferences: initialPreferences,
+        onPreferencesChanged: (preferences) =>
+            _forwardFullDiffPreferences(session, preferences),
+        columnWidths: columnWidths,
+        onColumnWidthsChanged: (widths) =>
+            _forwardFullDiffColumnWidths(session, widths),
+        editorService: ExternalEditorService(repositoryRoot: repository.root),
+        avatarService: avatarService,
+        showRemoteAvatars: showRemoteAvatars,
       ),
     );
+    session.route = route;
+    _fullDiffRouteSession = session;
+    Navigator.of(context).push(route);
   }
+}
+
+class _FullDiffRouteSession {
+  _FullDiffRouteSession(this.repository);
+
+  final GitRepository repository;
+  Route<void>? route;
 }
 
 /// The app's wordmark: one soft pastel per letter, legible on the dark bar, with

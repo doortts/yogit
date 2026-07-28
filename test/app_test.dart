@@ -2908,7 +2908,7 @@ void main() {
   );
 
   testWidgets(
-    'full diff opened before settings load persists through live callbacks',
+    'full diff changes before settings load persist without another change',
     (tester) async {
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = const Size(1200, 800);
@@ -2934,41 +2934,41 @@ void main() {
 
       await tester.tap(find.text('Side-by-side'));
       await tester.pump();
-      expect(store.saveCount, 0);
-
-      store.completeLoad();
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('History'));
-      await tester.pumpAndSettle();
-      expect(store.saveCount, 1);
-      expect(
-        store.current.fullDiffPreferences,
-        const FullDiffPreferences(
-          view: FullDiffView.history,
-          layout: DiffLayout.sideBySide,
-        ),
-      );
-
       await tester.drag(
         find.byKey(const Key('details-files-column-resizer')),
         const Offset(20, 0),
       );
+      await tester.pump();
+      expect(store.saveCount, 0);
+
+      store.completeLoad();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('full-diff-back')));
       await tester.pumpAndSettle();
       expect(store.saveCount, 2);
+      expect(
+        store.current.fullDiffPreferences,
+        const FullDiffPreferences(layout: DiffLayout.sideBySide),
+      );
       expect(store.current.fullDiffColumnWidths.files, 310);
 
-      await tester.tap(find.byKey(const Key('full-diff-back')));
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      await tester.pumpWidget(
+        YogitApp(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('1', 'commit')],
+            files: (_, _) async => const [],
+          ),
+          settingsStore: store,
+          discoverAvatars: false,
+          windowFrameController: controller,
+        ),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('toolbar-full-diff')));
       await tester.pumpAndSettle();
 
-      expect(
-        tester
-            .getSemantics(find.bySemanticsLabel('History'))
-            .flagsCollection
-            .isSelected,
-        ui.Tristate.isTrue,
-      );
       expect(
         tester
             .getSemantics(find.bySemanticsLabel('Side-by-side'))
@@ -2989,6 +2989,68 @@ void main() {
       await tester.pump();
       staleCallback(const FullDiffPreferences());
       expect(store.saveCount, savedBeforeDispose);
+    },
+  );
+
+  testWidgets(
+    'closing full diff before settings load keeps its pending changes',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1200, 800);
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+      final store = DelayedMemorySettingsStore();
+      final repository = FakeGitRepository(
+        (_, _) async => [commit('1', 'commit')],
+        files: (_, _) async => const [],
+      );
+      await tester.pumpWidget(
+        YogitApp(
+          repository: repository,
+          settingsStore: store,
+          discoverAvatars: false,
+          windowFrameController: controller,
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Side-by-side'));
+      await tester.drag(
+        find.byKey(const Key('details-files-column-resizer')),
+        const Offset(20, 0),
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('full-diff-back')));
+      await tester.pumpAndSettle();
+      expect(store.saveCount, 0);
+
+      store.completeLoad();
+      await tester.pumpAndSettle();
+
+      expect(store.saveCount, 2);
+      expect(
+        store.current.fullDiffPreferences,
+        const FullDiffPreferences(layout: DiffLayout.sideBySide),
+      );
+      expect(store.current.fullDiffColumnWidths.files, 310);
+
+      await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .getSemantics(find.bySemanticsLabel('Side-by-side'))
+            .flagsCollection
+            .isSelected,
+        ui.Tristate.isTrue,
+      );
+      expect(
+        tester.getSize(find.byKey(const Key('details-files-column'))).width,
+        310,
+      );
     },
   );
 
@@ -4457,6 +4519,68 @@ void main() {
       );
     },
   );
+
+  testWidgets('bootstrap full-file diff uses the bounded raw runner', (
+    tester,
+  ) async {
+    var textDiffCalls = 0;
+    var rawDiffCalls = 0;
+    Future<ProcessResult> runner(
+      String executable,
+      List<String> arguments, {
+      String? workingDirectory,
+    }) async {
+      if (arguments.contains('--show-toplevel')) {
+        return ProcessResult(1, 0, '/Users/ada/repo\n', '');
+      }
+      if (arguments.firstOrNull == 'diff') textDiffCalls++;
+      return ProcessResult(1, 0, '', '');
+    }
+
+    await tester.pumpWidget(
+      YogitBootstrap(
+        requestedPath: '/Users/ada/repo',
+        gitExecutable: '/usr/bin/git',
+        runner: runner,
+        rawRunner: (executable, arguments, {workingDirectory}) async {
+          if (arguments.firstOrNull == 'diff') rawDiffCalls++;
+          return ProcessResult(
+            1,
+            0,
+            utf8.encode(
+              'diff --git a/sample.txt b/sample.txt\n'
+              '--- a/sample.txt\n'
+              '+++ b/sample.txt\n'
+              '@@ -1 +1 @@\n'
+              '-old\n'
+              '+new\n',
+            ),
+            '',
+          );
+        },
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    final repository = tester
+        .widget<TimelineScreen>(find.byType(TimelineScreen))
+        .repository;
+
+    final lines = await repository.loadDiff(
+      commit('target', 'target', parents: const ['base']),
+      const GitFileChange(
+        path: 'sample.txt',
+        status: 'M',
+        additions: 1,
+        deletions: 1,
+      ),
+      scope: DiffScope.fullFile,
+    );
+
+    expect(rawDiffCalls, 1);
+    expect(textDiffCalls, 0);
+    expect(lines.where((line) => line.kind == DiffLineKind.add), hasLength(1));
+  });
 
   testWidgets('the folder button opens a picked repository, or says why not', (
     tester,
@@ -8548,12 +8672,17 @@ class FailingSettingsStore extends MemorySettingsStore {
 
 class DelayedMemorySettingsStore extends MemorySettingsStore {
   final _load = Completer<AppSettings>();
+  var _loadCompleted = false;
   var saveCount = 0;
 
-  void completeLoad() => _load.complete(current);
+  void completeLoad() {
+    _loadCompleted = true;
+    _load.complete(current);
+  }
 
   @override
-  Future<AppSettings> load() => _load.future;
+  Future<AppSettings> load() =>
+      _loadCompleted ? Future<AppSettings>.value(current) : _load.future;
 
   @override
   Future<void> save(AppSettings settings) async {

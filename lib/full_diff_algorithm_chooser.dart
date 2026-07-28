@@ -151,7 +151,8 @@ class FullDiffAlgorithmChooserState extends State<FullDiffAlgorithmChooser> {
       label: 'diff 알고리즘: ${widget.algorithm.label}',
       hint:
           'Git이 변경 구간을 나누는 방식을 정합니다. '
-          '${diffAlgorithmDescription(widget.algorithm)}',
+          '${diffAlgorithmDescription(widget.algorithm)} '
+          '단축키 Command Shift A',
       onTap: widget.enabled ? show : null,
       child: Material(
         color: Colors.transparent,

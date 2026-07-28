@@ -24,6 +24,7 @@ class UnifiedPresentationView extends StatelessWidget {
     this.controller,
     this.scrollTarget,
     this.scrollTargetKey,
+    this.debugMetrics,
     super.key,
   });
 
@@ -40,6 +41,7 @@ class UnifiedPresentationView extends StatelessWidget {
   final ScrollController? controller;
   final DiffSourceTarget? scrollTarget;
   final GlobalKey? scrollTargetKey;
+  final FullDiffLazyBuildMetrics? debugMetrics;
 
   @override
   Widget build(BuildContext context) {
@@ -52,28 +54,21 @@ class UnifiedPresentationView extends StatelessWidget {
       );
     }
 
-    final items = _unifiedItems(document);
-    final scrollTargetIndex = diffSourceTargetIndex(
-      rows: items,
-      target: scrollTarget,
-      oldLineOf: (item) =>
-          item.line?.kind == DiffLineKind.add ? null : item.line,
-      newLineOf: (item) =>
-          item.line?.kind == DiffLineKind.delete ? null : item.line,
-    );
-    final allSourceText = [
-      for (final item in items)
-        if (item.line case final line?) line.text,
-    ].join('\n');
+    final items = _UnifiedDocumentIndex(document);
+    final scrollTargetIndex = items.indexForTarget(scrollTarget);
     return FullDiffSelectionArea(
-      allSourceText: allSourceText,
+      allSourceTextBuilder: () {
+        debugMetrics?.recordSelectionTextBuild();
+        return items.buildSelectionText();
+      },
       child: ListView.builder(
         key: const Key('unified-list'),
         controller: controller,
         primary: controller == null,
-        itemCount: items.length,
+        itemCount: items.itemCount,
         itemBuilder: (context, itemIndex) {
-          final item = items[itemIndex];
+          final item = items.itemAt(itemIndex);
+          debugMetrics?.recordItem(pair: item.pairedLine != null);
           final hunk = item.hunk;
           final current = activeAnchor?.hunkIndex == hunk.index;
           Widget child;
@@ -133,64 +128,215 @@ class UnifiedPresentationView extends StatelessWidget {
       (throw StateError('Missing GlobalKey for ${anchor.id}'));
 }
 
-List<_UnifiedItem> _unifiedItems(DiffDocument document) {
-  final items = <_UnifiedItem>[];
-  var sourceRow = 0;
-  for (final hunk in document.hunks) {
-    final lineDescriptors = _unifiedLines(hunk.lines);
-    final firstChange = hunk.lines.indexWhere(
-      (line) =>
-          line.kind == DiffLineKind.add || line.kind == DiffLineKind.delete,
-    );
-    final leadingContextCount = firstChange < 0 ? 0 : firstChange;
-    void addLine(int lineIndex) {
-      final descriptor = lineDescriptors[lineIndex];
-      items.add(
-        _UnifiedItem(
+class _UnifiedDocumentIndex {
+  _UnifiedDocumentIndex(DiffDocument document) {
+    var itemStart = 0;
+    var sourceRowStart = 0;
+    for (final hunk in document.hunks) {
+      var leadingContextCount = 0;
+      while (leadingContextCount < hunk.lines.length) {
+        final kind = hunk.lines[leadingContextCount].kind;
+        if (kind == DiffLineKind.add || kind == DiffLineKind.delete) break;
+        leadingContextCount++;
+      }
+      if (leadingContextCount == hunk.lines.length) {
+        leadingContextCount = 0;
+      }
+      _hunks.add(
+        _UnifiedHunkIndex(
           hunk: hunk,
-          line: descriptor.line,
-          lineIndex: lineIndex,
-          sourceRow: sourceRow++,
-          pairedLine: descriptor.pairedLine,
-          oldSide: descriptor.oldSide,
+          itemStart: itemStart,
+          sourceRowStart: sourceRowStart,
+          leadingContextCount: leadingContextCount,
         ),
       );
+      itemStart += hunk.lines.length + 1;
+      sourceRowStart += hunk.lines.length;
     }
-
-    for (var index = 0; index < leadingContextCount; index++) {
-      addLine(index);
-    }
-    items.add(_UnifiedItem(hunk: hunk, anchorTarget: true));
-    for (var index = leadingContextCount; index < hunk.lines.length; index++) {
-      addLine(index);
-    }
+    itemCount = itemStart;
   }
-  return items;
+
+  final _hunks = <_UnifiedHunkIndex>[];
+  late final int itemCount;
+
+  _UnifiedItem itemAt(int index) {
+    RangeError.checkValidIndex(index, this, 'index', itemCount);
+    final hunk = _hunkAt(index);
+    final localIndex = index - hunk.itemStart;
+    if (localIndex == hunk.leadingContextCount) {
+      return _UnifiedItem(hunk: hunk.hunk, anchorTarget: true);
+    }
+    final lineIndex = localIndex < hunk.leadingContextCount
+        ? localIndex
+        : localIndex - 1;
+    final descriptor = hunk.lineAt(lineIndex);
+    return _UnifiedItem(
+      hunk: hunk.hunk,
+      line: descriptor.line,
+      lineIndex: lineIndex,
+      sourceRow: hunk.sourceRowStart + lineIndex,
+      pairedLine: descriptor.pairedLine,
+      oldSide: descriptor.oldSide,
+    );
+  }
+
+  int indexForTarget(DiffSourceTarget? target) {
+    if (target == null) return -1;
+    int? added;
+    int? deleted;
+    int? resultContext;
+    int? oldContext;
+    for (final hunk in _hunks) {
+      for (var lineIndex = 0; lineIndex < hunk.hunk.lines.length; lineIndex++) {
+        final line = hunk.hunk.lines[lineIndex];
+        final itemIndex =
+            hunk.itemStart +
+            lineIndex +
+            (lineIndex >= hunk.leadingContextCount ? 1 : 0);
+        if (target.newLine != null &&
+            line.kind == DiffLineKind.add &&
+            line.newNumber == target.newLine) {
+          added ??= itemIndex;
+        } else if (target.oldLine != null &&
+            line.kind == DiffLineKind.delete &&
+            line.oldNumber == target.oldLine) {
+          deleted ??= itemIndex;
+        } else {
+          if (target.newLine != null && line.newNumber == target.newLine) {
+            resultContext ??= itemIndex;
+          }
+          if (target.oldLine != null && line.oldNumber == target.oldLine) {
+            oldContext ??= itemIndex;
+          }
+        }
+      }
+    }
+    return added ?? deleted ?? resultContext ?? oldContext ?? -1;
+  }
+
+  String buildSelectionText() {
+    final text = StringBuffer();
+    var first = true;
+    for (final hunk in _hunks) {
+      for (final line in hunk.hunk.lines) {
+        if (!first) text.write('\n');
+        first = false;
+        text.write(line.text);
+      }
+    }
+    return text.toString();
+  }
+
+  _UnifiedHunkIndex _hunkAt(int itemIndex) {
+    var low = 0;
+    var high = _hunks.length;
+    while (low + 1 < high) {
+      final middle = low + ((high - low) >> 1);
+      if (_hunks[middle].itemStart <= itemIndex) {
+        low = middle;
+      } else {
+        high = middle;
+      }
+    }
+    return _hunks[low];
+  }
 }
 
-List<_UnifiedLineDescriptor> _unifiedLines(List<DiffLine> lines) {
-  final descriptors = <DiffLine, _UnifiedLineDescriptor>{};
-  for (final pair in pairDiff(lines)) {
-    final left = pair.left;
-    final right = pair.right;
-    if (left?.kind != DiffLineKind.delete || right?.kind != DiffLineKind.add) {
-      continue;
+class _UnifiedHunkIndex {
+  _UnifiedHunkIndex({
+    required this.hunk,
+    required this.itemStart,
+    required this.sourceRowStart,
+    required this.leadingContextCount,
+  });
+
+  final DiffHunk hunk;
+  final int itemStart;
+  final int sourceRowStart;
+  final int leadingContextCount;
+  _UnifiedChangeRun? _lastChangeRun;
+
+  _UnifiedLineDescriptor lineAt(int lineIndex) {
+    final line = hunk.lines[lineIndex];
+    if (line.kind != DiffLineKind.add && line.kind != DiffLineKind.delete) {
+      return _UnifiedLineDescriptor(line: line);
     }
-    descriptors[left!] = _UnifiedLineDescriptor(
-      line: left,
-      pairedLine: right!,
-      oldSide: true,
-    );
-    descriptors[right] = _UnifiedLineDescriptor(
-      line: right,
-      pairedLine: left,
-      oldSide: false,
+    final run = _changeRunAt(lineIndex);
+    if (line.kind == DiffLineKind.delete) {
+      final offset = lineIndex - run.deleteStart;
+      return _UnifiedLineDescriptor(
+        line: line,
+        pairedLine: offset < run.addCount
+            ? hunk.lines[run.addStart + offset]
+            : null,
+        oldSide: true,
+      );
+    }
+    final offset = lineIndex - run.addStart;
+    return _UnifiedLineDescriptor(
+      line: line,
+      pairedLine: offset < run.deleteCount
+          ? hunk.lines[run.deleteStart + offset]
+          : null,
     );
   }
-  return [
-    for (final line in lines)
-      descriptors[line] ?? _UnifiedLineDescriptor(line: line),
-  ];
+
+  _UnifiedChangeRun _changeRunAt(int lineIndex) {
+    final cached = _lastChangeRun;
+    if (cached != null &&
+        lineIndex >= cached.deleteStart &&
+        lineIndex < cached.addStart + cached.addCount) {
+      return cached;
+    }
+    var deleteStart = lineIndex;
+    var addStart = lineIndex;
+    if (hunk.lines[lineIndex].kind == DiffLineKind.delete) {
+      while (deleteStart > 0 &&
+          hunk.lines[deleteStart - 1].kind == DiffLineKind.delete) {
+        deleteStart--;
+      }
+      addStart = lineIndex;
+      while (addStart < hunk.lines.length &&
+          hunk.lines[addStart].kind == DiffLineKind.delete) {
+        addStart++;
+      }
+    } else {
+      while (addStart > 0 &&
+          hunk.lines[addStart - 1].kind == DiffLineKind.add) {
+        addStart--;
+      }
+      deleteStart = addStart;
+      while (deleteStart > 0 &&
+          hunk.lines[deleteStart - 1].kind == DiffLineKind.delete) {
+        deleteStart--;
+      }
+    }
+    var addEnd = addStart;
+    while (addEnd < hunk.lines.length &&
+        hunk.lines[addEnd].kind == DiffLineKind.add) {
+      addEnd++;
+    }
+    return _lastChangeRun = _UnifiedChangeRun(
+      deleteStart: deleteStart,
+      deleteCount: addStart - deleteStart,
+      addStart: addStart,
+      addCount: addEnd - addStart,
+    );
+  }
+}
+
+class _UnifiedChangeRun {
+  const _UnifiedChangeRun({
+    required this.deleteStart,
+    required this.deleteCount,
+    required this.addStart,
+    required this.addCount,
+  });
+
+  final int deleteStart;
+  final int deleteCount;
+  final int addStart;
+  final int addCount;
 }
 
 class _UnifiedLineDescriptor {

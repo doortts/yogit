@@ -908,6 +908,78 @@ void main() {
 
   for (final layout in DiffLayout.values) {
     testWidgets(
+      '${layout.name} first frame lazily materializes a near-limit document',
+      (tester) async {
+        const lineCount = fullDiffTextLineLimit - 1;
+        const changedLine = lineCount ~/ 2;
+        final document = DiffDocument.fromLines([
+          const DiffLine(
+            kind: DiffLineKind.hunk,
+            text: '@@ -1,199999 +1,199999 @@ near limit',
+          ),
+          for (var line = 1; line < changedLine; line++)
+            DiffLine(
+              kind: DiffLineKind.context,
+              text: 'context $line',
+              oldNumber: line,
+              newNumber: line,
+            ),
+          const DiffLine(
+            kind: DiffLineKind.delete,
+            text: 'old',
+            oldNumber: changedLine,
+          ),
+          const DiffLine(
+            kind: DiffLineKind.add,
+            text: 'new',
+            newNumber: changedLine,
+          ),
+          for (var line = changedLine + 1; line <= lineCount; line++)
+            DiffLine(
+              kind: DiffLineKind.context,
+              text: 'context $line',
+              oldNumber: line,
+              newNumber: line,
+            ),
+        ]);
+        final metrics = FullDiffLazyBuildMetrics();
+        final view = switch (layout) {
+          DiffLayout.unified => UnifiedPresentationView(
+            document: document,
+            activeAnchor: document.hunks.single.anchor,
+            path: fileA.path,
+            wrapLines: false,
+            highlighter: fakeHighlighter,
+            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
+            richRenderingEnabled: false,
+            debugMetrics: metrics,
+          ),
+          DiffLayout.sideBySide => SideBySidePresentationView(
+            document: document,
+            activeAnchor: document.hunks.single.anchor,
+            oldPath: fileA.path,
+            newPath: fileA.path,
+            wrapLines: false,
+            showOldSide: true,
+            highlighter: fakeHighlighter,
+            anchorKeys: {document.hunks.single.anchor.id: GlobalKey()},
+            richRenderingEnabled: false,
+            debugMetrics: metrics,
+          ),
+        };
+
+        await tester.pumpWidget(
+          qaApp(SizedBox(width: 800, height: 200, child: view)),
+        );
+        await tester.pump();
+
+        expect(metrics.materializedItemCount, lessThan(100));
+        expect(metrics.materializedPairCount, lessThan(100));
+        expect(metrics.selectionTextBuildCount, 0);
+      },
+    );
+
+    testWidgets(
       '${layout.name} disables syntax and word diff for a large patch',
       (tester) async {
         final document = DiffDocument.fromLines([

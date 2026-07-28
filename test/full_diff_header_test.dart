@@ -182,7 +182,8 @@ void main() {
       expect(
         data.hint,
         'Git이 변경 구간을 나누는 방식을 정합니다. '
-        '빈도가 낮은 줄을 기준으로 반복 코드의 경계를 찾습니다.',
+        '빈도가 낮은 줄을 기준으로 반복 코드의 경계를 찾습니다. '
+        '단축키 Command Shift A',
       );
       expect(data.value, isEmpty);
       expect(data.tooltip, isEmpty);

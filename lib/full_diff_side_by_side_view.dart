@@ -26,6 +26,7 @@ class SideBySidePresentationView extends StatelessWidget {
     this.controller,
     this.scrollTarget,
     this.scrollTargetKey,
+    this.debugMetrics,
     super.key,
   });
 
@@ -44,6 +45,7 @@ class SideBySidePresentationView extends StatelessWidget {
   final ScrollController? controller;
   final DiffSourceTarget? scrollTarget;
   final GlobalKey? scrollTargetKey;
+  final FullDiffLazyBuildMetrics? debugMetrics;
 
   @override
   Widget build(BuildContext context) {
@@ -56,26 +58,21 @@ class SideBySidePresentationView extends StatelessWidget {
       );
     }
 
-    final items = _sideBySideItems(document);
-    final scrollTargetIndex = diffSourceTargetIndex(
-      rows: items,
-      target: scrollTarget,
-      oldLineOf: (item) => item.pair?.left,
-      newLineOf: (item) => item.pair?.right,
-    );
-    final allSourceText = [
-      for (final item in items)
-        if (item.pair case final pair?) _pairSourceText(pair, showOldSide),
-    ].join('\n');
+    final items = _SideBySideDocumentIndex(document);
+    final scrollTargetIndex = items.indexForTarget(scrollTarget);
     final list = FullDiffSelectionArea(
-      allSourceText: allSourceText,
+      allSourceTextBuilder: () {
+        debugMetrics?.recordSelectionTextBuild();
+        return items.buildSelectionText(showOldSide: showOldSide);
+      },
       child: ListView.builder(
         key: const Key('side-by-side-list'),
         controller: controller,
         primary: controller == null,
-        itemCount: items.length,
+        itemCount: items.itemCount,
         itemBuilder: (context, itemIndex) {
-          final item = items[itemIndex];
+          final item = items.itemAt(itemIndex);
+          debugMetrics?.recordItem(pair: item.pair != null);
           final hunk = item.hunk;
           final current = activeAnchor?.hunkIndex == hunk.index;
           Widget child;
@@ -133,38 +130,331 @@ class SideBySidePresentationView extends StatelessWidget {
       (throw StateError('Missing GlobalKey for ${anchor.id}'));
 }
 
-List<_SideBySideItem> _sideBySideItems(DiffDocument document) {
-  final items = <_SideBySideItem>[];
-  var sourceRow = 0;
-  for (final hunk in document.hunks) {
-    final pairs = pairDiff(hunk.lines);
-    final firstChange = pairs.indexWhere(
-      (pair) =>
-          pair.left?.kind == DiffLineKind.delete ||
-          pair.right?.kind == DiffLineKind.add,
-    );
-    final leadingContextCount = firstChange < 0 ? 0 : firstChange;
-    void addPair(int pairIndex) {
-      items.add(
-        _SideBySideItem(
+class _SideBySideDocumentIndex {
+  _SideBySideDocumentIndex(DiffDocument document) {
+    var itemStart = 0;
+    var sourceRowStart = 0;
+    for (final hunk in document.hunks) {
+      final pairs = _LazyDiffPairs(hunk.lines);
+      _hunks.add(
+        _SideBySideHunkIndex(
           hunk: hunk,
-          pair: pairs[pairIndex],
-          pairIndex: pairIndex,
-          sourceRow: sourceRow++,
+          pairs: pairs,
+          itemStart: itemStart,
+          sourceRowStart: sourceRowStart,
         ),
       );
+      itemStart += pairs.pairCount + 1;
+      sourceRowStart += pairs.pairCount;
     }
+    itemCount = itemStart;
+  }
 
-    for (var index = 0; index < leadingContextCount; index++) {
-      addPair(index);
+  final _hunks = <_SideBySideHunkIndex>[];
+  late final int itemCount;
+
+  _SideBySideItem itemAt(int index) {
+    RangeError.checkValidIndex(index, this, 'index', itemCount);
+    final hunk = _hunkAt(index);
+    final localIndex = index - hunk.itemStart;
+    if (localIndex == hunk.pairs.leadingContextCount) {
+      return _SideBySideItem(hunk: hunk.hunk, anchorTarget: true);
     }
-    items.add(_SideBySideItem(hunk: hunk, anchorTarget: true));
-    for (var index = leadingContextCount; index < pairs.length; index++) {
-      addPair(index);
+    final pairIndex = localIndex < hunk.pairs.leadingContextCount
+        ? localIndex
+        : localIndex - 1;
+    return _SideBySideItem(
+      hunk: hunk.hunk,
+      pair: hunk.pairs.pairAt(pairIndex),
+      pairIndex: pairIndex,
+      sourceRow: hunk.sourceRowStart + pairIndex,
+    );
+  }
+
+  int indexForTarget(DiffSourceTarget? target) {
+    if (target == null) return -1;
+    for (final hunk in _hunks) {
+      final pairIndex = hunk.pairs.indexForTarget(target);
+      if (pairIndex < 0) continue;
+      return hunk.itemStart +
+          pairIndex +
+          (pairIndex >= hunk.pairs.leadingContextCount ? 1 : 0);
+    }
+    return -1;
+  }
+
+  String buildSelectionText({required bool showOldSide}) {
+    final text = StringBuffer();
+    var first = true;
+    for (final hunk in _hunks) {
+      for (var pairIndex = 0; pairIndex < hunk.pairs.pairCount; pairIndex++) {
+        if (!first) text.write('\n');
+        first = false;
+        text.write(_pairSourceText(hunk.pairs.pairAt(pairIndex), showOldSide));
+      }
+    }
+    return text.toString();
+  }
+
+  _SideBySideHunkIndex _hunkAt(int itemIndex) {
+    var low = 0;
+    var high = _hunks.length;
+    while (low + 1 < high) {
+      final middle = low + ((high - low) >> 1);
+      if (_hunks[middle].itemStart <= itemIndex) {
+        low = middle;
+      } else {
+        high = middle;
+      }
+    }
+    return _hunks[low];
+  }
+}
+
+class _SideBySideHunkIndex {
+  const _SideBySideHunkIndex({
+    required this.hunk,
+    required this.pairs,
+    required this.itemStart,
+    required this.sourceRowStart,
+  });
+
+  final DiffHunk hunk;
+  final _LazyDiffPairs pairs;
+  final int itemStart;
+  final int sourceRowStart;
+}
+
+class _LazyDiffPairs {
+  _LazyDiffPairs(this.lines) {
+    var lineIndex = 0;
+    var pairs = 0;
+    int? firstChange;
+    while (lineIndex < lines.length) {
+      if (lines[lineIndex].kind == DiffLineKind.delete) {
+        firstChange ??= pairs;
+        var deleteEnd = lineIndex;
+        while (deleteEnd < lines.length &&
+            lines[deleteEnd].kind == DiffLineKind.delete) {
+          deleteEnd++;
+        }
+        var addEnd = deleteEnd;
+        while (addEnd < lines.length &&
+            lines[addEnd].kind == DiffLineKind.add) {
+          addEnd++;
+        }
+        pairs += _max(deleteEnd - lineIndex, addEnd - deleteEnd);
+        lineIndex = addEnd;
+        continue;
+      }
+      if (lines[lineIndex].kind == DiffLineKind.add) firstChange ??= pairs;
+      pairs++;
+      lineIndex++;
+    }
+    pairCount = pairs;
+    leadingContextCount = firstChange ?? 0;
+    _checkpoints.add(
+      const _PairCheckpoint(pairIndex: 0, state: _PairCursorState()),
+    );
+  }
+
+  static const _checkpointInterval = 256;
+
+  final List<DiffLine> lines;
+  late final int pairCount;
+  late final int leadingContextCount;
+  final _checkpoints = <_PairCheckpoint>[];
+  var _nextPairIndex = 0;
+  var _lineIndex = 0;
+  _PairChange? _change;
+  var _changeOffset = 0;
+  var _lastPairIndex = -1;
+  DiffPair? _lastPair;
+
+  DiffPair pairAt(int pairIndex) {
+    RangeError.checkValidIndex(pairIndex, this, 'pairIndex', pairCount);
+    if (pairIndex == _lastPairIndex) return _lastPair!;
+    if (pairIndex < _nextPairIndex) _restoreFor(pairIndex);
+
+    late DiffPair result;
+    while (_nextPairIndex <= pairIndex) {
+      if (_nextPairIndex % _checkpointInterval == 0 &&
+          _checkpoints.last.pairIndex < _nextPairIndex) {
+        _checkpoints.add(
+          _PairCheckpoint(
+            pairIndex: _nextPairIndex,
+            state: _PairCursorState(
+              lineIndex: _lineIndex,
+              change: _change,
+              changeOffset: _changeOffset,
+            ),
+          ),
+        );
+      }
+      result = _takeNext();
+      _lastPairIndex = _nextPairIndex++;
+      _lastPair = result;
+    }
+    return result;
+  }
+
+  int indexForTarget(DiffSourceTarget target) {
+    int? added;
+    int? deleted;
+    int? resultContext;
+    int? oldContext;
+    var lineIndex = 0;
+    var pairIndex = 0;
+    while (lineIndex < lines.length) {
+      if (lines[lineIndex].kind == DiffLineKind.delete) {
+        final deleteStart = lineIndex;
+        while (lineIndex < lines.length &&
+            lines[lineIndex].kind == DiffLineKind.delete) {
+          lineIndex++;
+        }
+        final addStart = lineIndex;
+        while (lineIndex < lines.length &&
+            lines[lineIndex].kind == DiffLineKind.add) {
+          lineIndex++;
+        }
+        final deleteCount = addStart - deleteStart;
+        final addCount = lineIndex - addStart;
+        for (var offset = 0; offset < deleteCount; offset++) {
+          if (target.oldLine != null &&
+              lines[deleteStart + offset].oldNumber == target.oldLine) {
+            deleted ??= pairIndex + offset;
+          }
+        }
+        for (var offset = 0; offset < addCount; offset++) {
+          if (target.newLine != null &&
+              lines[addStart + offset].newNumber == target.newLine) {
+            added ??= pairIndex + offset;
+          }
+        }
+        pairIndex += _max(deleteCount, addCount);
+        continue;
+      }
+      final line = lines[lineIndex++];
+      if (line.kind == DiffLineKind.add) {
+        if (target.newLine != null && line.newNumber == target.newLine) {
+          added ??= pairIndex;
+        }
+      } else {
+        if (target.newLine != null && line.newNumber == target.newLine) {
+          resultContext ??= pairIndex;
+        }
+        if (target.oldLine != null && line.oldNumber == target.oldLine) {
+          oldContext ??= pairIndex;
+        }
+      }
+      pairIndex++;
+    }
+    return added ?? deleted ?? resultContext ?? oldContext ?? -1;
+  }
+
+  DiffPair _takeNext() {
+    while (true) {
+      if (_change case final change?) {
+        final offset = _changeOffset++;
+        final pair = DiffPair(
+          left: offset < change.deleteCount
+              ? lines[change.deleteStart + offset]
+              : null,
+          right: offset < change.addCount
+              ? lines[change.addStart + offset]
+              : null,
+        );
+        if (_changeOffset == _max(change.deleteCount, change.addCount)) {
+          _lineIndex = change.addStart + change.addCount;
+          _change = null;
+          _changeOffset = 0;
+        }
+        return pair;
+      }
+
+      final line = lines[_lineIndex];
+      if (line.kind == DiffLineKind.delete) {
+        final deleteStart = _lineIndex;
+        var addStart = deleteStart;
+        while (addStart < lines.length &&
+            lines[addStart].kind == DiffLineKind.delete) {
+          addStart++;
+        }
+        var addEnd = addStart;
+        while (addEnd < lines.length &&
+            lines[addEnd].kind == DiffLineKind.add) {
+          addEnd++;
+        }
+        _change = _PairChange(
+          deleteStart: deleteStart,
+          deleteCount: addStart - deleteStart,
+          addStart: addStart,
+          addCount: addEnd - addStart,
+        );
+        continue;
+      }
+      _lineIndex++;
+      return line.kind == DiffLineKind.add
+          ? DiffPair(right: line)
+          : DiffPair(left: line, right: line);
     }
   }
-  return items;
+
+  void _restoreFor(int pairIndex) {
+    var low = 0;
+    var high = _checkpoints.length;
+    while (low + 1 < high) {
+      final middle = low + ((high - low) >> 1);
+      if (_checkpoints[middle].pairIndex <= pairIndex) {
+        low = middle;
+      } else {
+        high = middle;
+      }
+    }
+    final checkpoint = _checkpoints[low];
+    _nextPairIndex = checkpoint.pairIndex;
+    _lineIndex = checkpoint.state.lineIndex;
+    _change = checkpoint.state.change;
+    _changeOffset = checkpoint.state.changeOffset;
+    _lastPairIndex = -1;
+    _lastPair = null;
+  }
 }
+
+class _PairChange {
+  const _PairChange({
+    required this.deleteStart,
+    required this.deleteCount,
+    required this.addStart,
+    required this.addCount,
+  });
+
+  final int deleteStart;
+  final int deleteCount;
+  final int addStart;
+  final int addCount;
+}
+
+class _PairCursorState {
+  const _PairCursorState({
+    this.lineIndex = 0,
+    this.change,
+    this.changeOffset = 0,
+  });
+
+  final int lineIndex;
+  final _PairChange? change;
+  final int changeOffset;
+}
+
+class _PairCheckpoint {
+  const _PairCheckpoint({required this.pairIndex, required this.state});
+
+  final int pairIndex;
+  final _PairCursorState state;
+}
+
+int _max(int left, int right) => left > right ? left : right;
 
 String _pairSourceText(DiffPair pair, bool showOldSide) {
   final left = pair.left?.text;

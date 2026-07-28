@@ -28,16 +28,33 @@ const _gutterStyle = TextStyle(
   height: 21 / 10,
 );
 
+class FullDiffLazyBuildMetrics {
+  int materializedItemCount = 0;
+  int materializedPairCount = 0;
+  int selectionTextBuildCount = 0;
+
+  void recordItem({bool pair = false}) {
+    materializedItemCount++;
+    if (pair) materializedPairCount++;
+  }
+
+  void recordSelectionTextBuild() {
+    selectionTextBuildCount++;
+  }
+}
+
 class FullDiffSelectionArea extends StatefulWidget {
   const FullDiffSelectionArea({
     required this.child,
     this.allSourceText,
+    this.allSourceTextBuilder,
     this.debugOnSelectionOrderResolved,
     super.key,
-  });
+  }) : assert(allSourceText == null || allSourceTextBuilder == null);
 
   final Widget child;
   final String? allSourceText;
+  final String Function()? allSourceTextBuilder;
 
   @visibleForTesting
   final VoidCallback? debugOnSelectionOrderResolved;
@@ -159,11 +176,13 @@ class _FullDiffSelectionAreaState extends State<FullDiffSelectionArea> {
 
   @override
   Widget build(BuildContext context) {
+    final hasFullDocumentText =
+        widget.allSourceText != null || widget.allSourceTextBuilder != null;
     final selectionArea = _FullDiffSelectionGroup(
       state: this,
       child: SelectionArea(
         key: _selectionAreaKey,
-        onSelectionChanged: widget.allSourceText == null
+        onSelectionChanged: !hasFullDocumentText
             ? null
             : (content) {
                 _modelSelectAll = false;
@@ -172,7 +191,7 @@ class _FullDiffSelectionAreaState extends State<FullDiffSelectionArea> {
         child: widget.child,
       ),
     );
-    if (widget.allSourceText == null) return selectionArea;
+    if (!hasFullDocumentText) return selectionArea;
     return Actions(
       actions: <Type, Action<Intent>>{
         SelectAllTextIntent: CallbackAction<SelectAllTextIntent>(
@@ -187,9 +206,9 @@ class _FullDiffSelectionAreaState extends State<FullDiffSelectionArea> {
         CopySelectionTextIntent: CallbackAction<CopySelectionTextIntent>(
           onInvoke: (intent) {
             if (_modelSelectAll) {
-              unawaited(
-                Clipboard.setData(ClipboardData(text: widget.allSourceText!)),
-              );
+              final allSourceText =
+                  widget.allSourceText ?? widget.allSourceTextBuilder!();
+              unawaited(Clipboard.setData(ClipboardData(text: allSourceText)));
             } else if (_selectedText case final selectedText?) {
               unawaited(Clipboard.setData(ClipboardData(text: selectedText)));
             }
