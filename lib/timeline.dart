@@ -1563,7 +1563,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
     final name = node.fullName;
     final hasChildren = node.children.isNotEmpty;
     final folderKey = '${section.name}:$path';
-    final folderCollapsed = _collapsedRefFolders.contains(folderKey);
+    final folderCollapsed =
+        _filter.trim().isEmpty && _collapsedRefFolders.contains(folderKey);
     final birth = name == null ? null : _refs.birthTimes[name];
     final current =
         section == _RefSection.local && name != null && name == _refs.current;
@@ -1582,8 +1583,13 @@ class _TimelineScreenState extends State<TimelineScreen> {
       }
     });
 
-    return SizedBox(
+    return Container(
+      key: name == null ? null : Key('sidebar-row-$name'),
       height: birth == null ? 28 : 40,
+      decoration: BoxDecoration(
+        color: current ? _accent : null,
+        borderRadius: BorderRadius.circular(5),
+      ),
       child: Padding(
         padding: EdgeInsets.only(left: 4 + depth * 16.0, right: 4),
         child: Row(
@@ -1620,10 +1626,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 child: Container(
                   height: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 5),
-                  decoration: BoxDecoration(
-                    color: current ? _accent : null,
-                    borderRadius: BorderRadius.circular(5),
-                  ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.start,

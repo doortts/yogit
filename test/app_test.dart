@@ -2024,12 +2024,7 @@ void main() {
       );
 
       final current = tester.widget<Container>(
-        find
-            .descendant(
-              of: find.byKey(const Key('sidebar-ref-main')),
-              matching: find.byType(Container),
-            )
-            .first,
+        find.byKey(const Key('sidebar-row-main')),
       );
       expect(
         (current.decoration! as BoxDecoration).color,
@@ -2084,6 +2079,17 @@ void main() {
       expect(
         find.byKey(const Key('sidebar-ref-feature/login')),
         findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<Icon>(
+              find.descendant(
+                of: find.byKey(const Key('sidebar-folder-local-feature')),
+                matching: find.byType(Icon),
+              ),
+            )
+            .icon,
+        Icons.expand_more,
       );
 
       await tester.enterText(find.byKey(const Key('ref-filter')), '');
