@@ -55,6 +55,19 @@ void main() {
     expect(TimelineScreen.rowHeight, 32);
     expect(list.itemExtent, TimelineScreen.rowHeight);
 
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
+    await tester.pump();
+    expect(find.byKey(const Key('selected-row-2')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    await tester.pump();
+    expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+    expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
+
     // The preview starts hidden and only a key opens it.
     expect(find.text('Commit & Diff'), findsNothing);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
@@ -239,6 +252,18 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyJ);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyJ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyJ);
+    await tester.pump();
+    expect(find.byKey(const Key('selected-row-2')), findsOneWidget);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyK);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyK);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyK);
+    await tester.pump();
+    expect(find.byKey(const Key('selected-row-0')), findsOneWidget);
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
     await tester.pump();
@@ -1592,6 +1617,15 @@ void main() {
     expect(saved?.time, 124);
     expect(tester.getSize(find.byKey(const Key('time-header'))).width, 124);
 
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+    await tester.pump();
+    expect(saved?.time, 132);
+    expect(tester.getSize(find.byKey(const Key('time-header'))).width, 132);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
+    await tester.pump();
+    expect(saved?.time, 124);
+    expect(tester.getSize(find.byKey(const Key('time-header'))).width, 124);
+
     for (var press = 0; press < 13; press++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
       await tester.pump();
@@ -1930,6 +1964,17 @@ void main() {
     expect(
       (current.decoration! as BoxDecoration).color,
       const Color(0xFF263246),
+    );
+
+    await tester.tap(find.byKey(const Key('ref-filter')));
+    await tester.enterText(find.byKey(const Key('ref-filter')), 'hjkl');
+    await tester.pump();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('ref-filter')))
+          .controller!
+          .text,
+      'hjkl',
     );
 
     await tester.enterText(find.byKey(const Key('ref-filter')), 'feature');

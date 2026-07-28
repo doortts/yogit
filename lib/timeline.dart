@@ -14,6 +14,7 @@ import 'git.dart';
 import 'page_scroll_shortcuts.dart';
 import 'settings.dart';
 import 'typography.dart';
+import 'vim_navigation.dart';
 import 'window_frame.dart';
 
 const _background = Color(0xFF15171E);
@@ -655,10 +656,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
   KeyEventResult _onKeyEvent(FocusNode _, KeyEvent event) {
     // Holding an arrow keeps moving; everything else acts once per press.
     if (event is KeyDownEvent || event is KeyRepeatEvent) {
+      final keyboard = HardwareKeyboard.instance;
       final pageScrollIntent = pageScrollIntentFor(
         event,
-        metaPressed: HardwareKeyboard.instance.isMetaPressed,
-        shiftPressed: HardwareKeyboard.instance.isShiftPressed,
+        metaPressed: keyboard.isMetaPressed,
+        shiftPressed: keyboard.isShiftPressed,
       );
       if (pageScrollIntent != null) {
         if (_previewController.previewPlacement != PreviewPlacement.closed) {
@@ -670,15 +672,25 @@ class _TimelineScreenState extends State<TimelineScreen> {
         }
         return KeyEventResult.handled;
       }
-      final step = switch (event.logicalKey) {
+      final key = normalizeNavigationKey(
+        event.logicalKey,
+        hasModifier:
+            keyboard.isMetaPressed ||
+            keyboard.isAltPressed ||
+            keyboard.isShiftPressed ||
+            keyboard.isControlPressed,
+      );
+      final step = switch (key) {
         LogicalKeyboardKey.arrowDown => 1,
         LogicalKeyboardKey.arrowUp => -1,
         _ => 0,
       };
       // Meta without Shift walks preview files.
       if (step != 0 &&
-          HardwareKeyboard.instance.isMetaPressed &&
-          !HardwareKeyboard.instance.isShiftPressed) {
+          (event.logicalKey == LogicalKeyboardKey.arrowDown ||
+              event.logicalKey == LogicalKeyboardKey.arrowUp) &&
+          keyboard.isMetaPressed &&
+          !keyboard.isShiftPressed) {
         if (_previewController.previewPlacement != PreviewPlacement.closed) {
           _stepPreviewFile(step);
         }
@@ -1681,7 +1693,16 @@ class _TimelineScreenState extends State<TimelineScreen> {
       focusNode: _resizerFocus[column],
       onKeyEvent: (node, event) {
         if (event is KeyUpEvent) return KeyEventResult.ignored;
-        final delta = switch (event.logicalKey) {
+        final keyboard = HardwareKeyboard.instance;
+        final key = normalizeNavigationKey(
+          event.logicalKey,
+          hasModifier:
+              keyboard.isMetaPressed ||
+              keyboard.isAltPressed ||
+              keyboard.isShiftPressed ||
+              keyboard.isControlPressed,
+        );
+        final delta = switch (key) {
           LogicalKeyboardKey.arrowLeft => -8.0,
           LogicalKeyboardKey.arrowRight => 8.0,
           _ => null,
