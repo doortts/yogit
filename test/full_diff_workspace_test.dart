@@ -482,12 +482,19 @@ void main() {
     );
 
     await tester.tap(find.text('Side-by-side'));
-    await tester.tap(find.text('Blame'));
-    await tester.pumpAndSettle();
     await tester.tap(find.text('History'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Blame'));
+    await tester.pumpAndSettle();
+    expect(controller.state.historySelected, isTrue);
+
     await tester.tap(find.text('Diff'));
     await tester.pumpAndSettle();
+    expect(controller.state.view, FullDiffView.history);
+
+    await tester.tap(find.text('History'));
+    await tester.pumpAndSettle();
+    expect(controller.state.view, FullDiffView.diff);
 
     expect(controller.state.layout, DiffLayout.sideBySide);
     expect(controller.state.activeAnchor?.hunkIndex, 1);
