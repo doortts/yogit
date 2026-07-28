@@ -1973,7 +1973,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       refs.isNotEmpty,
     );
     // Nodes keep their size at every width; only the overhang clips.
-    const avatarSize = 22.0;
+    const avatarSize = CommitGraphPainter.avatarDiameter;
     // The author/committer stack reaches 45% further right than one disc, so it
     // only shows while that stays clear of the next lane's rail.
     final stacked =
@@ -3572,6 +3572,8 @@ class CommitGraphPainter extends CustomPainter {
   static const laneInset = 28.0;
   static const defaultLaneSpacing = 30.0;
   static const railWidth = 2.0;
+  static const avatarDiameter = 22.0;
+  static const hashRailClearance = 3.0;
 
   /// Stage 3: at or below this cell width the graph collapses to one lane.
   static const compactWidth = 56.0;
@@ -3579,9 +3581,8 @@ class CommitGraphPainter extends CustomPainter {
   /// Stage 2 floor.
   static const minLaneSpacing = 12.0;
 
-  /// Half the 22px node avatar plus a hair of air: how far right of the deepest
-  /// lane's center a row still draws.
-  static const nodeExtent = 13.0;
+  /// Half the node avatar plus the required gap before the hash column's rail.
+  static const nodeExtent = avatarDiameter / 2 + hashRailClearance;
 
   /// Below this spacing the graph node shows the small avatar stack.
   static const compressedAvatarSpacing = 22.0;

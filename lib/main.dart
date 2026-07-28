@@ -206,13 +206,16 @@ class _YogitAppState extends State<YogitApp> {
   }
 
   Future<void> _loadSettings() async {
-    final settings = await _store.load();
-    if (mounted) {
-      setState(() {
-        AvatarService.palette = settings.laneColorValues;
-        _settings = settings;
-        _settingsLoaded = true;
-      });
+    final loaded = await _store.load();
+    final settings = loaded.migrateLegacyGraphWidth(_repository.root);
+    if (!mounted) return;
+    setState(() {
+      AvatarService.palette = settings.laneColorValues;
+      _settings = settings;
+      _settingsLoaded = true;
+    });
+    if (settings != loaded) {
+      _save = _save.then((_) => _store.save(settings)).catchError((_) {});
     }
   }
 
@@ -281,7 +284,7 @@ class _YogitAppState extends State<YogitApp> {
         avatarService: _avatarService,
         showRemoteAvatars: _settingsLoaded && _settings.showAvatars,
         preferredPreviewPlacement: _settings.previewPlacement,
-        columnWidths: _settings.columnWidths,
+        columnWidths: _settings.columnWidthsForRepository(_repository.root),
         fullDiffColumnWidths: _settings.fullDiffColumnWidths,
         fullDiffPreferences: _settings.fullDiffPreferences,
         previewWidth: _settings.previewWidth,
@@ -293,8 +296,9 @@ class _YogitAppState extends State<YogitApp> {
               )
             : null,
         onColumnWidthsChanged: _settingsLoaded
-            ? (widths) =>
-                  _changeSettings(_settings.copyWith(columnWidths: widths))
+            ? (widths) => _changeSettings(
+                _settings.withRepositoryColumnWidths(_repository.root, widths),
+              )
             : null,
         onFullDiffColumnWidthsChanged: _settingsLoaded
             ? (widths) => _changeSettings(
