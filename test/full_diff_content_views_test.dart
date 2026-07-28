@@ -2356,6 +2356,138 @@ void main() {
       expect(find.byKey(const Key('blame-hover-1')), findsOneWidget);
     },
   );
+
+  testWidgets('loaded blame keeps loading selection focus and scroll', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1000, 220);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final focusNode = FocusNode();
+    final scrollController = ScrollController();
+    final hostKey = GlobalKey<_LoadingBlameHostState>();
+    addTearDown(focusNode.dispose);
+    addTearDown(scrollController.dispose);
+
+    final file = FileDocument.fromBytes(
+      revision: commitA.sha,
+      path: 'loading.dart',
+      side: FileDocumentSide.result,
+      bytes: Uint8List.fromList(
+        utf8.encode(
+          '${List.generate(40, (index) => 'source ${index + 1}').join('\n')}\n',
+        ),
+      ),
+      gitMarkedBinary: false,
+    );
+    final loaded = BlameDocument.fromGitLines(file, [
+      for (var line = 1; line <= file.lines.length; line++)
+        GitBlameLine(
+          lineNumber: line,
+          sha: '40aff6d123456789',
+          author: 'Suwon Chae',
+          summary: 'Loaded summary $line',
+          uncommitted: false,
+        ),
+    ]);
+
+    await tester.pumpWidget(
+      qaApp(
+        _LoadingBlameHost(
+          key: hostKey,
+          file: file,
+          loaded: loaded,
+          focusNode: focusNode,
+          scrollController: scrollController,
+        ),
+      ),
+    );
+
+    scrollController.jumpTo(fullDiffSourceRowHeight * 4);
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('blame-line-6')));
+    await tester.pump();
+    final beforeScroll = scrollController.position.pixels;
+
+    expect(focusNode.hasFocus, isTrue);
+    expect(find.byKey(const Key('blame-selected-6')), findsOneWidget);
+    expect(find.byKey(const Key('blame-loading-6')), findsOneWidget);
+    expect(find.byKey(const Key('blame-commit-details-6')), findsNothing);
+
+    hostKey.currentState!.complete();
+    await tester.pump();
+
+    expect(focusNode.hasFocus, isTrue);
+    expect(find.byKey(const Key('blame-selected-6')), findsOneWidget);
+    expect(find.byKey(const Key('blame-loading-6')), findsNothing);
+    expect(find.byKey(const Key('blame-summary-6')), findsOneWidget);
+    expect(find.byKey(const Key('blame-commit-details-6')), findsOneWidget);
+    expect(scrollController.position.pixels, closeTo(beforeScroll, 0.5));
+    expect(tester.takeException(), isNull);
+  });
+}
+
+class _LoadingBlameHost extends StatefulWidget {
+  const _LoadingBlameHost({
+    required this.file,
+    required this.loaded,
+    required this.focusNode,
+    required this.scrollController,
+    super.key,
+  });
+
+  final FileDocument file;
+  final BlameDocument loaded;
+  final FocusNode focusNode;
+  final ScrollController scrollController;
+
+  @override
+  State<_LoadingBlameHost> createState() => _LoadingBlameHostState();
+}
+
+class _LoadingBlameHostState extends State<_LoadingBlameHost> {
+  var _loaded = false;
+
+  void complete() => setState(() => _loaded = true);
+
+  @override
+  Widget build(BuildContext context) {
+    final key = ValueKey((
+      widget.file.revision,
+      widget.file.path,
+      widget.file.side,
+      widget.file.fingerprint,
+    ));
+    final commonAnchorKeys = <String, GlobalKey>{};
+    return _loaded
+        ? FullBlameView(
+            key: key,
+            document: widget.loaded,
+            hunks: const [],
+            activeAnchor: null,
+            wrapLines: false,
+            highlighter: fakeHighlighter,
+            anchorKeys: commonAnchorKeys,
+            controller: widget.scrollController,
+            focusNode: widget.focusNode,
+            showRemoteAvatars: false,
+          )
+        : FullBlameView.loading(
+            key: key,
+            file: widget.file,
+            hunks: const [],
+            activeAnchor: null,
+            wrapLines: false,
+            highlighter: fakeHighlighter,
+            anchorKeys: commonAnchorKeys,
+            controller: widget.scrollController,
+            focusNode: widget.focusNode,
+            showRemoteAvatars: false,
+          );
+  }
 }
 
 class _ThrowingSyntaxHighlighter implements FullDiffSyntaxHighlighter {

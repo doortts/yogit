@@ -21,8 +21,8 @@ double fullBlameMetadataWidth(double viewportWidth) => viewportWidth >= 900
     : (viewportWidth * 0.38).clamp(250.0, 320.0).toDouble();
 
 class FullBlameView extends StatefulWidget {
-  const FullBlameView({
-    required this.document,
+  FullBlameView({
+    required BlameDocument document,
     required this.hunks,
     required this.activeAnchor,
     required this.wrapLines,
@@ -37,9 +37,29 @@ class FullBlameView extends StatefulWidget {
     this.onMoveToFiles,
     this.loadCommitMessage,
     super.key,
-  });
+  }) : file = document.file,
+       lines = document.lines;
 
-  final BlameDocument document;
+  FullBlameView.loading({
+    required this.file,
+    required this.hunks,
+    required this.activeAnchor,
+    required this.wrapLines,
+    required this.highlighter,
+    required this.anchorKeys,
+    this.onAnchorProbeAttached,
+    this.onAnchorProbeDetached,
+    this.controller,
+    this.avatarService,
+    this.showRemoteAvatars = true,
+    this.focusNode,
+    this.onMoveToFiles,
+    this.loadCommitMessage,
+    super.key,
+  }) : lines = null;
+
+  final FileDocument file;
+  final List<BlameLine>? lines;
   final List<DiffHunk> hunks;
   final DiffAnchor? activeAnchor;
   final bool wrapLines;
@@ -80,18 +100,19 @@ class FullBlameViewState extends State<FullBlameView> {
 
   @override
   Widget build(BuildContext context) {
-    final lineCount = widget.document.file.lines.length;
+    final lineCount = widget.file.lines.length;
     final sourceMap = FullSourceHunkMap(
       hunks: widget.hunks,
-      side: widget.document.file.side,
+      side: widget.file.side,
       lineCount: lineCount,
       activeAnchor: widget.activeAnchor,
     );
     final sourceLine = sourceMap.activeLine(widget.activeAnchor);
     final selectedLine = _selectedLine;
-    final selectedBlame = selectedLine == null
+    final lines = widget.lines;
+    final selectedBlame = selectedLine == null || lines == null
         ? null
-        : widget.document.lines[selectedLine - 1];
+        : lines[selectedLine - 1];
     return LayoutBuilder(
       builder: (context, constraints) {
         final metadataWidth = fullBlameMetadataWidth(constraints.maxWidth);
@@ -118,7 +139,7 @@ class FullBlameViewState extends State<FullBlameView> {
                     final lineNumber = index + 1;
                     final current = lineNumber == sourceLine;
                     final selected = lineNumber == _selectedLine;
-                    final blame = widget.document.lines[index];
+                    final blame = lines?[index];
                     Widget interactive = Semantics(
                       key: Key('blame-line-$lineNumber'),
                       container: true,
@@ -136,13 +157,12 @@ class FullBlameViewState extends State<FullBlameView> {
                           child: BlameSourceRow(
                             blame: blame,
                             lineNumber: lineNumber,
-                            source: widget.document.file.lines[index],
-                            path: widget.document.file.path,
-                            side: widget.document.file.side,
+                            source: widget.file.lines[index],
+                            path: widget.file.path,
+                            side: widget.file.side,
                             kind: sourceMap.kindForLine(lineNumber),
                             wrapLines: widget.wrapLines,
-                            highlighter:
-                                widget.document.file.disableRichRendering
+                            highlighter: widget.file.disableRichRendering
                                 ? const _NoopSyntaxHighlighter()
                                 : widget.highlighter,
                             current: current,
@@ -173,7 +193,7 @@ class FullBlameViewState extends State<FullBlameView> {
                     return _probe(
                       nearestHunkAnchorForSourceLine(
                         hunks: widget.hunks,
-                        side: widget.document.file.side,
+                        side: widget.file.side,
                         lineNumber: lineNumber,
                       ),
                       current && widget.activeAnchor != null
@@ -255,15 +275,13 @@ class FullBlameViewState extends State<FullBlameView> {
   }
 
   void _handleFocusChange(bool hasFocus) {
-    if (!hasFocus ||
-        _selectedLine != null ||
-        widget.document.file.lines.isEmpty) {
+    if (!hasFocus || _selectedLine != null || widget.file.lines.isEmpty) {
       return;
     }
     final sourceMap = FullSourceHunkMap(
       hunks: widget.hunks,
-      side: widget.document.file.side,
-      lineCount: widget.document.file.lines.length,
+      side: widget.file.side,
+      lineCount: widget.file.lines.length,
       activeAnchor: widget.activeAnchor,
     );
     final initial = sourceMap.activeLine(widget.activeAnchor) ?? 1;
@@ -296,12 +314,12 @@ class FullBlameViewState extends State<FullBlameView> {
         : key == LogicalKeyboardKey.arrowDown
         ? 1
         : 0;
-    if (delta == 0 || widget.document.lines.isEmpty) {
+    if (delta == 0 || widget.file.lines.isEmpty) {
       return KeyEventResult.ignored;
     }
     final current = _selectedLine;
     if (current == null) return KeyEventResult.ignored;
-    final next = (current + delta).clamp(1, widget.document.lines.length);
+    final next = (current + delta).clamp(1, widget.file.lines.length);
     if (next != current) {
       final navigationSerial = ++_navigationSerial;
       setState(() => _selectedLine = next);
@@ -364,13 +382,14 @@ class FullBlameViewState extends State<FullBlameView> {
           : rowTop - position.viewportDimension + fullDiffSourceRowHeight;
       return alignmentOffset.clamp(min, max);
     }
-    final lastIndex = widget.document.lines.length - 1;
+    final lastIndex = widget.file.lines.length - 1;
     if (lastIndex <= 0) return min;
     final fraction = (lineNumber - 1) / lastIndex;
     return (min + (max - min) * fraction).clamp(min, max);
   }
 
-  String _semanticsLabel(int lineNumber, BlameLine blame) {
+  String _semanticsLabel(int lineNumber, BlameLine? blame) {
+    if (blame == null) return 'Line $lineNumber, Blame loading';
     final summary = blame.summary.trim();
     if (summary.isNotEmpty) return 'Line $lineNumber, $summary';
     return 'Line $lineNumber, ${_shortSha(blame.sha)}, ${blame.author}';
@@ -416,7 +435,7 @@ class BlameSourceRow extends StatelessWidget {
     super.key,
   });
 
-  final BlameLine blame;
+  final BlameLine? blame;
   final int lineNumber;
   final String source;
   final String path;
@@ -433,6 +452,13 @@ class BlameSourceRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final blame = this.blame;
+    final loading = blame == null;
+    final summary = loading ? 'Blame 계산 중…' : blame.summary;
+    final date = loading ? '' : _formatDate(blame.authorTimestamp);
+    final railColor = loading
+        ? fullDiffMuted.withValues(alpha: 0.35)
+        : _railColor(blame.sha);
     final metadataWidth = fullBlameMetadataWidth(viewportWidth);
     final row = FullDiffCodeRow(
       line: DiffLine(
@@ -472,11 +498,16 @@ class BlameSourceRow extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 child: Text(
-                  blame.summary,
-                  key: Key('blame-summary-$lineNumber'),
+                  summary,
+                  key: loading
+                      ? Key('blame-loading-$lineNumber')
+                      : Key('blame-summary-$lineNumber'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12),
+                  style: TextStyle(
+                    color: loading ? fullDiffMuted : null,
+                    fontSize: 12,
+                  ),
                 ),
               ),
             ),
@@ -484,7 +515,7 @@ class BlameSourceRow extends StatelessWidget {
               key: Key('blame-date-$lineNumber'),
               width: 76,
               child: Text(
-                _formatDate(blame.authorTimestamp),
+                date,
                 maxLines: 1,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
@@ -499,7 +530,7 @@ class BlameSourceRow extends StatelessWidget {
               key: Key('blame-rail-$lineNumber'),
               width: fullBlameRailWidth,
               height: fullDiffSourceRowHeight,
-              child: ColoredBox(color: _railColor(blame.sha)),
+              child: ColoredBox(color: railColor),
             ),
           ],
         ),
@@ -532,6 +563,10 @@ class BlameSourceRow extends StatelessWidget {
   }
 
   Widget _avatar() {
+    final blame = this.blame;
+    if (blame == null) {
+      return SizedBox(key: Key('blame-avatar-$lineNumber'));
+    }
     final identity = GitIdentity(name: blame.author, email: blame.authorEmail);
     Widget avatar(RemoteAvatar? remoteAvatar) => IdentityAvatar(
       key: Key('blame-avatar-$lineNumber'),
