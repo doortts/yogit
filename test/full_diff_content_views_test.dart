@@ -456,7 +456,13 @@ void main() {
       );
       expect(selected, same(historyEntries[1]));
       expect(secondCard, findsOneWidget);
-      expect(find.text(historyEntries[1].commit.subject), findsWidgets);
+      expect(
+        find.descendant(
+          of: secondCard,
+          matching: find.text(historyEntries[1].commit.subject),
+        ),
+        findsOneWidget,
+      );
       expect(
         tester.getTopLeft(secondCard).dy,
         closeTo(tester.getBottomLeft(secondRow).dy + 4, 0.5),
