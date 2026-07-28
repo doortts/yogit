@@ -3181,6 +3181,78 @@ void main() {
     expect(selectedFileDecoration().border, isNotNull);
   });
 
+  testWidgets('right enters source while blame metadata is loading', (
+    tester,
+  ) async {
+    final pendingBlame = Completer<List<GitBlameLine>>();
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [_sizedFile])
+      ..diff = ((_, _, _, _, _) async => const [])
+      ..content = ((_, _, _) async => resultFile.bytes)
+      ..blame = ((_, _, _, _) => pendingBlame.future);
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.setPrimaryView(FullDiffView.blame);
+    await pumpWorkspace(
+      tester,
+      controller: controller,
+      size: const Size(1070, 842),
+      settle: false,
+    );
+    await tester.pump();
+
+    final filesFocus = tester.widget<Focus>(
+      find.byKey(const Key('changed-files-focus')),
+    );
+    filesFocus.focusNode!.requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+
+    final blameFocus = tester.widget<Focus>(
+      find.byKey(const Key('blame-list-focus')),
+    );
+    expect(blameFocus.focusNode!.hasFocus, isTrue);
+    expect(find.byKey(const Key('blame-loading-1')), findsOneWidget);
+    expect(find.byKey(const Key('blame-selected-1')), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(find.byKey(const Key('blame-selected-2')), findsOneWidget);
+
+    pendingBlame.complete([
+      for (var index = 0; index < resultFile.lines.length; index++)
+        GitBlameLine(
+          lineNumber: index + 1,
+          sha: commitA.sha,
+          author: fixtureIdentity.name,
+          summary: 'Loaded line ${index + 1}',
+          uncommitted: false,
+        ),
+    ]);
+    await tester.pumpAndSettle();
+
+    expect(blameFocus.focusNode!.hasFocus, isTrue);
+    expect(find.byKey(const Key('blame-selected-2')), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.byKey(const Key('blame-summary-2'))).data,
+      'Loaded line 2',
+    );
+    expect(find.byKey(const Key('blame-loading-2')), findsNothing);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
+    await tester.pump();
+    expect(filesFocus.focusNode!.hasFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+    await tester.pump();
+    expect(blameFocus.focusNode!.hasFocus, isTrue);
+  });
+
   testWidgets('History and Blame restore their independent detail-list focus', (
     tester,
   ) async {
@@ -3301,11 +3373,15 @@ void main() {
 
     final selection = controller.selectFile(secondFile);
     await tester.pump();
-    expect(find.byKey(const Key('blame-list-focus')), findsNothing);
-    expect(filesFocus.focusNode!.hasFocus, isTrue);
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-    await tester.pump();
-    expect(filesFocus.focusNode!.hasFocus, isTrue);
+    expect(find.byKey(const Key('blame-list-focus')), findsOneWidget);
+    expect(find.byKey(const Key('blame-loading-1')), findsOneWidget);
+    expect(
+      tester
+          .widget<Focus>(find.byKey(const Key('blame-list-focus')))
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
 
     pendingBlame.complete(blameLines());
     await selection;

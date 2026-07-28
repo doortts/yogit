@@ -361,8 +361,35 @@ class _DiffScreenState extends State<DiffScreen> {
         next.view == FullDiffView.history) {
       _restoreNavigationFocus();
     }
-    if (!identical(previous.blame.data, next.blame.data) &&
-        next.view == FullDiffView.blame) {
+    final blameFileBecameReady =
+        previous.file.data == null &&
+        next.file.data?.kind == FileContentKind.utf8 &&
+        next.view == FullDiffView.blame;
+    final blameStartedLoading =
+        !previous.blame.loading &&
+        next.blame.loading &&
+        next.view == FullDiffView.blame;
+    if (blameStartedLoading) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted ||
+            !_controller.state.blame.loading ||
+            _lastBlameNavigationPane != _FullDiffNavigationPane.blame ||
+            !_blameListFocus.hasFocus) {
+          return;
+        }
+        _blameListFocus.unfocus();
+        scheduleMicrotask(() {
+          if (mounted &&
+              _controller.state.blame.loading &&
+              _lastBlameNavigationPane == _FullDiffNavigationPane.blame) {
+            _blameListFocus.requestFocus();
+          }
+        });
+      });
+    }
+    if (blameFileBecameReady ||
+        (!identical(previous.blame.data, next.blame.data) &&
+            next.view == FullDiffView.blame)) {
       _restoreNavigationFocus();
     }
     if (previous.historyContext != next.historyContext) {
@@ -726,6 +753,11 @@ class _DiffScreenState extends State<DiffScreen> {
     }
   }
 
+  bool _blameDetailConnected(FullDiffSessionState state) =>
+      state.view == FullDiffView.blame &&
+      state.file.data?.kind == FileContentKind.utf8 &&
+      (_blameListFocus.context?.mounted ?? false);
+
   void _handleFileListFocusChanged() {
     if (!_fileListFocus.hasFocus) return;
     switch (_controller.state.view) {
@@ -736,8 +768,7 @@ class _DiffScreenState extends State<DiffScreen> {
           _lastDiffHistoryNavigationPane = _FullDiffNavigationPane.files;
         }
       case FullDiffView.blame:
-        if ((_controller.state.blame.data?.lines.isNotEmpty ?? false) &&
-            (_blameListFocus.context?.mounted ?? false)) {
+        if (_blameDetailConnected(_controller.state)) {
           _lastBlameNavigationPane = _FullDiffNavigationPane.files;
         }
     }
@@ -775,10 +806,7 @@ class _DiffScreenState extends State<DiffScreen> {
       final historyConnected =
           _controller.state.view == FullDiffView.history &&
           (_historyListFocus.context?.mounted ?? false);
-      final blameConnected =
-          _controller.state.view == FullDiffView.blame &&
-          (_controller.state.blame.data?.lines.isNotEmpty ?? false) &&
-          (_blameListFocus.context?.mounted ?? false);
+      final blameConnected = _blameDetailConnected(_controller.state);
       final filesConnected = _fileListFocus.context?.mounted ?? false;
       final target = switch (_controller.state.view) {
         FullDiffView.history => _navigationTarget(
@@ -867,9 +895,10 @@ class _DiffScreenState extends State<DiffScreen> {
       _historyListFocus.requestFocus();
       return KeyEventResult.handled;
     }
-    if (event.logicalKey == LogicalKeyboardKey.arrowRight &&
+    if (key == LogicalKeyboardKey.arrowRight &&
         _controller.state.view == FullDiffView.blame) {
-      if (_controller.state.blame.data?.lines.isNotEmpty ?? false) {
+      _lastBlameNavigationPane = _FullDiffNavigationPane.blame;
+      if (_blameListFocus.context?.mounted ?? false) {
         _blameListFocus.requestFocus();
       }
       return KeyEventResult.handled;
@@ -1676,16 +1705,39 @@ class _DiffScreenState extends State<DiffScreen> {
 
   Widget _blameContent(FullDiffSessionState state) {
     final blame = state.blame.data;
-    if (blame == null) {
+    final file = blame?.file ?? state.file.data;
+    if (file == null ||
+        file.kind != FileContentKind.utf8 ||
+        (blame == null && !state.blame.loading)) {
       return _resourceStatus(state.blame, 'Blame을 읽는 중입니다');
     }
+    final key = ValueKey((
+      file.revision,
+      file.path,
+      file.side,
+      file.fingerprint,
+    ));
+    if (blame == null) {
+      return FullBlameView.loading(
+        key: key,
+        file: file,
+        hunks: state.patch.data?.hunks ?? const [],
+        activeAnchor: state.activeAnchor,
+        wrapLines: state.wrapLines,
+        highlighter: _highlighter,
+        anchorKeys: _anchorKeys,
+        onAnchorProbeAttached: _attachAnchorProbe,
+        onAnchorProbeDetached: _detachAnchorProbe,
+        controller: _contentScroll,
+        avatarService: widget.avatarService,
+        showRemoteAvatars: widget.showRemoteAvatars,
+        focusNode: _blameListFocus,
+        onMoveToFiles: _fileListFocus.requestFocus,
+        loadCommitMessage: _loadCommitMessage,
+      );
+    }
     return FullBlameView(
-      key: ValueKey((
-        blame.file.revision,
-        blame.file.path,
-        blame.file.side,
-        blame.file.fingerprint,
-      )),
+      key: key,
       document: blame,
       hunks: state.patch.data?.hunks ?? const [],
       activeAnchor: state.activeAnchor,
