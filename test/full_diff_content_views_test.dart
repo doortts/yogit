@@ -410,6 +410,14 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.pump();
     expect(selected, same(historyEntries.first));
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
+    await tester.pump();
+    expect(selected, same(historyEntries[1]));
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    await tester.pump();
+    expect(selected, same(historyEntries.first));
   });
 
   testWidgets(
@@ -1735,6 +1743,14 @@ void main() {
           .isSelected,
       ui.Tristate.isTrue,
     );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
+    await tester.pump();
+    expect(find.byKey(const Key('blame-selected-5')), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    await tester.pump();
+    expect(find.byKey(const Key('blame-selected-4')), findsOneWidget);
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);

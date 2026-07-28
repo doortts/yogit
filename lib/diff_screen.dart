@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:yogit/vim_navigation.dart';
 
 import 'avatars.dart';
 import 'external_editor.dart';
@@ -768,18 +769,26 @@ class _DiffScreenState extends State<DiffScreen> {
       return KeyEventResult.ignored;
     }
     final keyboard = HardwareKeyboard.instance;
+    final key = normalizeNavigationKey(
+      event.logicalKey,
+      hasModifier:
+          keyboard.isMetaPressed ||
+          keyboard.isAltPressed ||
+          keyboard.isShiftPressed ||
+          keyboard.isControlPressed,
+    );
     if (keyboard.isMetaPressed || keyboard.isAltPressed) {
       return KeyEventResult.ignored;
     }
-    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+    if (key == LogicalKeyboardKey.arrowUp) {
       _stepFile(-1);
       return KeyEventResult.handled;
     }
-    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+    if (key == LogicalKeyboardKey.arrowDown) {
       _stepFile(1);
       return KeyEventResult.handled;
     }
-    if (event.logicalKey == LogicalKeyboardKey.arrowRight &&
+    if (key == LogicalKeyboardKey.arrowRight &&
         _controller.state.view == FullDiffView.history) {
       final entries = _controller.state.history.data;
       if (_controller.state.selectedHistoryEntry == null &&
@@ -924,6 +933,12 @@ class _DiffScreenState extends State<DiffScreen> {
                   _StepPrimaryFileIntent(-1),
             if (state.view != FullDiffView.history)
               const SingleActivator(LogicalKeyboardKey.arrowDown):
+                  _StepPrimaryFileIntent(1),
+            if (state.view != FullDiffView.history)
+              const SingleActivator(LogicalKeyboardKey.keyK):
+                  _StepPrimaryFileIntent(-1),
+            if (state.view != FullDiffView.history)
+              const SingleActivator(LogicalKeyboardKey.keyJ):
                   _StepPrimaryFileIntent(1),
           },
           child: Actions(

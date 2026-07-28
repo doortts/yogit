@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:yogit/vim_navigation.dart';
 
 import 'full_diff_theme.dart';
 
@@ -103,7 +104,16 @@ class _FullDiffResizeHandleState extends State<_FullDiffResizeHandle> {
   Widget build(BuildContext context) => Focus(
     onKeyEvent: (_, event) {
       if (event is! KeyDownEvent) return KeyEventResult.ignored;
-      final delta = switch (event.logicalKey) {
+      final keyboard = HardwareKeyboard.instance;
+      final key = normalizeNavigationKey(
+        event.logicalKey,
+        hasModifier:
+            keyboard.isMetaPressed ||
+            keyboard.isAltPressed ||
+            keyboard.isShiftPressed ||
+            keyboard.isControlPressed,
+      );
+      final delta = switch (key) {
         LogicalKeyboardKey.arrowLeft => -8.0,
         LogicalKeyboardKey.arrowRight => 8.0,
         _ => null,

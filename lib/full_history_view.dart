@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:yogit/vim_navigation.dart';
 
 import 'full_diff_model.dart';
 import 'full_diff_selectable_row.dart';
@@ -57,14 +58,22 @@ class _FullHistoryViewState extends State<FullHistoryView> {
       return KeyEventResult.ignored;
     }
     final keyboard = HardwareKeyboard.instance;
+    final key = normalizeNavigationKey(
+      event.logicalKey,
+      hasModifier:
+          keyboard.isMetaPressed ||
+          keyboard.isAltPressed ||
+          keyboard.isShiftPressed ||
+          keyboard.isControlPressed,
+    );
     if (keyboard.isMetaPressed || keyboard.isAltPressed) {
       return KeyEventResult.ignored;
     }
-    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+    if (key == LogicalKeyboardKey.arrowLeft) {
       widget.onMoveToFiles?.call();
       return KeyEventResult.handled;
     }
-    final delta = switch (event.logicalKey) {
+    final delta = switch (key) {
       LogicalKeyboardKey.arrowUp => -1,
       LogicalKeyboardKey.arrowDown => 1,
       _ => 0,
