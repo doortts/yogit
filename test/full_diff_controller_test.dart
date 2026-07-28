@@ -1321,7 +1321,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(controller.state.history.loading, isTrue);
 
-    controller.setView(FullDiffView.diff);
+    controller.setHistorySelected(false);
     await controller.retryFiles();
     expect(controller.state.history.data, isNull);
     expect(controller.state.selectedHistoryEntry, isNull);

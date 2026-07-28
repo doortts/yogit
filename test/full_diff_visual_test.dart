@@ -425,6 +425,19 @@ Future<void> prepareFunctionalCapture(
       await tester.tap(find.text('Side-by-side'));
       await tester.pump();
       expect(controller.state.layout, DiffLayout.sideBySide);
+      final pane = find.byKey(const Key('side-by-side-old-pane'));
+      final paneWidth = tester.getSize(pane).width;
+      await tester.drag(
+        find.byKey(const Key('side-by-side-resizer')),
+        Offset(paneWidth * 0.1, 0),
+      );
+      await tester.pump();
+      final displayedRatio =
+          (tester.getCenter(find.byKey(const Key('side-by-side-resizer'))).dx -
+              tester.getTopLeft(pane).dx) /
+          paneWidth;
+      expect(displayedRatio, closeTo(0.6, 0.01));
+      expect(savedWidths()?.sideBySideRatio, closeTo(0.6, 0.01));
     case '26-shortcut-hints':
       final before = tester.getRect(find.text('Unified'));
       await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
@@ -1298,6 +1311,8 @@ void main() {
       activeHunkIndex: 0,
     );
     addTearDown(controller.dispose);
+    controller.setHistorySelected(false);
+    expect(controller.state.view, FullDiffView.diff);
     const size = Size(1070, 842);
 
     await capture(
@@ -1310,6 +1325,19 @@ void main() {
         surfaceSize: size,
       ),
       prepare: () async {
+        await tester.tap(find.byKey(const Key('history-toggle')));
+        await tester.pumpAndSettle();
+        expect(controller.state.view, FullDiffView.history);
+
+        await tester.tap(find.text('Blame'));
+        await tester.pumpAndSettle();
+        for (final label in ['Unified', 'Side-by-side', 'Hunk', 'History']) {
+          expect(find.text(label), findsNothing);
+        }
+
+        await tester.tap(find.text('Diff'));
+        await tester.pumpAndSettle();
+        expect(controller.state.view, FullDiffView.history);
         final historyRowFocus = focusQaHistoryRow(tester, 'c78b2ff');
         await tester.pump();
         expect(historyRowFocus.hasPrimaryFocus, isTrue);
