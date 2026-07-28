@@ -2514,6 +2514,58 @@ void main() {
     },
   );
 
+  test('repository graph widths round-trip and discard damaged entries', () {
+    final restored = AppSettings.fromJson({
+      'repositoryGraphWidths': {
+        '/repo/a': 188,
+        '/repo/narrow': 1,
+        '/repo/wide': 999,
+        '/repo/bad': 'wide',
+        '': 120,
+      },
+    });
+
+    expect(restored.repositoryGraphWidths, {
+      '/repo/a': 188,
+      '/repo/narrow': 40,
+      '/repo/wide': 260,
+    });
+    expect(
+      AppSettings.fromJson(restored.toJson()).repositoryGraphWidths,
+      restored.repositoryGraphWidths,
+    );
+  });
+
+  test(
+    'repository graph widths stay independent and migrate legacy width once',
+    () {
+      const base = AppSettings(
+        columnWidths: TimelineColumnWidths(graph: 176, hash: 90),
+      );
+      final migrated = base.migrateLegacyGraphWidth('/repo/a');
+
+      expect(migrated.columnWidths.graph, isNull);
+      expect(migrated.repositoryGraphWidths, {'/repo/a': 176});
+      expect(migrated.columnWidthsForRepository('/repo/a').graph, 176);
+      expect(migrated.columnWidthsForRepository('/repo/b').graph, isNull);
+      expect(migrated.columnWidthsForRepository('/repo/b').hash, 90);
+
+      final changed = migrated.withRepositoryColumnWidths(
+        '/repo/b',
+        migrated.columnWidthsForRepository('/repo/b').withGraph(204),
+      );
+      expect(changed.repositoryGraphWidths, {'/repo/a': 176, '/repo/b': 204});
+      expect(changed.columnWidths.graph, isNull);
+
+      final mixed = AppSettings(
+        columnWidths: const TimelineColumnWidths(graph: 150),
+        repositoryGraphWidths: const {'/repo/existing': 190},
+      ).migrateLegacyGraphWidth('/repo/new');
+      expect(mixed.columnWidths.graph, isNull);
+      expect(mixed.repositoryGraphWidths, {'/repo/existing': 190});
+    },
+  );
+
   test('full diff column widths round-trip and clamp damaged settings', () {
     const widths = FullDiffColumnWidths(history: 240, files: 330);
     final decoded = AppSettings.fromJson(
@@ -4753,9 +4805,13 @@ void main() {
     );
     await store.save(saved);
 
-    expect(await store.load(), saved);
-    final json = await store.file.readAsString();
-    expect(json, contains('"showAvatars":false'));
+    final restored = await store.load();
+    expect(restored.showAvatars, isFalse);
+    expect(restored.previewPlacement, PreviewPlacement.bottom);
+    expect(restored.columnWidths.graph, isNull);
+    final json = jsonDecode(await store.file.readAsString());
+    expect(json['showAvatars'], isFalse);
+    expect(json['columnWidths'], isNot(contains('graph')));
     expect(json, isNot(contains('token')));
 
     await store.save(

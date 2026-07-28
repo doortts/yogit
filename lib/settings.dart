@@ -62,6 +62,18 @@ class TimelineColumnWidths {
     showName: showName ?? this.showName,
   );
 
+  TimelineColumnWidths withGraph(double? value) => TimelineColumnWidths(
+    sidebar: sidebar,
+    refs: refs,
+    graph: value,
+    hash: hash,
+    commit: commit,
+    time: time,
+    name: name,
+    showTime: showTime,
+    showName: showName,
+  );
+
   factory TimelineColumnWidths.fromJson(Object? value) {
     final json = value is Map<String, dynamic>
         ? value
@@ -198,11 +210,27 @@ double _clamped(Object? value, double fallback, double min, double max) =>
 String formatHexColor(String value) =>
     '#${value.trim().replaceFirst('#', '').toUpperCase()}';
 
+Map<String, double> _parseRepositoryGraphWidths(Object? value) {
+  if (value is! Map) return const {};
+  final result = <String, double>{};
+  for (final entry in value.entries) {
+    if (entry.key is! String || entry.value is! num) continue;
+    final root = (entry.key as String).trim();
+    if (root.isEmpty) continue;
+    result[root] = (entry.value as num)
+        .toDouble()
+        .clamp(40.0, 260.0)
+        .toDouble();
+  }
+  return result;
+}
+
 class AppSettings {
   const AppSettings({
     this.showAvatars = true,
     this.previewPlacement = PreviewPlacement.right,
     this.columnWidths = const TimelineColumnWidths(),
+    this.repositoryGraphWidths = const {},
     this.fullDiffColumnWidths = const FullDiffColumnWidths(),
     this.fullDiffPreferences = const FullDiffPreferences(),
     this.laneColors = defaultLaneColors,
@@ -239,6 +267,7 @@ class AppSettings {
   final bool showAvatars;
   final PreviewPlacement previewPlacement;
   final TimelineColumnWidths columnWidths;
+  final Map<String, double> repositoryGraphWidths;
   final FullDiffColumnWidths fullDiffColumnWidths;
   final FullDiffPreferences fullDiffPreferences;
   final List<String> laneColors;
@@ -256,10 +285,42 @@ class AppSettings {
         : colors.cast<Color>();
   }
 
+  TimelineColumnWidths columnWidthsForRepository(String root) =>
+      columnWidths.withGraph(repositoryGraphWidths[root]);
+
+  AppSettings withRepositoryColumnWidths(
+    String root,
+    TimelineColumnWidths widths,
+  ) {
+    final graphWidths = {...repositoryGraphWidths};
+    final graph = widths.graph;
+    if (root.trim().isNotEmpty && graph != null) {
+      graphWidths[root] = graph.clamp(40.0, 260.0).toDouble();
+    }
+    return copyWith(
+      columnWidths: widths.withGraph(null),
+      repositoryGraphWidths: graphWidths,
+    );
+  }
+
+  AppSettings migrateLegacyGraphWidth(String root) {
+    final legacy = columnWidths.graph;
+    if (legacy == null) return this;
+    final graphWidths = {...repositoryGraphWidths};
+    if (graphWidths.isEmpty && root.trim().isNotEmpty) {
+      graphWidths[root] = legacy;
+    }
+    return copyWith(
+      columnWidths: columnWidths.withGraph(null),
+      repositoryGraphWidths: graphWidths,
+    );
+  }
+
   AppSettings copyWith({
     bool? showAvatars,
     PreviewPlacement? previewPlacement,
     TimelineColumnWidths? columnWidths,
+    Map<String, double>? repositoryGraphWidths,
     FullDiffColumnWidths? fullDiffColumnWidths,
     FullDiffPreferences? fullDiffPreferences,
     List<String>? laneColors,
@@ -269,6 +330,7 @@ class AppSettings {
     showAvatars: showAvatars ?? this.showAvatars,
     previewPlacement: previewPlacement ?? this.previewPlacement,
     columnWidths: columnWidths ?? this.columnWidths,
+    repositoryGraphWidths: repositoryGraphWidths ?? this.repositoryGraphWidths,
     fullDiffColumnWidths: fullDiffColumnWidths ?? this.fullDiffColumnWidths,
     fullDiffPreferences: fullDiffPreferences ?? this.fullDiffPreferences,
     laneColors: laneColors ?? this.laneColors,
@@ -297,6 +359,9 @@ class AppSettings {
         _ => PreviewPlacement.right,
       },
       columnWidths: TimelineColumnWidths.fromJson(value['columnWidths']),
+      repositoryGraphWidths: _parseRepositoryGraphWidths(
+        value['repositoryGraphWidths'],
+      ),
       fullDiffColumnWidths: FullDiffColumnWidths.fromJson(
         value['fullDiffColumnWidths'],
       ),
@@ -312,7 +377,8 @@ class AppSettings {
   Map<String, Object> toJson() => {
     'showAvatars': showAvatars,
     'previewPlacement': previewPlacement.name,
-    'columnWidths': columnWidths.toJson(),
+    'columnWidths': columnWidths.withGraph(null).toJson(),
+    'repositoryGraphWidths': repositoryGraphWidths,
     'fullDiffColumnWidths': fullDiffColumnWidths.toJson(),
     'fullDiffPreferences': fullDiffPreferences.toJson(),
     'laneColors': laneColors,
@@ -326,6 +392,7 @@ class AppSettings {
       showAvatars == other.showAvatars &&
       previewPlacement == other.previewPlacement &&
       columnWidths == other.columnWidths &&
+      mapEquals(repositoryGraphWidths, other.repositoryGraphWidths) &&
       fullDiffColumnWidths == other.fullDiffColumnWidths &&
       fullDiffPreferences == other.fullDiffPreferences &&
       listEquals(laneColors, other.laneColors) &&
@@ -337,6 +404,11 @@ class AppSettings {
     showAvatars,
     previewPlacement,
     columnWidths,
+    Object.hashAllUnordered(
+      repositoryGraphWidths.entries.map(
+        (entry) => Object.hash(entry.key, entry.value),
+      ),
+    ),
     fullDiffColumnWidths,
     fullDiffPreferences,
     Object.hashAll(laneColors),
