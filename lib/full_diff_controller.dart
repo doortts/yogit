@@ -82,6 +82,7 @@ class FullDiffSessionState {
     required this.files,
     required this.selectedFile,
     required this.view,
+    required this.historySelected,
     required this.layout,
     required this.activeAnchor,
     required this.fullFileScrollTarget,
@@ -111,6 +112,7 @@ class FullDiffSessionState {
   final List<GitFileChange> files;
   final GitFileChange? selectedFile;
   final FullDiffView view;
+  final bool historySelected;
   final DiffLayout layout;
   final DiffAnchor? activeAnchor;
   final DiffSourceTarget? fullFileScrollTarget;
@@ -146,8 +148,12 @@ class FullDiffSessionState {
     return document != null && !document.disableRichRendering;
   }
 
+  FullDiffView get primaryView =>
+      view == FullDiffView.blame ? FullDiffView.blame : FullDiffView.diff;
+
   FullDiffPreferences get preferences => FullDiffPreferences(
     view: view,
+    historySelected: historySelected,
     layout: layout,
     scope: appliedScope,
     algorithm: appliedAlgorithm,
@@ -162,6 +168,7 @@ class FullDiffSessionState {
     List<GitFileChange>? files,
     Object? selectedFile = _unset,
     FullDiffView? view,
+    bool? historySelected,
     DiffLayout? layout,
     Object? activeAnchor = _unset,
     Object? fullFileScrollTarget = _unset,
@@ -192,6 +199,7 @@ class FullDiffSessionState {
         ? this.selectedFile
         : selectedFile as GitFileChange?,
     view: view ?? this.view,
+    historySelected: historySelected ?? this.historySelected,
     layout: layout ?? this.layout,
     activeAnchor: identical(activeAnchor, _unset)
         ? this.activeAnchor
@@ -301,6 +309,11 @@ FullDiffSessionState _initialState(
   final nearbyCommits = List<GitCommit>.unmodifiable(commits);
   final selectedCommit =
       nearbyCommits[initialIndex.clamp(0, nearbyCommits.length - 1)];
+  final initialView =
+      initialPreferences.view == FullDiffView.diff &&
+          initialPreferences.historySelected
+      ? FullDiffView.history
+      : initialPreferences.view;
   return FullDiffSessionState(
     nearbyCommits: nearbyCommits,
     selectedCommit: selectedCommit,
@@ -309,7 +322,8 @@ FullDiffSessionState _initialState(
         : selectedCommit.parents.first,
     files: const [],
     selectedFile: null,
-    view: initialPreferences.view,
+    view: initialView,
+    historySelected: initialPreferences.historySelected,
     layout: initialPreferences.layout,
     activeAnchor: null,
     fullFileScrollTarget: null,
@@ -559,10 +573,46 @@ class FullDiffSessionController extends ChangeNotifier {
     );
   }
 
+  void setPrimaryView(FullDiffView view) {
+    assert(view != FullDiffView.history);
+    final nextView = view == FullDiffView.blame
+        ? FullDiffView.blame
+        : state.historySelected
+        ? FullDiffView.history
+        : FullDiffView.diff;
+    _setViewState(nextView, state.historySelected);
+  }
+
+  void setHistorySelected(bool selected) {
+    _setViewState(
+      selected ? FullDiffView.history : FullDiffView.diff,
+      selected,
+    );
+  }
+
   void setView(FullDiffView view) {
-    if (_disposed || state.view == view) return;
+    switch (view) {
+      case FullDiffView.diff:
+      case FullDiffView.blame:
+        setPrimaryView(view);
+      case FullDiffView.history:
+        setHistorySelected(true);
+    }
+  }
+
+  void _setViewState(FullDiffView view, bool historySelected) {
+    if (_disposed ||
+        (state.view == view && state.historySelected == historySelected)) {
+      return;
+    }
     _fullFileScrollGeneration++;
-    _replace(state.copyWith(view: view, fullFileScrollTarget: null));
+    _replace(
+      state.copyWith(
+        view: view,
+        historySelected: historySelected,
+        fullFileScrollTarget: null,
+      ),
+    );
     if (view == FullDiffView.blame) unawaited(_ensureBlame());
     if (view == FullDiffView.history) unawaited(_ensureHistory());
   }

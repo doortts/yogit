@@ -80,14 +80,16 @@ bool diffDocumentContainsSourceTarget(
 class FullDiffPreferences {
   const FullDiffPreferences({
     this.view = FullDiffView.diff,
+    bool? historySelected,
     this.layout = DiffLayout.unified,
     this.scope = DiffScope.hunks,
     this.algorithm = DiffAlgorithm.gitSetting,
     this.ignoreWhitespace = false,
     this.wrapLines = true,
-  });
+  }) : historySelected = historySelected ?? view == FullDiffView.history;
 
   final FullDiffView view;
+  final bool historySelected;
   final DiffLayout layout;
   final DiffScope scope;
   final DiffAlgorithm algorithm;
@@ -96,6 +98,7 @@ class FullDiffPreferences {
 
   FullDiffPreferences copyWith({
     FullDiffView? view,
+    bool? historySelected,
     DiffLayout? layout,
     DiffScope? scope,
     DiffAlgorithm? algorithm,
@@ -103,6 +106,7 @@ class FullDiffPreferences {
     bool? wrapLines,
   }) => FullDiffPreferences(
     view: view ?? this.view,
+    historySelected: historySelected ?? this.historySelected,
     layout: layout ?? this.layout,
     scope: scope ?? this.scope,
     algorithm: algorithm ?? this.algorithm,
@@ -114,12 +118,19 @@ class FullDiffPreferences {
     final json = value is Map<String, dynamic>
         ? value
         : const <String, dynamic>{};
+    final view = switch (json['view']) {
+      'blame' => FullDiffView.blame,
+      'history' => FullDiffView.history,
+      _ => FullDiffView.diff,
+    };
+    final historySelected =
+        view == FullDiffView.history ||
+        (json['historySelected'] is bool
+            ? json['historySelected'] as bool
+            : false);
     return FullDiffPreferences(
-      view: switch (json['view']) {
-        'blame' => FullDiffView.blame,
-        'history' => FullDiffView.history,
-        _ => FullDiffView.diff,
-      },
+      view: view,
+      historySelected: historySelected,
       layout: json['layout'] == 'sideBySide'
           ? DiffLayout.sideBySide
           : DiffLayout.unified,
@@ -137,6 +148,7 @@ class FullDiffPreferences {
 
   Map<String, Object> toJson() => {
     'view': view.name,
+    'historySelected': historySelected,
     'layout': layout.name,
     'scope': scope.name,
     'algorithm': algorithm.name,
@@ -148,6 +160,7 @@ class FullDiffPreferences {
   bool operator ==(Object other) =>
       other is FullDiffPreferences &&
       view == other.view &&
+      historySelected == other.historySelected &&
       layout == other.layout &&
       scope == other.scope &&
       algorithm == other.algorithm &&
@@ -155,8 +168,15 @@ class FullDiffPreferences {
       wrapLines == other.wrapLines;
 
   @override
-  int get hashCode =>
-      Object.hash(view, layout, scope, algorithm, ignoreWhitespace, wrapLines);
+  int get hashCode => Object.hash(
+    view,
+    historySelected,
+    layout,
+    scope,
+    algorithm,
+    ignoreWhitespace,
+    wrapLines,
+  );
 }
 
 enum FileContentKind { utf8, binary, unsupportedEncoding, tooLarge }

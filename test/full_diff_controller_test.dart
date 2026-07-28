@@ -1503,6 +1503,80 @@ void main() {
     expect(controller.state.selectedHistoryEntry, same(selectedEntry));
   });
 
+  test('Diff restores the History selection kept behind Blame', () async {
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..diff = ((_, _, _, _, _) async => twoHunkLines)
+      ..content = ((_, _, _) async => resultFile.bytes)
+      ..history = ((_, _) async => const []);
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+      initialPreferences: const FullDiffPreferences(
+        view: FullDiffView.blame,
+        historySelected: true,
+      ),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    expect(controller.state.view, FullDiffView.blame);
+    expect(controller.state.primaryView, FullDiffView.blame);
+    expect(controller.state.historySelected, isTrue);
+
+    controller.setPrimaryView(FullDiffView.diff);
+
+    expect(controller.state.view, FullDiffView.history);
+    expect(controller.state.primaryView, FullDiffView.diff);
+  });
+
+  test('Diff stays in regular diff when remembered History is off', () async {
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..diff = ((_, _, _, _, _) async => twoHunkLines)
+      ..content = ((_, _, _) async => resultFile.bytes);
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    controller.setPrimaryView(FullDiffView.blame);
+    controller.setPrimaryView(FullDiffView.diff);
+
+    expect(controller.state.view, FullDiffView.diff);
+    expect(controller.state.historySelected, isFalse);
+  });
+
+  test('History selection persists while Blame is active', () async {
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [fileA])
+      ..diff = ((_, _, _, _, _) async => twoHunkLines)
+      ..content = ((_, _, _) async => resultFile.bytes)
+      ..history = ((_, _) async => const []);
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    controller.setHistorySelected(true);
+    controller.setPrimaryView(FullDiffView.blame);
+
+    expect(controller.state.view, FullDiffView.blame);
+    expect(controller.state.historySelected, isTrue);
+    expect(controller.state.preferences.historySelected, isTrue);
+
+    controller.setHistorySelected(false);
+    expect(controller.state.view, FullDiffView.diff);
+    expect(controller.state.historySelected, isFalse);
+  });
+
   test(
     'new repository keeps display preferences but starts with its own file',
     () async {

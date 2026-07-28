@@ -2596,6 +2596,7 @@ void main() {
   test('full diff preferences survive settings JSON', () {
     const preferences = FullDiffPreferences(
       view: FullDiffView.history,
+      historySelected: true,
       layout: DiffLayout.sideBySide,
       scope: DiffScope.fullFile,
       algorithm: DiffAlgorithm.patience,
@@ -2615,12 +2616,49 @@ void main() {
           as Map<String, Object>),
       const {
         'view': 'history',
+        'historySelected': true,
         'layout': 'sideBySide',
         'scope': 'fullFile',
         'algorithm': 'patience',
         'ignoreWhitespace': true,
         'wrapLines': false,
       },
+    );
+  });
+
+  test('full diff preferences preserve History behind Blame', () {
+    const preferences = FullDiffPreferences(
+      view: FullDiffView.blame,
+      historySelected: true,
+      layout: DiffLayout.sideBySide,
+    );
+
+    final json = preferences.toJson();
+    final restored = FullDiffPreferences.fromJson(json);
+
+    expect(restored, preferences);
+    expect(json['view'], 'blame');
+    expect(json['historySelected'], isTrue);
+  });
+
+  test('legacy History view migrates to selected History', () {
+    final restored = FullDiffPreferences.fromJson({
+      'view': 'history',
+      'layout': 'unified',
+    });
+
+    expect(restored.view, FullDiffView.history);
+    expect(restored.historySelected, isTrue);
+  });
+
+  test('legacy Diff and Blame views migrate with History off', () {
+    expect(
+      FullDiffPreferences.fromJson({'view': 'diff'}).historySelected,
+      isFalse,
+    );
+    expect(
+      FullDiffPreferences.fromJson({'view': 'blame'}).historySelected,
+      isFalse,
     );
   });
 
