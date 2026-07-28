@@ -4935,6 +4935,70 @@ void main() {
     );
   });
 
+  testWidgets('YogitApp persists base branches independently by repository', (
+    tester,
+  ) async {
+    final store = MemorySettingsStore()
+      ..current = const AppSettings(
+        baseBranches: {'/repos/one': 'release', '/repos/two': 'main'},
+      );
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository(
+          (_, _) async => [commit('tip', 'tip')],
+          root: '/repos/one',
+          refs: const RepoRefs(
+            local: ['main', 'release'],
+            current: 'main',
+            tips: {'main': 'tip', 'release': 'tip'},
+          ),
+        ),
+        settingsStore: store,
+        discoverAvatars: false,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('base-branch-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('base-branch-menu-main')));
+    await tester.pumpAndSettle();
+
+    expect(store.current.baseBranches, {
+      '/repos/one': 'main',
+      '/repos/two': 'main',
+    });
+  });
+
+  testWidgets('a failed settings write keeps the selected base branch', (
+    tester,
+  ) async {
+    final store = FailingSettingsStore()
+      ..current = const AppSettings(baseBranches: {'/repos/one': 'main'});
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository(
+          (_, _) async => [commit('tip', 'tip')],
+          root: '/repos/one',
+          refs: const RepoRefs(
+            local: ['main', 'release'],
+            current: 'main',
+            tips: {'main': 'tip', 'release': 'tip'},
+          ),
+        ),
+        settingsStore: store,
+        discoverAvatars: false,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('base-branch-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('base-branch-menu-release')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('release'), findsWidgets);
+    expect(find.byType(TimelineScreen), findsOneWidget);
+  });
+
   test('yo launcher builds once and passes the resolved repository path', () {
     final file = File('bin/yo');
     final source = file.readAsStringSync();
