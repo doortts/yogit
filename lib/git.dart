@@ -581,6 +581,70 @@ enum DiffScope { hunks, fullFile }
 
 enum DiffAlgorithm { gitSetting, myers, minimal, patience, histogram }
 
+const concreteDiffAlgorithms = <DiffAlgorithm>[
+  DiffAlgorithm.myers,
+  DiffAlgorithm.minimal,
+  DiffAlgorithm.patience,
+  DiffAlgorithm.histogram,
+];
+
+class GitDiffAlgorithmSetting {
+  const GitDiffAlgorithmSetting({
+    required this.algorithm,
+    required this.configuredValue,
+  });
+
+  const GitDiffAlgorithmSetting.gitDefault()
+    : algorithm = DiffAlgorithm.myers,
+      configuredValue = null;
+
+  final DiffAlgorithm algorithm;
+  final String? configuredValue;
+
+  bool get usesGitDefault =>
+      configuredValue == null || configuredValue == 'default';
+
+  String get configLabel => configuredValue == null
+      ? 'diff.algorithm 미설정'
+      : 'diff.algorithm=$configuredValue';
+
+  DiffAlgorithm normalizeSelection(DiffAlgorithm selection) =>
+      selection == DiffAlgorithm.gitSetting || selection == algorithm
+      ? DiffAlgorithm.gitSetting
+      : selection;
+
+  DiffAlgorithm resolveSelection(DiffAlgorithm selection) =>
+      selection == DiffAlgorithm.gitSetting ? algorithm : selection;
+}
+
+GitDiffAlgorithmSetting parseGitDiffAlgorithmSetting(String? value) {
+  final normalized = value?.trim().toLowerCase();
+  return switch (normalized) {
+    null || '' => const GitDiffAlgorithmSetting.gitDefault(),
+    'default' => const GitDiffAlgorithmSetting(
+      algorithm: DiffAlgorithm.myers,
+      configuredValue: 'default',
+    ),
+    'myers' => const GitDiffAlgorithmSetting(
+      algorithm: DiffAlgorithm.myers,
+      configuredValue: 'myers',
+    ),
+    'minimal' => const GitDiffAlgorithmSetting(
+      algorithm: DiffAlgorithm.minimal,
+      configuredValue: 'minimal',
+    ),
+    'patience' => const GitDiffAlgorithmSetting(
+      algorithm: DiffAlgorithm.patience,
+      configuredValue: 'patience',
+    ),
+    'histogram' => const GitDiffAlgorithmSetting(
+      algorithm: DiffAlgorithm.histogram,
+      configuredValue: 'histogram',
+    ),
+    _ => throw FormatException('Unsupported diff.algorithm: $value'),
+  };
+}
+
 extension DiffAlgorithmArguments on DiffAlgorithm {
   String get label => switch (this) {
     DiffAlgorithm.gitSetting => 'Git setting',
@@ -670,6 +734,8 @@ class RepoRefs {
 abstract interface class FullDiffRepository {
   String get root;
 
+  Future<GitDiffAlgorithmSetting> loadDiffAlgorithmSetting();
+
   Future<List<GitFileChange>> loadFiles(GitCommit commit, {String? parent});
 
   Future<List<DiffLine>> loadDiff(
@@ -728,6 +794,25 @@ class GitRepository implements FullDiffRepository {
   Future<String>? _emptyTree;
   Future<List<String>>? _startingRevisions;
   final _untrackedFiles = Expando<bool>();
+
+  @override
+  Future<GitDiffAlgorithmSetting> loadDiffAlgorithmSetting() async {
+    const args = ['config', '--get', 'diff.algorithm'];
+    final result = await runner(gitExecutable, args, workingDirectory: root);
+    final value = result.stdout.toString().trim();
+    if (result.exitCode == 1 && value.isEmpty) {
+      return const GitDiffAlgorithmSetting.gitDefault();
+    }
+    if (result.exitCode != 0) {
+      throw ProcessException(
+        gitExecutable,
+        args,
+        result.stderr.toString(),
+        result.exitCode,
+      );
+    }
+    return parseGitDiffAlgorithmSetting(value);
+  }
 
   Future<List<GitCommit>> loadHistory({int limit = 500, int skip = 0}) async {
     final revisions = await (_startingRevisions ??= _loadStartingRevisions());

@@ -474,6 +474,43 @@ void main() {
     ]);
   });
 
+  test('resolves Git diff algorithm settings to concrete choices', () {
+    final unset = parseGitDiffAlgorithmSetting(null);
+    expect(unset.algorithm, DiffAlgorithm.myers);
+    expect(unset.usesGitDefault, isTrue);
+    expect(unset.configLabel, 'diff.algorithm 미설정');
+
+    for (final entry in {
+      'default': DiffAlgorithm.myers,
+      'MYERS': DiffAlgorithm.myers,
+      'minimal': DiffAlgorithm.minimal,
+      'patience': DiffAlgorithm.patience,
+      'histogram': DiffAlgorithm.histogram,
+    }.entries) {
+      expect(parseGitDiffAlgorithmSetting(entry.key).algorithm, entry.value);
+    }
+
+    const histogram = GitDiffAlgorithmSetting(
+      algorithm: DiffAlgorithm.histogram,
+      configuredValue: 'histogram',
+    );
+    expect(
+      histogram.normalizeSelection(DiffAlgorithm.histogram),
+      DiffAlgorithm.gitSetting,
+    );
+    expect(
+      histogram.resolveSelection(DiffAlgorithm.gitSetting),
+      DiffAlgorithm.histogram,
+    );
+  });
+
+  test('rejects unsupported Git diff algorithm settings', () {
+    expect(
+      () => parseGitDiffAlgorithmSetting('unknown'),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
   test(
     'requests three context lines and optionally ignores whitespace',
     () async {

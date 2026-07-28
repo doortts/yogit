@@ -298,6 +298,32 @@ void main() {
     },
   );
 
+  test('reads the effective repository diff algorithm setting', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    final repository = GitRepository(root.path);
+
+    final unset = await repository.loadDiffAlgorithmSetting();
+    expect(unset.algorithm, DiffAlgorithm.myers);
+    expect(unset.usesGitDefault, isTrue);
+
+    await runGit(root, ['config', 'diff.algorithm', 'histogram']);
+    final configured = await repository.loadDiffAlgorithmSetting();
+    expect(configured.algorithm, DiffAlgorithm.histogram);
+    expect(configured.configuredValue, 'histogram');
+  });
+
+  test('rejects an unsupported repository diff algorithm setting', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await runGit(root, ['config', 'diff.algorithm', 'unknown']);
+
+    await expectLater(
+      GitRepository(root.path).loadDiffAlgorithmSetting(),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
   test(
     'selected git algorithm changes the parsed patch when boundaries differ',
     () async {

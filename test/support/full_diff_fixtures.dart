@@ -27,7 +27,11 @@ class FakeFullDiffRepository implements FullDiffRepository {
   final contentRequests = <({String sha, String path, String? parent})>[];
   final blameRequests = <({String sha, String path, String? parent})>[];
   final historyRequests = <({String sha, String path})>[];
+  int diffAlgorithmSettingRequests = 0;
 
+  GitDiffAlgorithmSetting gitDiffAlgorithmSetting =
+      const GitDiffAlgorithmSetting.gitDefault();
+  Future<GitDiffAlgorithmSetting> Function()? diffAlgorithmSetting;
   Future<List<GitFileChange>> Function(GitCommit, String?)? files;
   Future<List<DiffLine>> Function(
     GitCommit,
@@ -56,6 +60,13 @@ class FakeFullDiffRepository implements FullDiffRepository {
   blame;
   Future<List<GitFileHistoryRecord>> Function(GitCommit, GitFileChange)?
   history;
+
+  @override
+  Future<GitDiffAlgorithmSetting> loadDiffAlgorithmSetting() {
+    diffAlgorithmSettingRequests++;
+    return diffAlgorithmSetting?.call() ??
+        Future.value(gitDiffAlgorithmSetting);
+  }
 
   @override
   Future<List<GitFileChange>> loadFiles(GitCommit commit, {String? parent}) {
