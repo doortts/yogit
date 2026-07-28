@@ -670,6 +670,8 @@ class RepoRefs {
 abstract interface class FullDiffRepository {
   String get root;
 
+  Future<String> loadCommitMessage(String sha);
+
   Future<List<GitFileChange>> loadFiles(GitCommit commit, {String? parent});
 
   Future<List<DiffLine>> loadDiff(
@@ -728,6 +730,10 @@ class GitRepository implements FullDiffRepository {
   Future<String>? _emptyTree;
   Future<List<String>>? _startingRevisions;
   final _untrackedFiles = Expando<bool>();
+
+  @override
+  Future<String> loadCommitMessage(String sha) =>
+      _run(['show', '-s', '--format=%B', sha]);
 
   Future<List<GitCommit>> loadHistory({int limit = 500, int skip = 0}) async {
     final revisions = await (_startingRevisions ??= _loadStartingRevisions());
