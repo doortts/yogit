@@ -1001,11 +1001,12 @@ void main() {
           return ProcessResult(
             1,
             0,
-            'refs/heads/main aaa1\n'
-                'refs/heads/feature/x aaa2\n'
-                'refs/remotes/origin/HEAD aaa1\n'
-                'refs/remotes/origin/main aaa3\n'
-                'refs/tags/v0.1.0 aaa4\n',
+            'refs/heads/main aaa1 1700000100\n'
+                'refs/heads/feature/x aaa2 1700000200\n'
+                'refs/remotes/origin/HEAD aaa1 1700000100\n'
+                'refs/remotes/origin/main aaa3 1700000300\n'
+                'refs/tags/undated aaa5 \n'
+                'refs/tags/v0.1.0 aaa4 1700000400\n',
             '',
           );
         }
@@ -1023,13 +1024,15 @@ void main() {
 
     expect(refs.local, ['main', 'feature/x']);
     expect(refs.remote, ['origin/main']);
-    expect(refs.tags, ['v0.1.0']);
+    expect(refs.tags, ['undated', 'v0.1.0']);
+    expect(refs.tagCreatorTimes, {'v0.1.0': 1700000400});
     expect(refs.current, 'main');
     // origin/HEAD is an alias, so it contributes neither a name nor a tip.
     expect(refs.tips, {
       'main': 'aaa1',
       'feature/x': 'aaa2',
       'origin/main': 'aaa3',
+      'undated': 'aaa5',
       'v0.1.0': 'aaa4',
     });
     expect(refs.localTips, {'main': 'aaa1', 'feature/x': 'aaa2'});
@@ -1038,7 +1041,7 @@ void main() {
     expect(calls, [
       [
         'for-each-ref',
-        '--format=%(refname) %(objectname)',
+        '--format=%(refname) %(objectname) %(creatordate:unix)',
         'refs/heads',
         'refs/remotes',
         'refs/tags',

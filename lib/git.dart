@@ -771,6 +771,7 @@ class RepoRefs {
     this.tips = const {},
     this.localTips = const {},
     this.birthTimes = const {},
+    this.tagCreatorTimes = const {},
   });
 
   final List<String> local;
@@ -788,6 +789,9 @@ class RepoRefs {
   /// Local branch name → tip commit sha. Unlike [tips], this map cannot be
   /// overwritten by a same-named remote branch or tag.
   final Map<String, String> localTips;
+
+  /// Tag name → creator unix time. Absent when Git has no creator date.
+  final Map<String, int> tagCreatorTimes;
 }
 
 String? resolveBaseBranch(RepoRefs refs, String? savedBranch) {
@@ -1273,7 +1277,7 @@ class GitRepository implements FullDiffRepository {
   Future<RepoRefs> loadRefs() async {
     final lines = (await _run([
       'for-each-ref',
-      '--format=%(refname) %(objectname)',
+      '--format=%(refname) %(objectname) %(creatordate:unix)',
       'refs/heads',
       'refs/remotes',
       'refs/tags',
@@ -1283,14 +1287,22 @@ class GitRepository implements FullDiffRepository {
     final tags = <String>[];
     final tips = <String, String>{};
     final localTips = <String, String>{};
+    final tagCreatorTimes = <String, int>{};
     final buckets = {
       'refs/heads/': local,
       'refs/remotes/': remote,
       'refs/tags/': tags,
     };
     for (final line in lines) {
-      // A ref name cannot contain a space, so the split is exactly two fields.
-      final [name, sha] = line.split(' ');
+      final firstSpace = line.indexOf(' ');
+      final secondSpace = line.indexOf(' ', firstSpace + 1);
+      final name = line.substring(0, firstSpace);
+      final sha = secondSpace < 0
+          ? line.substring(firstSpace + 1)
+          : line.substring(firstSpace + 1, secondSpace);
+      final creatorTime = secondSpace < 0
+          ? null
+          : int.tryParse(line.substring(secondSpace + 1).trim());
       for (final bucket in buckets.entries) {
         if (!name.startsWith(bucket.key)) continue;
         final short = name.substring(bucket.key.length);
@@ -1299,6 +1311,9 @@ class GitRepository implements FullDiffRepository {
         bucket.value.add(short);
         tips[short] = sha;
         if (bucket.value == local) localTips[short] = sha;
+        if (bucket.value == tags && creatorTime != null) {
+          tagCreatorTimes[short] = creatorTime;
+        }
         break;
       }
     }
@@ -1311,6 +1326,7 @@ class GitRepository implements FullDiffRepository {
       current: current.isEmpty ? null : current,
       tips: tips,
       localTips: localTips,
+      tagCreatorTimes: tagCreatorTimes,
       birthTimes: {
         for (var index = 0; index < local.length; index++)
           local[index]: ?births[index],
