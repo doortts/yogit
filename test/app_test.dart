@@ -2129,6 +2129,65 @@ void main() {
     }
   });
 
+  testWidgets('tags show the newest ten and filtering reveals hidden matches', (
+    tester,
+  ) async {
+    final tags = [for (var index = 1; index <= 12; index++) 'release/v$index'];
+    final tagCreatorTimes = {
+      for (var index = 1; index <= 12; index++) 'release/v$index': index * 100,
+    };
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: RepoRefs(tags: tags, tagCreatorTimes: tagCreatorTimes),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('sidebar-ref-release/v12')), findsOneWidget);
+    expect(find.byKey(const Key('sidebar-ref-release/v3')), findsOneWidget);
+    expect(find.byKey(const Key('sidebar-ref-release/v2')), findsNothing);
+    expect(find.byKey(const Key('sidebar-ref-release/v1')), findsNothing);
+    expect(find.text('나머지 2개'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('sidebar-tags-overflow')));
+    await tester.pump();
+    expect(find.byKey(const Key('sidebar-ref-release/v1')), findsOneWidget);
+    final sidebarList = find.descendant(
+      of: find.byKey(const Key('sidebar')),
+      matching: find.byType(ListView),
+    );
+    final sidebarScrollable = find.descendant(
+      of: sidebarList,
+      matching: find.byType(Scrollable),
+    );
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('sidebar-tags-overflow')),
+      80,
+      scrollable: sidebarScrollable,
+    );
+    expect(find.text('태그 접기'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('sidebar-tags-overflow')));
+    await tester.pump();
+    expect(find.byKey(const Key('sidebar-ref-release/v1')), findsNothing);
+
+    await tester.enterText(find.byKey(const Key('ref-filter')), 'v1');
+    await tester.pump();
+    for (final index in [1, 10, 11, 12]) {
+      expect(find.byKey(Key('sidebar-ref-release/v$index')), findsOneWidget);
+    }
+    expect(find.byKey(const Key('sidebar-tags-overflow')), findsNothing);
+
+    await tester.enterText(find.byKey(const Key('ref-filter')), '');
+    await tester.pump();
+    expect(find.byKey(const Key('sidebar-ref-release/v1')), findsNothing);
+    expect(find.text('나머지 2개'), findsOneWidget);
+  });
+
   testWidgets(
     'selected row keeps normal ref chip styling and marks HEAD and tags',
     (tester) async {

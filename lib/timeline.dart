@@ -373,6 +373,8 @@ class TimelineScreen extends StatefulWidget {
 }
 
 class _TimelineScreenState extends State<TimelineScreen> {
+  static const _collapsedTagLimit = 10;
+
   static const _pageSize = 500;
 
   static const _sidebarRange = (min: 120.0, max: 320.0);
@@ -439,6 +441,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   var _filter = '';
   final _collapsedRefSections = <_RefSection>{};
   final _collapsedRefFolders = <String>{};
+  var _showAllTags = false;
 
   late final Map<String, double> _widths = _widthMap(widget.columnWidths);
   late double? _commitWidth = widget.columnWidths.commit;
@@ -1462,11 +1465,56 @@ class _TimelineScreenState extends State<TimelineScreen> {
     );
     if (collapsed) return;
 
-    final visibleNames = filtering
-        ? names.where((name) => name.toLowerCase().contains(query)).toList()
+    final orderedNames = section == _RefSection.tags
+        ? sortTagsNewestFirst(names, _refs.tagCreatorTimes)
         : names;
+    final hiddenTagCount = section == _RefSection.tags
+        ? math.max(0, orderedNames.length - _collapsedTagLimit)
+        : 0;
+    final projectedNames =
+        section == _RefSection.tags && !filtering && !_showAllTags
+        ? orderedNames.take(_collapsedTagLimit).toList()
+        : orderedNames;
+    final visibleNames = filtering
+        ? orderedNames
+              .where((name) => name.toLowerCase().contains(query))
+              .toList()
+        : projectedNames;
     yield* _refTreeRows(section, buildRefTree(visibleNames));
+    if (section == _RefSection.tags && !filtering && hiddenTagCount > 0) {
+      yield _tagOverflowRow(hiddenTagCount);
+    }
   }
+
+  Widget _tagOverflowRow(int hiddenTagCount) => GestureDetector(
+    key: const Key('sidebar-tags-overflow'),
+    behavior: HitTestBehavior.opaque,
+    onTap: () => setState(() => _showAllTags = !_showAllTags),
+    child: SizedBox(
+      height: 28,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Row(
+          children: [
+            Icon(
+              _showAllTags ? Icons.expand_less : Icons.expand_more,
+              size: 16,
+              color: _muted,
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                _showAllTags ? '태그 접기' : '나머지 $hiddenTagCount개',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: _muted, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 
   Iterable<Widget> _refTreeRows(
     _RefSection section,
