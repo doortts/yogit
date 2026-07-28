@@ -170,5 +170,5 @@ Flutter에서 저장소 경로를 Dart 진입점으로 해석해 실패했다. �
 | Side-by-side + 전체 파일 | [25-side-by-side-full-file](actual/25-side-by-side-full-file.png) | 1280×842 | PASS: 레이아웃 단일 선택, 전체 문맥, 양쪽 결과와 가운데 경계 확인 |
 | Command 단축키 | [26-shortcut-hints](actual/26-shortcut-hints.png) | 1280×842 | PASS: 배지가 조작부 아래에 겹쳐 나타나며 상단 바는 움직이지 않음 |
 | 알고리즘 선택기 | [27-algorithm-chooser](actual/27-algorithm-chooser.png) | 1280×842 | PASS: 왼쪽 목록과 오른쪽 Histogram 설명을 잘림 없이 확인 |
-| Blame 선택 카드 | [28-blame-selection](actual/28-blame-selection.png) | 1280×842 | PASS: 카드가 다음 두 행 영역을 덮고 기존 행 위치와 글꼴은 유지됨 |
+| Blame 선택 카드 | [28-blame-selection](actual/28-blame-selection.png) | 1280×842 | PASS: 카드는 294행에서 두 행 높이 아래에 시작해 295행을 가리지 않음. 본문은 UI 글꼴, SHA는 기술 글꼴 유지 |
 | History 리사이저 | [29-history-resizers](actual/29-history-resizers.png) | 1280×842 | PASS: 세 패널 경계, 저장된 너비, 가장자리에 닿는 선택면 확인 |

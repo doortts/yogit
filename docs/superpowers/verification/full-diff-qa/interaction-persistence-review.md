@@ -13,7 +13,7 @@
 | [25-side-by-side-full-file](actual/25-side-by-side-full-file.png) | 1280×842 | Unified를 선택한 뒤 Side-by-side로 되돌렸다. Side-by-side만 선택되고 Hunk는 독립적으로 꺼져 있다. 하나로 합쳐진 `Full file` 범위 안에 이전·결과 열, 가운데 경계, 변경 사이의 연속 문맥이 함께 보인다. | PASS |
 | [26-shortcut-hints](actual/26-shortcut-hints.png) | 1280×842 | Command 키를 누른 상태를 캡처했다. `⌘⇧F`, `⌘1`~`⌘3`, `⌘⇧A`, `⌘⇧Space`, `⌘⇧L`, `⌘U`, `⌘⇧H`가 각 조작부 바로 아래에 겹쳐 표시되며, 표시 전후 Unified 조작부의 위치는 바뀌지 않는다. | PASS |
 | [27-algorithm-chooser](actual/27-algorithm-chooser.png) | 1280×842 | 알고리즘 선택기를 열고 Histogram을 적용했다. 왼쪽의 Git setting·Myers·Minimal·Patience·Histogram 목록과 오른쪽 설명이 모두 보이고, Histogram에만 선택 표시가 있다. 팝오버 어느 쪽도 잘리지 않는다. | PASS |
-| [28-blame-selection](actual/28-blame-selection.png) | 1280×842 | 294행을 마우스로 선택했다. 커밋 카드가 선택 행 아래의 두 행 높이를 덮되 목록을 밀어내지 않고, 뒤 행의 위치도 그대로다. 제목·SHA·작성자·날짜가 지정 UI 글꼴로 선명하게 보인다. | PASS |
+| [28-blame-selection](actual/28-blame-selection.png) | 1280×842 | 294행을 마우스로 선택했다. 커밋 카드는 선택 행에서 두 행 높이 아래인 296행 위치에서 시작한다. 295행은 가리지 않고 296행부터 아래 콘텐츠 위에 겹치며 뒤 행의 위치도 그대로다. 제목·작성자·날짜 같은 본문 정보는 UI 글꼴을 물려받고 SHA는 의도대로 기술 글꼴(`technicalFontFamily`)을 쓴다. | PASS |
 | [29-history-resizers](actual/29-history-resizers.png) | 1280×842 | Files 경계를 20px, History 경계를 24px 옮겼다. Files·History·diff 사이의 1px 세로선이 끊기지 않으며, 콜백에 저장된 너비와 화면 너비가 같다. 선택된 History 행의 배경은 위·왼쪽·오른쪽 패널 가장자리에 닿는다. | PASS |
 
 ## 수동 확인 항목
@@ -30,8 +30,8 @@
    읽을 수 있다. **PASS**
 6. 단축키 배지 배치: 26에서 배지가 조작부 바로 아래에 놓이고 상단 바는
    움직이지 않는다. **PASS**
-7. Blame 카드 배치: 28에서 카드가 다음 두 행 영역을 덮고 기존 행을
-   밀어내지 않는다. **PASS**
+7. Blame 카드 배치: 28에서 카드는 294행보다 두 행 아래인 296행부터
+   겹친다. 295행을 가리지 않고 기존 행도 밀어내지 않는다. **PASS**
 8. 열 경계: 29에서 Files·History·diff 사이의 1px 세로 경계가 모두
    보인다. **PASS**
 9. History 선택면: 29에서 선택 배경이 목록 패널의 위·왼쪽·오른쪽
@@ -68,9 +68,10 @@
 10. Command 키를 누르면 배지가 상단 배치를 움직이지 않고 나타난다.
     26에서 배지의 위치와 Unified 조작부의 전후 좌표를 함께 검사했다.
     **PASS**
-11. Blame의 hover·클릭·키보드 선택은 행을 밀지 않고 다음 두 행 영역에
-    커밋 카드를 표시한다. 28과 Blame 선택·화살표 테스트에서 행 좌표를
-    확인했다. **PASS**
+11. Blame의 hover·클릭·키보드 선택은 행을 밀지 않는다. 커밋 카드는
+    선택 행에서 두 행 높이 아래부터 겹치므로 바로 다음 행은 가리지
+    않는다. 28과 Blame 선택·화살표 테스트에서 행 좌표를 확인했다.
+    **PASS**
 12. `⌘⇧↑`·`⌘⇧↓`는 활성 콘텐츠를 뷰포트의 50%만큼 스크롤한다.
     Preview·Full Diff·History 상세의 페이지 스크롤 테스트에서 이동
     거리와 끝점 제한을 확인했다. **PASS**
