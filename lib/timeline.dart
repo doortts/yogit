@@ -399,6 +399,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
   final _scrollController = ScrollController();
   final _previewFilesScrollController = ScrollController();
   final _previewDiffScrollController = ScrollController();
+  final _selectedPreviewFileKey = GlobalKey(
+    debugLabel: 'selected preview file',
+  );
   ScrollController? _activePreviewScrollController;
   final _commits = <GitCommit>[];
   final _committersBySha = <String, GitIdentity>{};
@@ -806,7 +809,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
           keyboard.isMetaPressed &&
           !keyboard.isShiftPressed) {
         if (_previewController.previewPlacement != PreviewPlacement.closed) {
-          _stepPreviewFile(step);
+          _stepPreviewFile(step, animate: event is KeyDownEvent);
         }
         return KeyEventResult.handled;
       }
@@ -2866,7 +2869,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       });
 
   /// Steps the open preview through the commit's files, clamped at both ends.
-  void _stepPreviewFile(int delta) {
+  void _stepPreviewFile(int delta, {bool animate = true}) {
     final commit = _selectedCommit;
     if (commit == null) return;
     final files = _previewFileLists[commit.sha];
@@ -2874,16 +2877,46 @@ class _TimelineScreenState extends State<TimelineScreen> {
     final current = _previewPaths[commit.sha] ?? files.first.path;
     final index = files.indexWhere((file) => file.path == current);
     final next = (index + delta).clamp(0, files.length - 1);
-    _selectPreviewFile(commit, files[next].path);
+    if (files[next].path == current) return;
+    _selectPreviewFile(
+      commit,
+      files[next].path,
+      revealDirection: delta,
+      animateReveal: animate,
+    );
   }
 
-  void _selectPreviewFile(GitCommit commit, String path) {
+  void _selectPreviewFile(
+    GitCommit commit,
+    String path, {
+    int? revealDirection,
+    bool animateReveal = true,
+  }) {
     setState(() => _previewPaths[commit.sha] = path);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       if (_previewDiffScrollController.hasClients) {
         _previewDiffScrollController.jumpTo(0);
       }
+      if (revealDirection != null) {
+        _revealSelectedPreviewFile(revealDirection, animate: animateReveal);
+      }
     });
+  }
+
+  void _revealSelectedPreviewFile(int direction, {required bool animate}) {
+    final selectedContext = _selectedPreviewFileKey.currentContext;
+    if (selectedContext == null) return;
+    unawaited(
+      Scrollable.ensureVisible(
+        selectedContext,
+        duration: animate ? const Duration(milliseconds: 100) : Duration.zero,
+        curve: Curves.easeOut,
+        alignmentPolicy: direction < 0
+            ? ScrollPositionAlignmentPolicy.keepVisibleAtStart
+            : ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+      ),
+    );
   }
 
   Widget _previewBody(GitCommit commit, bool bottom) {
@@ -3196,6 +3229,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   Widget _previewFileRow(GitCommit commit, GitFileChange file, bool selected) =>
       SizedBox(
+        key: selected ? _selectedPreviewFileKey : null,
         height: 28,
         child: InkWell(
           onTap: () => _selectPreviewFile(commit, file.path),
