@@ -4,12 +4,15 @@ import 'package:flutter/services.dart';
 import 'avatars.dart';
 import 'full_diff_anchor_probe.dart';
 import 'full_diff_code_row.dart';
+import 'full_diff_commit_info_card.dart';
 import 'full_diff_model.dart';
 import 'full_diff_syntax_contract.dart';
 import 'full_diff_theme.dart';
 import 'full_source_hunk_map.dart';
 import 'git.dart';
 import 'typography.dart';
+
+const fullBlameAvatarWidth = 20.0;
 
 class FullBlameView extends StatefulWidget {
   const FullBlameView({
@@ -24,6 +27,9 @@ class FullBlameView extends StatefulWidget {
     this.controller,
     this.avatarService,
     this.showRemoteAvatars = true,
+    this.focusNode,
+    this.onMoveToFiles,
+    this.loadCommitMessage,
     super.key,
   });
 
@@ -38,18 +44,23 @@ class FullBlameView extends StatefulWidget {
   final ScrollController? controller;
   final AvatarService? avatarService;
   final bool showRemoteAvatars;
+  final FocusNode? focusNode;
+  final VoidCallback? onMoveToFiles;
+  final FullDiffCommitMessageLoader? loadCommitMessage;
 
   @override
   FullBlameViewState createState() => FullBlameViewState();
 }
 
 class FullBlameViewState extends State<FullBlameView> {
-  final _focusNode = FocusNode(debugLabel: 'full blame lines');
+  final _ownedFocusNode = FocusNode(debugLabel: 'full blame lines');
   final _selectedLink = LayerLink();
   final _selectedRowKey = GlobalKey(debugLabel: 'selected blame row');
   int? _selectedLine;
   int? _hoveredLine;
   int _navigationSerial = 0;
+
+  FocusNode get _focusNode => widget.focusNode ?? _ownedFocusNode;
 
   @visibleForTesting
   int get debugRetainedRowGlobalKeyCount => 1;
@@ -57,7 +68,7 @@ class FullBlameViewState extends State<FullBlameView> {
   @override
   void dispose() {
     _navigationSerial++;
-    _focusNode.dispose();
+    _ownedFocusNode.dispose();
     super.dispose();
   }
 
@@ -71,9 +82,15 @@ class FullBlameViewState extends State<FullBlameView> {
       activeAnchor: widget.activeAnchor,
     );
     final sourceLine = sourceMap.activeLine(widget.activeAnchor);
+    final selectedLine = _selectedLine;
+    final selectedBlame = selectedLine == null
+        ? null
+        : widget.document.lines[selectedLine - 1];
     return LayoutBuilder(
       builder: (context, constraints) => Focus(
+        key: const Key('blame-list-focus'),
         focusNode: _focusNode,
+        onFocusChange: _handleFocusChange,
         onKeyEvent: _handleKeyEvent,
         child: FullDiffSelectionArea(
           child: Stack(
@@ -153,7 +170,7 @@ class FullBlameViewState extends State<FullBlameView> {
                   );
                 },
               ),
-              if (_selectedLine case final int selectedLine)
+              if (selectedLine != null && selectedBlame != null)
                 Positioned.fill(
                   child: IgnorePointer(
                     child: ClipRect(
@@ -162,13 +179,34 @@ class FullBlameViewState extends State<FullBlameView> {
                         showWhenUnlinked: false,
                         targetAnchor: Alignment.topLeft,
                         followerAnchor: Alignment.topLeft,
-                        offset: const Offset(12, fullDiffSourceRowHeight * 2),
-                        child: Align(
+                        offset: const Offset(
+                          fullBlameAvatarWidth,
+                          fullDiffSourceRowHeight * 2,
+                        ),
+                        child: UnconstrainedBox(
+                          constrainedAxis: Axis.vertical,
                           alignment: Alignment.topLeft,
-                          child: BlameCommitDetailsCard(
-                            key: Key('blame-commit-details-$selectedLine'),
-                            blame: widget.document.lines[selectedLine - 1],
-                            lineNumber: selectedLine,
+                          child: SizedBox(
+                            width: constraints.maxWidth <= fullBlameAvatarWidth
+                                ? 0
+                                : constraints.maxWidth - fullBlameAvatarWidth,
+                            child: Align(
+                              alignment: Alignment.topLeft,
+                              child: FullDiffCommitInfoCard(
+                                key: Key('blame-commit-details-$selectedLine'),
+                                info: FullDiffCommitInfo(
+                                  sha: selectedBlame.sha,
+                                  shortSha: _shortSha(selectedBlame.sha),
+                                  fallbackMessage: selectedBlame.summary,
+                                  author: selectedBlame.author,
+                                  timestamp: selectedBlame.authorTimestamp,
+                                ),
+                                loadMessage:
+                                    _canLoadCommitMessage(selectedBlame)
+                                    ? widget.loadCommitMessage
+                                    : null,
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -200,6 +238,22 @@ class FullBlameViewState extends State<FullBlameView> {
     _focusNode.requestFocus();
   }
 
+  void _handleFocusChange(bool hasFocus) {
+    if (!hasFocus ||
+        _selectedLine != null ||
+        widget.document.file.lines.isEmpty) {
+      return;
+    }
+    final sourceMap = FullSourceHunkMap(
+      hunks: widget.hunks,
+      side: widget.document.file.side,
+      lineCount: widget.document.file.lines.length,
+      activeAnchor: widget.activeAnchor,
+    );
+    final initial = sourceMap.activeLine(widget.activeAnchor) ?? 1;
+    setState(() => _selectedLine = initial);
+  }
+
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
@@ -209,6 +263,10 @@ class FullBlameViewState extends State<FullBlameView> {
         HardwareKeyboard.instance.isShiftPressed ||
         HardwareKeyboard.instance.isControlPressed) {
       return KeyEventResult.ignored;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      widget.onMoveToFiles?.call();
+      return KeyEventResult.handled;
     }
     final delta = event.logicalKey == LogicalKeyboardKey.arrowUp
         ? -1
@@ -309,6 +367,13 @@ class FullBlameViewState extends State<FullBlameView> {
         );
 }
 
+bool _canLoadCommitMessage(BlameLine blame) {
+  if (blame.uncommitted) return false;
+  final sha = blame.sha.trim();
+  return RegExp(r'^[0-9a-fA-F]{7,64}$').hasMatch(sha) &&
+      !RegExp(r'^0+$').hasMatch(sha);
+}
+
 class BlameSourceRow extends StatelessWidget {
   const BlameSourceRow({
     required this.blame,
@@ -366,7 +431,7 @@ class BlameSourceRow extends StatelessWidget {
         height: fullDiffSourceRowHeight,
         child: Row(
           children: [
-            SizedBox(width: 20, child: _avatar()),
+            SizedBox(width: fullBlameAvatarWidth, child: _avatar()),
             SizedBox(
               key: Key('blame-line-number-$lineNumber'),
               width: 42,
@@ -451,7 +516,7 @@ class BlameSourceRow extends StatelessWidget {
       key: Key('blame-avatar-$lineNumber'),
       identity: identity,
       remoteAvatar: remoteAvatar,
-      size: 20,
+      size: fullBlameAvatarWidth,
     );
 
     final service = showRemoteAvatars && _shaBranch(blame.sha) != null
@@ -463,79 +528,6 @@ class BlameSourceRow extends StatelessWidget {
       builder: (context, snapshot) => avatar(snapshot.data?.author),
     );
   }
-}
-
-class BlameCommitDetailsCard extends StatelessWidget {
-  const BlameCommitDetailsCard({
-    required this.blame,
-    required this.lineNumber,
-    super.key,
-  });
-
-  final BlameLine blame;
-  final int lineNumber;
-
-  @override
-  Widget build(BuildContext context) => ConstrainedBox(
-    constraints: const BoxConstraints(maxWidth: 420),
-    child: DecoratedBox(
-      decoration: BoxDecoration(
-        color: fullDiffHeader,
-        border: Border.all(color: fullDiffDivider),
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x66000000),
-            blurRadius: 12,
-            offset: Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        child: DefaultTextStyle.merge(
-          style: const TextStyle(color: Colors.white, fontSize: 11),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (blame.summary.isNotEmpty) ...[
-                Text(
-                  blame.summary,
-                  key: Key('blame-commit-summary-$lineNumber'),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 4),
-              ],
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _shortSha(blame.sha),
-                    style: const TextStyle(
-                      color: fullDiffAccent,
-                      fontFamily: technicalFontFamily,
-                      fontFamilyFallback: technicalFontFallback,
-                      fontSize: 10,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Flexible(child: Text(blame.author)),
-                  const SizedBox(width: 8),
-                  Text(
-                    _formatDate(blame.authorTimestamp),
-                    style: const TextStyle(color: fullDiffMuted, fontSize: 10),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    ),
-  );
 }
 
 String _formatDate(int? timestamp) {

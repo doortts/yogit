@@ -784,7 +784,14 @@ GitCommit _qaCommit({
   GitIdentity author = fixtureIdentity,
   bool workingTree = false,
 }) {
-  final timestamp =
+  final authorTimestamp =
+      DateTime(
+        2026,
+        7,
+        28,
+      ).subtract(Duration(days: daysAgo)).millisecondsSinceEpoch ~/
+      1000;
+  final committerTimestamp =
       DateTime.now()
           .subtract(Duration(days: daysAgo, hours: 1))
           .millisecondsSinceEpoch ~/
@@ -794,9 +801,9 @@ GitCommit _qaCommit({
     shortSha: sha,
     parents: [parent],
     author: author,
-    authorTimestamp: timestamp,
+    authorTimestamp: authorTimestamp,
     committer: author,
-    committerTimestamp: timestamp,
+    committerTimestamp: committerTimestamp,
     refs: const [],
     subject: subject,
   );

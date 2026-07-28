@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'full_diff_commit_info_card.dart';
 import 'full_diff_model.dart';
 import 'full_diff_selectable_row.dart';
 import 'full_diff_theme.dart';
@@ -14,6 +15,7 @@ class FullHistoryView extends StatefulWidget {
     this.controller,
     this.focusNode,
     this.onMoveToFiles,
+    this.loadCommitMessage,
     super.key,
   });
 
@@ -23,6 +25,7 @@ class FullHistoryView extends StatefulWidget {
   final ScrollController? controller;
   final FocusNode? focusNode;
   final VoidCallback? onMoveToFiles;
+  final FullDiffCommitMessageLoader? loadCommitMessage;
 
   @override
   State<FullHistoryView> createState() => _FullHistoryViewState();
@@ -31,6 +34,7 @@ class FullHistoryView extends StatefulWidget {
 class _FullHistoryViewState extends State<FullHistoryView> {
   final _ownedFocusNode = FocusNode(debugLabel: 'full history list');
   final _ownedScrollController = ScrollController();
+  final _selectedLink = LayerLink();
   final Map<String, GlobalKey> _rowKeys = {};
   bool _hasFocus = false;
 
@@ -125,6 +129,7 @@ class _FullHistoryViewState extends State<FullHistoryView> {
         ),
       );
     }
+    final selected = widget.selected;
     return Focus(
       key: const Key('history-list-focus'),
       focusNode: _focusNode,
@@ -133,50 +138,94 @@ class _FullHistoryViewState extends State<FullHistoryView> {
       },
       onKeyEvent: _handleKey,
       child: FocusTraversalGroup(
-        child: ListView.builder(
-          key: const Key('history-list'),
-          controller: _scrollController,
-          primary: false,
-          padding: EdgeInsets.zero,
-          itemCount: widget.entries.length,
-          itemBuilder: (context, index) {
-            final entry = widget.entries[index];
-            final isSelected = identical(entry, widget.selected);
-            void activate() {
-              _focusNode.requestFocus();
-              widget.onSelected(entry);
-            }
-
-            return KeyedSubtree(
-              key: _rowKeys.putIfAbsent(
-                entry.commit.sha,
-                () => GlobalKey(debugLabel: 'history ${entry.commit.sha}'),
-              ),
-              child: Focus(
-                onKeyEvent: (_, event) {
-                  if (event is KeyDownEvent &&
-                      event.logicalKey == LogicalKeyboardKey.enter) {
-                    activate();
-                    return KeyEventResult.handled;
+        child: Stack(
+          clipBehavior: Clip.hardEdge,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: ListView.builder(
+                key: const Key('history-list'),
+                controller: _scrollController,
+                primary: false,
+                padding: EdgeInsets.zero,
+                itemCount: widget.entries.length,
+                itemBuilder: (context, index) {
+                  final entry = widget.entries[index];
+                  final isSelected = identical(entry, selected);
+                  void activate() {
+                    _focusNode.requestFocus();
+                    widget.onSelected(entry);
                   }
-                  return KeyEventResult.ignored;
+
+                  Widget row = HistoryRow(
+                    entry: entry,
+                    selected: isSelected,
+                    focused: isSelected && _hasFocus,
+                  );
+                  if (isSelected) {
+                    row = CompositedTransformTarget(
+                      link: _selectedLink,
+                      child: row,
+                    );
+                  }
+
+                  return KeyedSubtree(
+                    key: _rowKeys.putIfAbsent(
+                      entry.commit.sha,
+                      () =>
+                          GlobalKey(debugLabel: 'history ${entry.commit.sha}'),
+                    ),
+                    child: Focus(
+                      onKeyEvent: (_, event) {
+                        if (event is KeyDownEvent &&
+                            event.logicalKey == LogicalKeyboardKey.enter) {
+                          activate();
+                          return KeyEventResult.handled;
+                        }
+                        return KeyEventResult.ignored;
+                      },
+                      child: Semantics(
+                        selected: isSelected,
+                        button: true,
+                        onTap: activate,
+                        child: InkWell(onTap: activate, child: row),
+                      ),
+                    ),
+                  );
                 },
-                child: Semantics(
-                  selected: isSelected,
-                  button: true,
-                  onTap: activate,
-                  child: InkWell(
-                    onTap: activate,
-                    child: HistoryRow(
-                      entry: entry,
-                      selected: isSelected,
-                      focused: isSelected && _hasFocus,
+              ),
+            ),
+            if (_hasFocus && selected != null)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: ClipRect(
+                    child: CompositedTransformFollower(
+                      link: _selectedLink,
+                      showWhenUnlinked: false,
+                      targetAnchor: Alignment.bottomLeft,
+                      followerAnchor: Alignment.topLeft,
+                      offset: const Offset(0, 4),
+                      child: Align(
+                        alignment: Alignment.topLeft,
+                        child: FullDiffCommitInfoCard(
+                          key: Key(
+                            'history-commit-details-${selected.commit.sha}',
+                          ),
+                          info: FullDiffCommitInfo(
+                            sha: selected.commit.sha,
+                            shortSha: selected.commit.shortSha,
+                            fallbackMessage: selected.commit.subject,
+                            author: selected.commit.author.name,
+                            timestamp: selected.commit.authorTimestamp,
+                          ),
+                          loadMessage: widget.loadCommitMessage,
+                        ),
+                      ),
                     ),
                   ),
                 ),
               ),
-            );
-          },
+          ],
         ),
       ),
     );

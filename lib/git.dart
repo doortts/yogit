@@ -736,6 +736,8 @@ abstract interface class FullDiffRepository {
 
   Future<GitDiffAlgorithmSetting> loadDiffAlgorithmSetting();
 
+  Future<String> loadCommitMessage(String sha);
+
   Future<List<GitFileChange>> loadFiles(GitCommit commit, {String? parent});
 
   Future<List<DiffLine>> loadDiff(
@@ -813,6 +815,10 @@ class GitRepository implements FullDiffRepository {
     }
     return parseGitDiffAlgorithmSetting(value);
   }
+
+  @override
+  Future<String> loadCommitMessage(String sha) =>
+      _run(['show', '-s', '--format=%B', sha]);
 
   Future<List<GitCommit>> loadHistory({int limit = 500, int skip = 0}) async {
     final revisions = await (_startingRevisions ??= _loadStartingRevisions());

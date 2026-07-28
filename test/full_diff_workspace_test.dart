@@ -9,6 +9,7 @@ import 'package:yogit/diff_screen.dart';
 import 'package:yogit/external_editor.dart';
 import 'package:yogit/full_diff_hunk_header.dart';
 import 'package:yogit/full_diff_controller.dart';
+import 'package:yogit/full_diff_commit_message_cache.dart';
 import 'package:yogit/full_diff_minimap.dart';
 import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/full_diff_selectable_row.dart';
@@ -326,6 +327,7 @@ void main() {
     required FullDiffSessionController controller,
     required Size size,
     ExternalEditorService? editorService,
+    FullDiffCommitMessageCache? commitMessageCache,
     ValueChanged<FullDiffPreferences>? onPreferencesChanged,
     FullDiffColumnWidths columnWidths = const FullDiffColumnWidths(),
     ValueChanged<FullDiffColumnWidths>? onColumnWidthsChanged,
@@ -344,6 +346,7 @@ void main() {
       initialIndex: 0,
       controller: controller,
       editorService: editorService,
+      commitMessageCache: commitMessageCache,
       onPreferencesChanged: onPreferencesChanged,
       columnWidths: columnWidths,
       onColumnWidthsChanged: onColumnWidthsChanged,
@@ -1787,6 +1790,7 @@ void main() {
 
       tester.view.physicalSize = const Size(700, 842);
       await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
       expect(
         tester.getSize(find.byKey(const Key('details-files-column'))).width,
         200,
@@ -3065,6 +3069,294 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
     await tester.pump();
     expect(filesFocus.focusNode!.hasFocus, isTrue);
+  });
+
+  testWidgets('Files and Blame lines move selection and focus explicitly', (
+    tester,
+  ) async {
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [_sizedFile])
+      ..diff = ((_, _, _, _, _) async => const [])
+      ..content = ((_, _, _) async => resultFile.bytes)
+      ..blame = ((_, _, _, _) async => [
+        for (var index = 0; index < resultFile.lines.length; index++)
+          GitBlameLine(
+            lineNumber: index + 1,
+            sha: commitA.sha,
+            author: fixtureIdentity.name,
+            uncommitted: false,
+          ),
+      ]);
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.setPrimaryView(FullDiffView.blame);
+    await pumpWorkspace(
+      tester,
+      controller: controller,
+      size: const Size(1070, 842),
+    );
+
+    final filesFocus = tester.widget<Focus>(
+      find.byKey(const Key('changed-files-focus')),
+    );
+    filesFocus.focusNode!.requestFocus();
+    await tester.pump();
+    final selectedFile = controller.state.selectedFile;
+    FullDiffSelectableRowSurface selectedFileSurface() =>
+        tester.widget<FullDiffSelectableRowSurface>(
+          find.byKey(Key('selected-file-${selectedFile!.path}')),
+        );
+    BoxDecoration selectedFileDecoration() =>
+        tester
+                .widget<DecoratedBox>(
+                  find
+                      .descendant(
+                        of: find.byKey(
+                          Key('selected-file-${selectedFile!.path}'),
+                        ),
+                        matching: find.byType(DecoratedBox),
+                      )
+                      .first,
+                )
+                .decoration
+            as BoxDecoration;
+    expect(selectedFileSurface().focused, isTrue);
+    expect(selectedFileDecoration().border, isNotNull);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    final blameFocus = tester.widget<Focus>(
+      find.byKey(const Key('blame-list-focus')),
+    );
+    expect(blameFocus.focusNode!.hasFocus, isTrue);
+    expect(find.byKey(const Key('blame-selected-1')), findsOneWidget);
+    expect(selectedFileSurface().focused, isFalse);
+    expect(selectedFileDecoration().border, isNull);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect(find.byKey(const Key('blame-selected-2')), findsOneWidget);
+    expect(controller.state.selectedFile, selectedFile);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+    expect(find.byKey(const Key('blame-selected-1')), findsOneWidget);
+    expect(controller.state.selectedFile, selectedFile);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+    expect(filesFocus.focusNode!.hasFocus, isTrue);
+    expect(selectedFileSurface().focused, isTrue);
+    expect(selectedFileDecoration().border, isNotNull);
+  });
+
+  testWidgets('History and Blame restore their independent detail-list focus', (
+    tester,
+  ) async {
+    final fixture = await workspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    fixture.controller.setHistorySelected(true);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1070, 842),
+    );
+
+    final filesFocus = tester.widget<Focus>(
+      find.byKey(const Key('changed-files-focus')),
+    );
+    filesFocus.focusNode!.requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<Focus>(find.byKey(const Key('history-list-focus')))
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
+
+    await tester.tap(find.text('Blame'));
+    await tester.pumpAndSettle();
+    expect(filesFocus.focusNode!.hasFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(
+      tester
+          .widget<Focus>(find.byKey(const Key('blame-list-focus')))
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
+
+    await tester.tap(find.text('Diff'));
+    await tester.pumpAndSettle();
+    expect(fixture.controller.state.view, FullDiffView.history);
+    expect(
+      tester
+          .widget<Focus>(find.byKey(const Key('history-list-focus')))
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
+
+    await tester.tap(find.text('Blame'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<Focus>(find.byKey(const Key('blame-list-focus')))
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
+  });
+
+  testWidgets('Blame line focus survives a loading fallback to Files', (
+    tester,
+  ) async {
+    const secondFile = GitFileChange(
+      path: 'src/second.pas',
+      status: 'M',
+      additions: 1,
+      deletions: 1,
+    );
+    final pendingBlame = Completer<List<GitBlameLine>>();
+    List<GitBlameLine> blameLines() => [
+      for (var index = 0; index < resultFile.lines.length; index++)
+        GitBlameLine(
+          lineNumber: index + 1,
+          sha: commitA.sha,
+          author: fixtureIdentity.name,
+          uncommitted: false,
+        ),
+    ];
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => const [_sizedFile, secondFile])
+      ..diff = ((_, _, _, _, _) async => const [])
+      ..content = ((_, _, _) async => resultFile.bytes)
+      ..blame = ((_, file, _, _) async {
+        if (file == secondFile) return pendingBlame.future;
+        return blameLines();
+      });
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [commitA],
+      initialIndex: 0,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.setPrimaryView(FullDiffView.blame);
+    await pumpWorkspace(
+      tester,
+      controller: controller,
+      size: const Size(1070, 842),
+    );
+
+    final filesFocus = tester.widget<Focus>(
+      find.byKey(const Key('changed-files-focus')),
+    );
+    filesFocus.focusNode!.requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(
+      tester
+          .widget<Focus>(find.byKey(const Key('blame-list-focus')))
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
+
+    final selection = controller.selectFile(secondFile);
+    await tester.pump();
+    expect(find.byKey(const Key('blame-list-focus')), findsNothing);
+    expect(filesFocus.focusNode!.hasFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(filesFocus.focusNode!.hasFocus, isTrue);
+
+    pendingBlame.complete(blameLines());
+    await selection;
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<Focus>(find.byKey(const Key('blame-list-focus')))
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
+    expect(find.byKey(const Key('blame-selected-1')), findsOneWidget);
+    expect(controller.state.selectedFile, secondFile);
+  });
+
+  testWidgets('commit message cache is shared by reopened Blame and History', (
+    tester,
+  ) async {
+    final first = await workspaceFixture();
+    addTearDown(first.controller.dispose);
+    first.repository.commitMessage = (sha) async =>
+        'Complete subject\n\nComplete body';
+    final cache = FullDiffCommitMessageCache();
+    Finder firstVisibleBlameLine() => find
+        .byWidgetPredicate(
+          (widget) =>
+              widget.key is ValueKey<String> &&
+              (widget.key! as ValueKey<String>).value.startsWith('blame-line-'),
+        )
+        .first;
+    first.controller.setPrimaryView(FullDiffView.blame);
+    await pumpWorkspace(
+      tester,
+      controller: first.controller,
+      size: const Size(1070, 842),
+      commitMessageCache: cache,
+    );
+
+    await tester.tap(firstVisibleBlameLine());
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Complete body'), findsOneWidget);
+    expect(first.repository.commitMessageRequests, [commitA.sha]);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+
+    final second = FullDiffSessionController(
+      repository: first.repository,
+      commits: const [commitA],
+      initialIndex: 0,
+    );
+    addTearDown(second.dispose);
+    await second.initialize();
+    second.setPrimaryView(FullDiffView.blame);
+    await pumpWorkspace(
+      tester,
+      controller: second,
+      size: const Size(1070, 842),
+      commitMessageCache: cache,
+    );
+
+    await tester.tap(firstVisibleBlameLine());
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Complete body'), findsOneWidget);
+    expect(first.repository.commitMessageRequests, [commitA.sha]);
+
+    second.setHistorySelected(true);
+    await tester.pumpAndSettle();
+    final historyFocus = tester.widget<Focus>(
+      find.byKey(const Key('history-list-focus')),
+    );
+    historyFocus.focusNode!.requestFocus();
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Complete body'), findsOneWidget);
+    expect(first.repository.commitMessageRequests, [commitA.sha]);
   });
 
   testWidgets(
