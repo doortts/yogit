@@ -2700,6 +2700,72 @@ void main() {
     expect(AvatarService.defaultColors, contains(AvatarService.color(ada)));
   });
 
+  testWidgets('Appearance selects one of three timeline theme previews', (
+    tester,
+  ) async {
+    final saved = <AppSettings>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          settings: const AppSettings(),
+          onChanged: saved.add,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('settings-section-appearance')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('timeline-theme-card-carbon')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('settings-section-appearance')));
+    await tester.pumpAndSettle();
+
+    for (final theme in TimelineThemeKind.values) {
+      expect(
+        find.byKey(Key('timeline-theme-card-${theme.storageValue}')),
+        findsOneWidget,
+      );
+    }
+    expect(
+      tester
+          .getSemantics(
+            find.byKey(const Key('timeline-theme-card-systemGraphite')),
+          )
+          .flagsCollection
+          .isSelected,
+      ui.Tristate.isTrue,
+    );
+
+    await tester.tap(find.byKey(const Key('timeline-theme-card-warmGraphite')));
+    await tester.pump();
+    final saveCountAfterTap = saved.length;
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(saved.last.timelineTheme, TimelineThemeKind.warmGraphite);
+    expect(saved.length, saveCountAfterTap + 1);
+
+    final saveCountAfterEnter = saved.length;
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    expect(saved.last.timelineTheme, TimelineThemeKind.warmGraphite);
+    expect(saved.length, saveCountAfterEnter + 1);
+
+    await tester.tap(find.byKey(const Key('timeline-theme-card-carbon')));
+    await tester.pumpAndSettle();
+
+    expect(saved.last.timelineTheme, TimelineThemeKind.carbon);
+    expect(
+      tester
+          .getSemantics(find.byKey(const Key('timeline-theme-card-carbon')))
+          .flagsCollection
+          .isSelected,
+      ui.Tristate.isTrue,
+    );
+  });
+
   testWidgets('the timeline colors editor applies hex edits and resets', (
     tester,
   ) async {

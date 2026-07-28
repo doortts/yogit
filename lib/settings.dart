@@ -471,6 +471,8 @@ class SettingsStore {
   }
 }
 
+enum _SettingsSection { gitIntegrations, appearance }
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     required this.settings,
@@ -489,6 +491,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late AppSettings _settings = widget.settings;
+  var _section = _SettingsSection.gitIntegrations;
   late final _laneFields = [
     for (final hex in _settings.laneColors) TextEditingController(text: hex),
   ];
@@ -559,127 +562,194 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 color: const Color(0xFF1A1D25),
                 padding: const EdgeInsets.all(10),
                 alignment: Alignment.topCenter,
-                child: Container(
-                  key: const Key('settings-git-integrations'),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 9,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF263246),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(
-                        Icons.account_tree_outlined,
-                        size: 15,
-                        color: Color(0xFF7AD6E8),
-                      ),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Git integrations',
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Color(0xFFE8EAF2),
-                            fontSize: 11,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                child: Column(
+                  children: [
+                    _settingsSectionRow(
+                      section: _SettingsSection.appearance,
+                      key: const Key('settings-section-appearance'),
+                      icon: Icons.palette_outlined,
+                      label: 'Appearance',
+                    ),
+                    const SizedBox(height: 4),
+                    _settingsSectionRow(
+                      section: _SettingsSection.gitIntegrations,
+                      key: const Key('settings-git-integrations'),
+                      icon: Icons.account_tree_outlined,
+                      label: 'Git integrations',
+                    ),
+                  ],
                 ),
               ),
               const VerticalDivider(width: 1, color: Color(0xFF343946)),
               Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(24),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 660),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Git integrations',
-                          style: TextStyle(
-                            color: Color(0xFFE8EAF2),
-                            fontSize: 20,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'yogit reuses your existing GitHub CLI login. '
-                          'There is no separate token or account to manage.',
-                          style: TextStyle(
-                            color: Color(0xFF8D94A8),
-                            fontSize: 12,
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        _connection(),
-                        const SizedBox(height: 20),
-                        SwitchListTile(
-                          key: const Key('show-avatars-toggle'),
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text(
-                            'Show commit avatars',
-                            style: TextStyle(
-                              color: Color(0xFFE8EAF2),
-                              fontSize: 13,
-                            ),
-                          ),
-                          subtitle: const Text(
-                            'GitHub and GHE only. Gravatar is never queried.',
-                            style: TextStyle(
-                              color: Color(0xFF8D94A8),
-                              fontSize: 11,
-                            ),
-                          ),
-                          value: _settings.showAvatars,
-                          onChanged: (value) =>
-                              _change(_settings.copyWith(showAvatars: value)),
-                        ),
-                        const SizedBox(height: 24),
-                        _laneColors(),
-                        const SizedBox(height: 24),
-                        const Text(
-                          'Avatar fallback preview',
-                          style: TextStyle(
-                            color: Color(0xFFE8EAF2),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        const Row(
-                          children: [
-                            _AvatarPreview(
-                              label: 'Single',
-                              kind: _PreviewKind.single,
-                            ),
-                            SizedBox(width: 10),
-                            _AvatarPreview(
-                              label: 'Author + committer',
-                              kind: _PreviewKind.stack,
-                            ),
-                            SizedBox(width: 10),
-                            _AvatarPreview(
-                              label: 'Initials fallback',
-                              kind: _PreviewKind.initials,
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
+                child: switch (_section) {
+                  _SettingsSection.appearance => _appearance(),
+                  _SettingsSection.gitIntegrations => _gitIntegrations(),
+                },
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _settingsSectionRow({
+    required _SettingsSection section,
+    required Key key,
+    required IconData icon,
+    required String label,
+  }) {
+    final selected = _section == section;
+    return Material(
+      key: key,
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: () => setState(() => _section = section),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+          decoration: BoxDecoration(
+            color: selected ? const Color(0xFF263246) : null,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                icon,
+                size: 15,
+                color: selected
+                    ? const Color(0xFF7AD6E8)
+                    : const Color(0xFF8D94A8),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: selected
+                        ? const Color(0xFFE8EAF2)
+                        : const Color(0xFF8D94A8),
+                    fontSize: 11,
                   ),
                 ),
               ),
             ],
           ),
         ),
-      ],
+      ),
+    );
+  }
+
+  Widget _appearance() => SingleChildScrollView(
+    padding: const EdgeInsets.all(24),
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 660),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Appearance',
+            style: TextStyle(
+              color: Color(0xFFE8EAF2),
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Choose the dark appearance used by the timeline and preview.',
+            style: TextStyle(color: Color(0xFF8D94A8), fontSize: 12),
+          ),
+          const SizedBox(height: 20),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              for (final theme in TimelineThemeKind.values)
+                _TimelineThemeCard(
+                  key: Key('timeline-theme-card-${theme.storageValue}'),
+                  theme: theme,
+                  selected: _settings.timelineTheme == theme,
+                  onTap: () =>
+                      _change(_settings.copyWith(timelineTheme: theme)),
+                ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _gitIntegrations() => SingleChildScrollView(
+    padding: const EdgeInsets.all(24),
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 660),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Git integrations',
+            style: TextStyle(
+              color: Color(0xFFE8EAF2),
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'yogit reuses your existing GitHub CLI login. '
+            'There is no separate token or account to manage.',
+            style: TextStyle(color: Color(0xFF8D94A8), fontSize: 12),
+          ),
+          const SizedBox(height: 20),
+          _connection(),
+          const SizedBox(height: 20),
+          SwitchListTile(
+            key: const Key('show-avatars-toggle'),
+            contentPadding: EdgeInsets.zero,
+            title: const Text(
+              'Show commit avatars',
+              style: TextStyle(color: Color(0xFFE8EAF2), fontSize: 13),
+            ),
+            subtitle: const Text(
+              'GitHub and GHE only. Gravatar is never queried.',
+              style: TextStyle(color: Color(0xFF8D94A8), fontSize: 11),
+            ),
+            value: _settings.showAvatars,
+            onChanged: (value) =>
+                _change(_settings.copyWith(showAvatars: value)),
+          ),
+          const SizedBox(height: 24),
+          _laneColors(),
+          const SizedBox(height: 24),
+          const Text(
+            'Avatar fallback preview',
+            style: TextStyle(
+              color: Color(0xFFE8EAF2),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Row(
+            children: [
+              _AvatarPreview(label: 'Single', kind: _PreviewKind.single),
+              SizedBox(width: 10),
+              _AvatarPreview(
+                label: 'Author + committer',
+                kind: _PreviewKind.stack,
+              ),
+              SizedBox(width: 10),
+              _AvatarPreview(
+                label: 'Initials fallback',
+                kind: _PreviewKind.initials,
+              ),
+            ],
+          ),
+        ],
+      ),
     ),
   );
 
@@ -806,6 +876,134 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         );
       },
+    );
+  }
+}
+
+class _TimelineThemeCard extends StatefulWidget {
+  const _TimelineThemeCard({
+    required this.theme,
+    required this.selected,
+    required this.onTap,
+    super.key,
+  });
+
+  final TimelineThemeKind theme;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  State<_TimelineThemeCard> createState() => _TimelineThemeCardState();
+}
+
+class _TimelineThemeCardState extends State<_TimelineThemeCard> {
+  late final _focusNode = FocusNode();
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = widget.theme.palette;
+    final surfaces = [
+      palette.background,
+      palette.panel,
+      palette.surface,
+      palette.raised,
+    ];
+    return Semantics(
+      selected: widget.selected,
+      button: true,
+      label: widget.theme.label,
+      child: SizedBox(
+        width: 196,
+        child: Material(
+          color: palette.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(9),
+            side: BorderSide(
+              color: widget.selected
+                  ? palette.interactive
+                  : const Color(0xFF343946),
+              width: widget.selected ? 2 : 1,
+            ),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            focusNode: _focusNode,
+            onTap: () {
+              _focusNode.requestFocus();
+              widget.onTap();
+            },
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          widget.theme.label,
+                          style: TextStyle(
+                            color: palette.text,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      if (widget.selected)
+                        Icon(
+                          Icons.check_circle,
+                          size: 16,
+                          color: palette.interactive,
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    widget.theme.description,
+                    style: TextStyle(color: palette.muted, fontSize: 10),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(5),
+                          child: Row(
+                            children: [
+                              for (final color in surfaces)
+                                Expanded(
+                                  child: ColoredBox(
+                                    color: color,
+                                    child: const SizedBox(height: 26),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        width: 18,
+                        height: 18,
+                        decoration: BoxDecoration(
+                          color: palette.interactive,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
