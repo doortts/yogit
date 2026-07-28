@@ -40,7 +40,7 @@ class FullBlameView extends StatefulWidget {
   }) : file = document.file,
        lines = document.lines;
 
-  FullBlameView.loading({
+  const FullBlameView.loading({
     required this.file,
     required this.hunks,
     required this.activeAnchor,
