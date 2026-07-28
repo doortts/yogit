@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -392,6 +393,82 @@ void main() {
     expect(find.text('No file history'), findsOneWidget);
     expect(find.byKey(const Key('history-list')), findsNothing);
   });
+
+  testWidgets(
+    'history shows focused selected commit details without moving rows',
+    (tester) async {
+      final historyFocus = FocusNode();
+      final filesFocus = FocusNode();
+      final messages = <String, Completer<String>>{};
+      addTearDown(historyFocus.dispose);
+      addTearDown(filesFocus.dispose);
+      var selected = historyEntries.first;
+      await tester.pumpWidget(
+        qaApp(
+          StatefulBuilder(
+            builder: (context, setState) => Column(
+              children: [
+                Focus(focusNode: filesFocus, child: const SizedBox(height: 1)),
+                Expanded(
+                  child: FullHistoryView(
+                    entries: historyEntries,
+                    selected: selected,
+                    focusNode: historyFocus,
+                    onSelected: (entry) => setState(() => selected = entry),
+                    loadCommitMessage: (sha) =>
+                        messages.putIfAbsent(sha, Completer<String>.new).future,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      final secondRow = find.byKey(
+        Key('history-row-${historyEntries[1].commit.sha}'),
+      );
+      final secondRowTopBeforeFocus = tester.getTopLeft(secondRow).dy;
+      expect(
+        find.byKey(Key('history-commit-details-${commitA.sha}')),
+        findsNothing,
+      );
+
+      historyFocus.requestFocus();
+      await tester.pump();
+
+      final firstCard = find.byKey(
+        Key('history-commit-details-${commitA.sha}'),
+      );
+      final firstRow = find.byKey(Key('history-row-${commitA.sha}'));
+      expect(firstCard, findsOneWidget);
+      expect(
+        tester.getTopLeft(firstCard).dy,
+        closeTo(tester.getBottomLeft(firstRow).dy + 4, 0.5),
+      );
+      expect(tester.getTopLeft(secondRow).dy, secondRowTopBeforeFocus);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump();
+
+      final secondCard = find.byKey(
+        Key('history-commit-details-${historyEntries[1].commit.sha}'),
+      );
+      expect(selected, same(historyEntries[1]));
+      expect(secondCard, findsOneWidget);
+      expect(find.text(historyEntries[1].commit.subject), findsWidgets);
+      expect(
+        tester.getTopLeft(secondCard).dy,
+        closeTo(tester.getBottomLeft(secondRow).dy + 4, 0.5),
+      );
+
+      filesFocus.requestFocus();
+      await tester.pumpAndSettle();
+
+      expect(secondCard, findsNothing);
+      expect(selected, same(historyEntries[1]));
+    },
+  );
 
   testWidgets('history arrows immediately commit the controlled selection', (
     tester,
