@@ -207,40 +207,37 @@ class FullBlameViewState extends State<FullBlameView> {
                 ),
                 if (selectedLine != null && selectedBlame != null)
                   Positioned.fill(
-                    child: IgnorePointer(
-                      child: ClipRect(
-                        child: CompositedTransformFollower(
-                          link: _selectedLink,
-                          showWhenUnlinked: false,
-                          targetAnchor: Alignment.topLeft,
-                          followerAnchor: Alignment.topLeft,
-                          offset: const Offset(
-                            fullBlameAvatarWidth,
-                            fullDiffSourceRowHeight * 2,
-                          ),
-                          child: UnconstrainedBox(
-                            constrainedAxis: Axis.vertical,
-                            alignment: Alignment.topLeft,
-                            child: SizedBox(
-                              width: cardWidth,
-                              child: Align(
-                                alignment: Alignment.topLeft,
-                                child: FullDiffCommitInfoCard(
-                                  key: Key(
-                                    'blame-commit-details-$selectedLine',
-                                  ),
-                                  info: FullDiffCommitInfo(
-                                    sha: selectedBlame.sha,
-                                    shortSha: _shortSha(selectedBlame.sha),
-                                    fallbackMessage: selectedBlame.summary,
-                                    author: selectedBlame.author,
-                                    timestamp: selectedBlame.authorTimestamp,
-                                  ),
-                                  loadMessage:
-                                      _canLoadCommitMessage(selectedBlame)
-                                      ? widget.loadCommitMessage
-                                      : null,
+                    child: ClipRect(
+                      child: CompositedTransformFollower(
+                        link: _selectedLink,
+                        showWhenUnlinked: false,
+                        targetAnchor: Alignment.topLeft,
+                        followerAnchor: Alignment.topLeft,
+                        offset: const Offset(
+                          fullBlameAvatarWidth,
+                          fullDiffSourceRowHeight * 2,
+                        ),
+                        child: UnconstrainedBox(
+                          constrainedAxis: Axis.vertical,
+                          alignment: Alignment.topLeft,
+                          child: SizedBox(
+                            width: cardWidth,
+                            child: Align(
+                              alignment: Alignment.topLeft,
+                              child: FullDiffCommitInfoCard(
+                                key: Key('blame-commit-details-$selectedLine'),
+                                info: FullDiffCommitInfo(
+                                  sha: selectedBlame.sha,
+                                  shortSha: _shortSha(selectedBlame.sha),
+                                  fallbackMessage: selectedBlame.summary,
+                                  author: selectedBlame.author,
+                                  timestamp: selectedBlame.authorTimestamp,
                                 ),
+                                loadMessage:
+                                    _canLoadCommitMessage(selectedBlame)
+                                    ? widget.loadCommitMessage
+                                    : null,
+                                scrollLongMessage: true,
                               ),
                             ),
                           ),

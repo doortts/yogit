@@ -45,7 +45,7 @@ class _FullDiffShortcutHintState extends State<FullDiffShortcutHint> {
                 showWhenUnlinked: false,
                 targetAnchor: Alignment.bottomCenter,
                 followerAnchor: Alignment.topCenter,
-                offset: const Offset(0, 4),
+                offset: const Offset(0, -4),
                 child: IgnorePointer(
                   child: ExcludeSemantics(
                     child: UnconstrainedBox(

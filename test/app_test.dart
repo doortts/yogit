@@ -9210,6 +9210,94 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-2')), findsOneWidget);
   });
+
+  testWidgets('preview keyboard file walking keeps the selected row visible', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 600);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'many changed files')],
+          files: (_, _) async => [
+            for (var index = 0; index < 20; index++)
+              GitFileChange(
+                path: 'lib/file$index.dart',
+                status: 'M',
+                additions: 1,
+                deletions: 0,
+              ),
+          ],
+          diff: (_, _, path, _, _) async => [
+            DiffLine(
+              kind: DiffLineKind.add,
+              text: 'body of $path',
+              newNumber: 1,
+            ),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    final filesViewport = find.byKey(const Key('preview-files-scroll'));
+    final filesPosition = tester
+        .state<ScrollableState>(
+          find.descendant(of: filesViewport, matching: find.byType(Scrollable)),
+        )
+        .position;
+
+    Future<void> metaArrow(LogicalKeyboardKey key) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(key);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+    }
+
+    Finder fileRow(String path) => find.ancestor(
+      of: find.byKey(Key('preview-state-$path')),
+      matching: find.byType(InkWell),
+    );
+
+    void expectRowVisible(String path) {
+      final viewportRect = tester.getRect(filesViewport);
+      final rowRect = tester.getRect(fileRow(path));
+      expect(rowRect.top, greaterThanOrEqualTo(viewportRect.top - 0.5));
+      expect(rowRect.bottom, lessThanOrEqualTo(viewportRect.bottom + 0.5));
+    }
+
+    for (var index = 0; index < 15; index++) {
+      await metaArrow(LogicalKeyboardKey.arrowDown);
+    }
+    expect(filesPosition.pixels, greaterThan(0));
+    expectRowVisible('lib/file15.dart');
+
+    final downOffset = filesPosition.pixels;
+    await metaArrow(LogicalKeyboardKey.arrowUp);
+    expect(filesPosition.pixels, moreOrLessEquals(downOffset));
+    expectRowVisible('lib/file14.dart');
+
+    for (var index = 0; index < 14; index++) {
+      await metaArrow(LogicalKeyboardKey.arrowUp);
+    }
+    expect(filesPosition.pixels, lessThan(downOffset));
+    expectRowVisible('lib/file0.dart');
+
+    final pointerOffset = filesPosition.pixels;
+    await tester.tap(find.byKey(const Key('preview-state-lib/file1.dart')));
+    await tester.pumpAndSettle();
+    expect(filesPosition.pixels, moreOrLessEquals(pointerOffset));
+    expect(find.text('+body of lib/file1.dart'), findsOneWidget);
+  });
+
   // ------------------------------------------------------------------ J2
   test('the window controls speak to the native window', () async {
     final calls = <String>[];

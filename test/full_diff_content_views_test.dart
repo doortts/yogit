@@ -468,6 +468,13 @@ void main() {
         findsOneWidget,
       );
       expect(
+        find.descendant(
+          of: find.byKey(Key('history-commit-details-${selected.commit.sha}')),
+          matching: find.byKey(const Key('full-diff-commit-message-scroll')),
+        ),
+        findsNothing,
+      );
+      expect(
         tester.getTopLeft(secondCard).dy,
         closeTo(tester.getBottomLeft(secondRow).dy + 4, 0.5),
       );
@@ -1783,6 +1790,44 @@ void main() {
   });
 
   testWidgets(
+    'blame long message scroll keeps the selected line and list focus',
+    (tester) async {
+      final blameFocus = FocusNode();
+      addTearDown(blameFocus.dispose);
+      await pumpInteractiveBlameView(
+        tester,
+        focusNode: blameFocus,
+        loadCommitMessage: (_) async => List.generate(
+          14,
+          (index) => 'message line ${index + 1}',
+        ).join('\n'),
+      );
+
+      await tester.tap(find.byKey(const Key('blame-line-3')));
+      await tester.pump();
+      await tester.pump();
+
+      final details = find.byKey(const Key('blame-commit-details-3'));
+      final messageArea = find.descendant(
+        of: details,
+        matching: find.byKey(const Key('full-diff-commit-message-scroll')),
+      );
+      final scrollable = tester.state<ScrollableState>(
+        find.descendant(of: messageArea, matching: find.byType(Scrollable)),
+      );
+      expect(blameFocus.hasFocus, isTrue);
+      expect(scrollable.position.maxScrollExtent, greaterThan(0));
+
+      await tester.drag(messageArea, const Offset(0, -80));
+      await tester.pump();
+
+      expect(scrollable.position.pixels, greaterThan(0));
+      expect(find.byKey(const Key('blame-selected-3')), findsOneWidget);
+      expect(blameFocus.hasFocus, isTrue);
+    },
+  );
+
+  testWidgets(
     'uncommitted zero-SHA blame keeps fallback without requesting a message',
     (tester) async {
       final requestedShas = <String>[];
@@ -1900,7 +1945,7 @@ void main() {
     expect(find.byKey(const Key('blame-selected-4')), findsOneWidget);
 
     final row6Rect = tester.getRect(row6);
-    await tester.tapAt(Offset(row6Rect.left + 100, row6Rect.center.dy));
+    await tester.tapAt(Offset(row6Rect.right - 10, row6Rect.center.dy));
     await tester.pump();
     expect(find.byKey(const Key('blame-selected-6')), findsOneWidget);
 

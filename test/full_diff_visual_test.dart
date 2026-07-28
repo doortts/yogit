@@ -17,6 +17,7 @@ import 'package:yogit/git.dart';
 import 'package:yogit/settings.dart';
 
 import '../tool/full_diff_visual_diff.dart';
+import 'support/full_diff_fixtures.dart';
 import 'support/full_diff_qa_harness.dart';
 
 typedef QaCase = ({
@@ -463,7 +464,7 @@ Future<void> prepareFunctionalCapture(
       );
       expect(overlayRect.contains(layoutControlRect.center), isTrue);
       expect(overlayRect.contains(layoutHintRect.center), isTrue);
-      expect(layoutHintRect.top, closeTo(layoutControlRect.bottom + 4, 0.5));
+      expect(layoutHintRect.top, closeTo(layoutControlRect.bottom - 4, 0.5));
     case '27-algorithm-chooser':
       await tester.tap(find.byKey(const Key('diff-algorithm')));
       await tester.pump();
@@ -484,6 +485,7 @@ Future<void> prepareFunctionalCapture(
         kind: PointerDeviceKind.mouse,
       );
       await tester.pump();
+      await tester.pump();
       final card = find.byKey(const Key('blame-commit-details-294'));
       expect(card, findsOneWidget);
       expect(
@@ -503,7 +505,47 @@ Future<void> prepareFunctionalCapture(
         matching: find.byKey(const Key('full-diff-commit-message')),
       );
       expect(message, findsOneWidget);
-      expect(tester.widget<Text>(message).maxLines, 8);
+      expect(
+        find.descendant(
+          of: card,
+          matching: find.byKey(const Key('full-diff-commit-message-scroll')),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.widget<Text>(message).maxLines, isNull);
+      final messageContext = tester.element(message);
+      final messageStyle = DefaultTextStyle.of(
+        messageContext,
+      ).style.merge(tester.widget<Text>(message).style);
+      final eightLineHeight = (TextPainter(
+        text: TextSpan(
+          text: List.filled(8, 'M').join('\n'),
+          style: messageStyle,
+        ),
+        textDirection: Directionality.of(messageContext),
+        textScaler: MediaQuery.textScalerOf(messageContext),
+        maxLines: 8,
+      )..layout()).height;
+      final messageScroll = find.descendant(
+        of: card,
+        matching: find.byKey(const Key('full-diff-commit-message-scroll')),
+      );
+      expect(
+        tester.getSize(messageScroll).height,
+        closeTo(eightLineHeight, 0.5),
+      );
+      expect(
+        tester
+            .state<ScrollableState>(
+              find.descendant(
+                of: messageScroll,
+                matching: find.byType(Scrollable),
+              ),
+            )
+            .position
+            .maxScrollExtent,
+        greaterThan(0),
+      );
       expect(tester.getTopLeft(coveredRow).dy, coveredRowTop);
     case '29-history-resizers':
       final filesPane = find.byKey(const Key('details-files-column'));
@@ -909,11 +951,9 @@ void main() {
     await tester.pump();
 
     final back = tester.getRect(find.byKey(const Key('full-diff-back')));
-    final fileIcon = tester.getRect(find.byIcon(Icons.code));
     final path = tester.getRect(find.byKey(const Key('file-path-chip')));
     expect(back.left, lessThan(80));
-    expect(back.right, lessThan(fileIcon.left));
-    expect(fileIcon.right, lessThan(path.left));
+    expect(back.right, lessThan(path.left));
     final focus = tester.getRect(find.text('탐색 패널'));
     final editor = tester.getRect(find.text('편집기로 열기'));
     expect(focus.right, lessThan(editor.left));
@@ -1241,6 +1281,10 @@ void main() {
               )
             : const GitDiffAlgorithmSetting.gitDefault(),
       );
+      if (scenario.name == '28-blame-selection') {
+        (controller.repository as FakeFullDiffRepository).commitMessage = (_) =>
+            Future.value(List.filled(12, 'Selected commit message').join('\n'));
+      }
       addTearDown(controller.dispose);
 
       expect(controller.state.view, scenario.view);

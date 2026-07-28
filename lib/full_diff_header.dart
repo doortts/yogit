@@ -92,8 +92,6 @@ class GlobalFileBar extends StatelessWidget {
                   padding: EdgeInsets.zero,
                 ),
               ),
-              if (path != null)
-                const Icon(Icons.code, size: 18, color: Colors.white),
               if (path case final path?)
                 Container(
                   key: const Key('file-path-chip'),
@@ -113,7 +111,7 @@ class GlobalFileBar extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: technicalTextStyle.copyWith(
                         color: Colors.white,
-                        fontSize: 11,
+                        fontSize: 13,
                       ),
                     ),
                   ),
@@ -681,7 +679,7 @@ class _HeaderBadge extends StatelessWidget {
         label,
         style: technicalTextStyle.copyWith(
           color: foreground,
-          fontSize: 9,
+          fontSize: 11,
           height: 1,
         ),
       ),
