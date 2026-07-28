@@ -385,6 +385,33 @@ void main() {
     expect(intermediate.height, lessThan(280));
   });
 
+  testWidgets('preview shows the commit message body', (tester) async {
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('preview-body-sha', 'Subject line')],
+      commitMessage: (_) async =>
+          'Subject line\n\nBody line one\nBody line two\n',
+      root: '/preview-message-test',
+    );
+    await tester.pumpWidget(app(repository, controller));
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    final preview = find.byKey(const Key('preview-panel'));
+    expect(
+      find.descendant(of: preview, matching: find.text('Subject line')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: preview,
+        matching: find.text('Body line one\nBody line two'),
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('preview loads real files before the first file diff once', (
     tester,
   ) async {
@@ -9575,6 +9602,7 @@ class FakeGitRepository extends GitRepository {
     this.refs = const RepoRefs(local: ['main'], current: 'main'),
     this.gitDiffAlgorithmSetting = const GitDiffAlgorithmSetting.gitDefault(),
     this.refsLoader,
+    this.commitMessage,
     String root = '.',
     CommandRunner runner = runProcess,
   }) : super(root, runner: runner);
@@ -9582,6 +9610,7 @@ class FakeGitRepository extends GitRepository {
   final RepoRefs refs;
   final GitDiffAlgorithmSetting gitDiffAlgorithmSetting;
   final Future<RepoRefs> Function()? refsLoader;
+  final Future<String> Function(String sha)? commitMessage;
   final Future<List<GitCommit>> Function(int skip, int limit) loader;
   final Future<GitCommit?> Function()? workingTree;
   final Future<List<GitFileChange>> Function(GitCommit commit, String? parent)?
@@ -9616,6 +9645,10 @@ class FakeGitRepository extends GitRepository {
   @override
   Future<List<GitCommit>> loadHistory({int limit = 500, int skip = 0}) =>
       loader(skip, limit);
+
+  @override
+  Future<String> loadCommitMessage(String sha) =>
+      commitMessage?.call(sha) ?? Future.value(sha);
 
   @override
   Future<RepoRefs> loadRefs() =>
