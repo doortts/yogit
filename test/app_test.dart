@@ -13,10 +13,12 @@ import 'package:yogit/diff_screen.dart';
 import 'package:yogit/full_blame_view.dart';
 import 'package:yogit/full_diff_controller.dart';
 import 'package:yogit/full_diff_model.dart';
+import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/main.dart';
 import 'package:yogit/settings.dart';
 import 'package:yogit/timeline.dart';
+import 'package:yogit/timeline_theme.dart';
 import 'package:yogit/typography.dart';
 import 'package:yogit/window_frame.dart';
 
@@ -30,6 +32,231 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (_) async => null);
     controller = WindowFrameController(channel: channel);
+  });
+
+  testWidgets(
+    'the timeline uses System Graphite by default and a stored theme',
+    (tester) async {
+      final store = MemorySettingsStore();
+      await tester.pumpWidget(
+        YogitApp(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+          ),
+          settingsStore: store,
+          discoverAvatars: false,
+          windowFrameController: controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      Color toolbarColor() =>
+          tester.widget<Container>(find.byKey(const Key('toolbar'))).color!;
+      Color scaffoldColor() =>
+          tester.widget<Scaffold>(find.byType(Scaffold).first).backgroundColor!;
+
+      expect(scaffoldColor(), TimelineThemePalette.systemGraphite.background);
+      expect(toolbarColor(), TimelineThemePalette.systemGraphite.surface);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(
+        (tester
+                    .widget<Container>(find.byKey(const Key('preview-surface')))
+                    .decoration!
+                as BoxDecoration)
+            .color,
+        TimelineThemePalette.systemGraphite.surface,
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await controller.setPreview(PreviewPlacement.closed);
+      store.current = const AppSettings(
+        timelineTheme: TimelineThemeKind.carbon,
+      );
+      await tester.pumpWidget(
+        YogitApp(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+            files: (_, _) async => const [
+              GitFileChange(
+                path: 'lib/a.dart',
+                status: 'M',
+                additions: 1,
+                deletions: 1,
+              ),
+            ],
+          ),
+          settingsStore: store,
+          discoverAvatars: false,
+          windowFrameController: controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(scaffoldColor(), TimelineThemePalette.carbon.background);
+      expect(toolbarColor(), TimelineThemePalette.carbon.surface);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(
+        (tester
+                    .widget<Container>(find.byKey(const Key('preview-surface')))
+                    .decoration!
+                as BoxDecoration)
+            .color,
+        TimelineThemePalette.carbon.surface,
+      );
+      final fileRow =
+          tester
+                  .widget<InkWell>(
+                    find.ancestor(
+                      of: find.byKey(const Key('preview-state-lib/a.dart')),
+                      matching: find.byType(InkWell),
+                    ),
+                  )
+                  .child!
+              as DecoratedBox;
+      expect(
+        ((fileRow.decoration as BoxDecoration).border! as Border).top.color,
+        const Color(0xFF303033),
+      );
+    },
+  );
+
+  final hierarchyRoleCases =
+      <
+        ({
+          String label,
+          Color Function(WidgetTester tester) actual,
+          Color Function(TimelineThemePalette palette) expected,
+        })
+      >[
+        (
+          label: 'checked-out branch',
+          actual: (tester) {
+            final row = tester.widget<Container>(
+              find.byKey(const Key('sidebar-row-main')),
+            );
+            return (row.decoration! as BoxDecoration).color!;
+          },
+          expected: (palette) => palette.selectedRow,
+        ),
+        (
+          label: 'placement control',
+          actual: (tester) {
+            final control = tester.widget<Container>(
+              find.byKey(const Key('preview-placement')),
+            );
+            return (control.decoration! as BoxDecoration).color!;
+          },
+          expected: (palette) => palette.raised,
+        ),
+        (
+          label: 'status bar',
+          actual: (tester) {
+            final bar = tester.widget<Container>(
+              find.ancestor(
+                of: find.byKey(const Key('status-timestamp')),
+                matching: find.byType(Container),
+              ),
+            );
+            return (bar.decoration! as BoxDecoration).color!;
+          },
+          expected: (palette) => palette.surface,
+        ),
+        (
+          label: 'idle keycap',
+          actual: (tester) {
+            final keycap = tester.widget<Container>(
+              find.descendant(
+                of: find.byKey(const Key('keycap-Enter')),
+                matching: find.byType(Container),
+              ),
+            );
+            return (keycap.decoration! as BoxDecoration).color!;
+          },
+          expected: (palette) => palette.raised,
+        ),
+      ];
+
+  for (final role in hierarchyRoleCases) {
+    testWidgets(
+      '${role.label} uses its approved role under every timeline theme',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(1400, 800);
+        addTearDown(() {
+          tester.view.resetDevicePixelRatio();
+          tester.view.resetPhysicalSize();
+        });
+
+        for (final theme in TimelineThemeKind.values) {
+          final store = MemorySettingsStore()
+            ..current = AppSettings(timelineTheme: theme);
+          await tester.pumpWidget(
+            YogitApp(
+              key: ValueKey(theme),
+              repository: FakeGitRepository(
+                (_, _) async => [commit('3', 'checked out commit')],
+                refs: const RepoRefs(
+                  local: ['main'],
+                  current: 'main',
+                  tips: {'main': '3'},
+                  localTips: {'main': '3'},
+                ),
+              ),
+              settingsStore: store,
+              discoverAvatars: false,
+              windowFrameController: controller,
+            ),
+          );
+          await tester.pumpAndSettle();
+
+          expect(
+            role.actual(tester),
+            role.expected(theme.palette),
+            reason: theme.label,
+          );
+        }
+      },
+    );
+  }
+
+  testWidgets('the stored timeline theme colors the base-branch popup', (
+    tester,
+  ) async {
+    final store = MemorySettingsStore()
+      ..current = const AppSettings(timelineTheme: TimelineThemeKind.carbon);
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository(
+          (_, _) async => [commit('tip', 'tip')],
+          refs: const RepoRefs(
+            local: ['main', 'release'],
+            current: 'main',
+            tips: {'main': 'tip', 'release': 'tip'},
+          ),
+        ),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('base-branch-selector')));
+    await tester.pumpAndSettle();
+
+    final item = find.byKey(const Key('base-branch-menu-release'));
+    final menuMaterial = tester.widget<Material>(
+      find.ancestor(of: item, matching: find.byType(Material)).last,
+    );
+    expect(menuMaterial.color, const Color(0xFF1C1C1E));
+
+    final text = find.descendant(of: item, matching: find.text('release'));
+    expect(
+      DefaultTextStyle.of(tester.element(text)).style.color,
+      const Color(0xFFF5F5F7),
+    );
   });
 
   testWidgets('keyboard and pointer control selection and preview', (
@@ -77,7 +304,7 @@ void main() {
     expect(selected, findsOneWidget);
     final selectedBase =
         tester.widget<GestureDetector>(selected).child! as ColoredBox;
-    expect(selectedBase.color, const Color(0xFF15171E));
+    expect(selectedBase.color, TimelineThemePalette.systemGraphite.background);
 
     final band = find.byKey(const Key('selection-band-2'));
     final bandRect = tester.getRect(band);
@@ -1181,16 +1408,22 @@ void main() {
     );
 
     expect(painter.workingTreeRingColor, AvatarService.branchColor(3));
-    expect(painter.workingTreeRingColor, isNot(const Color(0xFF15171E)));
+    expect(
+      painter.workingTreeRingColor,
+      isNot(TimelineThemePalette.systemGraphite.background),
+    );
     // The fill hides the rail behind the node, so it follows the row color.
-    expect(painter.nodeFillColor, const Color(0xFF1F4D8F));
+    expect(
+      painter.nodeFillColor,
+      TimelineThemePalette.systemGraphite.selectedRow,
+    );
     expect(
       CommitGraphPainter(
         row: wip,
         selected: false,
         committerColor: AvatarService.branchColor(3),
       ).nodeFillColor,
-      const Color(0xFF15171E),
+      TimelineThemePalette.systemGraphite.background,
     );
     // Without branch ids it degrades to the old committer color.
     expect(
@@ -2028,7 +2261,7 @@ void main() {
       );
       expect(
         (current.decoration! as BoxDecoration).color,
-        const Color(0xFF263246),
+        TimelineThemePalette.systemGraphite.selectedRow,
       );
 
       await tester.tap(find.byKey(const Key('ref-filter')));
@@ -2285,7 +2518,7 @@ void main() {
                     .decoration!
                 as BoxDecoration)
             .color;
-    expect(chip('lib/a.dart'), const Color(0xFF263246));
+    expect(chip('lib/a.dart'), TimelineThemePalette.systemGraphite.neutralChip);
     expect(chip('lib/b.dart'), const Color(0xFF8AD6A1).withValues(alpha: 0.2));
     expect(
       fileStateChipColor('D').background,
@@ -2477,6 +2710,26 @@ void main() {
     );
   });
 
+  test('timeline theme settings round-trip and reject unknown values', () {
+    const settings = AppSettings(timelineTheme: TimelineThemeKind.carbon);
+    expect(AppSettings.fromJson(settings.toJson()), settings);
+    expect(settings.toJson()['timelineTheme'], 'carbon');
+    expect(
+      AppSettings.fromJson(const {}).timelineTheme,
+      TimelineThemeKind.systemGraphite,
+    );
+    expect(
+      AppSettings.fromJson(const {'timelineTheme': 'sepia'}).timelineTheme,
+      TimelineThemeKind.systemGraphite,
+    );
+
+    final changed = settings.copyWith(
+      timelineTheme: TimelineThemeKind.warmGraphite,
+    );
+    expect(changed.timelineTheme, TimelineThemeKind.warmGraphite);
+    expect(changed.copyWith(), changed);
+  });
+
   test(
     'copyWith replaces the base branch map without losing other settings',
     () {
@@ -2545,6 +2798,72 @@ void main() {
     // An empty palette is never painted with.
     AvatarService.palette = const [];
     expect(AvatarService.defaultColors, contains(AvatarService.color(ada)));
+  });
+
+  testWidgets('Appearance selects one of three timeline theme previews', (
+    tester,
+  ) async {
+    final saved = <AppSettings>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          settings: const AppSettings(),
+          onChanged: saved.add,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('settings-section-appearance')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('timeline-theme-card-carbon')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('settings-section-appearance')));
+    await tester.pumpAndSettle();
+
+    for (final theme in TimelineThemeKind.values) {
+      expect(
+        find.byKey(Key('timeline-theme-card-${theme.storageValue}')),
+        findsOneWidget,
+      );
+    }
+    expect(
+      tester
+          .getSemantics(
+            find.byKey(const Key('timeline-theme-card-systemGraphite')),
+          )
+          .flagsCollection
+          .isSelected,
+      ui.Tristate.isTrue,
+    );
+
+    await tester.tap(find.byKey(const Key('timeline-theme-card-warmGraphite')));
+    await tester.pump();
+    final saveCountAfterTap = saved.length;
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(saved.last.timelineTheme, TimelineThemeKind.warmGraphite);
+    expect(saved.length, saveCountAfterTap + 1);
+
+    final saveCountAfterEnter = saved.length;
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    expect(saved.last.timelineTheme, TimelineThemeKind.warmGraphite);
+    expect(saved.length, saveCountAfterEnter + 1);
+
+    await tester.tap(find.byKey(const Key('timeline-theme-card-carbon')));
+    await tester.pumpAndSettle();
+
+    expect(saved.last.timelineTheme, TimelineThemeKind.carbon);
+    expect(
+      tester
+          .getSemantics(find.byKey(const Key('timeline-theme-card-carbon')))
+          .flagsCollection
+          .isSelected,
+      ui.Tristate.isTrue,
+    );
   });
 
   testWidgets('the timeline colors editor applies hex edits and resets', (
@@ -3070,6 +3389,43 @@ void main() {
     expect(
       tester.widget<DiffScreen>(find.byType(DiffScreen)).initialPreferences,
       preferences,
+    );
+  });
+
+  testWidgets('timeline themes do not recolor Settings or Full Diff', (
+    tester,
+  ) async {
+    final store = MemorySettingsStore()
+      ..current = const AppSettings(timelineTheme: TimelineThemeKind.carbon);
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository(
+          (_, _) async => [commit('1', 'commit')],
+          files: (_, _) async => const [],
+        ),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('open-settings')));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<Scaffold>(find.byType(Scaffold).last).backgroundColor,
+      const Color(0xFF15171E),
+    );
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.pumpAndSettle();
+    final diffContext = tester.element(find.byType(DiffScreen));
+    expect(Theme.of(diffContext).extension<TimelineThemePalette>(), isNull);
+    expect(
+      tester.widget<Scaffold>(find.byType(Scaffold).last).backgroundColor,
+      fullDiffCanvas,
     );
   });
 
@@ -5094,6 +5450,7 @@ void main() {
     expect(await store.load(), const AppSettings());
     const saved = AppSettings(
       showAvatars: false,
+      timelineTheme: TimelineThemeKind.warmGraphite,
       previewPlacement: PreviewPlacement.bottom,
       columnWidths: TimelineColumnWidths(graph: 220),
       baseBranches: {'/repos/one': 'main', '/repos/two': 'release'},
@@ -5102,10 +5459,12 @@ void main() {
 
     final restored = await store.load();
     expect(restored.showAvatars, isFalse);
+    expect(restored.timelineTheme, TimelineThemeKind.warmGraphite);
     expect(restored.previewPlacement, PreviewPlacement.bottom);
     expect(restored.columnWidths.graph, isNull);
     final json = jsonDecode(await store.file.readAsString());
     expect(json['showAvatars'], isFalse);
+    expect(json['timelineTheme'], 'warmGraphite');
     expect(json['columnWidths'], isNot(contains('graph')));
     expect(json, isNot(contains('token')));
 
@@ -5613,6 +5972,85 @@ void main() {
     expect(tester.getSize(find.byKey(const Key('graph-header'))).width, 180);
   });
 
+  testWidgets('changing the timeline theme preserves selection and scroll', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 500);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final store = MemorySettingsStore();
+    final commits = [
+      for (var index = 0; index < 30; index++)
+        commit('$index', 'message $index'),
+    ];
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository((_, _) async => commits),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    for (var index = 0; index < 12; index++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    }
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    final preview = find.byKey(const Key('preview-surface'));
+    final previewSubject = find.descendant(
+      of: preview,
+      matching: find.text('message 12'),
+    );
+    expect(preview, findsOneWidget);
+    expect(previewSubject, findsOneWidget);
+    final before = tester
+        .state<ScrollableState>(
+          find.descendant(
+            of: find.byKey(const Key('timeline-list')),
+            matching: find.byType(Scrollable),
+          ),
+        )
+        .position
+        .pixels;
+    expect(before, greaterThan(0));
+
+    await tester.tap(find.byKey(const Key('open-settings')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('settings-section-appearance')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('timeline-theme-card-carbon')));
+    await tester.pumpAndSettle();
+    expect(store.current.timelineTheme, TimelineThemeKind.carbon);
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('selected-row-12')), findsOneWidget);
+    expect(preview, findsOneWidget);
+    expect(previewSubject, findsOneWidget);
+    expect(
+      tester
+          .state<ScrollableState>(
+            find.descendant(
+              of: find.byKey(const Key('timeline-list')),
+              matching: find.byType(Scrollable),
+            ),
+          )
+          .position
+          .pixels,
+      before,
+    );
+    expect(
+      tester.widget<Container>(find.byKey(const Key('toolbar'))).color,
+      TimelineThemePalette.carbon.surface,
+    );
+  });
+
   testWidgets('settings toggle preserves timeline state and graph geometry', (
     tester,
   ) async {
@@ -6036,7 +6474,7 @@ void main() {
           )
           .first,
     );
-    expect(band.color, const Color(0xFF1F4D8F));
+    expect(band.color, TimelineThemePalette.systemGraphite.selectedRow);
 
     // It has no commit, so the preview falls back to its empty state.
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -7757,7 +8195,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-a')), findsNothing);
-    expect(background(), const Color(0xFF252936));
+    expect(background(), TimelineThemePalette.systemGraphite.raised);
     expect(
       tester
           .widget<GestureDetector>(
