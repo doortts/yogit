@@ -29,15 +29,17 @@ Side-by-side 화면은 이전 파일과 이후 파일의 폭이 항상 같으며
 
 ## 선택한 접근
 
-기존 `FullDiffView.diff`, `FullDiffView.blame`, `FullDiffView.history` 상태는 유지한다. 저장 형식을 바꾸지 않으므로 이전 설정과 호환된다.
+기존 `FullDiffView.diff`, `FullDiffView.blame`, `FullDiffView.history`는 실제로 표시할 내용을 정하는 값으로 유지한다. 여기에 사용자가 마지막으로 고른 History 상태를 기억하는 `historySelected` 값을 추가한다.
 
 화면에서는 상태를 다음처럼 해석한다.
 
-- `diff`: 상단에서 Diff 선택, History 해제
+- `diff`: 상단에서 Diff 선택, History 이전 선택 상태 복귀
 - `history`: 상단에서 Diff 선택, History 선택
-- `blame`: 상단에서 Blame 선택, Diff 전용 도구 숨김
+- `blame`: 상단에서 Blame 선택, Diff 전용 도구 숨김, History 선택 상태 유지
 
-History를 위한 별도 상태 모델을 추가하는 방법도 검토했지만, 기존 설정 이전과 상태 전환 코드를 크게 바꿔야 한다. 현재 모델을 화면에서만 직교 상태처럼 표현하면 같은 동작을 더 작은 변경으로 구현할 수 있다.
+Diff를 선택하면 `historySelected`가 켜져 있을 때는 History 화면으로, 꺼져 있을 때는 일반 Diff 화면으로 돌아간다. Blame을 선택할 때는 실제 화면만 바꾸며 `historySelected`는 건드리지 않는다. 따라서 History를 켠 상태에서 Blame을 보다가 Diff로 돌아오면 History 화면이 다시 열린다.
+
+`historySelected`는 다른 Full Diff 옵션과 함께 저장한다. 기존 설정에는 이 값이 없으므로 `view`가 `history`이면 켜진 상태로, `diff`나 `blame`이면 꺼진 상태로 읽는다. 새 설정은 `view`와 `historySelected`를 함께 저장하므로 Blame 화면에서 Full Diff를 닫았다가 다시 열어도 이전 History 선택 상태를 기억한다.
 
 ## 화면 구성
 
@@ -45,7 +47,7 @@ History를 위한 별도 상태 모델을 추가하는 방법도 검토했지만
 
 우측에는 `Diff | Blame` 두 버튼만 표시한다. 두 버튼은 간격 없이 붙이며 바깥쪽 모서리만 둥글게 처리한다. 항상 둘 중 하나만 선택된다.
 
-History가 열린 상태에서도 Diff를 선택 상태로 표시한다. Blame을 누르면 History가 닫히고 Blame 화면으로 전환한다.
+History가 열린 상태에서도 Diff를 선택 상태로 표시한다. Blame을 누르면 History 선택 상태를 유지한 채 Blame 화면으로 전환한다. 이후 Diff를 누르면 직전에 선택했던 History 상태로 돌아간다.
 
 ### 두 번째 줄
 
@@ -59,7 +61,7 @@ Unified와 Side-by-side는 간격 없이 붙이며 바깥쪽 모서리만 둥글
 
 Blame 상태에서는 Unified, Side-by-side, Hunk, History를 모두 숨긴다. 두 번째 줄의 나머지 도구 배치는 이번 작업에서 바꾸지 않는다.
 
-History를 다시 누르면 일반 Diff 화면으로 돌아간다. 기존 `Command 3`은 History를 여는 동작을 유지하며, History가 열린 상태에서 다시 누르면 일반 Diff로 돌아간다. `Command 1`은 일반 Diff 화면으로 전환하고 `Command 2`는 Blame 화면으로 전환한다.
+History를 다시 누르면 일반 Diff 화면으로 돌아간다. 기존 `Command 3`은 History 선택 상태를 바꾸고 Diff 화면으로 전환한다. `Command 1`은 Diff 화면으로 전환하면서 직전 History 선택 상태를 복원한다. `Command 2`는 History 선택 상태를 유지한 채 Blame 화면으로 전환한다.
 
 ## 목록 포커스와 키보드 이동
 
@@ -116,10 +118,13 @@ Side-by-side 화면은 이전 파일과 이후 파일 사이에 하나의 세로
 5. Diff와 Blame, Unified와 Side-by-side가 각각 붙어 있는 선택 묶음으로 렌더링된다.
 6. History 상태에서도 Diff가 선택 상태로 보이며 History도 선택 상태로 보인다.
 7. Blame에서는 두 번째 줄의 Diff 전용 도구가 보이지 않는다.
-8. Side-by-side 분할선을 드래그하면 양쪽 폭이 바뀌고 비율이 저장된다.
-9. 저장된 분할 비율이 다음 Full Diff와 다른 파일에도 적용된다.
-10. 좁은 화면에서는 분할선이 보이지 않는다.
-11. Command 키 안내 글자가 11픽셀이고 버튼 위치가 변하지 않는다.
+8. History를 켜고 Blame으로 전환한 뒤 Diff로 돌아오면 History가 다시 열린다.
+9. History를 끄고 Blame으로 전환한 뒤 Diff로 돌아오면 일반 Diff가 열린다.
+10. Blame 상태에서 Full Diff를 닫았다가 다시 열어도 이전 History 선택 상태가 유지된다.
+11. Side-by-side 분할선을 드래그하면 양쪽 폭이 바뀌고 비율이 저장된다.
+12. 저장된 분할 비율이 다음 Full Diff와 다른 파일에도 적용된다.
+13. 좁은 화면에서는 분할선이 보이지 않는다.
+14. Command 키 안내 글자가 11픽셀이고 버튼 위치가 변하지 않는다.
 
 영향 범위 테스트가 통과한 뒤 전체 Flutter 테스트, 시각 검수 테스트, 정적 검사, macOS 릴리스 빌드를 실행한다.
 
@@ -128,6 +133,7 @@ Side-by-side 화면은 이전 파일과 이후 파일 사이에 하나의 세로
 - 여섯 가지 사용자 요청을 모두 자동 테스트로 검증한다.
 - 기존 Full Diff 설정 파일을 그대로 읽을 수 있다.
 - History, Diff, Blame 전환 뒤에도 화살표 키 이동이 끊기지 않는다.
+- Blame에서 Diff로 돌아오면 직전 History 선택 상태를 복원한다.
 - Side-by-side 분할 비율이 저장되고 복원된다.
 - Blame 화면에는 Diff 전용 도구가 표시되지 않는다.
 - 시각 검수에서 버튼 배치와 선택 상태가 설계와 일치한다.
