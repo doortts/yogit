@@ -2535,6 +2535,25 @@ void main() {
     );
   });
 
+  test('side-by-side ratio round-trips and clamps damaged settings', () {
+    const widths = FullDiffColumnWidths(
+      history: 240,
+      files: 330,
+      sideBySideRatio: 0.65,
+    );
+    expect(FullDiffColumnWidths.fromJson(widths.toJson()), widths);
+
+    expect(
+      FullDiffColumnWidths.fromJson({'sideBySideRatio': 0.05}).sideBySideRatio,
+      0.2,
+    );
+    expect(
+      FullDiffColumnWidths.fromJson({'sideBySideRatio': 1.5}).sideBySideRatio,
+      0.8,
+    );
+    expect(FullDiffColumnWidths.fromJson(const {}).sideBySideRatio, 0.5);
+  });
+
   test('legacy full diff commits width migrates to history width', () {
     final widths = FullDiffColumnWidths.fromJson({
       'commits': 244,
@@ -2543,7 +2562,11 @@ void main() {
 
     expect(widths.history, 244);
     expect(widths.files, 318);
-    expect(widths.toJson(), {'history': 244.0, 'files': 318.0});
+    expect(widths.toJson(), {
+      'history': 244.0,
+      'files': 318.0,
+      'sideBySideRatio': 0.5,
+    });
   });
 
   test('legacy full diff initial view is ignored', () {

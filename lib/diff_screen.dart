@@ -148,6 +148,7 @@ class _DiffScreenState extends State<DiffScreen> {
   late FullDiffPreferences _lastReportedPreferences;
   late double _filesWidth;
   late double _historyWidth;
+  late double _sideBySideRatio;
   _FullDiffNavigationPane _lastNavigationPane = _FullDiffNavigationPane.files;
 
   bool _effectScheduled = false;
@@ -173,6 +174,7 @@ class _DiffScreenState extends State<DiffScreen> {
     );
     _filesWidth = widget.columnWidths.files;
     _historyWidth = widget.columnWidths.history;
+    _sideBySideRatio = widget.columnWidths.sideBySideRatio;
     _editorService =
         widget.editorService ??
         ExternalEditorService(repositoryRoot: widget.repository.root);
@@ -213,6 +215,7 @@ class _DiffScreenState extends State<DiffScreen> {
     if (widget.columnWidths != oldWidget.columnWidths) {
       _filesWidth = widget.columnWidths.files;
       _historyWidth = widget.columnWidths.history;
+      _sideBySideRatio = widget.columnWidths.sideBySideRatio;
     }
     final editorContextChanged =
         widget.editorService != oldWidget.editorService ||
@@ -1484,6 +1487,9 @@ class _DiffScreenState extends State<DiffScreen> {
         controller: _contentScroll,
         scrollTarget: state.fullFileScrollTarget,
         scrollTargetKey: _fullFileScrollTargetKey,
+        splitRatio: _sideBySideRatio,
+        onSplitRatioChanged: _resizeSideBySide,
+        onSplitRatioChangeEnd: _saveColumnWidths,
       ),
     };
     return _withRefreshError(presentation, state.patch.error);
@@ -1677,8 +1683,21 @@ class _DiffScreenState extends State<DiffScreen> {
     });
   }
 
+  void _resizeSideBySide(double ratio) {
+    setState(() {
+      _sideBySideRatio = ratio.clamp(
+        FullDiffColumnWidths.minSideBySideRatio,
+        FullDiffColumnWidths.maxSideBySideRatio,
+      );
+    });
+  }
+
   void _saveColumnWidths() => widget.onColumnWidthsChanged?.call(
-    FullDiffColumnWidths(history: _historyWidth, files: _filesWidth),
+    FullDiffColumnWidths(
+      history: _historyWidth,
+      files: _filesWidth,
+      sideBySideRatio: _sideBySideRatio,
+    ),
   );
 
   Widget _sectionHeader(Widget child) => Container(

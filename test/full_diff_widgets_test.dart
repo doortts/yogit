@@ -669,6 +669,106 @@ void main() {
     expect(anchorKey.currentContext, isNotNull);
   });
 
+  testWidgets('side-by-side divider resizes every row without keyboard focus', (
+    tester,
+  ) async {
+    var ratio = 0.5;
+    var ended = 0;
+
+    Future<void> pump() => tester.pumpWidget(
+      qaApp(
+        StatefulBuilder(
+          builder: (context, setState) => SizedBox(
+            width: 800,
+            height: 300,
+            child: SideBySidePresentationView(
+              document: twoHunkDocument,
+              activeAnchor: twoHunkDocument.hunks.first.anchor,
+              oldPath: 'old.pas',
+              newPath: 'new.pas',
+              wrapLines: false,
+              showOldSide: true,
+              highlighter: fakeHighlighter,
+              anchorKeys: {
+                for (final hunk in twoHunkDocument.hunks)
+                  hunk.anchor.id: GlobalKey(debugLabel: hunk.anchor.id),
+              },
+              splitRatio: ratio,
+              onSplitRatioChanged: (value) {
+                setState(() => ratio = value);
+              },
+              onSplitRatioChangeEnd: () => ended++,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await pump();
+    expect(
+      tester.getSize(find.byKey(const Key('side-by-side-divider'))).width,
+      1,
+    );
+    expect(
+      tester.getSize(find.byKey(const Key('side-by-side-resizer'))).width,
+      8,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('side-by-side-resizer')),
+        matching: find.byType(Focus),
+      ),
+      findsNothing,
+    );
+
+    Finder cellFor(String text) => find
+        .ancestor(of: find.text(text), matching: find.byType(FullDiffCodeRow))
+        .first;
+    expect(tester.getSize(cellFor('first old')).width, 400);
+    expect(tester.getSize(cellFor('first new')).width, 400);
+
+    await tester.drag(
+      find.byKey(const Key('side-by-side-resizer')),
+      const Offset(80, 0),
+    );
+    await tester.pump();
+
+    expect(ratio, closeTo(0.6, 0.01));
+    expect(ended, 1);
+    expect(tester.getSize(cellFor('first old')).width, closeTo(480, 0.01));
+    expect(tester.getSize(cellFor('first new')).width, closeTo(320, 0.01));
+  });
+
+  testWidgets('side-by-side divider is hidden with the old side', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      qaApp(
+        SizedBox(
+          width: 400,
+          height: 300,
+          child: SideBySidePresentationView(
+            document: twoHunkDocument,
+            activeAnchor: twoHunkDocument.hunks.first.anchor,
+            oldPath: 'old.pas',
+            newPath: 'new.pas',
+            wrapLines: false,
+            showOldSide: false,
+            highlighter: fakeHighlighter,
+            anchorKeys: {
+              for (final hunk in twoHunkDocument.hunks)
+                hunk.anchor.id: GlobalKey(debugLabel: hunk.anchor.id),
+            },
+            splitRatio: 0.65,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byKey(const Key('side-by-side-divider')), findsNothing);
+    expect(find.byKey(const Key('side-by-side-resizer')), findsNothing);
+  });
+
   testWidgets('side-by-side places leading context before its hunk header', (
     tester,
   ) async {

@@ -124,15 +124,22 @@ class TimelineColumnWidths {
 }
 
 class FullDiffColumnWidths {
-  const FullDiffColumnWidths({this.history = 280, this.files = 290});
+  const FullDiffColumnWidths({
+    this.history = 280,
+    this.files = 290,
+    this.sideBySideRatio = 0.5,
+  });
 
   static const minHistory = 180.0;
   static const maxHistory = 420.0;
   static const minFiles = 158.0;
   static const maxFiles = 520.0;
+  static const minSideBySideRatio = 0.2;
+  static const maxSideBySideRatio = 0.8;
 
   final double history;
   final double files;
+  final double sideBySideRatio;
 
   factory FullDiffColumnWidths.fromJson(Object? value) {
     final json = value is Map<String, dynamic>
@@ -151,19 +158,30 @@ class FullDiffColumnWidths {
         maxHistory,
       ),
       files: width('files', 290, minFiles, maxFiles),
+      sideBySideRatio: width(
+        'sideBySideRatio',
+        0.5,
+        minSideBySideRatio,
+        maxSideBySideRatio,
+      ),
     );
   }
 
-  Map<String, Object> toJson() => {'history': history, 'files': files};
+  Map<String, Object> toJson() => {
+    'history': history,
+    'files': files,
+    'sideBySideRatio': sideBySideRatio,
+  };
 
   @override
   bool operator ==(Object other) =>
       other is FullDiffColumnWidths &&
       history == other.history &&
-      files == other.files;
+      files == other.files &&
+      sideBySideRatio == other.sideBySideRatio;
 
   @override
-  int get hashCode => Object.hash(history, files);
+  int get hashCode => Object.hash(history, files, sideBySideRatio);
 }
 
 /// `#RRGGBB` (or bare `RRGGBB`) to a color, or null when malformed.

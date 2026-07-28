@@ -27,6 +27,9 @@ class SideBySidePresentationView extends StatelessWidget {
     this.scrollTarget,
     this.scrollTargetKey,
     this.debugMetrics,
+    this.splitRatio = 0.5,
+    this.onSplitRatioChanged,
+    this.onSplitRatioChangeEnd,
     super.key,
   });
 
@@ -46,6 +49,9 @@ class SideBySidePresentationView extends StatelessWidget {
   final DiffSourceTarget? scrollTarget;
   final GlobalKey? scrollTargetKey;
   final FullDiffLazyBuildMetrics? debugMetrics;
+  final double splitRatio;
+  final ValueChanged<double>? onSplitRatioChanged;
+  final VoidCallback? onSplitRatioChangeEnd;
 
   @override
   Widget build(BuildContext context) {
@@ -89,6 +95,7 @@ class SideBySidePresentationView extends StatelessWidget {
               current: current,
               richRenderingEnabled: richRenderingEnabled,
               wordDiffer: wordDiffer,
+              splitRatio: splitRatio.clamp(0.2, 0.8).toDouble(),
             );
           } else {
             child = SelectionContainer.disabled(
@@ -120,9 +127,52 @@ class SideBySidePresentationView extends StatelessWidget {
         },
       ),
     );
-    return showOldSide
-        ? KeyedSubtree(key: const Key('side-by-side-old-pane'), child: list)
-        : list;
+    if (!showOldSide) return list;
+    final ratio = splitRatio.clamp(0.2, 0.8).toDouble();
+    return KeyedSubtree(
+      key: const Key('side-by-side-old-pane'),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final splitX = constraints.maxWidth * ratio;
+          var dragRatio = ratio;
+          return Stack(
+            children: [
+              Positioned.fill(child: list),
+              Positioned(
+                key: const Key('side-by-side-divider'),
+                left: splitX,
+                top: 0,
+                bottom: 0,
+                width: 1,
+                child: const ColoredBox(color: fullDiffDivider),
+              ),
+              Positioned(
+                left: splitX - 4,
+                top: 0,
+                bottom: 0,
+                width: 8,
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.resizeColumn,
+                  child: GestureDetector(
+                    key: const Key('side-by-side-resizer'),
+                    behavior: HitTestBehavior.opaque,
+                    onHorizontalDragUpdate: (details) {
+                      dragRatio =
+                          (dragRatio + details.delta.dx / constraints.maxWidth)
+                              .clamp(0.2, 0.8)
+                              .toDouble();
+                      onSplitRatioChanged?.call(dragRatio);
+                    },
+                    onHorizontalDragEnd: (_) => onSplitRatioChangeEnd?.call(),
+                    onHorizontalDragCancel: onSplitRatioChangeEnd,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   GlobalKey _anchorKey(DiffAnchor anchor) =>
@@ -493,6 +543,7 @@ class _SideBySideRow extends StatelessWidget {
     required this.current,
     required this.richRenderingEnabled,
     required this.wordDiffer,
+    required this.splitRatio,
     super.key,
   });
 
@@ -506,6 +557,7 @@ class _SideBySideRow extends StatelessWidget {
   final bool current;
   final bool richRenderingEnabled;
   final FullDiffWordDiffer wordDiffer;
+  final double splitRatio;
 
   @override
   Widget build(BuildContext context) {
@@ -539,31 +591,44 @@ class _SideBySideRow extends StatelessWidget {
 
     if (!showOldSide) return newSide;
 
-    final row = Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: left == null
-              ? HatchedDiffCell(key: Key('side-by-side-missing-old-$sourceRow'))
-              : FullDiffCodeRow(
-                  line: left,
-                  path: oldPath,
-                  wrapLines: wrapLines,
-                  highlighter: highlighter,
-                  current: markCurrent,
-                  wordRanges: wordChanges.oldRanges,
-                  compactGutter: true,
-                  richRenderingEnabled: richRenderingEnabled,
-                  selectionOrder: FullDiffSelectionOrder(row: sourceRow),
-                ),
+    final oldSide = left == null
+        ? HatchedDiffCell(key: Key('side-by-side-missing-old-$sourceRow'))
+        : FullDiffCodeRow(
+            line: left,
+            path: oldPath,
+            wrapLines: wrapLines,
+            highlighter: highlighter,
+            current: markCurrent,
+            wordRanges: wordChanges.oldRanges,
+            compactGutter: true,
+            richRenderingEnabled: richRenderingEnabled,
+            selectionOrder: FullDiffSelectionOrder(row: sourceRow),
+          );
+    if (wrapLines) {
+      const ratioPrecision = 1000000;
+      final oldFlex = (splitRatio * ratioPrecision).round();
+      return IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(flex: oldFlex, child: oldSide),
+            Expanded(flex: ratioPrecision - oldFlex, child: newSide),
+          ],
         ),
-        const VerticalDivider(width: 1, color: fullDiffDivider),
-        Expanded(child: newSide),
-      ],
+      );
+    }
+    return SizedBox(
+      height: 27,
+      child: LayoutBuilder(
+        builder: (context, constraints) => Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(width: constraints.maxWidth * splitRatio, child: oldSide),
+            Expanded(child: newSide),
+          ],
+        ),
+      ),
     );
-    return wrapLines
-        ? IntrinsicHeight(child: row)
-        : SizedBox(height: 27, child: row);
   }
 }
 

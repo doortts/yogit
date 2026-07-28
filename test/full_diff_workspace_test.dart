@@ -1596,6 +1596,76 @@ void main() {
     },
   );
 
+  testWidgets(
+    'side-by-side divider saves and restores across file and layout changes',
+    (tester) async {
+      final controller = await longHistoryController();
+      addTearDown(controller.dispose);
+      controller.setLayout(DiffLayout.sideBySide);
+      FullDiffColumnWidths? saved;
+      await pumpWorkspace(
+        tester,
+        controller: controller,
+        size: const Size(1200, 842),
+        columnWidths: const FullDiffColumnWidths(history: 244, files: 318),
+        onColumnWidthsChanged: (value) => saved = value,
+      );
+
+      double displayedRatio() {
+        final pane = find.byKey(const Key('side-by-side-old-pane'));
+        final resizer = find.byKey(const Key('side-by-side-resizer'));
+        return (tester.getCenter(resizer).dx - tester.getTopLeft(pane).dx) /
+            tester.getSize(pane).width;
+      }
+
+      final paneWidth = tester
+          .getSize(find.byKey(const Key('side-by-side-old-pane')))
+          .width;
+      await tester.drag(
+        find.byKey(const Key('side-by-side-resizer')),
+        Offset(paneWidth * 0.1, 0),
+      );
+      await tester.pump();
+
+      expect(saved?.sideBySideRatio, closeTo(0.6, 0.01));
+      expect(displayedRatio(), closeTo(0.6, 0.01));
+
+      await pumpWorkspace(
+        tester,
+        controller: controller,
+        size: const Size(1200, 842),
+        columnWidths: const FullDiffColumnWidths(
+          history: 244,
+          files: 318,
+          sideBySideRatio: 0.7,
+        ),
+      );
+      expect(displayedRatio(), closeTo(0.7, 0.01));
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await pumpWorkspace(
+        tester,
+        controller: controller,
+        size: const Size(1200, 842),
+        columnWidths: saved!,
+      );
+      expect(displayedRatio(), closeTo(0.6, 0.01));
+
+      await controller.selectFile(controller.state.files.last);
+      await tester.pumpAndSettle();
+      expect(displayedRatio(), closeTo(0.6, 0.01));
+
+      controller.setLayout(DiffLayout.unified);
+      await tester.pump();
+      expect(find.byKey(const Key('side-by-side-resizer')), findsNothing);
+      controller.setLayout(DiffLayout.sideBySide);
+      await tester.pump();
+
+      expect(controller.state.layout, DiffLayout.sideBySide);
+      expect(displayedRatio(), closeTo(0.6, 0.01));
+    },
+  );
+
   testWidgets('pane resizers support 8px keyboard steps', (tester) async {
     final semantics = tester.ensureSemantics();
     final fixture = await historyWorkspaceFixture();
@@ -4053,14 +4123,12 @@ void main() {
         );
         expect(tester.getRect(firstRow).height, greaterThan(27));
         expect(targetFinder, findsNothing);
-        final scrollable = find
-            .descendant(
-              of: find.byKey(const Key('content-scrollable')),
-              matching: find.byType(Scrollable),
-            )
-            .first;
+        final scrollDragStart = Offset(
+          viewportRect.left + viewportRect.width * 0.75,
+          viewportRect.center.dy,
+        );
         for (var viewport = 0; viewport < 3; viewport++) {
-          await tester.drag(scrollable, const Offset(0, -300));
+          await tester.dragFrom(scrollDragStart, const Offset(0, -300));
           await tester.pumpAndSettle();
           expect(controller.state.activeAnchor?.hunkIndex, 0);
         }
@@ -4074,7 +4142,7 @@ void main() {
         expect(targetRect.top, greaterThanOrEqualTo(viewportRect.top));
         expect(targetRect.bottom, lessThanOrEqualTo(viewportRect.bottom));
         for (var viewport = 0; viewport < 2; viewport++) {
-          await tester.drag(scrollable, const Offset(0, -240));
+          await tester.dragFrom(scrollDragStart, const Offset(0, -240));
           await tester.pumpAndSettle();
           expect(controller.state.activeAnchor?.hunkIndex, 1);
         }
