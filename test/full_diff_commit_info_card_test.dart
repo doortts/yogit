@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/full_diff_commit_info_card.dart';
+import 'package:yogit/typography.dart';
 
 import 'support/full_diff_fixtures.dart';
 
@@ -41,6 +42,21 @@ void main() {
       expect(message.overflow, TextOverflow.ellipsis);
       expect(message.data, contains('line 9'));
       expect(find.textContaining('Suwon Chae'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('full-diff-commit-metadata')),
+          matching: find.text('·'),
+        ),
+        findsNWidgets(2),
+      );
+      expect(
+        tester.widget<Text>(find.text('40aff6d')).style?.fontFamily,
+        technicalFontFamily,
+      );
+      expect(
+        tester.widget<Text>(find.text('Suwon Chae')).style?.fontFamily,
+        isNot(technicalFontFamily),
+      );
       final local = DateTime.fromMillisecondsSinceEpoch(1704067200 * 1000);
       final expectedTime =
           '${local.year.toString().padLeft(4, '0')}-'
@@ -51,6 +67,42 @@ void main() {
       expect(find.textContaining(expectedTime), findsOneWidget);
     },
   );
+
+  testWidgets('metadata separators wrap inside a narrow commit card', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      qaApp(
+        const SizedBox(
+          width: 150,
+          child: FullDiffCommitInfoCard(
+            info: FullDiffCommitInfo(
+              sha: '40aff6d123',
+              shortSha: '40aff6d',
+              fallbackMessage: 'Fallback subject',
+              author: 'Suwon Chae',
+              timestamp: 1704067200,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      tester
+          .getSize(find.byKey(const Key('full-diff-commit-card-surface')))
+          .width,
+      lessThanOrEqualTo(150),
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('full-diff-commit-metadata')),
+        matching: find.text('·'),
+      ),
+      findsNWidgets(2),
+    );
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('keeps fallback when loading fails', (tester) async {
     await tester.pumpWidget(

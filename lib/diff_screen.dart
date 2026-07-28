@@ -136,6 +136,7 @@ class _DiffScreenState extends State<DiffScreen> {
   final _fileListFocus = FocusNode(debugLabel: 'full diff files');
   final _historyListFocus = FocusNode(debugLabel: 'full diff history');
   final _blameListFocus = FocusNode(debugLabel: 'full diff blame');
+  late final Listenable _detailNavigationFocus;
   final _algorithmChooserKey = GlobalKey<FullDiffAlgorithmChooserState>();
   final _contentViewportKey = GlobalKey();
   final _fullFileScrollTargetKey = GlobalKey(
@@ -190,6 +191,10 @@ class _DiffScreenState extends State<DiffScreen> {
     _contentScroll = FullDiffScrollController(
       onAttach: (_) => _handleContentScrollAttached(),
     );
+    _detailNavigationFocus = Listenable.merge([
+      _historyListFocus,
+      _blameListFocus,
+    ]);
     _filesWidth = widget.columnWidths.files;
     _historyWidth = widget.columnWidths.history;
     _sideBySideRatio = widget.columnWidths.sideBySideRatio;
@@ -1313,7 +1318,7 @@ class _DiffScreenState extends State<DiffScreen> {
                                 }
                               },
                               child: ListenableBuilder(
-                                listenable: _historyListFocus,
+                                listenable: _detailNavigationFocus,
                                 builder: (context, _) => FullDiffSelectableRowSurface(
                                   key: selected
                                       ? Key('selected-file-${file.path}')
@@ -1321,8 +1326,13 @@ class _DiffScreenState extends State<DiffScreen> {
                                   selected: selected,
                                   focused:
                                       selected &&
-                                      (state.view != FullDiffView.history ||
-                                          !_historyListFocus.hasFocus),
+                                      switch (state.view) {
+                                        FullDiffView.history =>
+                                          !_historyListFocus.hasFocus,
+                                        FullDiffView.blame =>
+                                          !_blameListFocus.hasFocus,
+                                        FullDiffView.diff => true,
+                                      },
                                   child: Padding(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 10,

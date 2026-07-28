@@ -3107,6 +3107,26 @@ void main() {
     filesFocus.focusNode!.requestFocus();
     await tester.pump();
     final selectedFile = controller.state.selectedFile;
+    FullDiffSelectableRowSurface selectedFileSurface() =>
+        tester.widget<FullDiffSelectableRowSurface>(
+          find.byKey(Key('selected-file-${selectedFile!.path}')),
+        );
+    BoxDecoration selectedFileDecoration() =>
+        tester
+                .widget<DecoratedBox>(
+                  find
+                      .descendant(
+                        of: find.byKey(
+                          Key('selected-file-${selectedFile!.path}'),
+                        ),
+                        matching: find.byType(DecoratedBox),
+                      )
+                      .first,
+                )
+                .decoration
+            as BoxDecoration;
+    expect(selectedFileSurface().focused, isTrue);
+    expect(selectedFileDecoration().border, isNotNull);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pump();
@@ -3115,6 +3135,8 @@ void main() {
     );
     expect(blameFocus.focusNode!.hasFocus, isTrue);
     expect(find.byKey(const Key('blame-selected-1')), findsOneWidget);
+    expect(selectedFileSurface().focused, isFalse);
+    expect(selectedFileDecoration().border, isNull);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pump();
@@ -3129,6 +3151,70 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
     await tester.pump();
     expect(filesFocus.focusNode!.hasFocus, isTrue);
+    expect(selectedFileSurface().focused, isTrue);
+    expect(selectedFileDecoration().border, isNotNull);
+  });
+
+  testWidgets('History and Blame restore their independent detail-list focus', (
+    tester,
+  ) async {
+    final fixture = await workspaceFixture();
+    addTearDown(fixture.controller.dispose);
+    fixture.controller.setHistorySelected(true);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1070, 842),
+    );
+
+    final filesFocus = tester.widget<Focus>(
+      find.byKey(const Key('changed-files-focus')),
+    );
+    filesFocus.focusNode!.requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<Focus>(find.byKey(const Key('history-list-focus')))
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
+
+    await tester.tap(find.text('Blame'));
+    await tester.pumpAndSettle();
+    expect(filesFocus.focusNode!.hasFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(
+      tester
+          .widget<Focus>(find.byKey(const Key('blame-list-focus')))
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
+
+    await tester.tap(find.text('Diff'));
+    await tester.pumpAndSettle();
+    expect(fixture.controller.state.view, FullDiffView.history);
+    expect(
+      tester
+          .widget<Focus>(find.byKey(const Key('history-list-focus')))
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
+
+    await tester.tap(find.text('Blame'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<Focus>(find.byKey(const Key('blame-list-focus')))
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
   });
 
   testWidgets('Blame line focus survives a loading fallback to Files', (

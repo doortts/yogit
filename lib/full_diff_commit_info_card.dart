@@ -109,7 +109,7 @@ class _FullDiffCommitInfoCardState extends State<FullDiffCommitInfoCard> {
                 const SizedBox(height: 4),
                 Wrap(
                   key: const Key('full-diff-commit-metadata'),
-                  spacing: 8,
+                  spacing: 4,
                   runSpacing: 2,
                   children: [
                     Text(
@@ -121,7 +121,9 @@ class _FullDiffCommitInfoCardState extends State<FullDiffCommitInfoCard> {
                         fontSize: 10,
                       ),
                     ),
+                    const Text('·'),
                     Text(info.author),
+                    const Text('·'),
                     Text(
                       _formatDateTime(info.timestamp),
                       style: const TextStyle(

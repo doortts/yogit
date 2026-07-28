@@ -37,6 +37,7 @@ void main() {
     VoidCallback? onMoveToFiles,
     DiffAnchor? activeAnchor,
     FullDiffCommitMessageLoader? loadCommitMessage,
+    GitBlameLine Function(int line)? blameForLine,
   }) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = size;
@@ -57,15 +58,18 @@ void main() {
     );
     final blame = BlameDocument.fromGitLines(file, [
       for (var line = 1; line <= file.lines.length; line++)
-        GitBlameLine(
-          lineNumber: line,
-          sha: '40aff6d123456789',
-          author: 'Suwon Chae',
-          authorEmail: 'suwon@example.com',
-          authorTimestamp: 1704067200,
-          summary: emptyThirdSummary && line == 3 ? '' : 'Commit summary $line',
-          uncommitted: false,
-        ),
+        blameForLine?.call(line) ??
+            GitBlameLine(
+              lineNumber: line,
+              sha: '40aff6d123456789',
+              author: 'Suwon Chae',
+              authorEmail: 'suwon@example.com',
+              authorTimestamp: 1704067200,
+              summary: emptyThirdSummary && line == 3
+                  ? ''
+                  : 'Commit summary $line',
+              uncommitted: false,
+            ),
     ]);
 
     Widget view = FullBlameView(
@@ -1770,6 +1774,39 @@ void main() {
     );
   });
 
+  testWidgets(
+    'uncommitted zero-SHA blame keeps fallback without requesting a message',
+    (tester) async {
+      final requestedShas = <String>[];
+      await pumpInteractiveBlameView(
+        tester,
+        lineCount: 1,
+        blameForLine: (line) => GitBlameLine(
+          lineNumber: line,
+          sha: '0000000000000000000000000000000000000000',
+          author: 'Not Committed Yet',
+          summary: 'Uncommitted change',
+          uncommitted: true,
+        ),
+        loadCommitMessage: (sha) async {
+          requestedShas.add(sha);
+          return 'Unexpected repository message';
+        },
+      );
+
+      await tester.tap(find.byKey(const Key('blame-line-1')));
+      await tester.pump();
+      await tester.pump();
+
+      final details = find.byKey(const Key('blame-commit-details-1'));
+      expect(requestedShas, isEmpty);
+      expect(
+        find.descendant(of: details, matching: find.text('Uncommitted change')),
+        findsOneWidget,
+      );
+    },
+  );
+
   testWidgets('blame hover and selection keep row geometry stable', (
     tester,
   ) async {
@@ -1865,6 +1902,50 @@ void main() {
     await tester.pump();
     expect(find.byKey(const Key('blame-selected-8')), findsOneWidget);
   });
+
+  testWidgets(
+    'narrow blame keeps the offset commit card inside the list viewport',
+    (tester) async {
+      await pumpInteractiveBlameView(
+        tester,
+        size: const Size(300, 240),
+        lineCount: 3,
+        loadCommitMessage: (_) async =>
+            List.filled(20, 'wide commit message').join(' '),
+      );
+
+      await tester.tap(find.byKey(const Key('blame-line-1')));
+      await tester.pump();
+      await tester.pump();
+
+      final viewport = tester.getRect(find.byKey(const Key('blame-list')));
+      final card = tester.getRect(
+        find.byKey(const Key('blame-commit-details-1')),
+      );
+      final numberColumn = tester.getRect(
+        find.byKey(const Key('blame-line-number-1')),
+      );
+      expect(card.left, closeTo(numberColumn.left, 0.5));
+      expect(card.right, lessThanOrEqualTo(viewport.right + 0.5));
+      expect(
+        card.width,
+        lessThanOrEqualTo(viewport.width - fullBlameAvatarWidth + 0.5),
+      );
+      expect(tester.takeException(), isNull);
+
+      tester.view.physicalSize = const Size(1000, 240);
+      await tester.pump();
+      final wideCard = tester.getRect(
+        find.byKey(const Key('blame-commit-details-1')),
+      );
+      final wideNumberColumn = tester.getRect(
+        find.byKey(const Key('blame-line-number-1')),
+      );
+      expect(wideCard.left, closeTo(wideNumberColumn.left, 0.5));
+      expect(wideCard.width, lessThanOrEqualTo(420));
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('blame focus selects, navigates, and returns to files', (
     tester,

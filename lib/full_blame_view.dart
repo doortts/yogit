@@ -183,18 +183,30 @@ class FullBlameViewState extends State<FullBlameView> {
                           fullBlameAvatarWidth,
                           fullDiffSourceRowHeight * 2,
                         ),
-                        child: Align(
+                        child: UnconstrainedBox(
+                          constrainedAxis: Axis.vertical,
                           alignment: Alignment.topLeft,
-                          child: FullDiffCommitInfoCard(
-                            key: Key('blame-commit-details-$selectedLine'),
-                            info: FullDiffCommitInfo(
-                              sha: selectedBlame.sha,
-                              shortSha: _shortSha(selectedBlame.sha),
-                              fallbackMessage: selectedBlame.summary,
-                              author: selectedBlame.author,
-                              timestamp: selectedBlame.authorTimestamp,
+                          child: SizedBox(
+                            width: constraints.maxWidth <= fullBlameAvatarWidth
+                                ? 0
+                                : constraints.maxWidth - fullBlameAvatarWidth,
+                            child: Align(
+                              alignment: Alignment.topLeft,
+                              child: FullDiffCommitInfoCard(
+                                key: Key('blame-commit-details-$selectedLine'),
+                                info: FullDiffCommitInfo(
+                                  sha: selectedBlame.sha,
+                                  shortSha: _shortSha(selectedBlame.sha),
+                                  fallbackMessage: selectedBlame.summary,
+                                  author: selectedBlame.author,
+                                  timestamp: selectedBlame.authorTimestamp,
+                                ),
+                                loadMessage:
+                                    _canLoadCommitMessage(selectedBlame)
+                                    ? widget.loadCommitMessage
+                                    : null,
+                              ),
                             ),
-                            loadMessage: widget.loadCommitMessage,
                           ),
                         ),
                       ),
@@ -353,6 +365,13 @@ class FullBlameViewState extends State<FullBlameView> {
           onDetached: widget.onAnchorProbeDetached,
           child: child,
         );
+}
+
+bool _canLoadCommitMessage(BlameLine blame) {
+  if (blame.uncommitted) return false;
+  final sha = blame.sha.trim();
+  return RegExp(r'^[0-9a-fA-F]{7,64}$').hasMatch(sha) &&
+      !RegExp(r'^0+$').hasMatch(sha);
 }
 
 class BlameSourceRow extends StatelessWidget {
