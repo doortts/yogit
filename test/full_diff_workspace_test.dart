@@ -1787,6 +1787,7 @@ void main() {
 
       tester.view.physicalSize = const Size(700, 842);
       await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
       expect(
         tester.getSize(find.byKey(const Key('details-files-column'))).width,
         200,
