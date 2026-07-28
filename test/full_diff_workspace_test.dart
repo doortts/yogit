@@ -1162,7 +1162,7 @@ void main() {
     await tester.tap(find.byKey(const Key('diff-algorithm')));
     await tester.pump();
 
-    final details = find.byKey(const Key('algorithm-details-gitSetting'));
+    final details = find.byKey(const Key('algorithm-details-myers'));
     expect(details, findsOneWidget);
     expect(tester.getTopLeft(details).dx, greaterThanOrEqualTo(0));
     expect(tester.getTopRight(details).dx, lessThanOrEqualTo(480));
@@ -2483,17 +2483,17 @@ void main() {
       final requestsBefore = fixture.repository.diffRequests.length;
 
       await sendChord(tester, LogicalKeyboardKey.keyA, meta: true, shift: true);
-      expect(
-        find.byKey(const Key('algorithm-details-gitSetting')),
-        findsOneWidget,
-      );
+      expect(find.byKey(const Key('algorithm-details-myers')), findsOneWidget);
 
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pump();
-      expect(find.byKey(const Key('algorithm-details-myers')), findsOneWidget);
+      expect(
+        find.byKey(const Key('algorithm-details-minimal')),
+        findsOneWidget,
+      );
       expect(
         tester
-            .getSemantics(find.byKey(const Key('algorithm-option-myers')))
+            .getSemantics(find.byKey(const Key('algorithm-option-minimal')))
             .getSemanticsData()
             .flagsCollection
             .isFocused,
@@ -2510,9 +2510,9 @@ void main() {
       expect(fixture.repository.diffRequests, hasLength(requestsBefore + 1));
       expect(
         fixture.repository.diffRequests.last.algorithm,
-        DiffAlgorithm.myers,
+        DiffAlgorithm.minimal,
       );
-      expect(fixture.controller.state.appliedAlgorithm, DiffAlgorithm.myers);
+      expect(fixture.controller.state.appliedAlgorithm, DiffAlgorithm.minimal);
     },
   );
 
@@ -2531,29 +2531,29 @@ void main() {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
-    expect(fixture.controller.state.appliedAlgorithm, DiffAlgorithm.myers);
+    expect(fixture.controller.state.appliedAlgorithm, DiffAlgorithm.minimal);
     expect(fixture.repository.diffRequests, hasLength(requestsBefore + 1));
-    expect(find.byKey(const Key('algorithm-details-myers')), findsNothing);
+    expect(find.byKey(const Key('algorithm-details-minimal')), findsNothing);
 
     await tester.sendKeyRepeatEvent(LogicalKeyboardKey.enter);
     await tester.sendKeyRepeatEvent(LogicalKeyboardKey.enter);
     await tester.pump();
 
     expect(fixture.repository.diffRequests, hasLength(requestsBefore + 1));
-    expect(find.byKey(const Key('algorithm-details-myers')), findsNothing);
+    expect(find.byKey(const Key('algorithm-details-minimal')), findsNothing);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
     await tester.pump();
-    expect(find.byKey(const Key('algorithm-details-myers')), findsOneWidget);
+    expect(find.byKey(const Key('algorithm-details-minimal')), findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
-    expect(fixture.controller.state.appliedAlgorithm, DiffAlgorithm.minimal);
+    expect(fixture.controller.state.appliedAlgorithm, DiffAlgorithm.patience);
     expect(fixture.repository.diffRequests, hasLength(requestsBefore + 2));
   });
 
@@ -2577,13 +2577,13 @@ void main() {
     await tester.sendKeyRepeatEvent(LogicalKeyboardKey.numpadEnter);
     await tester.pump();
 
-    expect(fixture.controller.state.appliedAlgorithm, DiffAlgorithm.myers);
+    expect(fixture.controller.state.appliedAlgorithm, DiffAlgorithm.minimal);
     expect(fixture.repository.diffRequests, hasLength(requestsBefore + 1));
-    expect(find.byKey(const Key('algorithm-details-myers')), findsNothing);
+    expect(find.byKey(const Key('algorithm-details-minimal')), findsNothing);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.numpadEnter);
     await tester.tap(find.byKey(const Key('diff-algorithm')));
     await tester.pump();
-    expect(find.byKey(const Key('algorithm-details-myers')), findsOneWidget);
+    expect(find.byKey(const Key('algorithm-details-minimal')), findsOneWidget);
   });
 
   testWidgets('pending algorithm request keeps its chooser closed', (
@@ -2593,7 +2593,7 @@ void main() {
     final repository = FakeFullDiffRepository()
       ..files = ((_, _) async => const [fileA])
       ..diff = ((_, _, _, algorithm, _) {
-        if (algorithm == DiffAlgorithm.myers) return pending.future;
+        if (algorithm == DiffAlgorithm.minimal) return pending.future;
         return Future.value(twoHunkLines);
       })
       ..content = ((_, _, _) async => resultFile.bytes);
@@ -2613,9 +2613,9 @@ void main() {
 
     await tester.tap(find.byKey(const Key('diff-algorithm')));
     await tester.pump();
-    await tester.tap(find.byKey(const Key('algorithm-option-myers')));
+    await tester.tap(find.byKey(const Key('algorithm-option-minimal')));
     await tester.pump();
-    expect(controller.state.requestedAlgorithm, DiffAlgorithm.myers);
+    expect(controller.state.requestedAlgorithm, DiffAlgorithm.minimal);
     expect(controller.state.appliedAlgorithm, DiffAlgorithm.gitSetting);
     expect(repository.diffRequests, hasLength(requestsBefore + 1));
     expect(
@@ -2630,19 +2630,19 @@ void main() {
     await tester.tap(find.byKey(const Key('diff-algorithm')));
     await tester.pump();
 
-    expect(find.byKey(const Key('algorithm-details-gitSetting')), findsNothing);
+    expect(find.byKey(const Key('algorithm-details-myers')), findsNothing);
     expect(repository.diffRequests, hasLength(requestsBefore + 1));
 
     pending.complete(twoHunkLines);
     await tester.pumpAndSettle();
-    expect(controller.state.appliedAlgorithm, DiffAlgorithm.myers);
+    expect(controller.state.appliedAlgorithm, DiffAlgorithm.minimal);
 
     await tester.tap(find.byKey(const Key('diff-algorithm')));
     await tester.pump();
-    expect(find.byKey(const Key('algorithm-details-myers')), findsOneWidget);
+    expect(find.byKey(const Key('algorithm-details-minimal')), findsOneWidget);
     expect(
       tester
-          .getSemantics(find.byKey(const Key('algorithm-option-myers')))
+          .getSemantics(find.byKey(const Key('algorithm-option-minimal')))
           .getSemanticsData()
           .flagsCollection
           .isSelected,
@@ -2657,7 +2657,7 @@ void main() {
       final repository = FakeFullDiffRepository()
         ..files = ((_, _) async => const [fileA])
         ..diff = ((_, _, _, algorithm, _) {
-          if (algorithm == DiffAlgorithm.myers) return pending.future;
+          if (algorithm == DiffAlgorithm.minimal) return pending.future;
           return Future.value(twoHunkLines);
         })
         ..content = ((_, _, _) async => resultFile.bytes);
@@ -2678,7 +2678,7 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
       await tester.pump();
-      expect(controller.state.requestedAlgorithm, DiffAlgorithm.myers);
+      expect(controller.state.requestedAlgorithm, DiffAlgorithm.minimal);
       expect(controller.state.appliedAlgorithm, DiffAlgorithm.gitSetting);
 
       await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
@@ -2686,12 +2686,15 @@ void main() {
       await tester.pumpAndSettle();
 
       await sendChord(tester, LogicalKeyboardKey.keyA, meta: true, shift: true);
-      expect(find.byKey(const Key('algorithm-details-myers')), findsOneWidget);
+      expect(
+        find.byKey(const Key('algorithm-details-minimal')),
+        findsOneWidget,
+      );
 
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
-      expect(controller.state.appliedAlgorithm, DiffAlgorithm.minimal);
+      expect(controller.state.appliedAlgorithm, DiffAlgorithm.patience);
     },
   );
 
@@ -2699,11 +2702,11 @@ void main() {
     'enter key up during a failed algorithm request re-enables pointer apply',
     (tester) async {
       final pending = Completer<List<DiffLine>>();
-      var myersRequests = 0;
+      var minimalRequests = 0;
       final repository = FakeFullDiffRepository()
         ..files = ((_, _) async => const [fileA])
         ..diff = ((_, _, _, algorithm, _) {
-          if (algorithm == DiffAlgorithm.myers && myersRequests++ == 0) {
+          if (algorithm == DiffAlgorithm.minimal && minimalRequests++ == 0) {
             return pending.future;
           }
           return Future.value(twoHunkLines);
@@ -2736,13 +2739,10 @@ void main() {
 
       await tester.tap(find.byKey(const Key('diff-algorithm')));
       await tester.pump();
-      expect(
-        find.byKey(const Key('algorithm-details-gitSetting')),
-        findsOneWidget,
-      );
-      await tester.tap(find.byKey(const Key('algorithm-option-myers')));
+      expect(find.byKey(const Key('algorithm-details-myers')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('algorithm-option-minimal')));
       await tester.pumpAndSettle();
-      expect(controller.state.appliedAlgorithm, DiffAlgorithm.myers);
+      expect(controller.state.appliedAlgorithm, DiffAlgorithm.minimal);
     },
   );
 
@@ -2761,12 +2761,12 @@ void main() {
     await sendChord(tester, LogicalKeyboardKey.keyA, meta: true, shift: true);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pump();
-    expect(find.byKey(const Key('algorithm-details-myers')), findsOneWidget);
+    expect(find.byKey(const Key('algorithm-details-minimal')), findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('algorithm-details-myers')), findsNothing);
+    expect(find.byKey(const Key('algorithm-details-minimal')), findsNothing);
     expect(fixture.repository.diffRequests, hasLength(requestsBefore));
     expect(fixture.controller.state.appliedAlgorithm, DiffAlgorithm.gitSetting);
     final algorithmButton = tester.widget<InkWell>(
@@ -3409,7 +3409,7 @@ void main() {
       final repository = FakeFullDiffRepository()
         ..files = ((_, _) async => const [fileA])
         ..diff = ((_, _, _, algorithm, _) {
-          if (algorithm == DiffAlgorithm.myers) return pending.future;
+          if (algorithm == DiffAlgorithm.minimal) return pending.future;
           return Future.value(twoHunkLines);
         })
         ..content = ((_, _, _) async => resultFile.bytes);
@@ -3430,21 +3430,21 @@ void main() {
 
       await tester.tap(find.byKey(const Key('diff-algorithm')));
       await tester.pump();
-      await tester.tap(find.byKey(const Key('algorithm-option-myers')));
+      await tester.tap(find.byKey(const Key('algorithm-option-minimal')));
       await tester.pump();
 
-      expect(controller.state.requestedAlgorithm, DiffAlgorithm.myers);
+      expect(controller.state.requestedAlgorithm, DiffAlgorithm.minimal);
       expect(controller.state.appliedAlgorithm, DiffAlgorithm.gitSetting);
       expect(
         find.descendant(
           of: find.byKey(const Key('diff-algorithm')),
-          matching: find.text('Git setting'),
+          matching: find.text('Myers'),
         ),
         findsOneWidget,
       );
       expect(
         reported.where(
-          (preference) => preference.algorithm == DiffAlgorithm.myers,
+          (preference) => preference.algorithm == DiffAlgorithm.minimal,
         ),
         isEmpty,
       );
@@ -3458,10 +3458,60 @@ void main() {
       expect(controller.state.appliedAlgorithm, DiffAlgorithm.gitSetting);
       expect(
         reported.where(
-          (preference) => preference.algorithm == DiffAlgorithm.myers,
+          (preference) => preference.algorithm == DiffAlgorithm.minimal,
         ),
         isEmpty,
       );
+    },
+  );
+
+  testWidgets(
+    'algorithm rows reload the visible patch and Git row restores config',
+    (tester) async {
+      final repository = FakeFullDiffRepository()
+        ..gitDiffAlgorithmSetting = const GitDiffAlgorithmSetting(
+          algorithm: DiffAlgorithm.histogram,
+          configuredValue: 'histogram',
+        )
+        ..files = ((_, _) async => const [fileA])
+        ..diff = ((_, _, _, algorithm, _) async => [
+          const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+          DiffLine(
+            kind: DiffLineKind.add,
+            text: algorithm == DiffAlgorithm.patience
+                ? 'patience patch'
+                : 'histogram patch',
+            newNumber: 1,
+          ),
+        ])
+        ..content = ((_, _, _) async => resultFile.bytes);
+      final controller = FullDiffSessionController(
+        repository: repository,
+        commits: const [commitA],
+        initialIndex: 0,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await pumpWorkspace(
+        tester,
+        controller: controller,
+        size: const Size(1200, 800),
+      );
+
+      expect(find.text('histogram patch'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('diff-algorithm')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('algorithm-option-patience')));
+      await tester.pumpAndSettle();
+      expect(find.text('patience patch'), findsOneWidget);
+      expect(repository.diffRequests.last.algorithm, DiffAlgorithm.patience);
+
+      await tester.tap(find.byKey(const Key('diff-algorithm')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('algorithm-option-histogram')));
+      await tester.pumpAndSettle();
+      expect(find.text('histogram patch'), findsOneWidget);
+      expect(controller.state.appliedAlgorithm, DiffAlgorithm.gitSetting);
     },
   );
 

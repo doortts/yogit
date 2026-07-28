@@ -73,7 +73,7 @@ void main() {
               file: _sizedFile,
               path: _sizedFile.path,
               reason: scenario.reason,
-              algorithm: DiffAlgorithm.gitSetting,
+              algorithm: DiffAlgorithm.myers,
               ignoreWhitespace: false,
               error: const FormatException('fixture failure'),
               onRetry: () => retries++,
@@ -113,7 +113,7 @@ void main() {
         );
 
         if (scenario.reason == FullDiffUnavailableReason.noChanges) {
-          expect(find.textContaining('Git setting'), findsOneWidget);
+          expect(find.textContaining('Myers'), findsOneWidget);
           expect(find.textContaining('공백 포함'), findsOneWidget);
         } else {
           expect(find.textContaining('공백 포함'), findsNothing);

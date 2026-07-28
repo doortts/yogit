@@ -18,11 +18,6 @@ class DiffAlgorithmDetails {
 }
 
 const diffAlgorithmDetails = <DiffAlgorithm, DiffAlgorithmDetails>{
-  DiffAlgorithm.gitSetting: DiffAlgorithmDetails(
-    description: '저장소의 Git 설정을 따릅니다. 설정이 없으면 Git 기본값을 사용합니다.',
-    bestFor: '팀에서 diff.algorithm 설정을 공유하는 저장소',
-    example: ['설정: diff.algorithm=histogram', '결과: Histogram 방식 사용'],
-  ),
   DiffAlgorithm.myers: DiffAlgorithmDetails(
     description: '일반적인 소스 변경을 빠르게 비교하는 Git 기본 알고리즘입니다.',
     bestFor: '대부분의 작은 코드 수정',
@@ -51,6 +46,7 @@ String diffAlgorithmDescription(DiffAlgorithm value) =>
 class FullDiffAlgorithmChooser extends StatefulWidget {
   const FullDiffAlgorithmChooser({
     required this.algorithm,
+    required this.gitDiffAlgorithmSetting,
     required this.onSelected,
     this.enabled = true,
     this.compact = false,
@@ -59,6 +55,7 @@ class FullDiffAlgorithmChooser extends StatefulWidget {
   });
 
   final DiffAlgorithm algorithm;
+  final GitDiffAlgorithmSetting gitDiffAlgorithmSetting;
   final ValueChanged<DiffAlgorithm> onSelected;
   final bool enabled;
   final bool compact;
@@ -118,6 +115,7 @@ class FullDiffAlgorithmChooserState extends State<FullDiffAlgorithmChooser> {
         items: [
           _AlgorithmChooserEntry(
             appliedAlgorithm: widget.algorithm,
+            gitDiffAlgorithmSetting: widget.gitDiffAlgorithmSetting,
             onApplyKeyDown: (key) => _suppressedApplyKey = key,
           ),
         ],
@@ -142,16 +140,19 @@ class FullDiffAlgorithmChooserState extends State<FullDiffAlgorithmChooser> {
 
   @override
   Widget build(BuildContext context) {
+    final displayedAlgorithm = widget.gitDiffAlgorithmSetting.resolveSelection(
+      widget.algorithm,
+    );
     return Semantics(
       key: const Key('diff-algorithm'),
       container: true,
       button: true,
       enabled: widget.enabled,
       excludeSemantics: true,
-      label: 'diff 알고리즘: ${widget.algorithm.label}',
+      label: 'diff 알고리즘: ${displayedAlgorithm.label}',
       hint:
           'Git이 변경 구간을 나누는 방식을 정합니다. '
-          '${diffAlgorithmDescription(widget.algorithm)} '
+          '${diffAlgorithmDescription(displayedAlgorithm)} '
           '단축키 Command Shift A',
       onTap: widget.enabled ? show : null,
       child: Material(
@@ -175,7 +176,7 @@ class FullDiffAlgorithmChooserState extends State<FullDiffAlgorithmChooser> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(widget.algorithm.label),
+                Text(displayedAlgorithm.label),
                 SizedBox(width: widget.compact ? 2 : 4),
                 const Icon(Icons.arrow_drop_down, size: 16),
               ],
@@ -190,10 +191,12 @@ class FullDiffAlgorithmChooserState extends State<FullDiffAlgorithmChooser> {
 class _AlgorithmChooserEntry extends PopupMenuEntry<DiffAlgorithm> {
   const _AlgorithmChooserEntry({
     required this.appliedAlgorithm,
+    required this.gitDiffAlgorithmSetting,
     required this.onApplyKeyDown,
   });
 
   final DiffAlgorithm appliedAlgorithm;
+  final GitDiffAlgorithmSetting gitDiffAlgorithmSetting;
   final ValueChanged<LogicalKeyboardKey> onApplyKeyDown;
 
   @override
@@ -214,14 +217,16 @@ class _AlgorithmChooserEntryState extends State<_AlgorithmChooserEntry> {
   @override
   void initState() {
     super.initState();
-    _previewAlgorithm = widget.appliedAlgorithm;
-    _focusedAlgorithm = widget.appliedAlgorithm;
+    _previewAlgorithm = widget.gitDiffAlgorithmSetting.resolveSelection(
+      widget.appliedAlgorithm,
+    );
+    _focusedAlgorithm = _previewAlgorithm;
     _focusNodes = {
-      for (final algorithm in DiffAlgorithm.values)
+      for (final algorithm in concreteDiffAlgorithms)
         algorithm: FocusNode(debugLabel: 'diff algorithm ${algorithm.name}'),
     };
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focusNodes[widget.appliedAlgorithm]!.requestFocus();
+      if (mounted) _focusNodes[_focusedAlgorithm]!.requestFocus();
     });
   }
 
@@ -234,7 +239,7 @@ class _AlgorithmChooserEntryState extends State<_AlgorithmChooserEntry> {
   }
 
   void _moveFocus(int delta) {
-    final values = DiffAlgorithm.values;
+    final values = concreteDiffAlgorithms;
     final nextIndex = (values.indexOf(_focusedAlgorithm) + delta).clamp(
       0,
       values.length - 1,
@@ -244,7 +249,10 @@ class _AlgorithmChooserEntryState extends State<_AlgorithmChooserEntry> {
 
   void _applyFocused(LogicalKeyboardKey key) {
     widget.onApplyKeyDown(key);
-    Navigator.pop(context, _focusedAlgorithm);
+    Navigator.pop(
+      context,
+      widget.gitDiffAlgorithmSetting.normalizeSelection(_focusedAlgorithm),
+    );
   }
 
   @override
@@ -287,16 +295,25 @@ class _AlgorithmChooserEntryState extends State<_AlgorithmChooserEntry> {
                 child: ListView(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   children: [
-                    for (final algorithm in DiffAlgorithm.values)
+                    for (final algorithm in concreteDiffAlgorithms)
                       Semantics(
                         key: Key('algorithm-option-${algorithm.name}'),
                         excludeSemantics: true,
                         button: true,
                         inMutuallyExclusiveGroup: true,
-                        selected: algorithm == widget.appliedAlgorithm,
+                        selected:
+                            algorithm ==
+                            widget.gitDiffAlgorithmSetting.resolveSelection(
+                              widget.appliedAlgorithm,
+                            ),
                         focused: algorithm == _focusedAlgorithm,
                         label: algorithm.label,
-                        onTap: () => Navigator.pop(context, algorithm),
+                        onTap: () => Navigator.pop(
+                          context,
+                          widget.gitDiffAlgorithmSetting.normalizeSelection(
+                            algorithm,
+                          ),
+                        ),
                         child: InkWell(
                           focusNode: _focusNodes[algorithm],
                           onFocusChange: (focused) {
@@ -312,7 +329,12 @@ class _AlgorithmChooserEntryState extends State<_AlgorithmChooserEntry> {
                               setState(() => _previewAlgorithm = algorithm);
                             }
                           },
-                          onTap: () => Navigator.pop(context, algorithm),
+                          onTap: () => Navigator.pop(
+                            context,
+                            widget.gitDiffAlgorithmSetting.normalizeSelection(
+                              algorithm,
+                            ),
+                          ),
                           child: SizedBox(
                             height: 44,
                             child: Padding(
@@ -323,7 +345,12 @@ class _AlgorithmChooserEntryState extends State<_AlgorithmChooserEntry> {
                                 children: [
                                   SizedBox(
                                     width: 20,
-                                    child: algorithm == widget.appliedAlgorithm
+                                    child:
+                                        algorithm ==
+                                            widget.gitDiffAlgorithmSetting
+                                                .resolveSelection(
+                                                  widget.appliedAlgorithm,
+                                                )
                                         ? const Icon(Icons.check, size: 16)
                                         : null,
                                   ),
@@ -347,6 +374,18 @@ class _AlgorithmChooserEntryState extends State<_AlgorithmChooserEntry> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        if (_previewAlgorithm ==
+                            widget.gitDiffAlgorithmSetting.algorithm) ...[
+                          Text(
+                            widget.gitDiffAlgorithmSetting.usesGitDefault
+                                ? '현재 Git 설정 · Git 기본값'
+                                : '현재 Git 설정',
+                            key: const Key('current-git-algorithm'),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(widget.gitDiffAlgorithmSetting.configLabel),
+                          const SizedBox(height: 8),
+                        ],
                         Text(
                           _previewAlgorithm.label,
                           style: Theme.of(context).textTheme.titleMedium,

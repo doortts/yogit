@@ -472,11 +472,14 @@ Future<FullDiffSessionController> qaControllerFor({
   bool wrapLines = false,
   int activeHunkIndex = 1,
   DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
+  GitDiffAlgorithmSetting gitDiffAlgorithmSetting =
+      const GitDiffAlgorithmSetting.gitDefault(),
   bool emptyPatch = false,
   bool selectPastHistory = false,
 }) async {
   final historicalRevision = qaHistoryRecords[1].commit.sha;
   final repository = FakeFullDiffRepository()
+    ..gitDiffAlgorithmSetting = gitDiffAlgorithmSetting
     ..files = ((commit, _) async =>
         commit.sha == historicalRevision ? qaHistoricalFiles : qaFiles)
     ..scopedDiff = ((commit, _, _, _, whitespace, requestedScope) async {
@@ -689,6 +692,7 @@ class _FullDiffQaDetailState extends State<FullDiffQaDetail> {
                   activeIndex: state.activeAnchor?.hunkIndex ?? 0,
                   anchorCount: patch.hunks.length,
                   algorithm: state.requestedAlgorithm,
+                  gitDiffAlgorithmSetting: state.gitDiffAlgorithmSetting,
                   ignoreWhitespace: state.requestedIgnoreWhitespace,
                   wrapLines: state.wrapLines,
                   loadingPatch: state.patch.loading,

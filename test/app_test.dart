@@ -3624,7 +3624,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byKey(const Key('diff-algorithm-value')),
-        matching: find.text('Git setting'),
+        matching: find.text('Myers'),
       ),
       findsOneWidget,
     );
@@ -3657,7 +3657,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byKey(const Key('diff-algorithm-value')),
-        matching: find.text('Git setting'),
+        matching: find.text('Myers'),
       ),
       findsOneWidget,
     );
@@ -4013,7 +4013,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byKey(const Key('diff-algorithm-value')),
-        matching: find.text('Git setting'),
+        matching: find.text('Myers'),
       ),
       findsOneWidget,
     );
@@ -7770,7 +7770,7 @@ void main() {
     expect(session.state.selectedFile, selectedFile);
     expect(session.state.activeAnchor, activeAnchor);
     expect(scroll.offset, offset);
-    expect(find.text('Minimal'), findsOneWidget);
+    expect(find.byKey(const Key('algorithm-details-minimal')), findsOneWidget);
   });
 
   testWidgets('the diff screen walks files from the keyboard', (tester) async {
@@ -7920,7 +7920,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byKey(const Key('diff-algorithm-value')),
-        matching: find.text('Git setting'),
+        matching: find.text('Myers'),
       ),
       findsOneWidget,
     );
@@ -8612,11 +8612,13 @@ class FakeGitRepository extends GitRepository {
     this.history,
     this.workingTree,
     this.refs = const RepoRefs(local: ['main'], current: 'main'),
+    this.gitDiffAlgorithmSetting = const GitDiffAlgorithmSetting.gitDefault(),
     String root = '.',
     CommandRunner runner = runProcess,
   }) : super(root, runner: runner);
 
   final RepoRefs refs;
+  final GitDiffAlgorithmSetting gitDiffAlgorithmSetting;
   final Future<List<GitCommit>> Function(int skip, int limit) loader;
   final Future<GitCommit?> Function()? workingTree;
   final Future<List<GitFileChange>> Function(GitCommit commit, String? parent)?
@@ -8658,6 +8660,10 @@ class FakeGitRepository extends GitRepository {
   @override
   Future<GitCommit?> loadWorkingTree() =>
       workingTree?.call() ?? Future.value(null);
+
+  @override
+  Future<GitDiffAlgorithmSetting> loadDiffAlgorithmSetting() =>
+      Future.value(gitDiffAlgorithmSetting);
 
   @override
   Future<List<GitFileChange>> loadFiles(GitCommit commit, {String? parent}) =>

@@ -133,6 +133,41 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets('shows four concrete algorithms and marks the Git setting', (
+    tester,
+  ) async {
+    await pumpHeaders(
+      tester,
+      algorithm: DiffAlgorithm.gitSetting,
+      gitDiffAlgorithmSetting: const GitDiffAlgorithmSetting(
+        algorithm: DiffAlgorithm.histogram,
+        configuredValue: 'histogram',
+      ),
+    );
+
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('diff-algorithm')),
+        matching: find.text('Histogram'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Git setting'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('diff-algorithm')));
+    await tester.pump();
+
+    for (final algorithm in concreteDiffAlgorithms) {
+      expect(
+        find.byKey(Key('algorithm-option-${algorithm.name}')),
+        findsOneWidget,
+      );
+    }
+    expect(find.byKey(const Key('algorithm-option-gitSetting')), findsNothing);
+    expect(find.text('현재 Git 설정'), findsOneWidget);
+    expect(find.text('diff.algorithm=histogram'), findsOneWidget);
+  });
+
   testWidgets('algorithm chooser marks only its applied value as selected', (
     tester,
   ) async {
@@ -143,7 +178,7 @@ void main() {
     await tester.pump();
 
     final selectedOptions = <DiffAlgorithm>[];
-    for (final algorithm in DiffAlgorithm.values) {
+    for (final algorithm in concreteDiffAlgorithms) {
       final option = find.byKey(Key('algorithm-option-${algorithm.name}'));
       expect(option, findsOneWidget);
       final data = tester.getSemantics(option).getSemanticsData();
@@ -160,6 +195,56 @@ void main() {
     expect(find.text('Histogram'), findsOneWidget);
     expect(find.byKey(const Key('diff-algorithm-value')), findsOneWidget);
     semantics.dispose();
+  });
+
+  testWidgets('shows Git default details on Myers', (tester) async {
+    await pumpHeaders(
+      tester,
+      algorithm: DiffAlgorithm.gitSetting,
+      gitDiffAlgorithmSetting: const GitDiffAlgorithmSetting.gitDefault(),
+    );
+    await tester.tap(find.byKey(const Key('diff-algorithm')));
+    await tester.pump();
+
+    expect(find.text('현재 Git 설정 · Git 기본값'), findsOneWidget);
+    expect(find.text('diff.algorithm 미설정'), findsOneWidget);
+  });
+
+  testWidgets('keeps applied selection separate from the current Git setting', (
+    tester,
+  ) async {
+    DiffAlgorithm? selected;
+    await pumpHeaders(
+      tester,
+      algorithm: DiffAlgorithm.patience,
+      gitDiffAlgorithmSetting: const GitDiffAlgorithmSetting(
+        algorithm: DiffAlgorithm.histogram,
+        configuredValue: 'histogram',
+      ),
+      onAlgorithmSelected: (value) => selected = value,
+    );
+    await tester.tap(find.byKey(const Key('diff-algorithm')));
+    await tester.pump();
+
+    expect(
+      tester
+          .getSemantics(find.byKey(const Key('algorithm-option-patience')))
+          .getSemanticsData()
+          .flagsCollection
+          .isSelected,
+      ui.Tristate.isTrue,
+    );
+    final histogram = find.byKey(const Key('algorithm-option-histogram'));
+    final mouse = await tester.createGesture(kind: ui.PointerDeviceKind.mouse);
+    await mouse.addPointer();
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(histogram));
+    await tester.pump();
+    expect(find.text('현재 Git 설정'), findsOneWidget);
+
+    await tester.tap(histogram);
+    await tester.pumpAndSettle();
+    expect(selected, DiffAlgorithm.gitSetting);
   });
 
   testWidgets('algorithm chooser previews immediately and applies on enter', (
@@ -212,7 +297,7 @@ void main() {
       expect(label, findsOneWidget);
       expect(find.text('diff 알고리즘'), findsOneWidget);
       expect(value, findsOneWidget);
-      expect(find.text('Git setting'), findsOneWidget);
+      expect(find.text('Myers'), findsOneWidget);
       expect(
         tester.getTopRight(label).dx,
         lessThan(tester.getTopLeft(value).dx),
@@ -257,11 +342,7 @@ void main() {
     },
   );
 
-  test('describes every supported diff algorithm', () {
-    expect(
-      diffAlgorithmDescription(DiffAlgorithm.gitSetting),
-      '저장소의 Git 설정을 따릅니다. 설정이 없으면 Git 기본값을 사용합니다.',
-    );
+  test('describes every concrete diff algorithm', () {
     expect(
       diffAlgorithmDescription(DiffAlgorithm.myers),
       '일반적인 소스 변경을 빠르게 비교하는 Git 기본 알고리즘입니다.',
@@ -547,6 +628,8 @@ Future<void> pumpHeaders(
   bool focusMode = false,
   bool ignoreWhitespace = false,
   DiffAlgorithm algorithm = DiffAlgorithm.histogram,
+  GitDiffAlgorithmSetting gitDiffAlgorithmSetting =
+      const GitDiffAlgorithmSetting.gitDefault(),
   String encodingLabel = 'UTF-8',
   bool showShortcutHints = false,
   VoidCallback? onBack,
@@ -575,6 +658,7 @@ Future<void> pumpHeaders(
           activeIndex: 1,
           anchorCount: 7,
           algorithm: algorithm,
+          gitDiffAlgorithmSetting: gitDiffAlgorithmSetting,
           ignoreWhitespace: ignoreWhitespace,
           wrapLines: false,
           loadingPatch: false,

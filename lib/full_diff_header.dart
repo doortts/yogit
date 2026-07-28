@@ -212,6 +212,7 @@ class GlobalDiffToolbar extends StatelessWidget {
     required this.onWrapLinesChanged,
     this.algorithmChooserKey,
     this.algorithmEnabled = true,
+    this.gitDiffAlgorithmSetting = const GitDiffAlgorithmSetting.gitDefault(),
     this.showLeadingControls = true,
     this.showShortcutHints = false,
     super.key,
@@ -224,6 +225,7 @@ class GlobalDiffToolbar extends StatelessWidget {
   final int activeIndex;
   final int anchorCount;
   final DiffAlgorithm algorithm;
+  final GitDiffAlgorithmSetting gitDiffAlgorithmSetting;
   final bool ignoreWhitespace;
   final bool wrapLines;
   final bool loadingPatch;
@@ -264,6 +266,7 @@ class GlobalDiffToolbar extends StatelessWidget {
           child: FullDiffAlgorithmChooser(
             key: algorithmChooserKey,
             algorithm: algorithm,
+            gitDiffAlgorithmSetting: gitDiffAlgorithmSetting,
             enabled: algorithmEnabled,
             onSelected: onAlgorithmSelected,
             compact: compact,
@@ -395,7 +398,10 @@ class GlobalDiffToolbar extends StatelessWidget {
         spacing: width <= 782 ? 0 : 10,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          algorithmControls,
+          if (compact)
+            SizedBox(width: double.infinity, child: algorithmControls)
+          else
+            algorithmControls,
           navigationControls,
           if (showLeadingControls && view != FullDiffView.blame)
             Wrap(

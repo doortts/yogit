@@ -1207,6 +1207,12 @@ void main() {
         wrapLines: scenario.wrap,
         activeHunkIndex: scenario.hunk,
         algorithm: scenario.algorithm,
+        gitDiffAlgorithmSetting: scenario.name == '27-algorithm-chooser'
+            ? const GitDiffAlgorithmSetting(
+                algorithm: DiffAlgorithm.histogram,
+                configuredValue: 'histogram',
+              )
+            : const GitDiffAlgorithmSetting.gitDefault(),
       );
       addTearDown(controller.dispose);
 
