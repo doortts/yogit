@@ -26,11 +26,13 @@ class FullDiffCommitInfoCard extends StatefulWidget {
   const FullDiffCommitInfoCard({
     required this.info,
     this.loadMessage,
+    this.scrollLongMessage = false,
     super.key,
   });
 
   final FullDiffCommitInfo info;
   final FullDiffCommitMessageLoader? loadMessage;
+  final bool scrollLongMessage;
 
   @override
   State<FullDiffCommitInfoCard> createState() => _FullDiffCommitInfoCardState();
@@ -39,6 +41,7 @@ class FullDiffCommitInfoCard extends StatefulWidget {
 class _FullDiffCommitInfoCardState extends State<FullDiffCommitInfoCard> {
   String? _message;
   var _requestSerial = 0;
+  final _messageScrollController = ScrollController();
 
   @override
   void initState() {
@@ -49,7 +52,18 @@ class _FullDiffCommitInfoCardState extends State<FullDiffCommitInfoCard> {
   @override
   void didUpdateWidget(covariant FullDiffCommitInfoCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.info.sha != widget.info.sha) _load();
+    if (oldWidget.info.sha == widget.info.sha) return;
+    if (_messageScrollController.hasClients) {
+      _messageScrollController.jumpTo(0);
+    }
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _requestSerial++;
+    _messageScrollController.dispose();
+    super.dispose();
   }
 
   void _load() {
@@ -99,13 +113,19 @@ class _FullDiffCommitInfoCardState extends State<FullDiffCommitInfoCard> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  message,
-                  key: const Key('full-diff-commit-message'),
-                  maxLines: 8,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
+                if (widget.scrollLongMessage)
+                  _ScrollableCommitMessage(
+                    message: message,
+                    controller: _messageScrollController,
+                  )
+                else
+                  Text(
+                    message,
+                    key: const Key('full-diff-commit-message'),
+                    maxLines: 8,
+                    overflow: TextOverflow.ellipsis,
+                    style: _commitMessageStyle,
+                  ),
                 const SizedBox(height: 4),
                 Wrap(
                   key: const Key('full-diff-commit-metadata'),
@@ -135,6 +155,57 @@ class _FullDiffCommitInfoCardState extends State<FullDiffCommitInfoCard> {
                 ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+const _commitMessageStyle = TextStyle(
+  fontSize: 11,
+  fontWeight: FontWeight.w600,
+);
+
+class _ScrollableCommitMessage extends StatelessWidget {
+  const _ScrollableCommitMessage({
+    required this.message,
+    required this.controller,
+  });
+
+  final String message;
+  final ScrollController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = DefaultTextStyle.of(context).style.merge(_commitMessageStyle);
+    final lineProbe = TextPainter(
+      text: TextSpan(text: List.filled(8, 'M').join('\n'), style: style),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 8,
+    )..layout();
+    final maxHeight = lineProbe.height;
+
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      child: Scrollbar(
+        controller: controller,
+        thumbVisibility: true,
+        interactive: true,
+        thickness: 4,
+        radius: const Radius.circular(2),
+        child: SingleChildScrollView(
+          key: const Key('full-diff-commit-message-scroll'),
+          controller: controller,
+          primary: false,
+          padding: const EdgeInsets.only(right: 8),
+          child: Text(
+            message,
+            key: const Key('full-diff-commit-message'),
+            maxLines: null,
+            overflow: TextOverflow.clip,
+            style: _commitMessageStyle,
           ),
         ),
       ),
