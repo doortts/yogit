@@ -1360,8 +1360,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(columnWidth('graph'), 101);
-    expect(columnWidth('commit'), 1100 - (156 + 101 + 78 + 116 + 150));
+    expect(columnWidth('graph'), 102);
+    expect(columnWidth('commit'), 1100 - (156 + 102 + 78 + 116 + 150));
     expect(
       tester.getRect(find.byKey(const Key('name-header'))).right,
       viewport().right,
@@ -1393,7 +1393,7 @@ void main() {
     expect(const TimelineColumnWidths().graph, isNull);
     expect(graphWidth(), 96);
 
-    // Three lanes want 28 + 2 * 30 + 13 of content, which clears the minimum.
+    // Three lanes want 28 + 2 * 30 + 14 of content, which clears the minimum.
     await tester.pumpWidget(
       screen(
         FakeGitRepository(
@@ -1407,7 +1407,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(graphWidth(), 101);
+    expect(graphWidth(), 102);
 
     // Dragging pins it, and the pinned width is what gets saved.
     await tester.drag(
@@ -1416,7 +1416,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     final pinned = graphWidth();
-    expect(pinned, greaterThan(101));
+    expect(pinned, greaterThan(102));
     expect(saved?.graph, pinned);
     final painter =
         tester
@@ -1424,6 +1424,44 @@ void main() {
                 .painter!
             as CommitGraphPainter;
     expect(painter.laneX(1) - painter.laneX(0), 30);
+  });
+
+  testWidgets('graph auto-fit leaves three pixels before the hash rail', (
+    tester,
+  ) async {
+    const identity = GitIdentity(name: 'Ada Author', email: 'ada@example.com');
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [
+              commit(
+                'M',
+                'octopus',
+                parents: const ['a', 'b', 'c'],
+                committer: identity,
+              ),
+              commit('a', 'a', parents: const ['P'], committer: identity),
+              commit('b', 'b', parents: const ['P'], committer: identity),
+              commit('c', 'c', parents: const ['P'], committer: identity),
+              commit('P', 'parent', committer: identity),
+            ],
+          ),
+          controller: controller,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final node = find.descendant(
+      of: find.byKey(const Key('graph-cell-3')),
+      matching: find.byType(CommitAvatarStack),
+    );
+    final hashRail = find.byKey(const Key('hash-rule-3'));
+
+    expect(node, findsOneWidget);
+    expect(hashRail, findsOneWidget);
+    expect(tester.getRect(hashRail).left - tester.getRect(node).right, 3);
   });
 
   testWidgets('the title column absorbs the window shrink down to 100px', (
@@ -1478,15 +1516,16 @@ void main() {
   test('graph lane spacing compresses in stages', () {
     // Lanes hold their coordinates while the cell still shows the last node,
     // which is all the width the content needs.
-    expect(CommitGraphPainter.contentWidth(2), 101);
-    expect(CommitGraphPainter.contentWidth(0), 41);
+    expect(CommitGraphPainter.contentWidth(2), 102);
+    expect(CommitGraphPainter.contentWidth(0), 42);
     expect(CommitGraphPainter.spacingFor(260, 2), 30);
     expect(CommitGraphPainter.spacingFor(118, 2), 30);
-    expect(CommitGraphPainter.spacingFor(101, 2), 30);
+    expect(CommitGraphPainter.spacingFor(102, 2), 30);
     expect(CommitGraphPainter.spacingFor(58, 0), 30);
     // Below that the lanes squeeze so the last node stays just inside.
-    expect(CommitGraphPainter.spacingFor(100, 2), 29.5);
-    expect(CommitGraphPainter.spacingFor(70, 2), 14.5);
+    expect(CommitGraphPainter.spacingFor(101, 2), 29.5);
+    expect(CommitGraphPainter.spacingFor(100, 2), 29);
+    expect(CommitGraphPainter.spacingFor(70, 2), 14);
     expect(CommitGraphPainter.spacingFor(40, 2), 12);
     expect(CommitGraphPainter.compactWidth, 56);
     expect(timelineColumns['graph']!.min, 40);
@@ -1524,7 +1563,7 @@ void main() {
         )
         .size;
 
-    // Stage 1: 118px is wider than the 101px content, so nothing moves.
+    // Stage 1: 118px is wider than the 102px content, so nothing moves.
     await tester.pumpWidget(screen(118));
     await tester.pumpAndSettle();
     expect(painterAt(0).compact, isFalse);
@@ -1536,12 +1575,12 @@ void main() {
     await tester.pumpWidget(screen(70));
     await tester.pumpAndSettle();
     expect(painterAt(0).compact, isFalse);
-    expect(painterAt(0).laneSpacing, 14.5);
+    expect(painterAt(0).laneSpacing, 14);
     expect(painterAt(1).laneX(0), CommitGraphPainter.laneInset);
-    expect(painterAt(1).laneX(1) - painterAt(1).laneX(0), 14.5);
+    expect(painterAt(1).laneX(1) - painterAt(1).laneX(0), 14);
     expect(
       painterAt(0).transitionPath(0, 2, 18, const Size(70, 36)).getBounds(),
-      const Rect.fromLTRB(28, 18, 57, 54),
+      const Rect.fromLTRB(28, 18, 56, 54),
     );
     // Nodes keep their full size at every width; the overhang just clips.
     expect(avatarSize(1), 22);
@@ -5849,7 +5888,7 @@ void main() {
     // Only lane 0 is on screen, so the column stays at its floor.
     expect(graphWidth(), 96);
 
-    // Scrolling the octopus into view widens it once: 28 + 3 * 30 + 13.
+    // Scrolling the octopus into view widens it once: 28 + 3 * 30 + 14.
     final scrollable = tester.state<ScrollableState>(
       find.descendant(
         of: find.byKey(const Key('timeline-list')),
@@ -5858,12 +5897,12 @@ void main() {
     );
     scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
     await tester.pumpAndSettle();
-    expect(graphWidth(), 131);
+    expect(graphWidth(), 132);
 
     // Scrolling back never shrinks it inside a session.
     scrollable.position.jumpTo(0);
     await tester.pumpAndSettle();
-    expect(graphWidth(), 131);
+    expect(graphWidth(), 132);
 
     // A different repository starts over.
     await tester.pumpWidget(
