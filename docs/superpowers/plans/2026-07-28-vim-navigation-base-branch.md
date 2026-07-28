@@ -510,9 +510,27 @@ test('working tree uses lane zero only when its parent is preferred', () {
   expect(other.first.lane, greaterThan(0));
   expect(other[2].lane, 0);
 });
+
+test('first-parent edge to unloaded preferred tip uses lane zero', () {
+  final row = layoutGraph(
+    [_commit('child', ['preferred'])],
+    preferredTip: 'preferred',
+  ).single;
+  expect(row.parentLanes, [0]);
+  expect(row.transitions, [(from: 1, to: 0, sha: 'preferred')]);
+});
+
+test('merge-parent edge to unloaded preferred tip uses lane zero', () {
+  final row = layoutGraph(
+    [_commit('merge', ['main', 'preferred'])],
+    preferredTip: 'preferred',
+  ).single;
+  expect(row.parentLanes, [1, 0]);
+  expect(row.transitions, [(from: 1, to: 0, sha: 'preferred')]);
+});
 ```
 
-기존 페이지 안정성 테스트를 `preferredTip`을 넘긴 경우에도 반복한다.
+기존 페이지 안정성 테스트를 `preferredTip`을 넘긴 경우에도 반복한다. 짧은 페이지에서 먼저 읽은 자식이 아직 읽지 않은 `preferredTip`을 첫 번째 부모나 머지 부모로 가리키면, 전체 페이지를 읽은 뒤에도 앞부분의 레인, 브랜치 식별자, 전이선이 같아야 한다.
 
 ```dart
 final page = layoutGraph(commits.take(4).toList(), preferredTip: 'P');
@@ -561,26 +579,27 @@ List<GraphRow> layoutGraph(
   final columns = <_Column>[
     if (preferredTip != null) (sha: null, row: -1, line: -1),
   ];
-  var preferredStarted = false;
+  var preferredNodePlaced = false;
+  var preferredTipLoaded = false;
 ```
 
 각 커밋의 일반 레인 탐색 전에 강제 배치 여부와 탐색 시작 열을 계산한다.
 
 ```dart
 final workingTreeStartsPreferred =
-    !preferredStarted &&
+    !preferredNodePlaced &&
     index == 0 &&
     commit.sha.isEmpty &&
     commit.parents.isNotEmpty &&
     commit.parents.first == preferredTip;
 final startsPreferred =
-    !preferredStarted &&
+    !preferredNodePlaced &&
     (commit.sha == preferredTip || workingTreeStartsPreferred);
 final firstCandidate =
-    preferredTip != null && !preferredStarted && !startsPreferred ? 1 : 0;
+    preferredTip != null && !preferredNodePlaced && !startsPreferred ? 1 : 0;
 
 var lane = startsPreferred ? 0 : -1;
-if (startsPreferred) preferredStarted = true;
+if (startsPreferred) preferredNodePlaced = true;
 for (
   var column = firstCandidate;
   column < columns.length && lane < 0;
@@ -597,7 +616,7 @@ for (
 }
 ```
 
-그 아래의 열 추가, 수렴, 부모 레인, 전이 계산은 기존 코드를 그대로 둔다. `preferredTip == null`이면 `columns`가 빈 목록에서 시작하고 `firstCandidate`가 0이므로 기존 결과가 유지된다.
+열 추가와 수렴 계산 뒤에는 아직 읽지 않은 `preferredTip`을 현재 커밋이 부모로 가리키는지 확인한다. 첫 번째 부모와 머지 부모를 구분하지 않고 해당 부모 레인을 0으로 정하며, 현재 레인에서 0번 레인으로 향하는 전이선을 즉시 만든다. 0번 레인에는 같은 브랜치 식별자로 `preferredTip`을 기다리는 선을 두고, 나중에 tip을 읽으면 그 선을 이어받게 한다. 따라서 페이지를 추가해도 앞부분의 레인, 브랜치 식별자, 전이선이 바뀌지 않는다. `preferredTip == null`이면 `columns`가 빈 목록에서 시작하고 `firstCandidate`가 0이므로 기존 결과가 유지된다.
 
 - [ ] **Step 6: 전체 Git 그래프 테스트 통과 확인**
 

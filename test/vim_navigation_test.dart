@@ -24,10 +24,7 @@ void main() {
 
   test('leaves arrows, ordinary keys, and modified vim keys unchanged', () {
     expect(
-      normalizeNavigationKey(
-        LogicalKeyboardKey.arrowDown,
-        hasModifier: false,
-      ),
+      normalizeNavigationKey(LogicalKeyboardKey.arrowDown, hasModifier: false),
       LogicalKeyboardKey.arrowDown,
     );
     expect(
