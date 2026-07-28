@@ -2696,6 +2696,98 @@ void main() {
     expect(algorithmButton.focusNode?.hasFocus, isTrue);
   });
 
+  testWidgets('History arrow navigation survives header actions', (
+    tester,
+  ) async {
+    const fileB = GitFileChange(
+      path: 'src/window.pas',
+      status: 'M',
+      additions: 1,
+      deletions: 1,
+    );
+    final fixture = await historyWorkspaceFixture(
+      files: (_, _) async => const [fileA, fileB],
+    );
+    addTearDown(fixture.controller.dispose);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1200, 842),
+    );
+
+    await tester.tap(
+      find.byKey(Key('history-row-${historyEntries.first.commit.sha}')),
+    );
+    await tester.pumpAndSettle();
+    final selectedBefore =
+        fixture.controller.state.selectedHistoryEntry!.commit.sha;
+
+    await tester.tap(find.text('Side-by-side'));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+
+    expect(
+      fixture.controller.state.selectedHistoryEntry!.commit.sha,
+      isNot(selectedBefore),
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(
+      fixture.controller.state.selectedFile,
+      fixture.controller.state.files[1],
+    );
+  });
+
+  testWidgets('selected file row can reclaim keyboard focus', (tester) async {
+    const fileB = GitFileChange(
+      path: 'src/window.pas',
+      status: 'M',
+      additions: 1,
+      deletions: 1,
+    );
+    final fixture = await historyWorkspaceFixture(
+      files: (_, _) async => const [fileA, fileB],
+    );
+    addTearDown(fixture.controller.dispose);
+    fixture.controller.setHistorySelected(false);
+    await pumpWorkspace(
+      tester,
+      controller: fixture.controller,
+      size: const Size(1070, 842),
+    );
+    final semantics = tester.ensureSemantics();
+
+    final filesFocus = tester.widget<Focus>(
+      find.byKey(const Key('changed-files-focus')),
+    );
+    filesFocus.focusNode!.unfocus();
+    await tester.pump();
+    expect(filesFocus.focusNode!.hasFocus, isFalse);
+    final selectedRow = find.byKey(
+      Key('selected-file-${fixture.controller.state.selectedFile!.path}'),
+    );
+    expect(
+      tester
+          .getSemantics(selectedRow)
+          .getSemanticsData()
+          .hasAction(ui.SemanticsAction.tap),
+      isTrue,
+    );
+    await tester.tap(selectedRow);
+    expect(filesFocus.focusNode!.hasFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+
+    expect(
+      fixture.controller.state.selectedFile,
+      fixture.controller.state.files[1],
+    );
+    semantics.dispose();
+  });
+
   testWidgets('file and History lists move selection and focus explicitly', (
     tester,
   ) async {
@@ -3245,6 +3337,18 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     expect(fixture.controller.state.view, FullDiffView.history);
 
+    fixture.controller.setHistorySelected(true);
+    await sendChord(tester, LogicalKeyboardKey.digit2, meta: true);
+    expect(fixture.controller.state.view, FullDiffView.blame);
+    expect(fixture.controller.state.historySelected, isTrue);
+
+    await sendChord(tester, LogicalKeyboardKey.digit1, meta: true);
+    expect(fixture.controller.state.view, FullDiffView.history);
+
+    await sendChord(tester, LogicalKeyboardKey.digit3, meta: true);
+    expect(fixture.controller.state.view, FullDiffView.diff);
+    expect(fixture.controller.state.historySelected, isFalse);
+
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.space);
@@ -3265,6 +3369,34 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.digit4);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     expect(fixture.controller.state.view, beforeCommand4);
+  });
+
+  testWidgets('History preference survives closing Full Diff on Blame', (
+    tester,
+  ) async {
+    final first = await workspaceFixture();
+    addTearDown(first.controller.dispose);
+    FullDiffPreferences? saved;
+    await pumpWorkspace(
+      tester,
+      controller: first.controller,
+      size: const Size(1070, 842),
+      onPreferencesChanged: (value) => saved = value,
+    );
+
+    first.controller.setHistorySelected(true);
+    first.controller.setPrimaryView(FullDiffView.blame);
+    await tester.pump();
+
+    expect(saved?.view, FullDiffView.blame);
+    expect(saved?.historySelected, isTrue);
+
+    final second = await distantChangeFixture(saved!);
+    addTearDown(second.controller.dispose);
+    expect(second.controller.state.view, FullDiffView.blame);
+
+    second.controller.setPrimaryView(FullDiffView.diff);
+    expect(second.controller.state.view, FullDiffView.history);
   });
 
   testWidgets('scope shortcut ignores repeats while its patch is loading', (

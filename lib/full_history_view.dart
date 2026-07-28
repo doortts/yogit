@@ -142,7 +142,11 @@ class _FullHistoryViewState extends State<FullHistoryView> {
           itemBuilder: (context, index) {
             final entry = widget.entries[index];
             final isSelected = identical(entry, widget.selected);
-            void activate() => widget.onSelected(entry);
+            void activate() {
+              _focusNode.requestFocus();
+              widget.onSelected(entry);
+            }
+
             return KeyedSubtree(
               key: _rowKeys.putIfAbsent(
                 entry.commit.sha,

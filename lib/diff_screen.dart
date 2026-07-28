@@ -78,6 +78,8 @@ class _StepPrimaryFileIntent extends Intent {
   final int delta;
 }
 
+enum _FullDiffNavigationPane { files, history }
+
 @visibleForTesting
 class FullDiffScrollController extends ScrollController {
   FullDiffScrollController({super.onAttach});
@@ -146,6 +148,7 @@ class _DiffScreenState extends State<DiffScreen> {
   late FullDiffPreferences _lastReportedPreferences;
   late double _filesWidth;
   late double _historyWidth;
+  _FullDiffNavigationPane _lastNavigationPane = _FullDiffNavigationPane.files;
 
   bool _effectScheduled = false;
   bool _scrollSyncScheduled = false;
@@ -176,6 +179,11 @@ class _DiffScreenState extends State<DiffScreen> {
     _attachController(_newController());
     HardwareKeyboard.instance.addHandler(_handleHardwareKeyEvent);
     _contentScroll.addListener(_handleContentScrolled);
+    _fileListFocus.addListener(_handleFileListFocusChanged);
+    _historyListFocus.addListener(_handleHistoryListFocusChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _restoreNavigationFocus();
+    });
     _queueAttachedAnchorScroll();
     if (_ownsController) unawaited(_controller.initialize());
   }
@@ -253,6 +261,8 @@ class _DiffScreenState extends State<DiffScreen> {
       ..removeListener(_handleContentScrolled)
       ..dispose();
     _historyScroll.dispose();
+    _fileListFocus.removeListener(_handleFileListFocusChanged);
+    _historyListFocus.removeListener(_handleHistoryListFocusChanged);
     _fileListFocus.dispose();
     _historyListFocus.dispose();
     if (_ownsController) _controller.dispose();
@@ -677,6 +687,55 @@ class _DiffScreenState extends State<DiffScreen> {
     }
   }
 
+  void _handleFileListFocusChanged() {
+    if (_fileListFocus.hasFocus) {
+      _lastNavigationPane = _FullDiffNavigationPane.files;
+    }
+  }
+
+  void _handleHistoryListFocusChanged() {
+    if (_historyListFocus.hasFocus) {
+      _lastNavigationPane = _FullDiffNavigationPane.history;
+    }
+  }
+
+  void _restoreNavigationFocus() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _controller.state.focusMode) return;
+      if (_controller.state.view == FullDiffView.history &&
+          _lastNavigationPane == _FullDiffNavigationPane.history &&
+          _historyListFocus.context != null) {
+        _historyListFocus.requestFocus();
+        return;
+      }
+      if (_fileListFocus.context != null) {
+        _lastNavigationPane = _FullDiffNavigationPane.files;
+        _fileListFocus.requestFocus();
+      }
+    });
+  }
+
+  void _selectPrimaryView(FullDiffView view) {
+    _controller.setPrimaryView(view);
+    if (_controller.state.view != FullDiffView.history) {
+      _lastNavigationPane = _FullDiffNavigationPane.files;
+    }
+    _restoreNavigationFocus();
+  }
+
+  void _selectLayout(DiffLayout layout) {
+    _controller.setLayout(layout);
+    _restoreNavigationFocus();
+  }
+
+  void _selectHistory(bool selected) {
+    _controller.setHistorySelected(selected);
+    if (!selected) {
+      _lastNavigationPane = _FullDiffNavigationPane.files;
+    }
+    _restoreNavigationFocus();
+  }
+
   KeyEventResult _handleFileListKey(FocusNode _, KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
@@ -766,78 +825,79 @@ class _DiffScreenState extends State<DiffScreen> {
       return Scaffold(
         backgroundColor: fullDiffCanvas,
         body: Shortcuts(
-          shortcuts: const <ShortcutActivator, Intent>{
-            SingleActivator(LogicalKeyboardKey.escape):
+          shortcuts: <ShortcutActivator, Intent>{
+            const SingleActivator(LogicalKeyboardKey.escape):
                 _ReturnToTimelineIntent(),
-            SingleActivator(
+            const SingleActivator(
               LogicalKeyboardKey.keyF,
               meta: true,
               shift: true,
               includeRepeats: false,
             ): _ToggleFocusModeIntent(),
-            SingleActivator(
+            const SingleActivator(
               LogicalKeyboardKey.digit1,
               meta: true,
               includeRepeats: false,
-            ): _SelectViewIntent(
+            ): const _SelectViewIntent(
               FullDiffView.diff,
             ),
-            SingleActivator(
+            const SingleActivator(
               LogicalKeyboardKey.digit2,
               meta: true,
               includeRepeats: false,
-            ): _SelectViewIntent(
+            ): const _SelectViewIntent(
               FullDiffView.blame,
             ),
-            SingleActivator(
+            const SingleActivator(
               LogicalKeyboardKey.digit3,
               meta: true,
               includeRepeats: false,
-            ): _SelectViewIntent(
+            ): const _SelectViewIntent(
               FullDiffView.history,
             ),
-            SingleActivator(
+            const SingleActivator(
               LogicalKeyboardKey.keyU,
               meta: true,
               includeRepeats: false,
             ): _ToggleLayoutIntent(),
-            SingleActivator(
+            const SingleActivator(
               LogicalKeyboardKey.keyH,
               meta: true,
               shift: true,
               includeRepeats: false,
             ): _ToggleScopeIntent(),
-            SingleActivator(
+            const SingleActivator(
               LogicalKeyboardKey.space,
               meta: true,
               shift: true,
               includeRepeats: false,
             ): _ToggleWhitespaceIntent(),
-            SingleActivator(
+            const SingleActivator(
               LogicalKeyboardKey.keyL,
               meta: true,
               shift: true,
               includeRepeats: false,
             ): _ToggleWrapIntent(),
-            SingleActivator(
+            const SingleActivator(
               LogicalKeyboardKey.keyA,
               meta: true,
               shift: true,
               includeRepeats: false,
             ): _OpenAlgorithmChooserIntent(),
-            SingleActivator(LogicalKeyboardKey.arrowUp, alt: true):
+            const SingleActivator(LogicalKeyboardKey.arrowUp, alt: true):
                 _StepHunkIntent(-1),
-            SingleActivator(LogicalKeyboardKey.arrowDown, alt: true):
+            const SingleActivator(LogicalKeyboardKey.arrowDown, alt: true):
                 _StepHunkIntent(1),
-            SingleActivator(LogicalKeyboardKey.arrowUp, meta: true):
+            const SingleActivator(LogicalKeyboardKey.arrowUp, meta: true):
                 _StepFileIntent(-1),
-            SingleActivator(LogicalKeyboardKey.arrowDown, meta: true):
+            const SingleActivator(LogicalKeyboardKey.arrowDown, meta: true):
                 _StepFileIntent(1),
-            SingleActivator(LogicalKeyboardKey.arrowUp): _StepPrimaryFileIntent(
-              -1,
-            ),
-            SingleActivator(LogicalKeyboardKey.arrowDown):
-                _StepPrimaryFileIntent(1),
+            if (state.view != FullDiffView.history)
+              const SingleActivator(LogicalKeyboardKey.arrowUp):
+                  _StepPrimaryFileIntent(-1),
+            if (state.view != FullDiffView.history)
+              const SingleActivator(LogicalKeyboardKey.arrowDown):
+                  _StepPrimaryFileIntent(1),
           },
           child: Actions(
             actions: <Type, Action<Intent>>{
@@ -856,13 +916,17 @@ class _DiffScreenState extends State<DiffScreen> {
               ),
               _SelectViewIntent: CallbackAction<_SelectViewIntent>(
                 onInvoke: (intent) {
-                  _controller.setView(intent.view);
+                  if (intent.view == FullDiffView.history) {
+                    _selectHistory(!_controller.state.historySelected);
+                  } else {
+                    _selectPrimaryView(intent.view);
+                  }
                   return null;
                 },
               ),
               _ToggleLayoutIntent: CallbackAction<_ToggleLayoutIntent>(
                 onInvoke: (_) {
-                  _controller.setLayout(
+                  _selectLayout(
                     _controller.state.layout == DiffLayout.unified
                         ? DiffLayout.sideBySide
                         : DiffLayout.unified,
@@ -882,6 +946,7 @@ class _DiffScreenState extends State<DiffScreen> {
                         )
                         .catchError((_) {}),
                   );
+                  _restoreNavigationFocus();
                   return null;
                 },
               ),
@@ -953,7 +1018,7 @@ class _DiffScreenState extends State<DiffScreen> {
                         editorError: _editorError,
                         onBack: _returnToTimeline,
                         onOpenEditor: _openEditor,
-                        onViewSelected: _controller.setPrimaryView,
+                        onViewSelected: _selectPrimaryView,
                         onFocusModeChanged: _controller.setFocusMode,
                       ),
                       GlobalDiffToolbar(
@@ -971,7 +1036,7 @@ class _DiffScreenState extends State<DiffScreen> {
                         wrapLines: state.wrapLines,
                         loadingPatch: state.patch.loading,
                         showShortcutHints: _commandHeld,
-                        onLayoutSelected: _controller.setLayout,
+                        onLayoutSelected: _selectLayout,
                         onHunkChanged: (enabled) {
                           unawaited(
                             _controller
@@ -982,8 +1047,9 @@ class _DiffScreenState extends State<DiffScreen> {
                                 )
                                 .catchError((_) {}),
                           );
+                          _restoreNavigationFocus();
                         },
-                        onHistoryChanged: _controller.setHistorySelected,
+                        onHistoryChanged: _selectHistory,
                         onPrevious: () => _controller.stepAnchor(-1),
                         onNext: () => _controller.stepAnchor(1),
                         onAlgorithmSelected: (algorithm) {
@@ -1142,10 +1208,12 @@ class _DiffScreenState extends State<DiffScreen> {
                             selected: selected,
                             button: true,
                             child: InkWell(
-                              onTap: selected
-                                  ? null
-                                  : () =>
-                                        unawaited(_controller.selectFile(file)),
+                              onTap: () {
+                                _fileListFocus.requestFocus();
+                                if (!selected) {
+                                  unawaited(_controller.selectFile(file));
+                                }
+                              },
                               child: ListenableBuilder(
                                 listenable: _historyListFocus,
                                 builder: (context, _) => FullDiffSelectableRowSurface(
@@ -1518,7 +1586,10 @@ class _DiffScreenState extends State<DiffScreen> {
       history: FullHistoryView(
         entries: history,
         selected: state.selectedHistoryEntry,
-        onSelected: (entry) => unawaited(_controller.selectHistoryEntry(entry)),
+        onSelected: (entry) {
+          _historyListFocus.requestFocus();
+          unawaited(_controller.selectHistoryEntry(entry));
+        },
         controller: _historyScroll,
         focusNode: _historyListFocus,
         onMoveToFiles: _fileListFocus.requestFocus,
