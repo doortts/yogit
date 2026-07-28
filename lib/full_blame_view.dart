@@ -14,6 +14,11 @@ import 'git.dart';
 import 'typography.dart';
 
 const fullBlameAvatarWidth = 20.0;
+const fullBlameRailWidth = 1.0;
+
+double fullBlameMetadataWidth(double viewportWidth) => viewportWidth >= 900
+    ? 360.0
+    : (viewportWidth * 0.38).clamp(250.0, 320.0).toDouble();
 
 class FullBlameView extends StatefulWidget {
   const FullBlameView({
@@ -88,124 +93,134 @@ class FullBlameViewState extends State<FullBlameView> {
         ? null
         : widget.document.lines[selectedLine - 1];
     return LayoutBuilder(
-      builder: (context, constraints) => Focus(
-        key: const Key('blame-list-focus'),
-        focusNode: _focusNode,
-        onFocusChange: _handleFocusChange,
-        onKeyEvent: _handleKeyEvent,
-        child: FullDiffSelectionArea(
-          child: Stack(
-            clipBehavior: Clip.hardEdge,
-            fit: StackFit.expand,
-            children: [
-              ListView.builder(
-                key: const Key('blame-list'),
-                controller: widget.controller,
-                primary: widget.controller == null,
-                itemCount: lineCount,
-                itemBuilder: (context, index) {
-                  final lineNumber = index + 1;
-                  final current = lineNumber == sourceLine;
-                  final selected = lineNumber == _selectedLine;
-                  final blame = widget.document.lines[index];
-                  Widget interactive = Semantics(
-                    key: Key('blame-line-$lineNumber'),
-                    container: true,
-                    excludeSemantics: true,
-                    label: _semanticsLabel(lineNumber, blame),
-                    selected: selected,
-                    button: true,
-                    onTap: () => _selectLine(lineNumber),
-                    child: MouseRegion(
-                      onEnter: (_) => _setHoveredLine(lineNumber),
-                      onExit: (_) => _clearHoveredLine(lineNumber),
-                      child: InkWell(
-                        excludeFromSemantics: true,
-                        onTap: () => _selectLine(lineNumber),
-                        child: BlameSourceRow(
-                          blame: blame,
-                          lineNumber: lineNumber,
-                          source: widget.document.file.lines[index],
-                          path: widget.document.file.path,
-                          side: widget.document.file.side,
-                          kind: sourceMap.kindForLine(lineNumber),
-                          wrapLines: widget.wrapLines,
-                          highlighter: widget.document.file.disableRichRendering
-                              ? const _NoopSyntaxHighlighter()
-                              : widget.highlighter,
-                          current: current,
-                          hovered: lineNumber == _hoveredLine,
-                          selected: selected,
-                          viewportWidth: constraints.maxWidth,
-                          avatarService: widget.avatarService,
-                          showRemoteAvatars: widget.showRemoteAvatars,
+      builder: (context, constraints) {
+        final metadataWidth = fullBlameMetadataWidth(constraints.maxWidth);
+        final cardWidth =
+            (metadataWidth - fullBlameAvatarWidth - fullBlameRailWidth)
+                .clamp(0.0, double.infinity)
+                .toDouble();
+        return Focus(
+          key: const Key('blame-list-focus'),
+          focusNode: _focusNode,
+          onFocusChange: _handleFocusChange,
+          onKeyEvent: _handleKeyEvent,
+          child: FullDiffSelectionArea(
+            child: Stack(
+              clipBehavior: Clip.hardEdge,
+              fit: StackFit.expand,
+              children: [
+                ListView.builder(
+                  key: const Key('blame-list'),
+                  controller: widget.controller,
+                  primary: widget.controller == null,
+                  itemCount: lineCount,
+                  itemBuilder: (context, index) {
+                    final lineNumber = index + 1;
+                    final current = lineNumber == sourceLine;
+                    final selected = lineNumber == _selectedLine;
+                    final blame = widget.document.lines[index];
+                    Widget interactive = Semantics(
+                      key: Key('blame-line-$lineNumber'),
+                      container: true,
+                      excludeSemantics: true,
+                      label: _semanticsLabel(lineNumber, blame),
+                      selected: selected,
+                      button: true,
+                      onTap: () => _selectLine(lineNumber),
+                      child: MouseRegion(
+                        onEnter: (_) => _setHoveredLine(lineNumber),
+                        onExit: (_) => _clearHoveredLine(lineNumber),
+                        child: InkWell(
+                          excludeFromSemantics: true,
+                          onTap: () => _selectLine(lineNumber),
+                          child: BlameSourceRow(
+                            blame: blame,
+                            lineNumber: lineNumber,
+                            source: widget.document.file.lines[index],
+                            path: widget.document.file.path,
+                            side: widget.document.file.side,
+                            kind: sourceMap.kindForLine(lineNumber),
+                            wrapLines: widget.wrapLines,
+                            highlighter:
+                                widget.document.file.disableRichRendering
+                                ? const _NoopSyntaxHighlighter()
+                                : widget.highlighter,
+                            current: current,
+                            hovered: lineNumber == _hoveredLine,
+                            selected: selected,
+                            viewportWidth: constraints.maxWidth,
+                            avatarService: widget.avatarService,
+                            showRemoteAvatars: widget.showRemoteAvatars,
+                          ),
                         ),
-                      ),
-                    ),
-                  );
-                  if (selected) {
-                    interactive = KeyedSubtree(
-                      key: _selectedRowKey,
-                      child: CompositedTransformTarget(
-                        link: _selectedLink,
-                        child: interactive,
                       ),
                     );
-                  }
-                  final row = KeyedSubtree(
-                    key: current ? Key('blame-current-line-$lineNumber') : null,
-                    child: interactive,
-                  );
-                  return _probe(
-                    nearestHunkAnchorForSourceLine(
-                      hunks: widget.hunks,
-                      side: widget.document.file.side,
-                      lineNumber: lineNumber,
-                    ),
-                    current && widget.activeAnchor != null
-                        ? KeyedSubtree(
-                            key: _anchorKey(widget.activeAnchor!),
-                            child: row,
-                          )
-                        : row,
-                  );
-                },
-              ),
-              if (selectedLine != null && selectedBlame != null)
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: ClipRect(
-                      child: CompositedTransformFollower(
-                        link: _selectedLink,
-                        showWhenUnlinked: false,
-                        targetAnchor: Alignment.topLeft,
-                        followerAnchor: Alignment.topLeft,
-                        offset: const Offset(
-                          fullBlameAvatarWidth,
-                          fullDiffSourceRowHeight * 2,
+                    if (selected) {
+                      interactive = KeyedSubtree(
+                        key: _selectedRowKey,
+                        child: CompositedTransformTarget(
+                          link: _selectedLink,
+                          child: interactive,
                         ),
-                        child: UnconstrainedBox(
-                          constrainedAxis: Axis.vertical,
-                          alignment: Alignment.topLeft,
-                          child: SizedBox(
-                            width: constraints.maxWidth <= fullBlameAvatarWidth
-                                ? 0
-                                : constraints.maxWidth - fullBlameAvatarWidth,
-                            child: Align(
-                              alignment: Alignment.topLeft,
-                              child: FullDiffCommitInfoCard(
-                                key: Key('blame-commit-details-$selectedLine'),
-                                info: FullDiffCommitInfo(
-                                  sha: selectedBlame.sha,
-                                  shortSha: _shortSha(selectedBlame.sha),
-                                  fallbackMessage: selectedBlame.summary,
-                                  author: selectedBlame.author,
-                                  timestamp: selectedBlame.authorTimestamp,
+                      );
+                    }
+                    final row = KeyedSubtree(
+                      key: current
+                          ? Key('blame-current-line-$lineNumber')
+                          : null,
+                      child: interactive,
+                    );
+                    return _probe(
+                      nearestHunkAnchorForSourceLine(
+                        hunks: widget.hunks,
+                        side: widget.document.file.side,
+                        lineNumber: lineNumber,
+                      ),
+                      current && widget.activeAnchor != null
+                          ? KeyedSubtree(
+                              key: _anchorKey(widget.activeAnchor!),
+                              child: row,
+                            )
+                          : row,
+                    );
+                  },
+                ),
+                if (selectedLine != null && selectedBlame != null)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: ClipRect(
+                        child: CompositedTransformFollower(
+                          link: _selectedLink,
+                          showWhenUnlinked: false,
+                          targetAnchor: Alignment.topLeft,
+                          followerAnchor: Alignment.topLeft,
+                          offset: const Offset(
+                            fullBlameAvatarWidth,
+                            fullDiffSourceRowHeight * 2,
+                          ),
+                          child: UnconstrainedBox(
+                            constrainedAxis: Axis.vertical,
+                            alignment: Alignment.topLeft,
+                            child: SizedBox(
+                              width: cardWidth,
+                              child: Align(
+                                alignment: Alignment.topLeft,
+                                child: FullDiffCommitInfoCard(
+                                  key: Key(
+                                    'blame-commit-details-$selectedLine',
+                                  ),
+                                  info: FullDiffCommitInfo(
+                                    sha: selectedBlame.sha,
+                                    shortSha: _shortSha(selectedBlame.sha),
+                                    fallbackMessage: selectedBlame.summary,
+                                    author: selectedBlame.author,
+                                    timestamp: selectedBlame.authorTimestamp,
+                                  ),
+                                  loadMessage:
+                                      _canLoadCommitMessage(selectedBlame)
+                                      ? widget.loadCommitMessage
+                                      : null,
                                 ),
-                                loadMessage:
-                                    _canLoadCommitMessage(selectedBlame)
-                                    ? widget.loadCommitMessage
-                                    : null,
                               ),
                             ),
                           ),
@@ -213,11 +228,11 @@ class FullBlameViewState extends State<FullBlameView> {
                       ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -418,9 +433,7 @@ class BlameSourceRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final metadataWidth = viewportWidth >= 900
-        ? 360.0
-        : (viewportWidth * 0.38).clamp(250.0, 320.0);
+    final metadataWidth = fullBlameMetadataWidth(viewportWidth);
     final row = FullDiffCodeRow(
       line: DiffLine(
         kind: kind,
@@ -484,7 +497,7 @@ class BlameSourceRow extends StatelessWidget {
             ),
             SizedBox(
               key: Key('blame-rail-$lineNumber'),
-              width: 1,
+              width: fullBlameRailWidth,
               height: fullDiffSourceRowHeight,
               child: ColoredBox(color: _railColor(blame.sha)),
             ),

@@ -1919,49 +1919,47 @@ void main() {
     expect(find.byKey(const Key('blame-selected-8')), findsOneWidget);
   });
 
-  testWidgets(
-    'narrow blame keeps the offset commit card inside the list viewport',
-    (tester) async {
-      await pumpInteractiveBlameView(
-        tester,
-        size: const Size(300, 240),
-        lineCount: 3,
-        loadCommitMessage: (_) async =>
-            List.filled(20, 'wide commit message').join(' '),
-      );
+  testWidgets('blame commit card stops before the metadata rail', (
+    tester,
+  ) async {
+    await pumpInteractiveBlameView(
+      tester,
+      size: const Size(300, 240),
+      lineCount: 3,
+      loadCommitMessage: (_) async =>
+          List.filled(20, 'wide commit message').join(' '),
+    );
 
-      await tester.tap(find.byKey(const Key('blame-line-1')));
-      await tester.pump();
-      await tester.pump();
+    await tester.tap(find.byKey(const Key('blame-line-1')));
+    await tester.pump();
+    await tester.pump();
 
-      final viewport = tester.getRect(find.byKey(const Key('blame-list')));
-      final card = tester.getRect(
-        find.byKey(const Key('blame-commit-details-1')),
-      );
-      final numberColumn = tester.getRect(
-        find.byKey(const Key('blame-line-number-1')),
-      );
-      expect(card.left, closeTo(numberColumn.left, 0.5));
-      expect(card.right, lessThanOrEqualTo(viewport.right + 0.5));
-      expect(
-        card.width,
-        lessThanOrEqualTo(viewport.width - fullBlameAvatarWidth + 0.5),
-      );
-      expect(tester.takeException(), isNull);
+    final card = tester.getRect(
+      find.byKey(const Key('blame-commit-details-1')),
+    );
+    final rail = tester.getRect(find.byKey(const Key('blame-rail-1')));
+    final numberColumn = tester.getRect(
+      find.byKey(const Key('blame-line-number-1')),
+    );
+    expect(card.left, closeTo(numberColumn.left, 0.5));
+    expect(card.right, lessThanOrEqualTo(rail.left + 0.5));
+    expect(fullBlameMetadataWidth(300), 250);
+    expect(tester.takeException(), isNull);
 
-      tester.view.physicalSize = const Size(1000, 240);
-      await tester.pump();
-      final wideCard = tester.getRect(
-        find.byKey(const Key('blame-commit-details-1')),
-      );
-      final wideNumberColumn = tester.getRect(
-        find.byKey(const Key('blame-line-number-1')),
-      );
-      expect(wideCard.left, closeTo(wideNumberColumn.left, 0.5));
-      expect(wideCard.width, lessThanOrEqualTo(420));
-      expect(tester.takeException(), isNull);
-    },
-  );
+    tester.view.physicalSize = const Size(1000, 240);
+    await tester.pump();
+    final wideCard = tester.getRect(
+      find.byKey(const Key('blame-commit-details-1')),
+    );
+    final wideRail = tester.getRect(find.byKey(const Key('blame-rail-1')));
+    final wideNumberColumn = tester.getRect(
+      find.byKey(const Key('blame-line-number-1')),
+    );
+    expect(wideCard.left, closeTo(wideNumberColumn.left, 0.5));
+    expect(wideCard.right, lessThanOrEqualTo(wideRail.left + 0.5));
+    expect(fullBlameMetadataWidth(1000), 360);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('blame focus selects, navigates, and returns to files', (
     tester,
