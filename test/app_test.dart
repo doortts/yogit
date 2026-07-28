@@ -6042,8 +6042,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Only the last segment shows; the full path lives in the tooltip.
-    expect(tester.widget<Text>(find.text('project')).style?.fontSize, 18);
+    // The selector shows the last segment and keeps the full path in a tooltip.
+    expect(find.text('저장소'), findsOneWidget);
+    expect(find.text('기준 브랜치'), findsOneWidget);
+    expect(find.text('project'), findsOneWidget);
     expect(find.text('/Users/ada/project'), findsNothing);
     expect(
       tester
@@ -6069,10 +6071,8 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('/'), findsOneWidget);
-    expect(
-      tester.widget<Icon>(find.byIcon(Icons.folder_open_outlined)).size,
-      24,
-    );
+    expect(find.byIcon(Icons.folder_open_outlined), findsNothing);
+    expect(find.byKey(const Key('base-branch-selector')), findsOneWidget);
     expect(tester.getSize(find.byKey(const Key('toolbar'))).height, 56);
   });
 
@@ -6274,7 +6274,18 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(tester.widget<Text>(find.text('main')).style?.fontSize, 13);
+    expect(
+      tester
+          .widget<Text>(
+            find.descendant(
+              of: find.byKey(const Key('sidebar-ref-main')),
+              matching: find.text('main'),
+            ),
+          )
+          .style
+          ?.fontSize,
+      13,
+    );
     expect(tester.widget<Text>(find.text('LOCAL')).style?.fontSize, 11);
     expect(
       tester
@@ -7383,6 +7394,175 @@ void main() {
       findsNothing,
     );
   });
+  testWidgets('base branch restores a valid choice and falls back to current', (
+    tester,
+  ) async {
+    final changes = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [
+              commit('feature-tip', 'feature'),
+              commit('main-tip', 'main'),
+            ],
+            refs: const RepoRefs(
+              local: ['main', 'feature'],
+              current: 'main',
+              tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+            ),
+          ),
+          preferredBranch: 'deleted',
+          onPreferredBranchChanged: changes.add,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('main'), findsWidgets);
+    expect(changes, ['main']);
+    final featurePainter =
+        tester
+                .widget<CustomPaint>(find.byKey(const Key('graph-painter-0')))
+                .painter
+            as CommitGraphPainter;
+    expect(featurePainter.row.lane, 1);
+  });
+
+  testWidgets('base branch refs failure keeps timeline history visible', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('tip', 'timeline survives')],
+            refsLoader: () => Future<RepoRefs>.error(StateError('refs failed')),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('불러오기 실패'), findsOneWidget);
+    expect(find.text('timeline survives'), findsOneWidget);
+  });
+
+  testWidgets(
+    'base branch applies a delayed setting without losing selection or scroll',
+    (tester) async {
+      final repository = FakeGitRepository(
+        (_, _) async => [
+          commit('feature-tip', 'feature'),
+          commit('main-tip', 'main'),
+          for (var index = 0; index < 40; index++)
+            commit('older-$index', 'older $index'),
+        ],
+        refs: const RepoRefs(
+          local: ['main', 'feature'],
+          current: 'main',
+          tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+        ),
+      );
+      String? preferredBranch;
+      late StateSetter updateHarness;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              updateHarness = setState;
+              return TimelineScreen(
+                repository: repository,
+                preferredBranch: preferredBranch,
+              );
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
+      await tester.pump();
+      expect(find.byKey(const Key('selected-row-main-tip')), findsOneWidget);
+      final scrollable = tester.state<ScrollableState>(
+        find.descendant(
+          of: find.byKey(const Key('timeline-list')),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      scrollable.position.jumpTo(32);
+      await tester.pump();
+      final before = scrollable.position.pixels;
+
+      updateHarness(() => preferredBranch = 'feature');
+      await tester.pump();
+
+      expect(find.byKey(const Key('selected-row-main-tip')), findsOneWidget);
+      expect(scrollable.position.pixels, before);
+      expect(find.text('feature'), findsWidgets);
+      final featurePainter =
+          tester
+                  .widget<CustomPaint>(find.byKey(const Key('graph-painter-0')))
+                  .painter
+              as CommitGraphPainter;
+      expect(featurePainter.row.lane, 0);
+    },
+  );
+
+  testWidgets(
+    'base branch selector relayout preserves preview and loaded history pages',
+    (tester) async {
+      final historyCalls = <int>[];
+      final firstPage = [
+        for (var index = 0; index < 500; index++)
+          commit('$index', 'commit $index'),
+      ];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TimelineScreen(
+            repository: FakeGitRepository(
+              (skip, _) async {
+                historyCalls.add(skip);
+                return skip == 0 ? firstPage : [commit('500', 'commit 500')];
+              },
+              refs: const RepoRefs(
+                local: ['main', 'feature'],
+                current: 'main',
+                tips: {'main': '499', 'feature': '0'},
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final scrollable = tester.state<ScrollableState>(
+        find.descendant(
+          of: find.byKey(const Key('timeline-list')),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(historyCalls, [0, 500]);
+      await tester.tap(find.text('commit 500'));
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('selected-row-500')), findsOneWidget);
+      expect(find.text('Commit & Diff'), findsOneWidget);
+      final before = scrollable.position.pixels;
+
+      await tester.tap(find.byKey(const Key('base-branch-selector')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('base-branch-menu-feature')));
+      await tester.pumpAndSettle();
+
+      expect(historyCalls, [0, 500]);
+      expect(find.byKey(const Key('selected-row-500')), findsOneWidget);
+      expect(find.text('Commit & Diff'), findsOneWidget);
+      expect(scrollable.position.pixels, before);
+      expect(find.text('feature'), findsWidgets);
+    },
+  );
+
   // ------------------------------------------------------------------ F3
   testWidgets('full diff steps hunks and toggles focus from the keyboard', (
     tester,
@@ -8544,9 +8724,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(
-      tester
-          .widget<IconButton>(find.byKey(const Key('pick-repository')))
-          .onPressed,
+      tester.widget<InkWell>(find.byKey(const Key('pick-repository'))).onTap,
       isNotNull,
     );
   });
@@ -8704,11 +8882,13 @@ class FakeGitRepository extends GitRepository {
     this.history,
     this.workingTree,
     this.refs = const RepoRefs(local: ['main'], current: 'main'),
+    this.refsLoader,
     String root = '.',
     CommandRunner runner = runProcess,
   }) : super(root, runner: runner);
 
   final RepoRefs refs;
+  final Future<RepoRefs> Function()? refsLoader;
   final Future<List<GitCommit>> Function(int skip, int limit) loader;
   final Future<GitCommit?> Function()? workingTree;
   final Future<List<GitFileChange>> Function(GitCommit commit, String? parent)?
@@ -8745,7 +8925,8 @@ class FakeGitRepository extends GitRepository {
       loader(skip, limit);
 
   @override
-  Future<RepoRefs> loadRefs() async => refs;
+  Future<RepoRefs> loadRefs() =>
+      refsLoader?.call() ?? Future<RepoRefs>.value(refs);
 
   @override
   Future<GitCommit?> loadWorkingTree() =>
