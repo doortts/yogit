@@ -653,6 +653,13 @@ class _TimelineScreenState extends State<TimelineScreen> {
     }
   }
 
+  bool get _editableDescendantHasFocus {
+    final context = FocusManager.instance.primaryFocus?.context;
+    if (context == null) return false;
+    return context.widget is EditableText ||
+        context.findAncestorWidgetOfExactType<EditableText>() != null;
+  }
+
   KeyEventResult _onKeyEvent(FocusNode _, KeyEvent event) {
     // Holding an arrow keeps moving; everything else acts once per press.
     if (event is KeyDownEvent || event is KeyRepeatEvent) {
@@ -678,7 +685,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
             keyboard.isMetaPressed ||
             keyboard.isAltPressed ||
             keyboard.isShiftPressed ||
-            keyboard.isControlPressed,
+            keyboard.isControlPressed ||
+            _editableDescendantHasFocus,
       );
       final step = switch (key) {
         LogicalKeyboardKey.arrowDown => 1,

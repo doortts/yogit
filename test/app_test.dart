@@ -1967,8 +1967,28 @@ void main() {
     );
 
     await tester.tap(find.byKey(const Key('ref-filter')));
-    await tester.enterText(find.byKey(const Key('ref-filter')), 'hjkl');
-    await tester.pump();
+    expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
+    var typed = '';
+    for (final (key, character) in [
+      (LogicalKeyboardKey.keyH, 'h'),
+      (LogicalKeyboardKey.keyJ, 'j'),
+      (LogicalKeyboardKey.keyK, 'k'),
+      (LogicalKeyboardKey.keyL, 'l'),
+    ]) {
+      // Widget tests deliver hardware and platform text-editing messages
+      // separately. The timeline must leave the hardware event unhandled before
+      // the engine can insert its character into the focused editable.
+      expect(await tester.sendKeyEvent(key), isFalse);
+      typed += character;
+      tester.testTextInput.updateEditingValue(
+        TextEditingValue(
+          text: typed,
+          selection: TextSelection.collapsed(offset: typed.length),
+        ),
+      );
+      await tester.pump();
+      expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
+    }
     expect(
       tester
           .widget<TextField>(find.byKey(const Key('ref-filter')))
