@@ -1216,7 +1216,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         key: const Key('preview-placement'),
         padding: const EdgeInsets.all(3),
         decoration: BoxDecoration(
-          color: _palette.panel,
+          color: _palette.raised,
           border: Border.all(color: _palette.border),
           borderRadius: BorderRadius.circular(6),
         ),
@@ -1587,7 +1587,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       key: name == null ? null : Key('sidebar-row-$name'),
       height: birth == null ? 28 : 40,
       decoration: BoxDecoration(
-        color: current ? _palette.neutralChip : null,
+        color: current ? _palette.selectedRow : null,
         borderRadius: BorderRadius.circular(5),
       ),
       child: Padding(
@@ -1666,7 +1666,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   Widget _statusBar() => Container(
     height: 29,
     decoration: BoxDecoration(
-      color: _palette.panel,
+      color: _palette.surface,
       border: Border(top: BorderSide(color: _palette.border)),
     ),
     child: Stack(
@@ -3659,7 +3659,7 @@ class _KeyCapState extends State<_KeyCap> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
           decoration: BoxDecoration(
-            color: _hovered ? palette.selectedRow : palette.panel,
+            color: _hovered ? palette.selectedRow : palette.raised,
             border: Border.all(
               color: _hovered ? palette.muted : palette.border,
             ),

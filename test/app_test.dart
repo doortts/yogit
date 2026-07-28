@@ -122,6 +122,105 @@ void main() {
     },
   );
 
+  final hierarchyRoleCases =
+      <
+        ({
+          String label,
+          Color Function(WidgetTester tester) actual,
+          Color Function(TimelineThemePalette palette) expected,
+        })
+      >[
+        (
+          label: 'checked-out branch',
+          actual: (tester) {
+            final row = tester.widget<Container>(
+              find.byKey(const Key('sidebar-row-main')),
+            );
+            return (row.decoration! as BoxDecoration).color!;
+          },
+          expected: (palette) => palette.selectedRow,
+        ),
+        (
+          label: 'placement control',
+          actual: (tester) {
+            final control = tester.widget<Container>(
+              find.byKey(const Key('preview-placement')),
+            );
+            return (control.decoration! as BoxDecoration).color!;
+          },
+          expected: (palette) => palette.raised,
+        ),
+        (
+          label: 'status bar',
+          actual: (tester) {
+            final bar = tester.widget<Container>(
+              find.ancestor(
+                of: find.byKey(const Key('status-timestamp')),
+                matching: find.byType(Container),
+              ),
+            );
+            return (bar.decoration! as BoxDecoration).color!;
+          },
+          expected: (palette) => palette.surface,
+        ),
+        (
+          label: 'idle keycap',
+          actual: (tester) {
+            final keycap = tester.widget<Container>(
+              find.descendant(
+                of: find.byKey(const Key('keycap-Enter')),
+                matching: find.byType(Container),
+              ),
+            );
+            return (keycap.decoration! as BoxDecoration).color!;
+          },
+          expected: (palette) => palette.raised,
+        ),
+      ];
+
+  for (final role in hierarchyRoleCases) {
+    testWidgets(
+      '${role.label} uses its approved role under every timeline theme',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(1400, 800);
+        addTearDown(() {
+          tester.view.resetDevicePixelRatio();
+          tester.view.resetPhysicalSize();
+        });
+
+        for (final theme in TimelineThemeKind.values) {
+          final store = MemorySettingsStore()
+            ..current = AppSettings(timelineTheme: theme);
+          await tester.pumpWidget(
+            YogitApp(
+              key: ValueKey(theme),
+              repository: FakeGitRepository(
+                (_, _) async => [commit('3', 'checked out commit')],
+                refs: const RepoRefs(
+                  local: ['main'],
+                  current: 'main',
+                  tips: {'main': '3'},
+                  localTips: {'main': '3'},
+                ),
+              ),
+              settingsStore: store,
+              discoverAvatars: false,
+              windowFrameController: controller,
+            ),
+          );
+          await tester.pumpAndSettle();
+
+          expect(
+            role.actual(tester),
+            role.expected(theme.palette),
+            reason: theme.label,
+          );
+        }
+      },
+    );
+  }
+
   testWidgets('the stored timeline theme colors the base-branch popup', (
     tester,
   ) async {
@@ -2162,7 +2261,7 @@ void main() {
       );
       expect(
         (current.decoration! as BoxDecoration).color,
-        TimelineThemePalette.systemGraphite.neutralChip,
+        TimelineThemePalette.systemGraphite.selectedRow,
       );
 
       await tester.tap(find.byKey(const Key('ref-filter')));
