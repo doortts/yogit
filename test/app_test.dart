@@ -2280,6 +2280,32 @@ void main() {
     );
   });
 
+  test('base branches round-trip per repository', () {
+    const settings = AppSettings(
+      baseBranches: {'/repos/one': 'main', '/repos/two': 'release'},
+    );
+    expect(AppSettings.fromJson(settings.toJson()), settings);
+    expect(AppSettings.fromJson(const {}).baseBranches, isEmpty);
+    expect(
+      AppSettings.fromJson({
+        'baseBranches': {'/repos/one': 'main', '/repos/bad': 42},
+      }).baseBranches,
+      {'/repos/one': 'main'},
+    );
+  });
+
+  test(
+    'copyWith replaces the base branch map without losing other settings',
+    () {
+      const settings = AppSettings(showAvatars: false);
+      final changed = settings.copyWith(
+        baseBranches: {'/repos/one': 'develop'},
+      );
+      expect(changed.showAvatars, isFalse);
+      expect(changed.baseBranches, {'/repos/one': 'develop'});
+    },
+  );
+
   testWidgets('the initials avatar is a filled disc with contrasting ink', (
     tester,
   ) async {
@@ -4815,6 +4841,7 @@ void main() {
       showAvatars: false,
       previewPlacement: PreviewPlacement.bottom,
       columnWidths: TimelineColumnWidths(graph: 220),
+      baseBranches: {'/repos/one': 'main', '/repos/two': 'release'},
     );
     await store.save(saved);
 
