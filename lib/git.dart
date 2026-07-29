@@ -179,6 +179,9 @@ class GitCommit {
   bool get isWorkingTree => sha.isEmpty;
 }
 
+const _gitLogFormat =
+    '%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%ce%x1f%ct%x1f%D%x1f%s%x1e';
+
 List<GitCommit> parseGitLog(String output) {
   return output.split('\x1e').where((record) => record.trim().isNotEmpty).map((
     record,
@@ -224,6 +227,60 @@ List<GitRef> _parseRefs(String decorations) {
 /// occupying [to] below this row.
 typedef LaneTransition = ({int from, int to, String sha});
 
+enum BranchCommitSide { baseOnly, compareOnly, commonBoundary }
+
+class BranchComparisonCommit {
+  const BranchComparisonCommit({required this.commit, required this.side});
+
+  final GitCommit commit;
+  final BranchCommitSide side;
+}
+
+enum MergeConflictStatus { clean, conflicts, failed }
+
+class MergeConflictCheck {
+  const MergeConflictCheck({
+    required this.status,
+    this.files = const [],
+    this.error,
+  });
+
+  final MergeConflictStatus status;
+  final List<String> files;
+  final String? error;
+}
+
+class BranchComparisonResult {
+  const BranchComparisonResult({
+    required this.baseRef,
+    required this.compareRef,
+    required this.baseTip,
+    required this.compareTip,
+    required this.baseParent,
+    required this.compareParent,
+    required this.mergeBases,
+    required this.commits,
+    required this.files,
+    required this.merge,
+  });
+
+  final String baseRef;
+  final String compareRef;
+  final String baseTip;
+  final String compareTip;
+  final String? baseParent;
+  final String? compareParent;
+  final List<String> mergeBases;
+  final List<BranchComparisonCommit> commits;
+  final List<GitFileChange> files;
+  final MergeConflictCheck merge;
+
+  bool get sameFirstParent =>
+      baseParent != null &&
+      compareParent != null &&
+      baseParent == compareParent;
+}
+
 class GraphRow {
   const GraphRow({
     required this.commit,
@@ -266,6 +323,48 @@ class GraphRow {
   int get maxLane => nextLanes.isEmpty
       ? activeLanes.last
       : max(activeLanes.last, nextLanes.last);
+}
+
+List<GraphRow> layoutBranchComparison(List<BranchComparisonCommit> commits) {
+  final firstCommon = commits.indexWhere(
+    (entry) => entry.side == BranchCommitSide.commonBoundary,
+  );
+  return [
+    for (var index = 0; index < commits.length; index++)
+      () {
+        final entry = commits[index];
+        final lane = entry.side == BranchCommitSide.compareOnly ? 1 : 0;
+        final beforeCommon = firstCommon < 0 || index < firstCommon;
+        final convergesHere = firstCommon > 0 && index == firstCommon - 1;
+        final activeLanes = beforeCommon ? const [0, 1] : const [0];
+        final nextLanes = convergesHere || !beforeCommon
+            ? const [0]
+            : const [0, 1];
+        return GraphRow(
+          commit: entry.commit,
+          lane: lane,
+          parentLanes: [for (final _ in entry.commit.parents) lane],
+          activeLanes: activeLanes,
+          nextLanes: nextLanes,
+          activeLaneShas: {
+            for (final active in activeLanes)
+              active: active == lane ? entry.commit.sha : '',
+          },
+          nextLaneShas: {
+            for (final next in nextLanes)
+              next: next == lane ? entry.commit.sha : '',
+          },
+          transitions: convergesHere
+              ? [(from: 1, to: 0, sha: commits[firstCommon].commit.sha)]
+              : const [],
+          branch: lane,
+          activeLaneBranches: {
+            for (final active in activeLanes) active: active,
+          },
+          nextLaneBranches: {for (final next in nextLanes) next: next},
+        );
+      }(),
+  ];
 }
 
 /// One graph column, holding the single edge it currently carries. [sha] is the
@@ -921,10 +1020,168 @@ class GitRepository implements FullDiffRepository {
       '--date-order',
       '--max-count=$limit',
       '--skip=$skip',
-      '--format=%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%ce%x1f%ct%x1f%D%x1f%s%x1e',
+      '--format=$_gitLogFormat',
       ...revisions,
     ];
     return parseGitLog(await _run(args));
+  }
+
+  Future<BranchComparisonResult> compareBranches(
+    String baseRef,
+    String compareRef,
+  ) async {
+    final baseTip = (await _run([
+      'rev-parse',
+      '--verify',
+      '$baseRef^{commit}',
+    ])).trim();
+    final compareTip = (await _run([
+      'rev-parse',
+      '--verify',
+      '$compareRef^{commit}',
+    ])).trim();
+    final baseParent = await _firstParent(baseTip);
+    final compareParent = await _firstParent(compareTip);
+    final mergeBases = await _mergeBases(baseTip, compareTip);
+    final commits = await _comparisonCommits(baseTip, compareTip, mergeBases);
+    final files = await _loadFilesBetween(baseTip, compareTip);
+    final merge = await _checkMerge(baseTip, compareTip);
+    return BranchComparisonResult(
+      baseRef: baseRef,
+      compareRef: compareRef,
+      baseTip: baseTip,
+      compareTip: compareTip,
+      baseParent: baseParent,
+      compareParent: compareParent,
+      mergeBases: mergeBases,
+      commits: commits,
+      files: files,
+      merge: merge,
+    );
+  }
+
+  Future<String?> _firstParent(String tip) async {
+    final fields = (await _run([
+      'rev-list',
+      '--parents',
+      '-n',
+      '1',
+      tip,
+    ])).trim().split(RegExp(r'\s+'));
+    return fields.length > 1 ? fields[1] : null;
+  }
+
+  Future<List<String>> _mergeBases(String baseTip, String compareTip) async {
+    final arguments = ['merge-base', '--all', baseTip, compareTip];
+    final result = await runner(
+      gitExecutable,
+      arguments,
+      workingDirectory: root,
+    );
+    if (result.exitCode == 1) return const [];
+    if (result.exitCode != 0) {
+      throw ProcessException(
+        gitExecutable,
+        arguments,
+        result.stderr.toString(),
+        result.exitCode,
+      );
+    }
+    return result.stdout
+        .toString()
+        .split(RegExp(r'\s+'))
+        .where((value) => value.isNotEmpty)
+        .toList();
+  }
+
+  Future<List<BranchComparisonCommit>> _comparisonCommits(
+    String baseTip,
+    String compareTip,
+    List<String> mergeBases,
+  ) async {
+    final output = await _run([
+      'log',
+      '--left-right',
+      '--topo-order',
+      '--date-order',
+      '--format=%m%x1f$_gitLogFormat',
+      '$baseTip...$compareTip',
+    ]);
+    final result = <BranchComparisonCommit>[];
+    for (final record
+        in output.split('\x1e').where((value) => value.trim().isNotEmpty)) {
+      final fields = record.trimLeft().split('\x1f');
+      if (fields.length < 12) {
+        throw const FormatException('Invalid branch comparison log record');
+      }
+      final side = switch (fields.first) {
+        '<' => BranchCommitSide.baseOnly,
+        '>' => BranchCommitSide.compareOnly,
+        _ => throw const FormatException('Invalid branch comparison side'),
+      };
+      result.add(
+        BranchComparisonCommit(
+          commit: parseGitLog('${fields.skip(1).join('\x1f')}\x1e').single,
+          side: side,
+        ),
+      );
+    }
+    for (final sha in mergeBases) {
+      final commit = parseGitLog(
+        await _run(['show', '-s', '--format=$_gitLogFormat', sha]),
+      ).single;
+      result.add(
+        BranchComparisonCommit(
+          commit: commit,
+          side: BranchCommitSide.commonBoundary,
+        ),
+      );
+    }
+    return result;
+  }
+
+  Future<MergeConflictCheck> _checkMerge(
+    String baseTip,
+    String compareTip,
+  ) async {
+    final arguments = [
+      'merge-tree',
+      '--write-tree',
+      '--name-only',
+      '-z',
+      baseTip,
+      compareTip,
+    ];
+    final result = await runner(
+      gitExecutable,
+      arguments,
+      workingDirectory: root,
+    );
+    if (result.exitCode == 0) {
+      return const MergeConflictCheck(status: MergeConflictStatus.clean);
+    }
+    if (result.exitCode != 1) {
+      return MergeConflictCheck(
+        status: MergeConflictStatus.failed,
+        error: result.stderr.toString().trim(),
+      );
+    }
+    final fields = result.stdout.toString().split('\x00');
+    final detailsStart = fields.indexOf('');
+    final files = <String>{};
+    for (
+      var index = detailsStart + 1;
+      detailsStart >= 0 && index + 3 < fields.length;
+      index += 4
+    ) {
+      if (fields[index + 2].startsWith('CONFLICT')) {
+        files.add(fields[index + 1]);
+      }
+    }
+    return MergeConflictCheck(
+      status: MergeConflictStatus.conflicts,
+      files: files.toList(),
+    );
   }
 
   Future<List<String>> _loadStartingRevisions() async => (await _run([
@@ -1010,6 +1267,66 @@ class GitRepository implements FullDiffRepository {
       }
     }
     return _withFileSizes(commit, files, parent: parent);
+  }
+
+  Future<List<GitFileChange>> _loadFilesBetween(
+    String fromRef,
+    String toRef,
+  ) async {
+    final statuses = _parseNameStatus(
+      await _run([
+        'diff',
+        ...safeDiffArguments,
+        '--name-status',
+        '-z',
+        fromRef,
+        toRef,
+        '--',
+      ]),
+    );
+    final stats = _parseNumstat(
+      await _run([
+        'diff',
+        ...safeDiffArguments,
+        '--numstat',
+        '-z',
+        fromRef,
+        toRef,
+        '--',
+      ]),
+    );
+    final files = [
+      for (final status in statuses)
+        GitFileChange(
+          path: status.path,
+          oldPath: status.oldPath,
+          status: status.status,
+          additions: stats[status.path]?.additions,
+          deletions: stats[status.path]?.deletions,
+          isBinary: stats[status.path]?.isBinary ?? false,
+        ),
+    ];
+    final resultSizes = await _loadLsTreeSizes(
+      toRef,
+      files
+          .where((file) => !file.status.startsWith('D'))
+          .map((file) => file.path),
+    );
+    final deletedSizes = await _loadLsTreeSizes(
+      fromRef,
+      files
+          .where((file) => file.status.startsWith('D'))
+          .map((file) => file.oldPath ?? file.path),
+    );
+    return [
+      for (final file in files)
+        _copyWithSize(
+          file,
+          file.status.startsWith('D')
+              ? deletedSizes[file.oldPath ?? file.path]
+              : resultSizes[file.path],
+        ),
+    ];
   }
 
   Future<List<GitFileChange>> _withFileSizes(
@@ -1136,6 +1453,31 @@ class GitRepository implements FullDiffRepository {
       return parseUnifiedDiff(await _run(args));
     }
     final output = await _runDiff(args);
+    return parseUnifiedDiff(output);
+  }
+
+  Future<List<DiffLine>> loadDiffBetween(
+    String fromRef,
+    String toRef,
+    GitFileChange file, {
+    DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
+    bool ignoreWhitespace = false,
+    DiffScope scope = DiffScope.hunks,
+  }) async {
+    final arguments = [
+      'diff',
+      ...safeDiffArguments,
+      '--unified=${scope == DiffScope.hunks ? 3 : fullDiffTextLineLimit}',
+      if (ignoreWhitespace) '--ignore-all-space',
+      ...algorithm.gitArguments,
+      fromRef,
+      toRef,
+      '--',
+      ...pathspecsFor(file),
+    ];
+    final output = scope == DiffScope.hunks
+        ? await _run(arguments)
+        : await _runDiff(arguments);
     return parseUnifiedDiff(output);
   }
 

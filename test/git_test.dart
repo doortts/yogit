@@ -533,6 +533,94 @@ void main() {
     _expectStableColumns(rows);
   });
 
+  test(
+    'compares branch tips with unique commits, common boundary, and diff direction',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'yogit_branch_compare_',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      await _initRepository(root);
+      await File('${root.path}/shared.txt').writeAsString('base\n');
+      await _git(root, ['add', 'shared.txt']);
+      await _git(root, ['commit', '-m', 'base']);
+      final baseSha = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+
+      await _git(root, ['switch', '-c', 'feature']);
+      await File('${root.path}/shared.txt').writeAsString('feature\n');
+      await _git(root, ['commit', '-am', 'feature one']);
+      await File('${root.path}/feature.txt').writeAsString('feature only\n');
+      await _git(root, ['add', 'feature.txt']);
+      await _git(root, ['commit', '-m', 'feature two']);
+
+      await _git(root, ['switch', 'main']);
+      await File('${root.path}/shared.txt').writeAsString('main\n');
+      await _git(root, ['commit', '-am', 'main one']);
+
+      final repository = GitRepository(root.path);
+      final result = await repository.compareBranches('main', 'feature');
+
+      expect(result.sameFirstParent, isFalse);
+      expect(result.mergeBases, [baseSha]);
+      expect(
+        result.commits.map((entry) => entry.side),
+        containsAll([
+          BranchCommitSide.baseOnly,
+          BranchCommitSide.compareOnly,
+          BranchCommitSide.commonBoundary,
+        ]),
+      );
+      expect(result.files.map((file) => file.path), contains('shared.txt'));
+      expect(result.merge.status, MergeConflictStatus.conflicts);
+      expect(result.merge.files, contains('shared.txt'));
+      expect(
+        layoutBranchComparison(result.commits).map((row) => row.maxLane),
+        everyElement(lessThanOrEqualTo(1)),
+      );
+
+      final shared = result.files.singleWhere(
+        (file) => file.path == 'shared.txt',
+      );
+      final lines = await repository.loadDiffBetween(
+        result.baseTip,
+        result.compareTip,
+        shared,
+      );
+      expect(
+        lines.where((line) => line.kind == DiffLineKind.delete).single.text,
+        'main',
+      );
+      expect(
+        lines.where((line) => line.kind == DiffLineKind.add).single.text,
+        'feature',
+      );
+    },
+  );
+
+  test('branch comparison recognizes sibling tips with one parent', () async {
+    final root = await Directory.systemTemp.createTemp('yogit_siblings_');
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    await File('${root.path}/base.txt').writeAsString('base\n');
+    await _git(root, ['add', 'base.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+    await _git(root, ['branch', 'sibling']);
+
+    await File('${root.path}/main.txt').writeAsString('main\n');
+    await _git(root, ['add', 'main.txt']);
+    await _git(root, ['commit', '-m', 'main']);
+    await _git(root, ['switch', 'sibling']);
+    await File('${root.path}/sibling.txt').writeAsString('sibling\n');
+    await _git(root, ['add', 'sibling.txt']);
+    await _git(root, ['commit', '-m', 'sibling']);
+
+    final result = await GitRepository(
+      root.path,
+    ).compareBranches('main', 'sibling');
+
+    expect(result.sameFirstParent, isTrue);
+  });
+
   test('retains the commit SHA occupying each lane segment', () {
     final branch = _commit('B', [
       'R',
