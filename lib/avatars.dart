@@ -142,6 +142,42 @@ class AvatarService {
 
   Future<String?> accountLogin() => _account ??= _loadAccount();
 
+  Future<String?> resolveMergedBranchName(String tipSha) async {
+    final result = await runner(ghExecutable, [
+      'api',
+      '--hostname',
+      remote.host,
+      'repos/${remote.owner}/${remote.repository}/commits/$tipSha/pulls',
+    ]);
+    if (result.exitCode != 0) return null;
+    try {
+      final json = jsonDecode(result.stdout.toString());
+      if (json is! List) return null;
+      final candidates = <({String ref, String sha, DateTime mergedAt})>[];
+      for (final entry in json) {
+        if (entry is! Map<String, dynamic>) continue;
+        final head = entry['head'];
+        final mergedAt = DateTime.tryParse('${entry['merged_at'] ?? ''}');
+        if (head is! Map<String, dynamic> || mergedAt == null) continue;
+        final sha = head['sha'];
+        final ref = head['ref'];
+        if (sha is! String || sha.isEmpty || ref is! String || ref.isEmpty) {
+          continue;
+        }
+        candidates.add((ref: ref, sha: sha, mergedAt: mergedAt));
+      }
+      candidates.sort((left, right) {
+        final leftExact = left.sha == tipSha;
+        final rightExact = right.sha == tipSha;
+        if (leftExact != rightExact) return leftExact ? -1 : 1;
+        return right.mergedAt.compareTo(left.mergedAt);
+      });
+      return candidates.firstOrNull?.ref;
+    } on FormatException {
+      return null;
+    }
+  }
+
   Future<String?> _loadAccount() async {
     final result = await runner(ghExecutable, [
       'api',

@@ -6315,6 +6315,93 @@ void main() {
     );
   });
 
+  test(
+    'deleted branch PR lookup prefers an exact head sha over a newer merge',
+    () async {
+      final requests = <List<String>>[];
+      final service = AvatarService(
+        remote: const RemoteRepository(
+          host: 'github.com',
+          owner: 'team',
+          repository: 'yogit',
+        ),
+        ghExecutable: '/usr/bin/gh',
+        runner: (executable, arguments, {workingDirectory, environment}) async {
+          requests.add(arguments);
+          return ProcessResult(1, 0, '''
+[
+  {"number":2,"state":"closed","merged_at":"2026-07-28T12:00:00Z","head":{"sha":"other","ref":"newer"}},
+  {"number":1,"state":"closed","merged_at":"2026-07-27T12:00:00Z","head":{"sha":"tip","ref":"exact"}}
+]
+''', '');
+        },
+      );
+
+      expect(await service.resolveMergedBranchName('tip'), 'exact');
+      expect(requests.single, [
+        'api',
+        '--hostname',
+        'github.com',
+        'repos/team/yogit/commits/tip/pulls',
+      ]);
+    },
+  );
+
+  test(
+    'deleted branch PR lookup uses the newest merge when no head matches',
+    () async {
+      final service = AvatarService(
+        remote: const RemoteRepository(
+          host: 'git.example.com',
+          owner: 'team',
+          repository: 'yogit',
+        ),
+        runner:
+            (executable, arguments, {workingDirectory, environment}) async =>
+                ProcessResult(1, 0, '''
+[
+  {"number":1,"state":"closed","merged_at":"2026-07-27T12:00:00Z","head":{"sha":"first","ref":"older"}},
+  {"number":2,"state":"closed","merged_at":"2026-07-28T12:00:00Z","head":{"sha":"second","ref":"newer"}}
+]
+''', ''),
+      );
+
+      expect(await service.resolveMergedBranchName('tip'), 'newer');
+    },
+  );
+
+  test('deleted branch PR lookup ignores unusable responses', () async {
+    for (final response in [
+      ProcessResult(1, 1, '', 'offline'),
+      ProcessResult(1, 0, 'not json', ''),
+      ProcessResult(
+        1,
+        0,
+        '[{"merged_at":null,"head":{"sha":"tip","ref":"open"}}]',
+        '',
+      ),
+      ProcessResult(
+        1,
+        0,
+        '[{"merged_at":"not-a-date","head":{"sha":"tip","ref":"bad"}}]',
+        '',
+      ),
+    ]) {
+      final service = AvatarService(
+        remote: const RemoteRepository(
+          host: 'github.com',
+          owner: 'team',
+          repository: 'yogit',
+        ),
+        runner:
+            (executable, arguments, {workingDirectory, environment}) async =>
+                response,
+      );
+
+      expect(await service.resolveMergedBranchName('tip'), isNull);
+    }
+  });
+
   test('drops Gravatar avatar URLs returned by GitHub and GHE', () async {
     for (final entry in {
       'github.com': 'https://gravatar.com/avatar/ada',
