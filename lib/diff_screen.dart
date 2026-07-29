@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -24,6 +25,7 @@ import 'full_diff_unavailable_panel.dart';
 import 'full_history_view.dart';
 import 'full_history_workspace.dart';
 import 'git.dart';
+import 'monaco_editor_screen.dart';
 import 'page_scroll_shortcuts.dart';
 import 'settings.dart';
 import 'typography.dart';
@@ -108,6 +110,8 @@ class DiffScreen extends StatefulWidget {
     this.onColumnWidthsChanged,
     this.onPreferencesChanged,
     this.editorService,
+    this.editorForTesting,
+    this.documentLoaderForTesting,
     this.avatarService,
     this.commitMessageCache,
     this.showRemoteAvatars = true,
@@ -123,6 +127,13 @@ class DiffScreen extends StatefulWidget {
   final ValueChanged<FullDiffColumnWidths>? onColumnWidthsChanged;
   final ValueChanged<FullDiffPreferences>? onPreferencesChanged;
   final ExternalEditorService? editorService;
+
+  @visibleForTesting
+  final Widget? editorForTesting;
+
+  @visibleForTesting
+  final Future<WorkingTreeTextDocument> Function(String relativePath)?
+  documentLoaderForTesting;
   final AvatarService? avatarService;
   final FullDiffCommitMessageCache? commitMessageCache;
   final bool showRemoteAvatars;
@@ -909,9 +920,8 @@ class _DiffScreenState extends State<DiffScreen> {
   bool _canOpenEditor(FullDiffSessionState state) {
     final file = state.selectedFile;
     return !_openingEditor &&
-        state.selectedCommit.isWorkingTree &&
         file != null &&
-        !file.status.startsWith('D') &&
+        (!state.selectedCommit.isWorkingTree || !file.status.startsWith('D')) &&
         state.file.data != null;
   }
 
@@ -926,9 +936,104 @@ class _DiffScreenState extends State<DiffScreen> {
     });
     String? errorMessage;
     try {
-      await _editorService.open(
-        relativePath: file.path,
-        line: _editorLine(state),
+      String? internalError;
+      final fileDocument = state.file.data!;
+      if (fileDocument.kind != FileContentKind.utf8) {
+        internalError = switch (fileDocument.kind) {
+          FileContentKind.binary => '바이너리 파일은 내장 에디터에서 열 수 없습니다',
+          FileContentKind.unsupportedEncoding => 'UTF-8 파일만 내장 에디터에서 열 수 있습니다',
+          FileContentKind.tooLarge => '파일이 너무 커서 내장 에디터에서 열 수 없습니다',
+          FileContentKind.utf8 => null,
+        };
+      }
+      final overlay =
+          Overlay.of(context).context.findRenderObject()! as RenderBox;
+      final choice = await showMenu<String>(
+        context: context,
+        position: RelativeRect.fromLTRB(
+          overlay.size.width - 260,
+          54,
+          16,
+          overlay.size.height - 54,
+        ),
+        items: [
+          PopupMenuItem(
+            value: 'internal',
+            enabled: internalError == null,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('내장 에디터'),
+                if (internalError != null)
+                  Text(
+                    internalError,
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+              ],
+            ),
+          ),
+          PopupMenuItem(
+            value: 'external',
+            enabled: state.selectedCommit.isWorkingTree,
+            child: const Text('외부 에디터'),
+          ),
+        ],
+      );
+      if (!mounted || request != _editorRequestSerial || choice == null) return;
+      if (choice == 'external') {
+        await _editorService.open(
+          relativePath: file.path,
+          line: _editorLine(state),
+        );
+        return;
+      }
+      WorkingTreeTextDocument? document;
+      late final String text;
+      if (state.selectedCommit.isWorkingTree) {
+        document =
+            await widget.documentLoaderForTesting?.call(file.path) ??
+            await WorkingTreeTextDocument.load(
+              repositoryRoot: widget.repository.root,
+              relativePath: file.path,
+            );
+        text = document.text;
+      } else {
+        final bytes = fileDocument.bytes;
+        final offset =
+            bytes.length >= 3 &&
+                bytes[0] == 0xEF &&
+                bytes[1] == 0xBB &&
+                bytes[2] == 0xBF
+            ? 3
+            : 0;
+        text = utf8.decode(bytes.sublist(offset)).replaceAll('\r\n', '\n');
+      }
+      if (!mounted || request != _editorRequestSerial) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => MonacoEditorScreen(
+            title: file.path,
+            initialText: text,
+            language: monacoLanguageForPath(file.path),
+            readOnly: !state.selectedCommit.isWorkingTree,
+            onSave: document?.save,
+            onOpenExternal: state.selectedCommit.isWorkingTree
+                ? () async {
+                    try {
+                      await _editorService.open(
+                        relativePath: file.path,
+                        line: _editorLine(state),
+                      );
+                    } catch (error) {
+                      if (mounted && request == _editorRequestSerial) {
+                        setState(() => _editorError = error.toString());
+                      }
+                    }
+                  }
+                : null,
+            editorForTesting: widget.editorForTesting,
+          ),
+        ),
       );
     } catch (error) {
       errorMessage = error.toString();

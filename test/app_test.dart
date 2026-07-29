@@ -16,6 +16,7 @@ import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/main.dart';
+import 'package:yogit/monaco_editor_screen.dart';
 import 'package:yogit/settings.dart';
 import 'package:yogit/timeline.dart';
 import 'package:yogit/timeline_theme.dart';
@@ -2737,6 +2738,143 @@ void main() {
     await tester.tap(find.byKey(const Key('cherry-pick-continue')));
     await tester.pumpAndSettle();
     expect(continued, isTrue);
+  });
+
+  testWidgets('internal editor saves and stages only the resolved conflict', (
+    tester,
+  ) async {
+    final root = Directory.systemTemp.createTempSync('yogit_conflict_editor_');
+    addTearDown(() => root.deleteSync(recursive: true));
+    final login = File('${root.path}/lib/login_form.dart');
+    login.createSync(recursive: true);
+    login.writeAsStringSync('resolved\n');
+    File(
+      '${root.path}/lib/session_banner.dart',
+    ).writeAsStringSync('still unresolved\n');
+    late final WorkingTreeTextDocument document;
+    await tester.runAsync(() async {
+      document = await WorkingTreeTextDocument.load(
+        repositoryRoot: root.path,
+        relativePath: 'lib/login_form.dart',
+      );
+    });
+    var state = const CherryPickState(
+      commitSha: 'source-tip',
+      conflicts: ['lib/login_form.dart', 'lib/session_banner.dart'],
+    );
+    final staged = <String>[];
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('main-tip', 'main commit')],
+      root: root.path,
+      refs: const RepoRefs(local: ['main'], current: 'main'),
+      loadCherryPickStateCallback: () async => state,
+      stageResolvedFileCallback: (path) async {
+        staged.add(path);
+        state = const CherryPickState(
+          commitSha: 'source-tip',
+          conflicts: ['lib/session_banner.dart'],
+        );
+      },
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: repository,
+          controller: controller,
+          editorForTesting: const SizedBox.expand(),
+          documentLoaderForTesting: (_) async => document,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('cherry-pick-open-editor')));
+    await tester.pumpAndSettle();
+    expect(find.text('내장 에디터'), findsOneWidget);
+    expect(find.text('외부 에디터'), findsOneWidget);
+    await tester.tap(find.text('내장 에디터'));
+    await tester.pumpAndSettle();
+    final save = tester.widget<TextButton>(
+      find.widgetWithText(TextButton, '저장'),
+    );
+    await tester.runAsync(() async {
+      save.onPressed!();
+      for (var attempt = 0; attempt < 50 && staged.isEmpty; attempt++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    await tester.pumpAndSettle();
+
+    expect(staged, ['lib/login_form.dart']);
+    expect(staged, isNot(contains('lib/session_banner.dart')));
+    expect(find.text('1개 충돌 파일'), findsOneWidget);
+    expect(find.text('lib/session_banner.dart'), findsOneWidget);
+  });
+
+  testWidgets('a saved conflict with markers stays unresolved', (tester) async {
+    final root = Directory.systemTemp.createTempSync('yogit_conflict_markers_');
+    addTearDown(() => root.deleteSync(recursive: true));
+    final file = File('${root.path}/lib/login_form.dart');
+    file.createSync(recursive: true);
+    file.writeAsStringSync('<<<<<<< HEAD\nmain\n=======\nsource\n>>>>>>>\n');
+    late final WorkingTreeTextDocument document;
+    await tester.runAsync(() async {
+      document = await WorkingTreeTextDocument.load(
+        repositoryRoot: root.path,
+        relativePath: 'lib/login_form.dart',
+      );
+    });
+    final attempted = <String>[];
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('main-tip', 'main commit')],
+      root: root.path,
+      refs: const RepoRefs(local: ['main'], current: 'main'),
+      loadCherryPickStateCallback: () async => const CherryPickState(
+        commitSha: 'source-tip',
+        conflicts: ['lib/login_form.dart'],
+      ),
+      stageResolvedFileCallback: (path) async {
+        attempted.add(path);
+        throw GitRepositoryException(path, '충돌 표시가 남아 있습니다.');
+      },
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: repository,
+          controller: controller,
+          editorForTesting: const SizedBox.expand(),
+          documentLoaderForTesting: (_) async => document,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('cherry-pick-open-editor')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('내장 에디터'));
+    await tester.pumpAndSettle();
+    final save = tester.widget<TextButton>(
+      find.widgetWithText(TextButton, '저장'),
+    );
+    await tester.runAsync(() async {
+      save.onPressed!();
+      for (var attempt = 0; attempt < 50 && attempted.isEmpty; attempt++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    await tester.pumpAndSettle();
+
+    expect(attempted, ['lib/login_form.dart']);
+    expect(find.textContaining('충돌 표시가 남아 있습니다'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('해결 필요'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('cherry-pick-continue')))
+          .onPressed,
+      isNull,
+    );
   });
 
   testWidgets('tags show the newest ten and filtering reveals hidden matches', (
@@ -10401,6 +10539,7 @@ class FakeGitRepository extends GitRepository {
     this.cherryPickCallback,
     this.continueCherryPickCallback,
     this.abortCherryPickCallback,
+    this.stageResolvedFileCallback,
     String root = '.',
     CommandRunner runner = runProcess,
   }) : super(root, runner: runner);
@@ -10426,6 +10565,7 @@ class FakeGitRepository extends GitRepository {
   final Future<CherryPickResult> Function(String sha)? cherryPickCallback;
   final Future<CherryPickResult> Function()? continueCherryPickCallback;
   final Future<void> Function()? abortCherryPickCallback;
+  final Future<void> Function(String path)? stageResolvedFileCallback;
   final Future<List<GitCommit>> Function(int skip, int limit) loader;
   final Future<GitCommit?> Function()? workingTree;
   final Future<List<GitFileChange>> Function(GitCommit commit, String? parent)?
@@ -10503,6 +10643,11 @@ class FakeGitRepository extends GitRepository {
   @override
   Future<void> abortCherryPick() =>
       abortCherryPickCallback?.call() ?? Future.value();
+
+  @override
+  Future<void> stageResolvedFile(String relativePath) =>
+      stageResolvedFileCallback?.call(relativePath) ??
+      super.stageResolvedFile(relativePath);
 
   @override
   Future<List<DiffLine>> loadDiffBetween(

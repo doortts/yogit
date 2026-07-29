@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -16,6 +17,7 @@ import 'package:yogit/full_diff_selectable_row.dart';
 import 'package:yogit/full_history_view.dart';
 import 'package:yogit/full_history_workspace.dart';
 import 'package:yogit/git.dart';
+import 'package:yogit/monaco_editor_screen.dart';
 import 'package:yogit/settings.dart';
 
 import 'support/full_diff_fixtures.dart';
@@ -327,6 +329,9 @@ void main() {
     required FullDiffSessionController controller,
     required Size size,
     ExternalEditorService? editorService,
+    Widget? editorForTesting,
+    Future<WorkingTreeTextDocument> Function(String relativePath)?
+    documentLoaderForTesting,
     FullDiffCommitMessageCache? commitMessageCache,
     ValueChanged<FullDiffPreferences>? onPreferencesChanged,
     FullDiffColumnWidths columnWidths = const FullDiffColumnWidths(),
@@ -346,6 +351,8 @@ void main() {
       initialIndex: 0,
       controller: controller,
       editorService: editorService,
+      editorForTesting: editorForTesting,
+      documentLoaderForTesting: documentLoaderForTesting,
       commitMessageCache: commitMessageCache,
       onPreferencesChanged: onPreferencesChanged,
       columnWidths: columnWidths,
@@ -4492,10 +4499,96 @@ void main() {
     );
 
     await tester.tap(find.byKey(const Key('open-editor')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('외부 에디터'));
     await tester.pump();
 
     expect(editorService.line, 10);
   });
+
+  testWidgets(
+    'editor choice opens working files editable and history read-only',
+    (tester) async {
+      final root = Directory.systemTemp.createTempSync('yogit_diff_editor_');
+      addTearDown(() => root.deleteSync(recursive: true));
+      final file = File('${root.path}/${fileA.path}');
+      file.parent.createSync(recursive: true);
+      file.writeAsBytesSync(resultFile.bytes);
+      late final WorkingTreeTextDocument document;
+      await tester.runAsync(() async {
+        document = await WorkingTreeTextDocument.load(
+          repositoryRoot: root.path,
+          relativePath: fileA.path,
+        );
+      });
+      const workingTree = GitCommit(
+        sha: '',
+        shortSha: '',
+        parents: ['HEAD'],
+        author: fixtureIdentity,
+        authorTimestamp: 1720573300,
+        committer: fixtureIdentity,
+        committerTimestamp: 1720573300,
+        refs: [],
+        subject: 'working tree',
+      );
+      final workingRepository = FakeFullDiffRepository(root: root.path)
+        ..files = ((_, _) async => const [fileA])
+        ..diff = ((_, _, _, _, _) async => twoHunkLines)
+        ..content = ((_, _, _) async => resultFile.bytes);
+      final workingController = FullDiffSessionController(
+        repository: workingRepository,
+        commits: const [workingTree],
+        initialIndex: 0,
+      );
+      addTearDown(workingController.dispose);
+      await workingController.initialize();
+      await pumpWorkspace(
+        tester,
+        controller: workingController,
+        size: const Size(1070, 842),
+        editorForTesting: const SizedBox.expand(),
+        documentLoaderForTesting: (_) async => document,
+      );
+
+      await tester.tap(find.byKey(const Key('open-editor')));
+      await tester.pumpAndSettle();
+      expect(find.text('내장 에디터'), findsOneWidget);
+      expect(find.text('외부 에디터'), findsOneWidget);
+      await tester.tap(find.text('내장 에디터'));
+      await tester.pumpAndSettle();
+      expect(find.text('수정 가능'), findsOneWidget);
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      final committed = await workspaceFixture();
+      addTearDown(committed.controller.dispose);
+      await pumpWorkspace(
+        tester,
+        controller: committed.controller,
+        size: const Size(1070, 842),
+        editorForTesting: const SizedBox.expand(),
+      );
+      await tester.tap(find.byKey(const Key('open-editor')));
+      await tester.pumpAndSettle();
+      expect(find.text('내장 에디터'), findsOneWidget);
+      expect(
+        tester
+            .widget<PopupMenuItem<String>>(
+              find.ancestor(
+                of: find.text('외부 에디터'),
+                matching: find.byType(PopupMenuItem<String>),
+              ),
+            )
+            .enabled,
+        isFalse,
+      );
+      await tester.tap(find.text('내장 에디터'));
+      await tester.pumpAndSettle();
+      expect(find.text('읽기 전용'), findsOneWidget);
+      expect(find.text('저장'), findsNothing);
+    },
+  );
 
   testWidgets('a late editor failure cannot alter a replacement session', (
     tester,
@@ -4544,6 +4637,8 @@ void main() {
       editorService: editorService,
     );
     await tester.tap(find.byKey(const Key('open-editor')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('외부 에디터'));
     await tester.pump();
     expect(editorButton(tester).onTap, isNull);
 
@@ -4617,6 +4712,8 @@ void main() {
       );
 
       await tester.tap(find.byKey(const Key('open-editor')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('외부 에디터'));
       await tester.pump();
       expect(editorButton(tester).onTap, isNull);
 
@@ -4797,6 +4894,8 @@ void main() {
     );
 
     await tester.tap(find.byKey(const Key('open-editor')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('외부 에디터'));
     await tester.pump();
     editorCompleter.completeError(StateError('Native file opener failed'));
     await tester.pump();
@@ -4812,7 +4911,7 @@ void main() {
   });
 
   testWidgets(
-    'external editor stays blocked outside an existing worktree file',
+    'editor availability follows file state and working-tree capabilities',
     (tester) async {
       final committed = await workspaceFixture();
       addTearDown(committed.controller.dispose);
@@ -4821,7 +4920,7 @@ void main() {
         controller: committed.controller,
         size: const Size(1070, 842),
       );
-      expect(editorButton(tester).onTap, isNull);
+      expect(editorButton(tester).onTap, isNotNull);
 
       const workingTree = GitCommit(
         sha: '',
@@ -4865,6 +4964,8 @@ void main() {
       );
       expect(editorButton(tester).onTap, isNotNull);
       await tester.tap(find.byKey(const Key('open-editor')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('외부 에디터'));
       await tester.pump();
       expect(editorService.relativePath, fileA.path);
       expect(editorService.line, twoHunkDocument.hunks.first.anchor.newLine);

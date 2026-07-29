@@ -603,6 +603,17 @@ void main() {
         findsOneWidget,
       );
       expect(
+        tester
+            .widget<Tooltip>(
+              find.ancestor(
+                of: find.byKey(const Key('open-editor')),
+                matching: find.byType(Tooltip),
+              ),
+            )
+            .message,
+        '내장 또는 외부 에디터로 엽니다',
+      );
+      expect(
         find.descendant(
           of: actions,
           matching: find.byKey(const Key('main-view-controls')),

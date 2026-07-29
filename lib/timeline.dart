@@ -11,6 +11,7 @@ import 'diff_screen.dart';
 import 'external_editor.dart';
 import 'full_diff_model.dart';
 import 'git.dart';
+import 'monaco_editor_screen.dart';
 import 'page_scroll_shortcuts.dart';
 import 'ref_tree.dart';
 import 'repository_branch_selector.dart';
@@ -329,6 +330,8 @@ class TimelineScreen extends StatefulWidget {
     this.onFullDiffColumnWidthsChanged,
     this.onFullDiffPreferencesChanged,
     this.onPreviewSizeChanged,
+    this.editorForTesting,
+    this.documentLoaderForTesting,
     super.key,
   });
 
@@ -360,6 +363,13 @@ class TimelineScreen extends StatefulWidget {
   final ValueChanged<FullDiffColumnWidths>? onFullDiffColumnWidthsChanged;
   final ValueChanged<FullDiffPreferences>? onFullDiffPreferencesChanged;
   final ValueChanged<({double width, double height})>? onPreviewSizeChanged;
+
+  @visibleForTesting
+  final Widget? editorForTesting;
+
+  @visibleForTesting
+  final Future<WorkingTreeTextDocument> Function(String relativePath)?
+  documentLoaderForTesting;
 
   @override
   State<TimelineScreen> createState() => _TimelineScreenState();
@@ -3513,6 +3523,14 @@ class _TimelineScreenState extends State<TimelineScreen>
                                 fontFamily: 'monospace',
                               ),
                             ),
+                            trailing: Text(
+                              '해결 필요',
+                              style: TextStyle(
+                                color: _behind,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ),
                         ),
                     ],
@@ -3536,7 +3554,9 @@ class _TimelineScreenState extends State<TimelineScreen>
             children: [
               OutlinedButton(
                 key: const Key('cherry-pick-open-editor'),
-                onPressed: null,
+                onPressed: _cherryPickBusy || _selectedConflictPath == null
+                    ? null
+                    : () => unawaited(_openConflictEditor()),
                 child: const Text('편집기로 열기'),
               ),
               TextButton(
@@ -3558,6 +3578,75 @@ class _TimelineScreenState extends State<TimelineScreen>
         ],
       ),
     );
+  }
+
+  Future<void> _openConflictEditor() async {
+    final path = _selectedConflictPath;
+    if (path == null || _cherryPickBusy) return;
+    setState(() {
+      _cherryPickBusy = true;
+      _cherryPickError = null;
+    });
+    try {
+      final overlay =
+          Overlay.of(context).context.findRenderObject()! as RenderBox;
+      final choice = await showMenu<String>(
+        context: context,
+        position: RelativeRect.fromLTRB(
+          overlay.size.width - 260,
+          overlay.size.height - 160,
+          16,
+          16,
+        ),
+        items: [
+          const PopupMenuItem(value: 'internal', child: Text('내장 에디터')),
+          const PopupMenuItem(value: 'external', child: Text('외부 에디터')),
+        ],
+      );
+      if (!mounted || choice == null) return;
+      final externalEditor = ExternalEditorService(
+        repositoryRoot: widget.repository.root,
+      );
+      if (choice == 'external') {
+        await externalEditor.open(relativePath: path);
+        return;
+      }
+      final document =
+          await widget.documentLoaderForTesting?.call(path) ??
+          await WorkingTreeTextDocument.load(
+            repositoryRoot: widget.repository.root,
+            relativePath: path,
+          );
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => MonacoEditorScreen(
+            title: path,
+            initialText: document.text,
+            language: monacoLanguageForPath(path),
+            readOnly: false,
+            onSave: (text) async {
+              await document.save(text);
+              await widget.repository.stageResolvedFile(path);
+              await _reloadCherryPickState();
+              if (mounted) Navigator.of(context).pop();
+            },
+            onOpenExternal: () async {
+              try {
+                await externalEditor.open(relativePath: path);
+              } catch (error) {
+                if (mounted) setState(() => _cherryPickError = error);
+              }
+            },
+            editorForTesting: widget.editorForTesting,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _cherryPickError = error);
+    } finally {
+      if (mounted) setState(() => _cherryPickBusy = false);
+    }
   }
 
   /// The commit's changed files, remembered in resolved form as well so ⌘↑/⌘↓ can

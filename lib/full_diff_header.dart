@@ -153,7 +153,7 @@ class GlobalFileBar extends StatelessWidget {
                 ),
               ),
               Tooltip(
-                message: editorError ?? '현재 작업 디렉터리의 파일을 외부 편집기로 엽니다',
+                message: editorError ?? '내장 또는 외부 에디터로 엽니다',
                 child: _HeaderButton(
                   controlKey: const Key('open-editor'),
                   label: '편집기로 열기',
