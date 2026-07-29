@@ -4631,6 +4631,12 @@ void main() {
       (_, _) async => [
         commit('40aff6d1', 'aligned blame', parents: const ['parent']),
       ],
+      refs: const RepoRefs(
+        local: ['main'],
+        current: 'main',
+        tips: {'main': '40aff6d1'},
+        localTips: {'main': '40aff6d1'},
+      ),
       files: (_, _) async => const [
         GitFileChange(
           path: 'lib/aligned.dart',
@@ -6859,6 +6865,12 @@ void main() {
       YogitApp(
         repository: FakeGitRepository(
           (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(
+            local: ['main'],
+            current: 'main',
+            tips: {'main': '1'},
+            localTips: {'main': '1'},
+          ),
         ),
         settingsStore: store,
         avatarService: service,
@@ -8564,13 +8576,9 @@ void main() {
           home: TimelineScreen(
             repository: FakeGitRepository(
               (skip, _) async => skip == 0 ? commits : const [],
-              refs: const RepoRefs(
-                local: ['main'],
-                current: 'main',
-                tips: {'main': 'merge'},
-                localTips: {'main': 'merge'},
-              ),
-              deletedBranchNameCallback: (_, _) => resolver.future,
+              refs: const RepoRefs(),
+              deletedBranchNameCallback: (tipSha, _) =>
+                  tipSha == 'side-tip' ? resolver.future : Future.value(null),
             ),
           ),
         ),
@@ -8913,6 +8921,57 @@ void main() {
 
     expect(find.text('feature/old'), findsNothing);
     expect(find.text('feature/new'), findsOneWidget);
+  });
+
+  testWidgets('deleted branch concurrent lookups keep each loading state', (
+    tester,
+  ) async {
+    final sideA = Completer<String?>();
+    final sideB = Completer<String?>();
+    final commits = [
+      commit('merge-a', 'merge a', parents: const ['merge-b', 'side-a']),
+      commit('merge-b', 'merge b', parents: const ['base', 'side-b']),
+      commit('side-a', 'side a', parents: const ['base']),
+      commit('side-b', 'side b', parents: const ['base']),
+      commit('base', 'base'),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (skip, _) async => skip == 0 ? commits : const [],
+            refs: const RepoRefs(
+              local: ['main'],
+              current: 'main',
+              tips: {'main': 'merge-a'},
+              localTips: {'main': 'merge-a'},
+            ),
+            deletedBranchNameCallback: (tipSha, _) => switch (tipSha) {
+              'side-a' => sideA.future,
+              'side-b' => sideB.future,
+              _ => Future.value(null),
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('side a'));
+    await tester.pump();
+    await tester.tap(find.text('side b'));
+    await tester.pump();
+    await tester.tap(find.text('side a'));
+    await tester.pump();
+
+    expect(
+      find.byKey(const Key('deleted-branch-loading-side-a')),
+      findsOneWidget,
+    );
+
+    sideA.complete(null);
+    sideB.complete(null);
+    await tester.pumpAndSettle();
   });
 
   testWidgets('deleted branch remote failure is attempted once per run', (

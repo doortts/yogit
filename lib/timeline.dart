@@ -473,7 +473,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   final _deletedBranchLookupAttempts = <String>{};
   final _deletedBranchRevision = ValueNotifier(0);
   var _deletedBranchLookupGeneration = 0;
-  String? _resolvingDeletedBranchTip;
+  final _resolvingDeletedBranchTips = <String>{};
 
   var _refs = const RepoRefs();
   var _refsLoading = true;
@@ -669,6 +669,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (recoveryContextChanged) {
       _deletedBranchLookupGeneration++;
       _deletedBranchLookupAttempts.clear();
+      _resolvingDeletedBranchTips.clear();
     }
     if (deletedBranchNamesChanged) {
       _deletedBranchNames
@@ -1074,7 +1075,6 @@ class _TimelineScreenState extends State<TimelineScreen>
       unawaited(_resolveSelectedDeletedBranchName());
 
   String? _deletedBranchTipSha(int branch) {
-    if (_refs.tips.isEmpty) return null;
     for (final row in _normalRows) {
       if (row.branch != branch || row.commit.isWorkingTree) continue;
       return _rowRefs(row.commit).isEmpty ? row.commit.sha : null;
@@ -1102,7 +1102,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     final generation = _deletedBranchLookupGeneration;
     final repository = widget.repository;
     final avatarService = widget.avatarService;
-    _resolvingDeletedBranchTip = line.tipSha;
+    _resolvingDeletedBranchTips.add(line.tipSha);
     _deletedBranchRevision.value++;
     String? name;
     try {
@@ -1124,9 +1124,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       _deletedBranchLookupAttempts.remove(line.tipSha);
     }
     if (name != null) _deletedBranchNames[line.tipSha] = name;
-    if (_resolvingDeletedBranchTip == line.tipSha) {
-      _resolvingDeletedBranchTip = null;
-    }
+    _resolvingDeletedBranchTips.remove(line.tipSha);
     _deletedBranchRevision.value++;
     if (name != null) {
       widget.onDeletedBranchNamesChanged?.call(Map.of(_deletedBranchNames));
@@ -2964,7 +2962,7 @@ class _TimelineScreenState extends State<TimelineScreen>
             ? null
             : _deletedBranchNames[lineTip],
         deletedBranchLoading:
-            lineTip != null && _resolvingDeletedBranchTip == lineTip,
+            lineTip != null && _resolvingDeletedBranchTips.contains(lineTip),
       );
     }
 
