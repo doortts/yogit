@@ -384,6 +384,12 @@ List<GraphRow> layoutBranchComparison(List<BranchComparisonCommit> commits) {
   final firstCommon = commits.indexWhere(
     (entry) => entry.side == BranchCommitSide.commonBoundary,
   );
+  final hasBaseOnly = commits.any(
+    (entry) => entry.side == BranchCommitSide.baseOnly,
+  );
+  final hasCompareOnly = commits.any(
+    (entry) => entry.side == BranchCommitSide.compareOnly,
+  );
   return [
     for (var index = 0; index < commits.length; index++)
       () {
@@ -391,10 +397,12 @@ List<GraphRow> layoutBranchComparison(List<BranchComparisonCommit> commits) {
         final lane = entry.side == BranchCommitSide.compareOnly ? 1 : 0;
         final beforeCommon = firstCommon < 0 || index < firstCommon;
         final convergesHere = firstCommon > 0 && index == firstCommon - 1;
-        final activeLanes = beforeCommon ? const [0, 1] : const [0];
+        final activeLanes = beforeCommon
+            ? [if (hasBaseOnly) 0, if (hasCompareOnly) 1]
+            : const [0];
         final nextLanes = convergesHere || !beforeCommon
             ? const [0]
-            : const [0, 1];
+            : [if (hasBaseOnly) 0, if (hasCompareOnly) 1];
         return GraphRow(
           commit: entry.commit,
           lane: lane,

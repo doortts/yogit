@@ -622,6 +622,26 @@ void main() {
   });
 
   test(
+    'does not activate a base lane when only the compare branch is unique',
+    () {
+      final rows = layoutBranchComparison([
+        BranchComparisonCommit(
+          commit: _commit('feature-tip', ['shared']),
+          side: BranchCommitSide.compareOnly,
+        ),
+        BranchComparisonCommit(
+          commit: _commit('shared', const []),
+          side: BranchCommitSide.commonBoundary,
+        ),
+      ]);
+
+      expect(rows.first.activeLanes, [1]);
+      expect(rows.first.activeLaneBranches, {1: 1});
+      expect(rows.first.nextLanes, [0]);
+    },
+  );
+
+  test(
     'rebase simulation reports first conflicting commit and cleans worktree',
     () async {
       final root = await Directory.systemTemp.createTemp(
