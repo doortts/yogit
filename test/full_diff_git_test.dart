@@ -205,7 +205,7 @@ void main() {
     var rawCalls = 0;
     final repository = GitRepository(
       '/unused',
-      runner: (executable, arguments, {workingDirectory}) async {
+      runner: (executable, arguments, {workingDirectory, environment}) async {
         runnerCalls++;
         return ProcessResult(1, 0, output.toString(), '');
       },
@@ -247,7 +247,7 @@ void main() {
       final calls = <List<String>>[];
       final repository = GitRepository(
         root.path,
-        runner: (executable, arguments, {workingDirectory}) {
+        runner: (executable, arguments, {workingDirectory, environment}) {
           calls.add(List.unmodifiable(arguments));
           return runProcess(
             executable,
@@ -303,15 +303,16 @@ void main() {
     addTearDown(() => root.delete(recursive: true));
     final repository = GitRepository(
       root.path,
-      runner: (executable, arguments, {workingDirectory}) => Process.run(
-        executable,
-        arguments,
-        workingDirectory: workingDirectory,
-        environment: {
-          'GIT_CONFIG_NOSYSTEM': '1',
-          'GIT_CONFIG_GLOBAL': '${root.path}/empty-global-gitconfig',
-        },
-      ),
+      runner: (executable, arguments, {workingDirectory, environment}) =>
+          Process.run(
+            executable,
+            arguments,
+            workingDirectory: workingDirectory,
+            environment: {
+              'GIT_CONFIG_NOSYSTEM': '1',
+              'GIT_CONFIG_GLOBAL': '${root.path}/empty-global-gitconfig',
+            },
+          ),
     );
 
     final unset = await repository.loadDiffAlgorithmSetting();
@@ -400,7 +401,7 @@ void main() {
     final calls = <List<String>>[];
     final repository = GitRepository(
       root.path,
-      runner: (executable, arguments, {workingDirectory}) {
+      runner: (executable, arguments, {workingDirectory, environment}) {
         calls.add(List.unmodifiable(arguments));
         return runProcess(
           executable,
@@ -474,7 +475,7 @@ void main() {
       var rawCalls = 0;
       final repository = GitRepository(
         '/unused',
-        runner: (executable, arguments, {workingDirectory}) async {
+        runner: (executable, arguments, {workingDirectory, environment}) async {
           calls.add(List.unmodifiable(arguments));
           return ProcessResult(1, 0, '${_textByteLimit + 2}\n', '');
         },
@@ -586,7 +587,7 @@ void main() {
       var blameCalls = 0;
       final repository = GitRepository(
         root.path,
-        runner: (executable, arguments, {workingDirectory}) {
+        runner: (executable, arguments, {workingDirectory, environment}) {
           if (arguments.first == 'blame') {
             blameCalls++;
             return Future.value(ProcessResult(1, 0, '', ''));
@@ -622,7 +623,7 @@ void main() {
     String? contentsPath;
     final repository = GitRepository(
       root.path,
-      runner: (executable, arguments, {workingDirectory}) {
+      runner: (executable, arguments, {workingDirectory, environment}) {
         if (arguments.first == 'blame') {
           contentsPath = arguments[arguments.indexOf('--contents') + 1];
           return Future.value(ProcessResult(1, 1, '', 'forced blame failure'));
@@ -699,7 +700,7 @@ void main() {
     final calls = <List<String>>[];
     final repository = GitRepository(
       '/repo',
-      runner: (executable, arguments, {workingDirectory}) async {
+      runner: (executable, arguments, {workingDirectory, environment}) async {
         calls.add(List.unmodifiable(arguments));
         return ProcessResult(0, 0, '', '');
       },
@@ -835,7 +836,7 @@ $uncommittedSha 4 4
     );
     final fixtureRepository = GitRepository(
       '/repo',
-      runner: (executable, arguments, {workingDirectory}) async =>
+      runner: (executable, arguments, {workingDirectory, environment}) async =>
           ProcessResult(0, 0, porcelain, ''),
     );
 
@@ -900,7 +901,7 @@ $uncommittedSha 4 4
     final calls = <List<String>>[];
     final repository = GitRepository(
       root.path,
-      runner: (executable, arguments, {workingDirectory}) {
+      runner: (executable, arguments, {workingDirectory, environment}) {
         calls.add(List.unmodifiable(arguments));
         return runProcess(
           executable,
@@ -941,7 +942,7 @@ $uncommittedSha 4 4
       final calls = <List<String>>[];
       final repository = GitRepository(
         root.path,
-        runner: (executable, arguments, {workingDirectory}) {
+        runner: (executable, arguments, {workingDirectory, environment}) {
           calls.add(List.unmodifiable(arguments));
           return runProcess(
             executable,
@@ -1063,7 +1064,7 @@ $uncommittedSha 4 4
       final calls = <List<String>>[];
       final repository = GitRepository(
         root.path,
-        runner: (executable, arguments, {workingDirectory}) {
+        runner: (executable, arguments, {workingDirectory, environment}) {
           calls.add(List.unmodifiable(arguments));
           return runProcess(
             executable,
@@ -1162,7 +1163,7 @@ $uncommittedSha 4 4
     final calls = <List<String>>[];
     final repository = GitRepository(
       root.path,
-      runner: (executable, arguments, {workingDirectory}) {
+      runner: (executable, arguments, {workingDirectory, environment}) {
         calls.add(List.unmodifiable(arguments));
         return runProcess(
           executable,
@@ -1205,7 +1206,7 @@ $uncommittedSha 4 4
       final calls = <List<String>>[];
       final repository = GitRepository(
         root.path,
-        runner: (executable, arguments, {workingDirectory}) {
+        runner: (executable, arguments, {workingDirectory, environment}) {
           calls.add(List.unmodifiable(arguments));
           return runProcess(
             executable,
@@ -1262,7 +1263,7 @@ $uncommittedSha 4 4
     final calls = <List<String>>[];
     final repository = GitRepository(
       root.path,
-      runner: (executable, arguments, {workingDirectory}) {
+      runner: (executable, arguments, {workingDirectory, environment}) {
         calls.add(List.unmodifiable(arguments));
         return runProcess(
           executable,
@@ -1304,7 +1305,7 @@ $uncommittedSha 4 4
     final calls = <List<String>>[];
     final repository = GitRepository(
       root.path,
-      runner: (executable, arguments, {workingDirectory}) {
+      runner: (executable, arguments, {workingDirectory, environment}) {
         calls.add(List.unmodifiable(arguments));
         if (arguments.first == 'ls-tree' && arguments[2] == resultRevision) {
           return Future.value(
@@ -1391,7 +1392,7 @@ $uncommittedSha 4 4
 
     final repository = GitRepository(
       root.path,
-      runner: (executable, arguments, {workingDirectory}) {
+      runner: (executable, arguments, {workingDirectory, environment}) {
         if (arguments.first == 'ls-tree') {
           return Future.value(
             ProcessResult(1, 1, '', 'forced ls-tree failure'),
@@ -1428,7 +1429,7 @@ $uncommittedSha 4 4
       final calls = <List<String>>[];
       final repository = GitRepository(
         root.path,
-        runner: (executable, arguments, {workingDirectory}) {
+        runner: (executable, arguments, {workingDirectory, environment}) {
           calls.add(List.unmodifiable(arguments));
           return runProcess(
             executable,
@@ -1459,7 +1460,7 @@ $uncommittedSha 4 4
     final calls = <List<String>>[];
     final repository = GitRepository(
       root.path,
-      runner: (executable, arguments, {workingDirectory}) {
+      runner: (executable, arguments, {workingDirectory, environment}) {
         calls.add(List.unmodifiable(arguments));
         return runProcess(
           executable,
@@ -1490,7 +1491,7 @@ $uncommittedSha 4 4
       var removedBeforeStat = false;
       final repository = GitRepository(
         root.path,
-        runner: (executable, arguments, {workingDirectory}) async {
+        runner: (executable, arguments, {workingDirectory, environment}) async {
           final result = await runProcess(
             executable,
             arguments,

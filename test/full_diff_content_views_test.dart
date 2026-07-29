@@ -1113,7 +1113,7 @@ void main() {
         owner: 'team',
         repository: 'yogit',
       ),
-      runner: (executable, arguments, {workingDirectory}) async {
+      runner: (executable, arguments, {workingDirectory, environment}) async {
         requests.add(List.unmodifiable(arguments));
         return ProcessResult(
           1,
@@ -1175,7 +1175,7 @@ void main() {
         owner: 'team',
         repository: 'yogit',
       ),
-      runner: (executable, arguments, {workingDirectory}) async {
+      runner: (executable, arguments, {workingDirectory, environment}) async {
         requests++;
         throw StateError('avatar lookup failed');
       },

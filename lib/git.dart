@@ -10,13 +10,20 @@ typedef CommandRunner =
       String executable,
       List<String> arguments, {
       String? workingDirectory,
+      Map<String, String>? environment,
     });
 
 Future<ProcessResult> runProcess(
   String executable,
   List<String> arguments, {
   String? workingDirectory,
-}) => Process.run(executable, arguments, workingDirectory: workingDirectory);
+  Map<String, String>? environment,
+}) => Process.run(
+  executable,
+  arguments,
+  workingDirectory: workingDirectory,
+  environment: environment,
+);
 
 typedef RawCommandRunner =
     Future<ProcessResult> Function(
@@ -772,6 +779,7 @@ class RepoRefs {
     this.localTips = const {},
     this.birthTimes = const {},
     this.tagCreatorTimes = const {},
+    this.aheadBehind = const {},
   });
 
   final List<String> local;
@@ -792,7 +800,19 @@ class RepoRefs {
 
   /// Tag name → creator unix time. Absent when Git has no creator date.
   final Map<String, int> tagCreatorTimes;
+
+  /// Local branch name → commits unique to local and matching origin branch.
+  final Map<String, BranchAheadBehind> aheadBehind;
 }
+
+class BranchAheadBehind {
+  const BranchAheadBehind({required this.ahead, required this.behind});
+
+  final int ahead;
+  final int behind;
+}
+
+enum FetchOriginResult { updated, noOrigin }
 
 String? resolveBaseBranch(RepoRefs refs, String? savedBranch) {
   if (savedBranch != null && refs.local.contains(savedBranch)) {
@@ -1318,6 +1338,11 @@ class GitRepository implements FullDiffRepository {
       }
     }
     final births = await Future.wait(local.map(_birthTime));
+    final aheadBehind = <String, BranchAheadBehind>{};
+    for (final branch in local) {
+      if (!remote.contains('origin/$branch')) continue;
+      aheadBehind[branch] = await _loadAheadBehind(branch);
+    }
     final current = (await _run(['branch', '--show-current'])).trim();
     return RepoRefs(
       local: local,
@@ -1331,6 +1356,23 @@ class GitRepository implements FullDiffRepository {
         for (var index = 0; index < local.length; index++)
           local[index]: ?births[index],
       },
+      aheadBehind: aheadBehind,
+    );
+  }
+
+  Future<BranchAheadBehind> _loadAheadBehind(String branch) async {
+    final counts = (await _run([
+      'rev-list',
+      '--left-right',
+      '--count',
+      '$branch...refs/remotes/origin/$branch',
+    ])).trim().split(RegExp(r'\s+'));
+    if (counts.length != 2) {
+      throw FormatException('Invalid ahead/behind counts for $branch');
+    }
+    return BranchAheadBehind(
+      ahead: int.parse(counts[0]),
+      behind: int.parse(counts[1]),
     );
   }
 
@@ -1359,6 +1401,36 @@ class GitRepository implements FullDiffRepository {
     } on ProcessException {
       return null;
     }
+  }
+
+  Future<FetchOriginResult> fetchOrigin() async {
+    if (await loadOriginUrl() == null) return FetchOriginResult.noOrigin;
+    const arguments = [
+      '-c',
+      'credential.interactive=never',
+      'fetch',
+      '--prune',
+      'origin',
+    ];
+    final result = await runner(
+      gitExecutable,
+      arguments,
+      workingDirectory: root,
+      environment: {
+        ...Platform.environment,
+        'GIT_TERMINAL_PROMPT': '0',
+        'GCM_INTERACTIVE': 'Never',
+      },
+    );
+    if (result.exitCode != 0) {
+      throw ProcessException(
+        gitExecutable,
+        arguments,
+        result.stderr.toString(),
+        result.exitCode,
+      );
+    }
+    return FetchOriginResult.updated;
   }
 
   /// The working tree row compares its base against the checkout, so it passes

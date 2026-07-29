@@ -4019,7 +4019,7 @@ void main() {
         owner: 'team',
         repository: 'yogit',
       ),
-      runner: (executable, arguments, {workingDirectory}) async {
+      runner: (executable, arguments, {workingDirectory, environment}) async {
         requested.add(int.parse(arguments.last.split('/').last));
         return ProcessResult(1, 1, '', 'offline');
       },
@@ -4061,7 +4061,7 @@ void main() {
         owner: 'team',
         repository: 'yogit',
       ),
-      runner: (executable, arguments, {workingDirectory}) async {
+      runner: (executable, arguments, {workingDirectory, environment}) async {
         requests++;
         return ProcessResult(1, 1, '', 'offline');
       },
@@ -5252,6 +5252,7 @@ void main() {
         String executable,
         List<String> arguments, {
         String? workingDirectory,
+        Map<String, String>? environment,
       }) async {
         if (arguments.contains('--show-toplevel')) {
           final path = arguments[1];
@@ -5292,6 +5293,7 @@ void main() {
       String executable,
       List<String> arguments, {
       String? workingDirectory,
+      Map<String, String>? environment,
     }) async {
       if (arguments.contains('--show-toplevel')) {
         return ProcessResult(1, 0, '/Users/ada/repo\n', '');
@@ -5359,6 +5361,7 @@ void main() {
       String executable,
       List<String> arguments, {
       String? workingDirectory,
+      Map<String, String>? environment,
     }) async => arguments.contains('/Users/ada/next')
         ? ProcessResult(1, 0, '/Users/ada/next\n', '')
         : ProcessResult(1, 128, '', 'not a git repository');
@@ -5517,7 +5520,7 @@ void main() {
     final root = await resolveRepositoryRoot(
       '/tmp/project',
       gitExecutable: executable.path,
-      runner: (command, arguments, {workingDirectory}) async {
+      runner: (command, arguments, {workingDirectory, environment}) async {
         calls.add(arguments);
         return ProcessResult(1, 0, '/tmp/project\n', '');
       },
@@ -5533,7 +5536,7 @@ void main() {
     await expectLater(
       resolveRepositoryRoot(
         '/tmp/not-a-repository',
-        runner: (command, arguments, {workingDirectory}) async =>
+        runner: (command, arguments, {workingDirectory, environment}) async =>
             ProcessResult(1, 128, '', 'not a git repository'),
       ),
       throwsA(isA<GitRepositoryException>()),
@@ -5717,7 +5720,7 @@ void main() {
         repository: 'yogit',
       ),
       ghExecutable: '/usr/bin/gh',
-      runner: (executable, arguments, {workingDirectory}) async {
+      runner: (executable, arguments, {workingDirectory, environment}) async {
         requests.add(arguments);
         return ProcessResult(
           1,
@@ -5762,13 +5765,19 @@ void main() {
           owner: 'team',
           repository: 'yogit',
         ),
-        runner: (executable, arguments, {workingDirectory}) async => ProcessResult(
-          1,
-          0,
-          '{"author":{"login":"ada","avatar_url":"${entry.value}"},'
-              '"committer":{"login":"cam","avatar_url":"https://notgravatar.com/cam"}}',
-          '',
-        ),
+        runner:
+            (
+              executable,
+              arguments, {
+              workingDirectory,
+              environment,
+            }) async => ProcessResult(
+              1,
+              0,
+              '{"author":{"login":"ada","avatar_url":"${entry.value}"},'
+                  '"committer":{"login":"cam","avatar_url":"https://notgravatar.com/cam"}}',
+              '',
+            ),
       );
 
       final avatars = await service.resolve(entry.key);
@@ -5785,7 +5794,7 @@ void main() {
         owner: 'team',
         repository: 'yogit',
       ),
-      runner: (executable, arguments, {workingDirectory}) async {
+      runner: (executable, arguments, {workingDirectory, environment}) async {
         if (arguments.take(2).join(' ') == 'auth token') {
           return ProcessResult(1, 0, 'secret-token\n', '');
         }
@@ -5816,7 +5825,7 @@ void main() {
         owner: 'team',
         repository: 'yogit',
       ),
-      runner: (executable, arguments, {workingDirectory}) {
+      runner: (executable, arguments, {workingDirectory, environment}) {
         final gate = gates[started++];
         active++;
         peak = active > peak ? active : peak;
@@ -5849,7 +5858,7 @@ void main() {
           owner: 'team',
           repository: 'yogit',
         ),
-        runner: (executable, arguments, {workingDirectory}) =>
+        runner: (executable, arguments, {workingDirectory, environment}) =>
             gates[started++].future,
       );
 
@@ -5881,7 +5890,7 @@ void main() {
           owner: 'team',
           repository: 'yogit',
         ),
-        runner: (executable, arguments, {workingDirectory}) async {
+        runner: (executable, arguments, {workingDirectory, environment}) async {
           sequentialStarts++;
           return ProcessResult(1, 1, '', 'offline');
         },
@@ -6061,7 +6070,7 @@ void main() {
         owner: 'team',
         repository: 'yogit',
       ),
-      runner: (executable, arguments, {workingDirectory}) async =>
+      runner: (executable, arguments, {workingDirectory, environment}) async =>
           ProcessResult(1, 1, '', 'offline'),
     );
     final repository = FakeGitRepository(
@@ -6116,7 +6125,7 @@ void main() {
         owner: 'team',
         repository: 'yogit',
       ),
-      runner: (executable, arguments, {workingDirectory}) async {
+      runner: (executable, arguments, {workingDirectory, environment}) async {
         requests++;
         return ProcessResult(1, 1, '', 'offline');
       },

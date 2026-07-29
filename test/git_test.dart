@@ -12,7 +12,7 @@ void main() {
     late List<String> arguments;
     final repository = GitRepository(
       '/repo',
-      runner: (executable, args, {workingDirectory}) async {
+      runner: (executable, args, {workingDirectory, environment}) async {
         arguments = args;
         return ProcessResult(1, 0, 'Subject\n\nBody line\n', '');
       },
@@ -756,7 +756,7 @@ void main() {
       final calls = <List<String>>[];
       final repository = GitRepository(
         '.',
-        runner: (executable, arguments, {workingDirectory}) async {
+        runner: (executable, arguments, {workingDirectory, environment}) async {
           calls.add(arguments);
           return ProcessResult(1, 0, '', '');
         },
@@ -891,7 +891,7 @@ void main() {
     final calls = <List<String>>[];
     final repository = GitRepository(
       '/tmp/repository',
-      runner: (executable, arguments, {workingDirectory}) async {
+      runner: (executable, arguments, {workingDirectory, environment}) async {
         calls.add(arguments);
         if (arguments.first == 'rev-parse') {
           return ProcessResult(1, 0, liveRefs, '');
@@ -924,7 +924,7 @@ void main() {
       final repository = GitRepository(
         '/tmp/repository',
         gitExecutable: '/usr/bin/git',
-        runner: (executable, arguments, {workingDirectory}) async {
+        runner: (executable, arguments, {workingDirectory, environment}) async {
           calls.add(arguments);
           if (arguments.first == 'hash-object') {
             return ProcessResult(1, 0, 'sha256-empty-tree\n', '');
@@ -960,7 +960,7 @@ void main() {
     final calls = <List<String>>[];
     final repository = GitRepository(
       '/tmp/repository',
-      runner: (executable, arguments, {workingDirectory}) async {
+      runner: (executable, arguments, {workingDirectory, environment}) async {
         calls.add(arguments);
         if (arguments.first == 'status') {
           return ProcessResult(1, 0, ' M lib/timeline.dart\n', '');
@@ -995,7 +995,7 @@ void main() {
     final calls = <List<String>>[];
     final repository = GitRepository(
       '/tmp/repository',
-      runner: (executable, arguments, {workingDirectory}) async {
+      runner: (executable, arguments, {workingDirectory, environment}) async {
         calls.add(arguments);
         if (arguments.first == 'for-each-ref') {
           return ProcessResult(
@@ -1015,6 +1015,9 @@ void main() {
           return arguments.last.endsWith('/main')
               ? ProcessResult(1, 0, '1700000200\n1700000100\n', '')
               : ProcessResult(1, 0, '', '');
+        }
+        if (arguments.first == 'rev-list') {
+          return ProcessResult(1, 0, '2\t3\n', '');
         }
         return ProcessResult(1, 0, 'main\n', '');
       },
@@ -1036,6 +1039,8 @@ void main() {
       'v0.1.0': 'aaa4',
     });
     expect(refs.localTips, {'main': 'aaa1', 'feature/x': 'aaa2'});
+    expect(refs.aheadBehind['main']?.ahead, 2);
+    expect(refs.aheadBehind['main']?.behind, 3);
     // Only local branches have a birth time, and an empty reflog just has none.
     expect(refs.birthTimes, {'main': 1700000100});
     expect(calls, [
@@ -1048,6 +1053,12 @@ void main() {
       ],
       ['reflog', 'show', '--format=%ct', 'refs/heads/main'],
       ['reflog', 'show', '--format=%ct', 'refs/heads/feature/x'],
+      [
+        'rev-list',
+        '--left-right',
+        '--count',
+        'main...refs/remotes/origin/main',
+      ],
       ['branch', '--show-current'],
     ]);
     // Arguments stay single tokens — only the format string carries a space, and
@@ -1060,10 +1071,70 @@ void main() {
     );
   });
 
+  test('loadRefs reports local and origin divergence by direction', () async {
+    final root = await Directory.systemTemp.createTemp('yogit_divergence_');
+    final remote = await Directory.systemTemp.createTemp('yogit_origin_');
+    final other = await Directory.systemTemp.createTemp('yogit_other_');
+    addTearDown(() => root.delete(recursive: true));
+    addTearDown(() => remote.delete(recursive: true));
+    addTearDown(() => other.delete(recursive: true));
+
+    await _git(remote, ['init', '--bare']);
+    await _initRepository(root);
+    await File('${root.path}/file.txt').writeAsString('base\n');
+    await _git(root, ['add', 'file.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+    await _git(root, ['remote', 'add', 'origin', remote.path]);
+    await _git(root, ['push', '-u', 'origin', 'main']);
+
+    await File('${root.path}/local.txt').writeAsString('local\n');
+    await _git(root, ['add', 'local.txt']);
+    await _git(root, ['commit', '-m', 'local']);
+
+    await _git(other, ['clone', remote.path, '.']);
+    await _git(other, ['config', 'user.name', 'Other User']);
+    await _git(other, ['config', 'user.email', 'other@example.com']);
+    await File('${other.path}/remote.txt').writeAsString('remote\n');
+    await _git(other, ['add', 'remote.txt']);
+    await _git(other, ['commit', '-m', 'remote']);
+    await _git(other, ['push', 'origin', 'main']);
+    await _git(root, ['fetch', 'origin']);
+
+    final refs = await GitRepository(root.path).loadRefs();
+
+    expect(refs.aheadBehind['main']?.ahead, 1);
+    expect(refs.aheadBehind['main']?.behind, 1);
+  });
+
+  test('fetchOrigin disables terminal prompts and handles no origin', () async {
+    Map<String, String>? fetchEnvironment;
+    final repository = GitRepository(
+      '/repo',
+      runner: (executable, arguments, {workingDirectory, environment}) async {
+        if (arguments case ['remote', 'get-url', 'origin']) {
+          return ProcessResult(1, 0, 'https://example.com/repo.git\n', '');
+        }
+        fetchEnvironment = environment;
+        return ProcessResult(2, 0, '', '');
+      },
+    );
+
+    expect(await repository.fetchOrigin(), FetchOriginResult.updated);
+    expect(fetchEnvironment?['GIT_TERMINAL_PROMPT'], '0');
+    expect(fetchEnvironment?['GCM_INTERACTIVE'], 'Never');
+
+    final noOrigin = GitRepository(
+      '/repo',
+      runner: (executable, arguments, {workingDirectory, environment}) async =>
+          ProcessResult(3, 2, '', 'missing'),
+    );
+    expect(await noOrigin.fetchOrigin(), FetchOriginResult.noOrigin);
+  });
+
   test('a detached HEAD reports no current branch', () async {
     final repository = GitRepository(
       '/tmp/repository',
-      runner: (executable, arguments, {workingDirectory}) async =>
+      runner: (executable, arguments, {workingDirectory, environment}) async =>
           switch (arguments.first) {
             'branch' => ProcessResult(1, 0, '\n', ''),
             // A branch whose reflog is gone: the failure stays local to that branch.
@@ -1083,7 +1154,7 @@ void main() {
   test('a clean working tree produces no uncommitted row', () async {
     final repository = GitRepository(
       '/tmp/repository',
-      runner: (executable, arguments, {workingDirectory}) async =>
+      runner: (executable, arguments, {workingDirectory, environment}) async =>
           ProcessResult(1, 0, '', ''),
     );
 
