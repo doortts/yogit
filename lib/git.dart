@@ -1066,6 +1066,8 @@ class GitRepository implements FullDiffRepository {
   Future<String> loadCommitMessage(String sha) =>
       _run(['show', '-s', '--format=%B', sha]);
 
+  void invalidateHistory() => _startingRevisions = null;
+
   Future<List<GitCommit>> loadHistory({int limit = 500, int skip = 0}) async {
     final revisions = await (_startingRevisions ??= _loadStartingRevisions());
     if (revisions.isEmpty) return const [];
@@ -1391,7 +1393,8 @@ class GitRepository implements FullDiffRepository {
       '-q',
       'CHERRY_PICK_HEAD',
     ], workingDirectory: root);
-    if (head.exitCode != 0) return null;
+    final commitSha = head.stdout.toString().trim();
+    if (head.exitCode != 0 || commitSha.isEmpty) return null;
     final conflicts = await runner(gitExecutable, const [
       'diff',
       '--name-only',
@@ -1407,7 +1410,7 @@ class GitRepository implements FullDiffRepository {
       );
     }
     return CherryPickState(
-      commitSha: head.stdout.toString().trim(),
+      commitSha: commitSha,
       conflicts: conflicts.stdout
           .toString()
           .split('\x00')

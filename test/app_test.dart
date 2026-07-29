@@ -2623,6 +2623,122 @@ void main() {
     expect(find.text('stale comparison'), findsNothing);
   });
 
+  testWidgets('commit menu and drag open the same cherry-pick confirmation', (
+    tester,
+  ) async {
+    final picked = <String>[];
+    final repository = FakeGitRepository(
+      (_, _) async => [
+        commit(
+          'main-tip',
+          'main commit',
+          parents: const ['root'],
+          refs: const [GitRef(name: 'main', isHead: true)],
+        ),
+        commit(
+          'source-tip',
+          'source commit',
+          parents: const ['root'],
+          refs: const [GitRef(name: 'feature')],
+        ),
+        commit('root', 'root'),
+      ],
+      refs: const RepoRefs(
+        local: ['main', 'feature'],
+        current: 'main',
+        tips: {'main': 'main-tip', 'feature': 'source-tip'},
+      ),
+      cherryPickCallback: (sha) async {
+        picked.add(sha);
+        return const CherryPickResult(
+          outcome: CherryPickOutcome.applied,
+          headSha: 'picked-head',
+        );
+      },
+    );
+    await tester.pumpWidget(app(repository, controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('source commit'), buttons: kSecondaryButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('현재 브랜치로 체리픽'));
+    await tester.pumpAndSettle();
+    expect(find.text('source-tip'), findsWidgets);
+    expect(find.text('source commit'), findsWidgets);
+    expect(find.text('main'), findsWidgets);
+    await tester.tap(find.text('취소'));
+    await tester.pumpAndSettle();
+
+    final source = tester.getCenter(find.text('source commit'));
+    final target = tester.getCenter(find.byKey(const Key('sidebar-row-main')));
+    await tester.dragFrom(source, target - source);
+    await tester.pumpAndSettle();
+    expect(find.text('source-tip'), findsWidgets);
+    expect(find.text('source commit'), findsWidgets);
+    expect(find.text('main'), findsWidgets);
+    await tester.tap(find.text('체리픽'));
+    await tester.pumpAndSettle();
+    expect(picked, ['source-tip']);
+  });
+
+  testWidgets('cherry-pick conflict panel restores and gates continue', (
+    tester,
+  ) async {
+    var state = const CherryPickState(
+      commitSha: 'source-tip',
+      conflicts: ['lib/a.dart', 'lib/b.dart'],
+    );
+    var continued = false;
+    var aborted = false;
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('main-tip', 'main commit')],
+          refs: const RepoRefs(local: ['main'], current: 'main'),
+          loadCherryPickStateCallback: () async => state,
+          continueCherryPickCallback: () async {
+            continued = true;
+            return const CherryPickResult(
+              outcome: CherryPickOutcome.applied,
+              headSha: 'continued-head',
+            );
+          },
+          abortCherryPickCallback: () async => aborted = true,
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('lib/a.dart'), findsOneWidget);
+    expect(find.text('lib/b.dart'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('cherry-pick-continue')))
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(find.byKey(const Key('cherry-pick-abort')));
+    await tester.pumpAndSettle();
+    expect(find.text('체리픽을 중단할까요?'), findsOneWidget);
+    await tester.tap(find.text('취소'));
+    await tester.pumpAndSettle();
+    expect(aborted, isFalse);
+
+    state = const CherryPickState(commitSha: 'source-tip', conflicts: []);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('cherry-pick-continue')))
+          .onPressed,
+      isNotNull,
+    );
+    await tester.tap(find.byKey(const Key('cherry-pick-continue')));
+    await tester.pumpAndSettle();
+    expect(continued, isTrue);
+  });
+
   testWidgets('tags show the newest ten and filtering reveals hidden matches', (
     tester,
   ) async {
@@ -10281,6 +10397,10 @@ class FakeGitRepository extends GitRepository {
     this.compareBranchesCallback,
     this.simulateRebaseCallback,
     this.diffBetween,
+    this.loadCherryPickStateCallback,
+    this.cherryPickCallback,
+    this.continueCherryPickCallback,
+    this.abortCherryPickCallback,
     String root = '.',
     CommandRunner runner = runProcess,
   }) : super(root, runner: runner);
@@ -10302,6 +10422,10 @@ class FakeGitRepository extends GitRepository {
     GitFileChange file,
   )?
   diffBetween;
+  final Future<CherryPickState?> Function()? loadCherryPickStateCallback;
+  final Future<CherryPickResult> Function(String sha)? cherryPickCallback;
+  final Future<CherryPickResult> Function()? continueCherryPickCallback;
+  final Future<void> Function()? abortCherryPickCallback;
   final Future<List<GitCommit>> Function(int skip, int limit) loader;
   final Future<GitCommit?> Function()? workingTree;
   final Future<List<GitFileChange>> Function(GitCommit commit, String? parent)?
@@ -10363,6 +10487,22 @@ class FakeGitRepository extends GitRepository {
 
   @override
   Future<void> cleanupStaleRebaseWorktrees() async {}
+
+  @override
+  Future<CherryPickState?> loadCherryPickState() =>
+      loadCherryPickStateCallback?.call() ?? Future.value();
+
+  @override
+  Future<CherryPickResult> cherryPick(String sha) =>
+      cherryPickCallback?.call(sha) ?? super.cherryPick(sha);
+
+  @override
+  Future<CherryPickResult> continueCherryPick() =>
+      continueCherryPickCallback?.call() ?? super.continueCherryPick();
+
+  @override
+  Future<void> abortCherryPick() =>
+      abortCherryPickCallback?.call() ?? Future.value();
 
   @override
   Future<List<DiffLine>> loadDiffBetween(

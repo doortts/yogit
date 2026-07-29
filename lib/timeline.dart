@@ -365,7 +365,8 @@ class TimelineScreen extends StatefulWidget {
   State<TimelineScreen> createState() => _TimelineScreenState();
 }
 
-class _TimelineScreenState extends State<TimelineScreen> {
+class _TimelineScreenState extends State<TimelineScreen>
+    with WidgetsBindingObserver {
   static const _collapsedTagLimit = 10;
   static const _fetchInterval = Duration(minutes: 5);
 
@@ -443,6 +444,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
   Timer? _fetchTimer;
   var _fetchingOrigin = false;
   Object? _fetchError;
+  CherryPickState? _cherryPickState;
+  Object? _cherryPickError;
+  var _cherryPickBusy = false;
+  String? _selectedConflictPath;
   String? _baseBranch;
   String? _pendingBaseBranch;
   var _pendingBaseBranchIsUserSelection = false;
@@ -495,6 +500,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _ownsPreviewController = widget.controller == null;
     _previewController = widget.controller ?? WindowFrameController();
     _scrollController.addListener(_maybeLoadNextPage);
@@ -502,7 +508,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     // detail pane stays hidden until Enter or Space asks for it.
     _loadNextPage();
     unawaited(_loadRefs());
-    unawaited(_refreshOrigin());
+    unawaited(_restoreCherryPickThenRefresh());
     _fetchTimer = Timer.periodic(
       _fetchInterval,
       (_) => unawaited(_refreshOrigin()),
@@ -510,7 +516,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 
   Future<void> _refreshOrigin() async {
-    if (_fetchingOrigin) return;
+    if (_fetchingOrigin || _cherryPickState != null) return;
     setState(() => _fetchingOrigin = true);
     try {
       final result = await widget.repository.fetchOrigin();
@@ -521,6 +527,41 @@ class _TimelineScreenState extends State<TimelineScreen> {
       if (mounted) setState(() => _fetchError = error);
     } finally {
       if (mounted) setState(() => _fetchingOrigin = false);
+    }
+  }
+
+  Future<void> _restoreCherryPickThenRefresh() async {
+    await _reloadCherryPickState();
+    if (_cherryPickState == null) await _refreshOrigin();
+  }
+
+  Future<void> _reloadCherryPickState() async {
+    try {
+      final state = await widget.repository.loadCherryPickState();
+      if (!mounted) return;
+      setState(() {
+        _cherryPickState = state;
+        _cherryPickError = null;
+        _selectedConflictPath =
+            state?.conflicts.contains(_selectedConflictPath) == true
+            ? _selectedConflictPath
+            : state == null || state.conflicts.isEmpty
+            ? null
+            : state.conflicts.first;
+      });
+      if (state != null &&
+          _previewController.previewPlacement == PreviewPlacement.closed) {
+        await _previewController.setPreview(widget.preferredPreviewPlacement);
+      }
+    } catch (error) {
+      if (mounted) setState(() => _cherryPickError = error);
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_reloadCherryPickState());
     }
   }
 
@@ -636,6 +677,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _fetchTimer?.cancel();
     _clearFullDiffRouteSession();
     if (_ownsPreviewController) _previewController.dispose();
@@ -1393,6 +1435,203 @@ class _TimelineScreenState extends State<TimelineScreen> {
     _focusNode.requestFocus();
   }
 
+  bool _canCherryPick(GitCommit commit) {
+    if (_cherryPickBusy ||
+        _cherryPickState != null ||
+        _refs.current == null ||
+        commit.isWorkingTree ||
+        commit.sha == _refs.localTips[_refs.current]) {
+      return false;
+    }
+    final comparison = _comparison;
+    if (comparison == null) return true;
+    return comparison.commits
+            .firstWhere((entry) => entry.commit.sha == commit.sha)
+            .side ==
+        BranchCommitSide.compareOnly;
+  }
+
+  Future<void> _showCommitMenu(GitCommit commit, Offset position) async {
+    if (!_canCherryPick(commit)) return;
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final action = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        overlay.size.width - position.dx,
+        overlay.size.height - position.dy,
+      ),
+      items: const [
+        PopupMenuItem(value: 'cherry-pick', child: Text('현재 브랜치로 체리픽')),
+      ],
+    );
+    if (action == 'cherry-pick' && mounted) {
+      await _confirmCherryPick(commit);
+    }
+  }
+
+  Future<void> _confirmCherryPick(GitCommit commit) async {
+    final current = _refs.current;
+    if (current == null || !_canCherryPick(commit)) return;
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('현재 브랜치로 체리픽'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(commit.sha),
+            const SizedBox(height: 6),
+            Text(commit.subject),
+            const SizedBox(height: 6),
+            Text('→ $current'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('체리픽'),
+          ),
+        ],
+      ),
+    );
+    if (approved == true) await _runCherryPick(commit.sha);
+  }
+
+  Future<void> _runCherryPick(String sha) async {
+    if (_cherryPickBusy) return;
+    setState(() {
+      _cherryPickBusy = true;
+      _cherryPickError = null;
+    });
+    try {
+      await _handleCherryPickResult(await widget.repository.cherryPick(sha));
+    } catch (error) {
+      if (mounted) {
+        setState(() => _cherryPickError = error);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+    } finally {
+      if (mounted) setState(() => _cherryPickBusy = false);
+    }
+  }
+
+  Future<void> _handleCherryPickResult(CherryPickResult result) async {
+    if (!mounted) return;
+    if (result.outcome == CherryPickOutcome.conflicts) {
+      setState(() {
+        _cherryPickState = result.state;
+        _selectedConflictPath = result.state?.conflicts.isEmpty == false
+            ? result.state!.conflicts.first
+            : null;
+      });
+      if (_previewController.previewPlacement == PreviewPlacement.closed) {
+        await _previewController.setPreview(widget.preferredPreviewPlacement);
+      }
+      return;
+    }
+    setState(() {
+      _cherryPickState = null;
+      _selectedConflictPath = null;
+    });
+    if (result.outcome == CherryPickOutcome.empty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('적용할 변경이 없습니다')));
+    }
+    await _reloadTimelineAfterCherryPick(result.headSha);
+  }
+
+  Future<void> _continueCherryPick() async {
+    if (_cherryPickBusy || _cherryPickState?.canContinue != true) return;
+    setState(() {
+      _cherryPickBusy = true;
+      _cherryPickError = null;
+    });
+    try {
+      await _handleCherryPickResult(
+        await widget.repository.continueCherryPick(),
+      );
+    } catch (error) {
+      if (mounted) {
+        setState(() => _cherryPickError = error);
+        await _reloadCherryPickState();
+      }
+    } finally {
+      if (mounted) setState(() => _cherryPickBusy = false);
+    }
+  }
+
+  Future<void> _confirmAbortCherryPick() async {
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('체리픽을 중단할까요?'),
+        content: const Text('체리픽을 시작하기 전 상태로 되돌립니다.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('체리픽 중단'),
+          ),
+        ],
+      ),
+    );
+    if (approved != true || !mounted) return;
+    setState(() => _cherryPickBusy = true);
+    try {
+      await widget.repository.abortCherryPick();
+      if (!mounted) return;
+      setState(() {
+        _cherryPickState = null;
+        _selectedConflictPath = null;
+        _cherryPickError = null;
+      });
+      await _reloadTimelineAfterCherryPick(null);
+    } catch (error) {
+      if (mounted) setState(() => _cherryPickError = error);
+    } finally {
+      if (mounted) setState(() => _cherryPickBusy = false);
+    }
+  }
+
+  Future<void> _reloadTimelineAfterCherryPick(String? headSha) async {
+    widget.repository.invalidateHistory();
+    setState(() {
+      _normalCommits.clear();
+      _normalRows = [];
+      _normalEntries = [];
+      _committersBySha.clear();
+      _previewFiles.clear();
+      _previewFileLists.clear();
+      _previewDiffs.clear();
+      _previewPaths.clear();
+      _hasWorkingTree = false;
+      _end = false;
+      _loadError = null;
+      _selectedIndex.value = 0;
+    });
+    await _fetchNextPage();
+    await _loadRefs();
+    if (!mounted || headSha == null) return;
+    final index = _entries.indexWhere(
+      (entry) => entry.rowIndex >= 0 && entry.row.commit.sha == headSha,
+    );
+    if (index >= 0) _selectedIndex.value = index;
+  }
+
   Widget _toolbarRight(bool showPreviewLabel, bool showShortcuts) => Row(
     mainAxisAlignment: MainAxisAlignment.end,
     children: [
@@ -1780,7 +2019,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       }
     });
 
-    return Container(
+    final row = Container(
       key: name == null ? null : Key('sidebar-row-$name'),
       height: birth == null ? 28 : 40,
       decoration: BoxDecoration(
@@ -1872,6 +2111,21 @@ class _TimelineScreenState extends State<TimelineScreen> {
               ),
           ],
         ),
+      ),
+    );
+    if (!current) return row;
+    return DragTarget<GitCommit>(
+      onWillAcceptWithDetails: (details) => _canCherryPick(details.data),
+      onAcceptWithDetails: (details) =>
+          unawaited(_confirmCherryPick(details.data)),
+      builder: (context, candidates, rejected) => DecoratedBox(
+        decoration: BoxDecoration(
+          border: candidates.isEmpty
+              ? null
+              : Border.all(color: _main, width: 1.5),
+          borderRadius: BorderRadius.circular(5),
+        ),
+        child: row,
       ),
     );
   }
@@ -2582,7 +2836,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     // only shows while that stays clear of the next lane's rail.
     final stacked =
         avatarSize * 0.95 <= painter.laneSpacing - CommitGraphPainter.railWidth;
-    return MouseRegion(
+    final content = MouseRegion(
       onEnter: (_) => _hoverIndex.value = index,
       onExit: (_) {
         if (_hoverIndex.value == index) _hoverIndex.value = -1;
@@ -2591,6 +2845,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
         key: selected ? Key('selected-row-${commit.sha}') : null,
         behavior: HitTestBehavior.opaque,
         onTap: () => _select(index),
+        onSecondaryTapDown: (details) =>
+            unawaited(_showCommitMenu(commit, details.globalPosition)),
         child: ColoredBox(
           color: selected
               ? _palette.background
@@ -2728,6 +2984,20 @@ class _TimelineScreenState extends State<TimelineScreen> {
           ),
         ),
       ),
+    );
+    if (!_canCherryPick(commit)) return content;
+    return Draggable<GitCommit>(
+      data: commit,
+      affinity: Axis.horizontal,
+      feedback: Material(
+        color: _palette.raised,
+        borderRadius: BorderRadius.circular(6),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          child: Text(commit.subject, style: TextStyle(color: _palette.text)),
+        ),
+      ),
+      child: content,
     );
   }
 
@@ -3089,7 +3359,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    '파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓',
+                    _cherryPickState == null
+                        ? '파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓'
+                        : '충돌 파일을 해결한 뒤 계속할 수 있습니다',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -3101,7 +3373,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   ),
                 ),
                 Expanded(
-                  child: commit == null
+                  child: _cherryPickState != null
+                      ? _cherryPickPanel()
+                      : commit == null
                       ? Center(
                           child: Text(
                             'No commit selected',
@@ -3137,7 +3411,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
         // panel is dragged narrow.
         Expanded(
           child: Text(
-            _comparison == null ? 'Commit & Diff' : '브랜치 Diff',
+            _cherryPickState != null
+                ? '체리픽 충돌'
+                : _comparison == null
+                ? 'Commit & Diff'
+                : '브랜치 Diff',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
@@ -3151,7 +3429,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
         const SizedBox(width: 8),
         _ShowDiffButton(
           key: const Key('preview-full-diff'),
-          onTap: commit == null || _comparison != null ? null : _openFullDiff,
+          onTap:
+              commit == null || _comparison != null || _cherryPickState != null
+              ? null
+              : _openFullDiff,
           height: 28,
           labelSize: 11,
           shortcutSize: 8,
@@ -3161,7 +3442,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
           constraints: const BoxConstraints(maxWidth: 64),
           child: Text(
             key: const Key('preview-hash'),
-            _comparison != null
+            _cherryPickState != null
+                ? _cherryPickState!.commitSha
+                : _comparison != null
                 ? '${_comparison!.baseRef} ↔ ${_comparison!.compareRef}'
                 : commit == null
                 ? '—'
@@ -3181,6 +3464,101 @@ class _TimelineScreenState extends State<TimelineScreen> {
       ],
     ),
   );
+
+  Widget _cherryPickPanel() {
+    final state = _cherryPickState!;
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            '${state.conflicts.length}개 충돌 파일',
+            style: TextStyle(
+              color: _palette.text,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: state.conflicts.isEmpty
+                ? Center(
+                    child: Text(
+                      '모든 충돌 파일이 해결되었습니다.',
+                      style: TextStyle(color: _palette.muted, fontSize: 12),
+                    ),
+                  )
+                : ListView(
+                    children: [
+                      for (final path in state.conflicts)
+                        Material(
+                          color: Colors.transparent,
+                          child: ListTile(
+                            dense: true,
+                            selected: path == _selectedConflictPath,
+                            selectedColor: _palette.text,
+                            selectedTileColor: _palette.neutralChip,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                            ),
+                            onTap: () =>
+                                setState(() => _selectedConflictPath = path),
+                            title: Text(
+                              path,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+          ),
+          if (_cherryPickError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                _cherryPickError.toString(),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: _behind, fontSize: 11),
+              ),
+            ),
+          const SizedBox(height: 8),
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton(
+                key: const Key('cherry-pick-open-editor'),
+                onPressed: null,
+                child: const Text('편집기로 열기'),
+              ),
+              TextButton(
+                key: const Key('cherry-pick-abort'),
+                onPressed: _cherryPickBusy
+                    ? null
+                    : () => unawaited(_confirmAbortCherryPick()),
+                child: const Text('체리픽 중단'),
+              ),
+              FilledButton(
+                key: const Key('cherry-pick-continue'),
+                onPressed: !_cherryPickBusy && state.canContinue
+                    ? () => unawaited(_continueCherryPick())
+                    : null,
+                child: const Text('계속'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 
   /// The commit's changed files, remembered in resolved form as well so ⌘↑/⌘↓ can
   /// walk them without waiting on a future.
