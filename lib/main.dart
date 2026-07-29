@@ -238,9 +238,10 @@ class _YogitAppState extends State<YogitApp> {
   Future<void> _discoverAvatarService() async {
     final ghExecutable = widget.ghExecutable;
     if (ghExecutable == null) return;
-    final url = await _repository.loadOriginUrl();
+    final repository = _repository;
+    final url = await repository.loadOriginUrl();
     final remote = url == null ? null : RemoteRepository.tryParse(url);
-    if (mounted && remote != null) {
+    if (mounted && identical(_repository, repository) && remote != null) {
       setState(
         () => _avatarService = AvatarService(
           remote: remote,

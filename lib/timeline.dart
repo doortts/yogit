@@ -471,6 +471,8 @@ class _TimelineScreenState extends State<TimelineScreen>
   final _previewPaths = <String, String>{};
   late final Map<String, String> _deletedBranchNames;
   final _deletedBranchLookupAttempts = <String>{};
+  final _deletedBranchRevision = ValueNotifier(0);
+  var _deletedBranchLookupGeneration = 0;
   String? _resolvingDeletedBranchTip;
 
   var _refs = const RepoRefs();
@@ -661,6 +663,13 @@ class _TimelineScreenState extends State<TimelineScreen>
       widget.deletedBranchNames,
       oldWidget.deletedBranchNames,
     );
+    final recoveryContextChanged =
+        !identical(widget.repository, oldWidget.repository) ||
+        !identical(widget.avatarService, oldWidget.avatarService);
+    if (recoveryContextChanged) {
+      _deletedBranchLookupGeneration++;
+      _deletedBranchLookupAttempts.clear();
+    }
     if (deletedBranchNamesChanged) {
       _deletedBranchNames
         ..clear()
@@ -669,7 +678,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     if ((widget.deletedBranchNamesReady &&
             !oldWidget.deletedBranchNamesReady) ||
         deletedBranchNamesChanged ||
-        (widget.avatarService != null && oldWidget.avatarService == null)) {
+        recoveryContextChanged) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) unawaited(_resolveSelectedDeletedBranchName());
       });
@@ -739,6 +748,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (_ownsPreviewController) _previewController.dispose();
     _selectedIndex.removeListener(_selectedCommitChanged);
     _selectedIndex.dispose();
+    _deletedBranchRevision.dispose();
     _hoverIndex.dispose();
     _hoveredHeader.dispose();
     _scrollController
@@ -1063,12 +1073,21 @@ class _TimelineScreenState extends State<TimelineScreen>
   void _selectedCommitChanged() =>
       unawaited(_resolveSelectedDeletedBranchName());
 
+  String? _deletedBranchTipSha(int branch) {
+    if (_refs.tips.isEmpty) return null;
+    for (final row in _normalRows) {
+      if (row.branch != branch || row.commit.isWorkingTree) continue;
+      return _rowRefs(row.commit).isEmpty ? row.commit.sha : null;
+    }
+    return null;
+  }
+
   ({String selectedSha, String tipSha})? _selectedDeletedBranchLine() {
     if (!_refsLoaded || _comparison != null || _entries.isEmpty) return null;
     final entry = _entries[_selectedIndex.value];
     if (entry.rowIndex < 0 || entry.row.commit.isWorkingTree) return null;
-    final tipSha = branchLineTipSha(_normalRows, entry.row.branch);
-    if (tipSha == null || _refs.tips.values.contains(tipSha)) return null;
+    final tipSha = _deletedBranchTipSha(entry.row.branch);
+    if (tipSha == null) return null;
     return (selectedSha: entry.row.commit.sha, tipSha: tipSha);
   }
 
@@ -1080,27 +1099,35 @@ class _TimelineScreenState extends State<TimelineScreen>
         !_deletedBranchLookupAttempts.add(line.tipSha)) {
       return;
     }
-    setState(() => _resolvingDeletedBranchTip = line.tipSha);
+    final generation = _deletedBranchLookupGeneration;
+    final repository = widget.repository;
+    final avatarService = widget.avatarService;
+    _resolvingDeletedBranchTip = line.tipSha;
+    _deletedBranchRevision.value++;
     String? name;
     try {
-      name = await widget.repository.loadLocalDeletedBranchName(
+      name = await repository.loadLocalDeletedBranchName(
         line.tipSha,
         _normalCommits,
       );
-      name ??= await widget.avatarService?.resolveMergedBranchName(line.tipSha);
+      name ??= await avatarService?.resolveMergedBranchName(line.tipSha);
     } catch (_) {
       name = null;
     }
-    if (!mounted) return;
-    if (name == null && widget.avatarService == null) {
+    if (!mounted ||
+        generation != _deletedBranchLookupGeneration ||
+        !identical(widget.repository, repository) ||
+        !identical(widget.avatarService, avatarService)) {
+      return;
+    }
+    if (name == null && avatarService == null) {
       _deletedBranchLookupAttempts.remove(line.tipSha);
     }
-    setState(() {
-      if (name != null) _deletedBranchNames[line.tipSha] = name;
-      if (_resolvingDeletedBranchTip == line.tipSha) {
-        _resolvingDeletedBranchTip = null;
-      }
-    });
+    if (name != null) _deletedBranchNames[line.tipSha] = name;
+    if (_resolvingDeletedBranchTip == line.tipSha) {
+      _resolvingDeletedBranchTip = null;
+    }
+    _deletedBranchRevision.value++;
     if (name != null) {
       widget.onDeletedBranchNamesChanged?.call(Map.of(_deletedBranchNames));
     }
@@ -2924,12 +2951,23 @@ class _TimelineScreenState extends State<TimelineScreen>
     // One branch line, one color: rails, chips, node ring and hash border.
     final branchColor = AvatarService.branchColor(row.branch);
     final refs = _rowRefs(commit);
-    final lineTip = selected && refs.isEmpty
-        ? branchLineTipSha(_normalRows, row.branch)
-        : null;
-    final deletedTip = lineTip != null && !_refs.tips.values.contains(lineTip)
-        ? lineTip
-        : null;
+    Widget refsCell() {
+      final lineTip = selected && refs.isEmpty
+          ? _deletedBranchTipSha(row.branch)
+          : null;
+      return _refsCell(
+        entry.rowIndex,
+        commit,
+        refs,
+        branchColor,
+        deletedBranchName: lineTip == null
+            ? null
+            : _deletedBranchNames[lineTip],
+        deletedBranchLoading:
+            lineTip != null && _resolvingDeletedBranchTip == lineTip,
+      );
+    }
+
     final merge = commit.parents.length >= 2 && !commit.isWorkingTree;
     // Shrink stages: full spacing while the cell fits every lane, compressed
     // spacing below that, one collapsed lane at the narrowest.
@@ -2978,18 +3016,12 @@ class _TimelineScreenState extends State<TimelineScreen>
                 ),
               Row(
                 children: [
-                  _refsCell(
-                    entry.rowIndex,
-                    commit,
-                    refs,
-                    branchColor,
-                    deletedBranchName: deletedTip == null
-                        ? null
-                        : _deletedBranchNames[deletedTip],
-                    deletedBranchLoading:
-                        deletedTip != null &&
-                        _resolvingDeletedBranchTip == deletedTip,
-                  ),
+                  selected
+                      ? ValueListenableBuilder<int>(
+                          valueListenable: _deletedBranchRevision,
+                          builder: (_, _, _) => refsCell(),
+                        )
+                      : refsCell(),
                   _graphCell(
                     Key('graph-painter-${entry.rowIndex}'),
                     painter,

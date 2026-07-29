@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
+import 'dart:io' show ProcessException;
 
 import 'package:flutter/material.dart';
 
@@ -143,14 +144,14 @@ class AvatarService {
   Future<String?> accountLogin() => _account ??= _loadAccount();
 
   Future<String?> resolveMergedBranchName(String tipSha) async {
-    final result = await runner(ghExecutable, [
-      'api',
-      '--hostname',
-      remote.host,
-      'repos/${remote.owner}/${remote.repository}/commits/$tipSha/pulls',
-    ]);
-    if (result.exitCode != 0) return null;
     try {
+      final result = await runner(ghExecutable, [
+        'api',
+        '--hostname',
+        remote.host,
+        'repos/${remote.owner}/${remote.repository}/commits/$tipSha/pulls',
+      ]);
+      if (result.exitCode != 0) return null;
       final json = jsonDecode(result.stdout.toString());
       if (json is! List) return null;
       final candidates = <({String ref, String sha, DateTime mergedAt})>[];
@@ -173,6 +174,8 @@ class AvatarService {
         return right.mergedAt.compareTo(left.mergedAt);
       });
       return candidates.firstOrNull?.ref;
+    } on ProcessException {
+      return null;
     } on FormatException {
       return null;
     }

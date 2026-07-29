@@ -5975,6 +5975,67 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  testWidgets('repository switch ignores stale avatar discovery', (
+    tester,
+  ) async {
+    final firstOrigin = Completer<String?>();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('test/yogit-window'),
+          (call) async =>
+              call.method == 'pickRepository' ? '/repo/second' : null,
+        );
+    Future<ProcessResult> runner(
+      String executable,
+      List<String> arguments, {
+      String? workingDirectory,
+      Map<String, String>? environment,
+    }) async => ProcessResult(1, 0, '/repo/second\n', '');
+
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository(
+          (_, _) async => [commit('first', 'first')],
+          root: '/repo/first',
+          runner: runner,
+          originUrlCallback: () => firstOrigin.future,
+        ),
+        repositoryFactory: (root) => FakeGitRepository(
+          (_, _) async => [commit('second', 'second')],
+          root: root,
+          runner: runner,
+          originUrlCallback: () async => 'https://github.com/team/second.git',
+        ),
+        settingsStore: MemorySettingsStore(),
+        ghExecutable: 'gh',
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('pick-repository')));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TimelineScreen>(find.byType(TimelineScreen))
+          .avatarService
+          ?.remote
+          .repository,
+      'second',
+    );
+
+    firstOrigin.complete('https://github.com/team/first.git');
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TimelineScreen>(find.byType(TimelineScreen))
+          .avatarService
+          ?.remote
+          .repository,
+      'second',
+    );
+  });
+
   test('native close clamps the saved frame to a current visible screen', () {
     final source = File(
       'macos/Runner/MainFlutterWindow.swift',
@@ -6400,6 +6461,21 @@ void main() {
 
       expect(await service.resolveMergedBranchName('tip'), isNull);
     }
+  });
+
+  test('deleted branch PR lookup handles a missing gh executable', () async {
+    final service = AvatarService(
+      remote: const RemoteRepository(
+        host: 'github.com',
+        owner: 'team',
+        repository: 'yogit',
+      ),
+      runner: (executable, arguments, {workingDirectory, environment}) async {
+        throw ProcessException(executable, arguments, 'missing');
+      },
+    );
+
+    expect(await service.resolveMergedBranchName('tip'), isNull);
   });
 
   test('drops Gravatar avatar URLs returned by GitHub and GHE', () async {
@@ -8620,7 +8696,12 @@ void main() {
     final commits = [
       commit('merge', 'merge', parents: const ['main-parent', 'side-tip']),
       commit('main-parent', 'main parent', parents: const ['base']),
-      commit('side-tip', 'side commit', parents: const ['base']),
+      commit(
+        'side-tip',
+        'side commit',
+        parents: const ['base'],
+        refs: const [GitRef(name: 'feature/live')],
+      ),
       commit('base', 'base'),
     ];
     await tester.pumpWidget(
@@ -8629,10 +8710,10 @@ void main() {
           repository: FakeGitRepository(
             (skip, _) async => skip == 0 ? commits : const [],
             refs: const RepoRefs(
-              local: ['main', 'feature/live'],
+              local: ['main'],
               current: 'main',
-              tips: {'main': 'merge', 'feature/live': 'side-tip'},
-              localTips: {'main': 'merge', 'feature/live': 'side-tip'},
+              tips: {'main': 'merge'},
+              localTips: {'main': 'merge'},
             ),
             deletedBranchNameCallback: (_, _) async {
               localLookups++;
@@ -8742,6 +8823,96 @@ void main() {
 
     expect(find.text('feature/gone'), findsNothing);
     expect(find.text('삭제됨'), findsNothing);
+  });
+
+  testWidgets('deleted branch lookup ignores a stale avatar service result', (
+    tester,
+  ) async {
+    final oldResult = Completer<ProcessResult>();
+    late StateSetter update;
+    var service = AvatarService(
+      remote: const RemoteRepository(
+        host: 'github.com',
+        owner: 'team',
+        repository: 'old',
+      ),
+      runner: (executable, arguments, {workingDirectory, environment}) =>
+          oldResult.future,
+    );
+    final commits = [
+      commit('merge', 'merge', parents: const ['main-parent', 'side-tip']),
+      commit('main-parent', 'main parent', parents: const ['base']),
+      commit('side-tip', 'side commit', parents: const ['base']),
+      commit('base', 'base'),
+    ];
+    final repository = FakeGitRepository(
+      (skip, _) async => skip == 0 ? commits : const [],
+      refs: const RepoRefs(
+        local: ['main'],
+        current: 'main',
+        tips: {'main': 'merge'},
+        localTips: {'main': 'merge'},
+      ),
+      deletedBranchNameCallback: (_, _) async => null,
+    );
+    await tester.pumpWidget(
+      StatefulBuilder(
+        builder: (context, setState) {
+          update = setState;
+          return MaterialApp(
+            home: TimelineScreen(
+              repository: repository,
+              avatarService: service,
+              showRemoteAvatars: false,
+            ),
+          );
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('side commit'));
+    await tester.pump();
+    update(() {
+      service = AvatarService(
+        remote: const RemoteRepository(
+          host: 'github.com',
+          owner: 'team',
+          repository: 'new',
+        ),
+        runner:
+            (executable, arguments, {workingDirectory, environment}) async =>
+                ProcessResult(
+                  1,
+                  0,
+                  jsonEncode([
+                    {
+                      'merged_at': '2026-07-29T00:00:00Z',
+                      'head': {'sha': 'side-tip', 'ref': 'feature/new'},
+                    },
+                  ]),
+                  '',
+                ),
+      );
+    });
+    await tester.pump();
+    oldResult.complete(
+      ProcessResult(
+        1,
+        0,
+        jsonEncode([
+          {
+            'merged_at': '2026-07-28T00:00:00Z',
+            'head': {'sha': 'side-tip', 'ref': 'feature/old'},
+          },
+        ]),
+        '',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('feature/old'), findsNothing);
+    expect(find.text('feature/new'), findsOneWidget);
   });
 
   testWidgets('deleted branch remote failure is attempted once per run', (
@@ -11008,6 +11179,7 @@ class FakeGitRepository extends GitRepository {
     this.gitDiffAlgorithmSetting = const GitDiffAlgorithmSetting.gitDefault(),
     this.refsLoader,
     this.fetchOriginCallback,
+    this.originUrlCallback,
     this.compareBranchesCallback,
     this.simulateRebaseCallback,
     this.diffBetween,
@@ -11026,6 +11198,7 @@ class FakeGitRepository extends GitRepository {
   final GitDiffAlgorithmSetting gitDiffAlgorithmSetting;
   final Future<RepoRefs> Function()? refsLoader;
   final Future<FetchOriginResult> Function()? fetchOriginCallback;
+  final Future<String?> Function()? originUrlCallback;
   final Future<BranchComparisonResult> Function(String base, String compare)?
   compareBranchesCallback;
   final Future<RebaseCheckResult> Function({
@@ -11083,12 +11256,14 @@ class FakeGitRepository extends GitRepository {
       loader(skip, limit);
 
   @override
+  Future<String?> loadOriginUrl() =>
+      originUrlCallback?.call() ?? super.loadOriginUrl();
+
+  @override
   Future<String?> loadLocalDeletedBranchName(
     String tipSha,
     Iterable<GitCommit> commits,
-  ) =>
-      deletedBranchNameCallback?.call(tipSha, commits) ??
-      super.loadLocalDeletedBranchName(tipSha, commits);
+  ) => deletedBranchNameCallback?.call(tipSha, commits) ?? Future.value(null);
 
   @override
   Future<String> loadCommitMessage(String sha) =>
