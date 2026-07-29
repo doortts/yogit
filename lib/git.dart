@@ -240,6 +240,58 @@ List<GitRef> _parseRefs(String decorations) {
   }).toList();
 }
 
+final _mergedBranchPatterns = <RegExp>[
+  RegExp(r"^Merge branch '([^']+)'(?: into .+)?$"),
+  RegExp(r"^Merge remote-tracking branch '[^/']+/([^']+)'(?: into .+)?$"),
+  RegExp(r'^Merge pull request #\d+ from [^/]+/(.+)$'),
+];
+
+String? deletedBranchNameFromMerge(Iterable<GitCommit> commits, String tipSha) {
+  for (final commit in commits) {
+    if (!commit.parents.skip(1).contains(tipSha)) continue;
+    for (final pattern in _mergedBranchPatterns) {
+      final name = pattern.firstMatch(commit.subject)?.group(1)?.trim();
+      if (name != null && name.isNotEmpty) return name;
+    }
+  }
+  return null;
+}
+
+String? deletedBranchNameFromReflog(String output, String tipSha) {
+  final entries = output
+      .split('\n')
+      .where((line) => line.isNotEmpty)
+      .map((line) {
+        final separator = line.indexOf('\x00');
+        return separator < 0
+            ? null
+            : (
+                sha: line.substring(0, separator),
+                subject: line.substring(separator + 1),
+              );
+      })
+      .whereType<({String sha, String subject})>()
+      .toList();
+  final checkout = RegExp(r'^checkout: moving from (.+) to .+$');
+  final detached = RegExp(r'^[0-9a-fA-F]{7,40}$');
+  for (var index = 0; index + 1 < entries.length; index++) {
+    if (entries[index + 1].sha != tipSha) continue;
+    final source = checkout
+        .firstMatch(entries[index].subject)
+        ?.group(1)
+        ?.trim();
+    if (source == null ||
+        source.isEmpty ||
+        source == 'HEAD' ||
+        source == '-' ||
+        detached.hasMatch(source)) {
+      continue;
+    }
+    return source;
+  }
+  return null;
+}
+
 /// A lane change happening across this row's lower half: the rail in [from]
 /// sweeps into [to] between this row's center and the next row's center. Covers
 /// merge edges (listed on the child's row) and branch lines converging on their
@@ -1089,6 +1141,22 @@ class GitRepository implements FullDiffRepository {
       ...revisions,
     ];
     return parseGitLog(await _run(args));
+  }
+
+  Future<String?> loadLocalDeletedBranchName(
+    String tipSha,
+    Iterable<GitCommit> commits,
+  ) async {
+    final merged = deletedBranchNameFromMerge(commits, tipSha);
+    if (merged != null) return merged;
+    try {
+      return deletedBranchNameFromReflog(
+        await _run(['reflog', 'show', '--format=%H%x00%gs', 'HEAD']),
+        tipSha,
+      );
+    } on ProcessException {
+      return null;
+    }
   }
 
   Future<BranchComparisonResult> compareBranches(
