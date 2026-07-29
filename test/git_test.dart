@@ -621,6 +621,89 @@ void main() {
     expect(result.sameFirstParent, isTrue);
   });
 
+  test(
+    'rebase simulation reports first conflicting commit and cleans worktree',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'yogit_rebasefixture_',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      await _initRepository(root);
+      await File('${root.path}/shared.txt').writeAsString('base\n');
+      await _git(root, ['add', 'shared.txt']);
+      await _git(root, ['commit', '-m', 'base']);
+
+      await _git(root, ['switch', '-c', 'feature']);
+      await File('${root.path}/feature.txt').writeAsString('one\n');
+      await _git(root, ['add', 'feature.txt']);
+      await _git(root, ['commit', '-m', 'feature one']);
+      await File('${root.path}/shared.txt').writeAsString('feature\n');
+      await _git(root, ['commit', '-am', 'feature two']);
+      final conflictingSha = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+
+      await _git(root, ['switch', 'main']);
+      await File('${root.path}/shared.txt').writeAsString('main\n');
+      await _git(root, ['commit', '-am', 'main']);
+      final originalHead = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+
+      final repository = GitRepository(root.path);
+      final result = await repository.simulateRebase(
+        baseRef: 'main',
+        compareRef: 'feature',
+      );
+
+      expect(result.status, RebaseCheckStatus.conflicts);
+      expect(result.stoppedCommit, conflictingSha);
+      expect(result.files, ['shared.txt']);
+      expect((await _git(root, ['rev-parse', 'HEAD'])).trim(), originalHead);
+      expect((await _git(root, ['branch', '--show-current'])).trim(), 'main');
+      expect((await _git(root, ['status', '--porcelain'])).trim(), isEmpty);
+      expect(
+        await Directory.systemTemp
+            .list()
+            .where(
+              (entry) =>
+                  entry is Directory &&
+                  entry.uri.pathSegments
+                      .where((segment) => segment.isNotEmpty)
+                      .last
+                      .startsWith('yogit_rebase_'),
+            )
+            .toList(),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
+    'rebase simulation reports a clean replay without moving HEAD',
+    () async {
+      final root = await Directory.systemTemp.createTemp('yogit_cleanrebase_');
+      addTearDown(() => root.delete(recursive: true));
+      await _initRepository(root);
+      await File('${root.path}/base.txt').writeAsString('base\n');
+      await _git(root, ['add', 'base.txt']);
+      await _git(root, ['commit', '-m', 'base']);
+      await _git(root, ['switch', '-c', 'feature']);
+      await File('${root.path}/feature.txt').writeAsString('feature\n');
+      await _git(root, ['add', 'feature.txt']);
+      await _git(root, ['commit', '-m', 'feature']);
+      await _git(root, ['switch', 'main']);
+      await File('${root.path}/main.txt').writeAsString('main\n');
+      await _git(root, ['add', 'main.txt']);
+      await _git(root, ['commit', '-m', 'main']);
+      final originalHead = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+
+      final result = await GitRepository(
+        root.path,
+      ).simulateRebase(baseRef: 'main', compareRef: 'feature');
+
+      expect(result.status, RebaseCheckStatus.clean);
+      expect((await _git(root, ['rev-parse', 'HEAD'])).trim(), originalHead);
+      expect((await _git(root, ['status', '--porcelain'])).trim(), isEmpty);
+    },
+  );
+
   test('retains the commit SHA occupying each lane segment', () {
     final branch = _commit('B', [
       'R',

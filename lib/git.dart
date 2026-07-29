@@ -250,6 +250,22 @@ class MergeConflictCheck {
   final String? error;
 }
 
+enum RebaseCheckStatus { clean, conflicts, failed }
+
+class RebaseCheckResult {
+  const RebaseCheckResult({
+    required this.status,
+    this.stoppedCommit,
+    this.files = const [],
+    this.error,
+  });
+
+  final RebaseCheckStatus status;
+  final String? stoppedCommit;
+  final List<String> files;
+  final String? error;
+}
+
 class BranchComparisonResult {
   const BranchComparisonResult({
     required this.baseRef,
@@ -1182,6 +1198,169 @@ class GitRepository implements FullDiffRepository {
       status: MergeConflictStatus.conflicts,
       files: files.toList(),
     );
+  }
+
+  Future<RebaseCheckResult> simulateRebase({
+    required String baseRef,
+    required String compareRef,
+  }) async {
+    final temporary = await Directory.systemTemp.createTemp('yogit_rebase_');
+    final path = temporary.path;
+    await temporary.delete();
+    var added = false;
+    try {
+      final add = await runner(gitExecutable, [
+        'worktree',
+        'add',
+        '--detach',
+        path,
+        compareRef,
+      ], workingDirectory: root);
+      if (add.exitCode != 0) {
+        return RebaseCheckResult(
+          status: RebaseCheckStatus.failed,
+          error: add.stderr.toString().trim(),
+        );
+      }
+      added = true;
+      final result = await runner(
+        gitExecutable,
+        [
+          '-c',
+          'core.hooksPath=/dev/null',
+          '-c',
+          'rerere.enabled=false',
+          '-c',
+          'rebase.autoStash=false',
+          '-c',
+          'rebase.updateRefs=false',
+          '-c',
+          'commit.gpgSign=false',
+          'rebase',
+          '--no-autostash',
+          baseRef,
+        ],
+        workingDirectory: path,
+        environment: {
+          ...Platform.environment,
+          'GIT_EDITOR': 'true',
+          'GIT_SEQUENCE_EDITOR': 'true',
+          'GIT_TERMINAL_PROMPT': '0',
+        },
+      );
+      if (result.exitCode == 0) {
+        return const RebaseCheckResult(status: RebaseCheckStatus.clean);
+      }
+      final stopped = await runner(gitExecutable, const [
+        'rev-parse',
+        '--verify',
+        'REBASE_HEAD',
+      ], workingDirectory: path);
+      final conflicts = await runner(gitExecutable, const [
+        'diff',
+        '--name-only',
+        '--diff-filter=U',
+        '-z',
+      ], workingDirectory: path);
+      final stoppedCommit = stopped.exitCode == 0
+          ? stopped.stdout.toString().trim()
+          : null;
+      final files = conflicts.exitCode == 0
+          ? conflicts.stdout
+                .toString()
+                .split('\x00')
+                .where((value) => value.isNotEmpty)
+                .toList()
+          : const <String>[];
+      if (stoppedCommit != null && files.isNotEmpty) {
+        return RebaseCheckResult(
+          status: RebaseCheckStatus.conflicts,
+          stoppedCommit: stoppedCommit,
+          files: files,
+        );
+      }
+      return RebaseCheckResult(
+        status: RebaseCheckStatus.failed,
+        error: result.stderr.toString().trim(),
+      );
+    } finally {
+      if (added) {
+        await _ignoreCommand(const [
+          'rebase',
+          '--abort',
+        ], workingDirectory: path);
+        await _ignoreCommand([
+          'worktree',
+          'remove',
+          '--force',
+          path,
+        ], workingDirectory: root);
+      }
+      final directory = Directory(path);
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+      await _ignoreCommand(const ['worktree', 'prune'], workingDirectory: root);
+    }
+  }
+
+  Future<void> cleanupStaleRebaseWorktrees() async {
+    final result = await runner(gitExecutable, const [
+      'worktree',
+      'list',
+      '--porcelain',
+    ], workingDirectory: root);
+    if (result.exitCode != 0) {
+      throw ProcessException(
+        gitExecutable,
+        const ['worktree', 'list', '--porcelain'],
+        result.stderr.toString(),
+        result.exitCode,
+      );
+    }
+    final paths = result.stdout
+        .toString()
+        .split('\n')
+        .where((line) => line.startsWith('worktree '))
+        .map((line) => line.substring('worktree '.length))
+        .where(_isYogitRebasePath);
+    for (final path in paths) {
+      await _ignoreCommand([
+        'worktree',
+        'remove',
+        '--force',
+        path,
+      ], workingDirectory: root);
+      final directory = Directory(path);
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+    }
+    await _ignoreCommand(const ['worktree', 'prune'], workingDirectory: root);
+  }
+
+  bool _isYogitRebasePath(String path) {
+    final directory = Directory(path).absolute;
+    return directory.parent.path == Directory.systemTemp.absolute.path &&
+        directory.uri.pathSegments
+            .where((segment) => segment.isNotEmpty)
+            .last
+            .startsWith('yogit_rebase_');
+  }
+
+  Future<void> _ignoreCommand(
+    List<String> arguments, {
+    required String workingDirectory,
+  }) async {
+    try {
+      await runner(
+        gitExecutable,
+        arguments,
+        workingDirectory: workingDirectory,
+      );
+    } on ProcessException {
+      // Best-effort cleanup continues with the remaining owned resources.
+    }
   }
 
   Future<List<String>> _loadStartingRevisions() async => (await _run([
