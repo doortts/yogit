@@ -110,4 +110,62 @@ void main() {
       expect(text.overflow, TextOverflow.ellipsis);
     }
   });
+
+  testWidgets('searches local and remote comparison branches', (tester) async {
+    String? compared;
+    var cleared = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RepositoryBranchSelector(
+            repositoryName: 'yogit',
+            repositoryPath: '/repos/yogit',
+            localBranches: const ['main', 'feature/a'],
+            remoteBranches: const ['origin/main'],
+            selectedBranch: 'main',
+            comparedBranch: 'feature/a',
+            refsLoading: false,
+            refsLoadFailed: false,
+            onRepositoryPressed: () {},
+            onBranchSelected: (_) {},
+            onComparisonSelected: (value) => compared = value,
+            onComparisonCleared: () => cleared = true,
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    expect(find.text('LOCAL'), findsOneWidget);
+    expect(find.text('REMOTE'), findsOneWidget);
+    expect(find.byKey(const Key('branch-diff-menu-main')), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('branch-diff-menu-feature/a')),
+        matching: find.byIcon(Icons.check),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.enterText(
+      find.byKey(const Key('branch-diff-search')),
+      'origin',
+    );
+    await tester.pump();
+    expect(
+      find.byKey(const Key('branch-diff-menu-origin/main')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('branch-diff-menu-feature/a')), findsNothing);
+    await tester.tap(find.byKey(const Key('branch-diff-menu-origin/main')));
+    await tester.pumpAndSettle();
+    expect(compared, 'origin/main');
+
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-clear')));
+    await tester.pump();
+    expect(cleared, isTrue);
+  });
 }

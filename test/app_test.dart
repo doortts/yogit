@@ -2468,6 +2468,161 @@ void main() {
     expect(find.text('↑2'), findsOneWidget);
   });
 
+  testWidgets('branch comparison keeps only two branch lanes', (tester) async {
+    final result = branchComparison();
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            remote: ['origin/main'],
+            current: 'main',
+            tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async => result,
+          simulateRebaseCallback: ({required baseRef, required compareRef}) =>
+              Future.value(
+                const RebaseCheckResult(status: RebaseCheckStatus.clean),
+              ),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('normal history'), findsNothing);
+    expect(find.text('main only'), findsOneWidget);
+    expect(find.text('feature only'), findsOneWidget);
+    expect(find.text('shared commit'), findsOneWidget);
+    expect(find.text('main만'), findsOneWidget);
+    expect(find.text('feature만'), findsOneWidget);
+    expect(find.text('공통'), findsOneWidget);
+    expect(find.text('부모 동일'), findsOneWidget);
+    expect(find.text('병합 충돌 없음'), findsOneWidget);
+    expect(
+      tester
+          .widgetList<CustomPaint>(
+            find.byWidgetPredicate(
+              (widget) =>
+                  widget is CustomPaint && widget.painter is CommitGraphPainter,
+            ),
+          )
+          .map((paint) => (paint.painter! as CommitGraphPainter).row.maxLane),
+      everyElement(lessThanOrEqualTo(1)),
+    );
+  });
+
+  testWidgets('comparison preview stays on the branch tip diff', (
+    tester,
+  ) async {
+    final calls = <({String from, String to, String path})>[];
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            current: 'main',
+            tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async => branchComparison(),
+          simulateRebaseCallback: ({required baseRef, required compareRef}) =>
+              Future.value(
+                const RebaseCheckResult(status: RebaseCheckStatus.clean),
+              ),
+          diffBetween: (from, to, file) async {
+            calls.add((from: from, to: to, path: file.path));
+            return const [
+              DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+              DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
+            ];
+          },
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(find.text('lib/shared.dart'), findsWidgets);
+    expect(calls, [
+      (from: 'main-tip', to: 'feature-tip', path: 'lib/shared.dart'),
+    ]);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(find.text('lib/shared.dart'), findsWidgets);
+    expect(calls, hasLength(1));
+  });
+
+  testWidgets('a stale branch comparison cannot replace a newer selection', (
+    tester,
+  ) async {
+    final first = Completer<BranchComparisonResult>();
+    final second = Completer<BranchComparisonResult>();
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main', 'feature/a', 'feature/b'],
+            current: 'main',
+          ),
+          compareBranchesCallback: (_, compare) => switch (compare) {
+            'feature/a' => first.future,
+            _ => second.future,
+          },
+          simulateRebaseCallback: ({required baseRef, required compareRef}) =>
+              Future.value(
+                const RebaseCheckResult(status: RebaseCheckStatus.clean),
+              ),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature/a')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature/b')));
+    await tester.pump();
+
+    second.complete(
+      branchComparison(
+        compareRef: 'feature/b',
+        compareTip: 'feature-b-tip',
+        compareSubject: 'newer comparison',
+      ),
+    );
+    await tester.pumpAndSettle();
+    first.complete(
+      branchComparison(
+        compareRef: 'feature/a',
+        compareTip: 'feature-a-tip',
+        compareSubject: 'stale comparison',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('newer comparison'), findsOneWidget);
+    expect(find.text('stale comparison'), findsNothing);
+  });
+
   testWidgets('tags show the newest ten and filtering reveals hidden matches', (
     tester,
   ) async {
@@ -10123,6 +10278,9 @@ class FakeGitRepository extends GitRepository {
     this.gitDiffAlgorithmSetting = const GitDiffAlgorithmSetting.gitDefault(),
     this.refsLoader,
     this.fetchOriginCallback,
+    this.compareBranchesCallback,
+    this.simulateRebaseCallback,
+    this.diffBetween,
     String root = '.',
     CommandRunner runner = runProcess,
   }) : super(root, runner: runner);
@@ -10131,6 +10289,19 @@ class FakeGitRepository extends GitRepository {
   final GitDiffAlgorithmSetting gitDiffAlgorithmSetting;
   final Future<RepoRefs> Function()? refsLoader;
   final Future<FetchOriginResult> Function()? fetchOriginCallback;
+  final Future<BranchComparisonResult> Function(String base, String compare)?
+  compareBranchesCallback;
+  final Future<RebaseCheckResult> Function({
+    required String baseRef,
+    required String compareRef,
+  })?
+  simulateRebaseCallback;
+  final Future<List<DiffLine>> Function(
+    String from,
+    String to,
+    GitFileChange file,
+  )?
+  diffBetween;
   final Future<List<GitCommit>> Function(int skip, int limit) loader;
   final Future<GitCommit?> Function()? workingTree;
   final Future<List<GitFileChange>> Function(GitCommit commit, String? parent)?
@@ -10173,6 +10344,44 @@ class FakeGitRepository extends GitRepository {
   @override
   Future<FetchOriginResult> fetchOrigin() =>
       fetchOriginCallback?.call() ?? Future.value(FetchOriginResult.noOrigin);
+
+  @override
+  Future<BranchComparisonResult> compareBranches(
+    String baseRef,
+    String compareRef,
+  ) =>
+      compareBranchesCallback?.call(baseRef, compareRef) ??
+      super.compareBranches(baseRef, compareRef);
+
+  @override
+  Future<RebaseCheckResult> simulateRebase({
+    required String baseRef,
+    required String compareRef,
+  }) =>
+      simulateRebaseCallback?.call(baseRef: baseRef, compareRef: compareRef) ??
+      super.simulateRebase(baseRef: baseRef, compareRef: compareRef);
+
+  @override
+  Future<void> cleanupStaleRebaseWorktrees() async {}
+
+  @override
+  Future<List<DiffLine>> loadDiffBetween(
+    String fromRef,
+    String toRef,
+    GitFileChange file, {
+    DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
+    bool ignoreWhitespace = false,
+    DiffScope scope = DiffScope.hunks,
+  }) =>
+      diffBetween?.call(fromRef, toRef, file) ??
+      super.loadDiffBetween(
+        fromRef,
+        toRef,
+        file,
+        algorithm: algorithm,
+        ignoreWhitespace: ignoreWhitespace,
+        scope: scope,
+      );
 
   @override
   Future<GitCommit?> loadWorkingTree() =>
@@ -10337,4 +10546,41 @@ GitCommit commit(
       refs ??
       (sha == '3' ? const [GitRef(name: 'main', isHead: true)] : const []),
   subject: subject,
+);
+
+BranchComparisonResult branchComparison({
+  String compareRef = 'feature',
+  String compareTip = 'feature-tip',
+  String compareSubject = 'feature only',
+}) => BranchComparisonResult(
+  baseRef: 'main',
+  compareRef: compareRef,
+  baseTip: 'main-tip',
+  compareTip: compareTip,
+  baseParent: 'root',
+  compareParent: 'root',
+  mergeBases: const ['root'],
+  commits: [
+    BranchComparisonCommit(
+      commit: commit('main-tip', 'main only', parents: const ['root']),
+      side: BranchCommitSide.baseOnly,
+    ),
+    BranchComparisonCommit(
+      commit: commit(compareTip, compareSubject, parents: const ['root']),
+      side: BranchCommitSide.compareOnly,
+    ),
+    BranchComparisonCommit(
+      commit: commit('root', 'shared commit'),
+      side: BranchCommitSide.commonBoundary,
+    ),
+  ],
+  files: const [
+    GitFileChange(
+      path: 'lib/shared.dart',
+      status: 'M',
+      additions: 1,
+      deletions: 1,
+    ),
+  ],
+  merge: const MergeConflictCheck(status: MergeConflictStatus.clean),
 );

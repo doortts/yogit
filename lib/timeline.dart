@@ -399,10 +399,25 @@ class _TimelineScreenState extends State<TimelineScreen> {
     debugLabel: 'selected preview file',
   );
   ScrollController? _activePreviewScrollController;
-  final _commits = <GitCommit>[];
+  final _normalCommits = <GitCommit>[];
   final _committersBySha = <String, GitIdentity>{};
-  var _rows = <GraphRow>[];
-  var _entries = <TimelineEntry>[];
+  var _normalRows = <GraphRow>[];
+  var _normalEntries = <TimelineEntry>[];
+  String? _compareRef;
+  BranchComparisonResult? _comparison;
+  var _comparisonRows = <GraphRow>[];
+  var _comparisonEntries = <TimelineEntry>[];
+  RebaseCheckResult? _rebaseCheck;
+  Object? _comparisonError;
+  var _comparisonSerial = 0;
+
+  List<GitCommit> get _commits => _comparison == null
+      ? _normalCommits
+      : [for (final entry in _comparison!.commits) entry.commit];
+  List<GraphRow> get _rows =>
+      _comparison == null ? _normalRows : _comparisonRows;
+  List<TimelineEntry> get _entries =>
+      _comparison == null ? _normalEntries : _comparisonEntries;
   late final WindowFrameController _previewController;
   late final bool _ownsPreviewController;
 
@@ -521,15 +536,29 @@ class _TimelineScreenState extends State<TimelineScreen> {
         _pendingBaseBranch = branch;
         _pendingBaseBranchIsUserSelection = false;
       }
+      final compared = _compareRef;
+      final comparisonStillExists =
+          compared != null &&
+          (refs.local.contains(compared) || refs.remote.contains(compared));
       setState(() {
         _refs = refs;
         _refsLoading = false;
         _refsLoadFailed = false;
         _refsLoaded = true;
         _baseBranch = branch;
+        if (compared != null && !comparisonStillExists) {
+          _comparisonSerial++;
+          _compareRef = null;
+          _comparison = null;
+          _comparisonRows = [];
+          _comparisonEntries = [];
+          _rebaseCheck = null;
+          _comparisonError = null;
+        }
         _rebuildGraph();
       });
       _scheduleRatchetUpdate();
+      if (comparisonStillExists) unawaited(_selectComparison(compared));
       if (widget.preferredBranchReady &&
           branch != null &&
           branch != widget.preferredBranch) {
@@ -682,7 +711,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   void _maybeLoadNextPage() {
     _updateRatchet();
-    if (!_scrollController.hasClients || _end || _inFlight != null) return;
+    if (_compareRef != null ||
+        !_scrollController.hasClients ||
+        _end ||
+        _inFlight != null) {
+      return;
+    }
     if (_scrollController.position.maxScrollExtent -
             _scrollController.position.pixels <=
         TimelineScreen.rowHeight * 12) {
@@ -691,7 +725,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 
   void _loadNextPage() {
-    if (_end || _inFlight != null) return;
+    if (_compareRef != null || _end || _inFlight != null) return;
     final request = _fetchNextPage();
     _inFlight = request;
     request.whenComplete(() {
@@ -701,13 +735,13 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   /// Commits actually read from `git log`, so the working tree row never shifts
   /// the paging offset.
-  int get _historyCount => _commits.length - (_hasWorkingTree ? 1 : 0);
+  int get _historyCount => _normalCommits.length - (_hasWorkingTree ? 1 : 0);
 
   void _rebuildGraph() {
-    _rows = layoutGraph(_commits, preferredTip: _preferredTip);
-    _entries = timelineEntries(_rows, DateTime.now());
+    _normalRows = layoutGraph(_normalCommits, preferredTip: _preferredTip);
+    _normalEntries = timelineEntries(_normalRows, DateTime.now());
     AvatarService.branchAssignments = assignBranchColors(
-      _rows,
+      _normalRows,
       widget.repository.root.hashCode,
     );
   }
@@ -719,7 +753,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     });
     try {
       // The first page fetches the working tree and the log together.
-      final (working, page) = _commits.isEmpty
+      final (working, page) = _normalCommits.isEmpty
           ? await (
               widget.repository.loadWorkingTree(),
               widget.repository.loadHistory(limit: _pageSize),
@@ -733,7 +767,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
             );
       if (!mounted) return;
       final keepEndVisible =
-          _commits.isNotEmpty &&
+          _normalCommits.isNotEmpty &&
           page.length < _pageSize &&
           _scrollController.hasClients &&
           _scrollController.position.maxScrollExtent -
@@ -741,13 +775,13 @@ class _TimelineScreenState extends State<TimelineScreen> {
               TimelineScreen.rowHeight;
       setState(() {
         if (working != null) {
-          _commits.add(working);
+          _normalCommits.add(working);
           _hasWorkingTree = true;
           // The working tree row inherits HEAD's committer color so its rail
           // matches the branch it sits on.
           if (page.isNotEmpty) _committersBySha[''] = page.first.committer;
         }
-        _commits.addAll(page);
+        _normalCommits.addAll(page);
         _committersBySha.addEntries(
           page.map((commit) => MapEntry(commit.sha, commit.committer)),
         );
@@ -1165,17 +1199,39 @@ class _TimelineScreenState extends State<TimelineScreen> {
   Widget _toolbarLeft() => Row(
     children: [
       _windowButtons(),
-      RepositoryBranchSelector(
-        repositoryName: _repositoryName,
-        repositoryPath: widget.repository.root,
-        localBranches: _refs.local,
-        selectedBranch: _baseBranch,
-        refsLoading: _refsLoading,
-        refsLoadFailed: _refsLoadFailed,
-        onRepositoryPressed: () => unawaited(_pickRepository()),
-        onBranchSelected: _selectBaseBranch,
+      Expanded(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final selectorWidth = math.min(
+              460.0,
+              math.max(0.0, constraints.maxWidth - _minDragWidth),
+            );
+            return Row(
+              children: [
+                SizedBox(
+                  width: selectorWidth,
+                  child: RepositoryBranchSelector(
+                    repositoryName: _repositoryName,
+                    repositoryPath: widget.repository.root,
+                    localBranches: _refs.local,
+                    remoteBranches: _refs.remote,
+                    selectedBranch: _baseBranch,
+                    comparedBranch: _compareRef,
+                    refsLoading: _refsLoading,
+                    refsLoadFailed: _refsLoadFailed,
+                    onRepositoryPressed: () => unawaited(_pickRepository()),
+                    onBranchSelected: _selectBaseBranch,
+                    onComparisonSelected: (branch) =>
+                        unawaited(_selectComparison(branch)),
+                    onComparisonCleared: _clearComparison,
+                  ),
+                ),
+                Expanded(child: _dragAndWordmark()),
+              ],
+            );
+          },
+        ),
       ),
-      Expanded(child: _dragAndWordmark()),
     ],
   );
 
@@ -1193,17 +1249,22 @@ class _TimelineScreenState extends State<TimelineScreen> {
         behavior: HitTestBehavior.opaque,
         onPanStart: (_) => unawaited(_previewController.startDrag()),
         onDoubleTap: () => unawaited(_previewController.toggleZoom()),
-        child: Row(
-          children: [
-            const Spacer(flex: 5),
-            if (size > 0) ...[
-              const Spacer(flex: 2),
-              IgnorePointer(
-                child: _Wordmark(key: const Key('wordmark'), fontSize: size),
-              ),
-              const Spacer(flex: 2),
+        child: SizedBox(
+          width: constraints.maxWidth,
+          height: constraints.maxHeight,
+          child: Row(
+            children: [
+              const Spacer(flex: 5),
+              if (size > 0) ...[
+                const Spacer(flex: 2),
+                IgnorePointer(
+                  child: _Wordmark(key: const Key('wordmark'), fontSize: size),
+                ),
+                const Spacer(flex: 2),
+              ],
+              const Spacer(flex: 5),
             ],
-          ],
+          ),
         ),
       );
     },
@@ -1211,17 +1272,124 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   void _selectBaseBranch(String branch) {
     if (!_refs.local.contains(branch) || branch == _baseBranch) return;
+    final compared = _compareRef;
     setState(() {
       _baseBranch = branch;
       _rebuildGraph();
     });
     _scheduleRatchetUpdate();
+    if (compared != null) {
+      if (compared == branch) {
+        _clearComparison();
+      } else {
+        unawaited(_selectComparison(compared));
+      }
+    }
     if (widget.preferredBranchReady) {
       widget.onPreferredBranchChanged?.call(branch);
     } else {
       _pendingBaseBranch = branch;
       _pendingBaseBranchIsUserSelection = true;
     }
+    _focusNode.requestFocus();
+  }
+
+  Future<void> _selectComparison(String compareRef) async {
+    final baseRef = _baseBranch;
+    if (baseRef == null || compareRef == baseRef) return;
+    final serial = ++_comparisonSerial;
+    setState(() {
+      _compareRef = compareRef;
+      _comparison = null;
+      _comparisonRows = [];
+      _comparisonEntries = [];
+      _rebaseCheck = null;
+      _comparisonError = null;
+      _selectedIndex.value = 0;
+    });
+    try {
+      final result = await widget.repository.compareBranches(
+        baseRef,
+        compareRef,
+      );
+      if (!mounted ||
+          serial != _comparisonSerial ||
+          _baseBranch != baseRef ||
+          _compareRef != compareRef) {
+        return;
+      }
+      final rows = layoutBranchComparison(result.commits);
+      setState(() {
+        _comparison = result;
+        _comparisonRows = rows;
+        _comparisonEntries = [
+          for (var index = 0; index < rows.length; index++)
+            (rowIndex: index, label: null, row: rows[index]),
+        ];
+      });
+      _scheduleRatchetUpdate();
+      unawaited(_checkRebase(baseRef, compareRef, serial));
+    } catch (error) {
+      if (!mounted ||
+          serial != _comparisonSerial ||
+          _compareRef != compareRef) {
+        return;
+      }
+      setState(() => _comparisonError = error);
+    }
+  }
+
+  Future<void> _checkRebase(
+    String baseRef,
+    String compareRef,
+    int serial,
+  ) async {
+    try {
+      await widget.repository.cleanupStaleRebaseWorktrees();
+      final result = await widget.repository.simulateRebase(
+        baseRef: baseRef,
+        compareRef: compareRef,
+      );
+      if (!mounted ||
+          serial != _comparisonSerial ||
+          _baseBranch != baseRef ||
+          _compareRef != compareRef) {
+        return;
+      }
+      setState(() => _rebaseCheck = result);
+    } catch (error) {
+      if (!mounted ||
+          serial != _comparisonSerial ||
+          _compareRef != compareRef) {
+        return;
+      }
+      setState(
+        () => _rebaseCheck = RebaseCheckResult(
+          status: RebaseCheckStatus.failed,
+          error: error.toString(),
+        ),
+      );
+    }
+  }
+
+  void _clearComparison() {
+    if (_compareRef == null) return;
+    _comparisonSerial++;
+    setState(() {
+      _compareRef = null;
+      _comparison = null;
+      _comparisonRows = [];
+      _comparisonEntries = [];
+      _rebaseCheck = null;
+      _comparisonError = null;
+      if (_normalEntries.isNotEmpty) {
+        _selectedIndex.value = _selectedIndex.value.clamp(
+          0,
+          _normalEntries.length - 1,
+        );
+      }
+    });
+    _scheduleRatchetUpdate();
     _focusNode.requestFocus();
   }
 
@@ -1710,7 +1878,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   // -------------------------------------------------------------- status bar
 
-  Widget _statusBar() => Container(
+  Widget _statusBar() =>
+      _compareRef == null ? _normalStatusBar() : _comparisonStatusBar();
+
+  Widget _normalStatusBar() => Container(
     height: 29,
     decoration: BoxDecoration(
       color: _palette.surface,
@@ -1819,6 +1990,57 @@ class _TimelineScreenState extends State<TimelineScreen> {
     ),
   );
 
+  Widget _comparisonStatusBar() {
+    final comparison = _comparison;
+    final labels = comparison == null
+        ? [if (_comparisonError == null) '브랜치 비교 중' else '브랜치 비교 실패']
+        : [
+            comparison.sameFirstParent ? '부모 동일' : '부모 다름',
+            '공통 ${comparison.mergeBases.length}',
+            '${comparison.baseRef}만 ${comparison.commits.where((entry) => entry.side == BranchCommitSide.baseOnly).length}',
+            '${comparison.compareRef}만 ${comparison.commits.where((entry) => entry.side == BranchCommitSide.compareOnly).length}',
+            switch (comparison.merge.status) {
+              MergeConflictStatus.clean => '병합 충돌 없음',
+              MergeConflictStatus.conflicts =>
+                '병합 충돌 ${comparison.merge.files.length}',
+              MergeConflictStatus.failed => '병합 검사 실패',
+            },
+            switch (_rebaseCheck?.status) {
+              null => '리베이스 검사 중',
+              RebaseCheckStatus.clean => '리베이스 가능',
+              RebaseCheckStatus.conflicts =>
+                '리베이스 충돌 ${_rebaseCheck!.files.length}',
+              RebaseCheckStatus.failed => '리베이스 검사 실패',
+            },
+          ];
+    return Container(
+      key: const Key('comparison-status'),
+      height: 29,
+      decoration: BoxDecoration(
+        color: _palette.surface,
+        border: Border(top: BorderSide(color: _palette.border)),
+      ),
+      child: ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        scrollDirection: Axis.horizontal,
+        itemCount: labels.length,
+        separatorBuilder: (_, _) => Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Text('·', style: TextStyle(color: _palette.muted)),
+        ),
+        itemBuilder: (_, index) => Center(
+          child: Text(
+            labels[index],
+            style: TextStyle(
+              color: _comparisonError == null ? _palette.muted : _behind,
+              fontSize: 10,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _legend(String label, Widget dot) => Padding(
     padding: const EdgeInsets.only(right: 12),
     child: Row(
@@ -1914,7 +2136,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     },
   );
 
-  bool get _showFooter => true;
+  bool get _showFooter => _compareRef == null;
 
   Widget _header(String column, double width) => SizedBox(
     key: Key('$column-header'),
@@ -2181,6 +2403,21 @@ class _TimelineScreenState extends State<TimelineScreen> {
   /// The chips a row shows: the `for-each-ref` tips landing on this commit,
   /// unioned with the log decorations so remotes and detached HEAD still show.
   List<GitRef> _rowRefs(GitCommit commit) {
+    if (_comparison case BranchComparisonResult comparison) {
+      final side = comparison.commits
+          .firstWhere((entry) => entry.commit.sha == commit.sha)
+          .side;
+      return [
+        GitRef(
+          name: switch (side) {
+            BranchCommitSide.baseOnly => '${comparison.baseRef}만',
+            BranchCommitSide.compareOnly => '${comparison.compareRef}만',
+            BranchCommitSide.commonBoundary => '공통',
+          },
+          isHead: side == BranchCommitSide.baseOnly,
+        ),
+      ];
+    }
     final refs = [...commit.refs];
     if (commit.sha.isEmpty || _refs.tips.isEmpty) return refs;
     final seen = {for (final ref in refs) ref.name};
@@ -2900,7 +3137,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         // panel is dragged narrow.
         Expanded(
           child: Text(
-            'Commit & Diff',
+            _comparison == null ? 'Commit & Diff' : '브랜치 Diff',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
@@ -2914,7 +3151,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
         const SizedBox(width: 8),
         _ShowDiffButton(
           key: const Key('preview-full-diff'),
-          onTap: commit == null ? null : _openFullDiff,
+          onTap: commit == null || _comparison != null ? null : _openFullDiff,
           height: 28,
           labelSize: 11,
           shortcutSize: 8,
@@ -2924,7 +3161,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
           constraints: const BoxConstraints(maxWidth: 64),
           child: Text(
             key: const Key('preview-hash'),
-            commit == null
+            _comparison != null
+                ? '${_comparison!.baseRef} ↔ ${_comparison!.compareRef}'
+                : commit == null
                 ? '—'
                 : commit.isWorkingTree
                 ? 'WIP'
@@ -2945,24 +3184,33 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   /// The commit's changed files, remembered in resolved form as well so ⌘↑/⌘↓ can
   /// walk them without waiting on a future.
-  Future<List<GitFileChange>> _previewFilesFor(GitCommit commit) =>
-      _previewFiles.putIfAbsent(commit.sha, () {
-        final request = widget.repository.loadFiles(commit);
-        unawaited(
-          request
-              .then((files) => _previewFileLists[commit.sha] = files)
-              .catchError((_) => const <GitFileChange>[]),
-        );
-        return request;
-      });
+  String _previewKey(GitCommit commit) => _comparison == null
+      ? commit.sha
+      : '${_comparison!.baseTip}..${_comparison!.compareTip}';
+
+  Future<List<GitFileChange>> _previewFilesFor(GitCommit commit) {
+    final key = _previewKey(commit);
+    return _previewFiles.putIfAbsent(key, () {
+      final request = _comparison == null
+          ? widget.repository.loadFiles(commit)
+          : Future.value(_comparison!.files);
+      unawaited(
+        request
+            .then((files) => _previewFileLists[key] = files)
+            .catchError((_) => const <GitFileChange>[]),
+      );
+      return request;
+    });
+  }
 
   /// Steps the open preview through the commit's files, clamped at both ends.
   void _stepPreviewFile(int delta, {bool animate = true}) {
     final commit = _selectedCommit;
     if (commit == null) return;
-    final files = _previewFileLists[commit.sha];
+    final key = _previewKey(commit);
+    final files = _previewFileLists[key];
     if (files == null || files.isEmpty) return;
-    final current = _previewPaths[commit.sha] ?? files.first.path;
+    final current = _previewPaths[key] ?? files.first.path;
     final index = files.indexWhere((file) => file.path == current);
     final next = (index + delta).clamp(0, files.length - 1);
     if (files[next].path == current) return;
@@ -2980,7 +3228,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
     int? revealDirection,
     bool animateReveal = true,
   }) {
-    setState(() => _previewPaths[commit.sha] = path);
+    setState(() => _previewPaths[_previewKey(commit)] = path);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (_previewDiffScrollController.hasClients) {
@@ -3013,8 +3261,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
       future: files,
       builder: (context, snapshot) {
         final changes = snapshot.data;
+        final key = _previewKey(commit);
         final requestedPath =
-            _previewPaths[commit.sha] ??
+            _previewPaths[key] ??
             (changes == null || changes.isEmpty ? null : changes.first.path);
         GitFileChange? selectedFile;
         if (changes != null && changes.isNotEmpty) {
@@ -3031,7 +3280,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                commit.subject,
+                _comparison == null
+                    ? commit.subject
+                    : '${_comparison!.baseRef} ↔ ${_comparison!.compareRef}',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -3042,7 +3293,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
               ),
               const SizedBox(height: 9),
               Text(
-                commit.isWorkingTree
+                _comparison != null
+                    ? '${_comparison!.baseTip}..${_comparison!.compareTip}'
+                    : commit.isWorkingTree
                     ? 'Working tree changes'
                     : 'commit ${commit.sha}',
                 maxLines: 1,
@@ -3053,7 +3306,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                   fontFamily: 'monospace',
                 ),
               ),
-              _previewPerson(commit),
+              if (_comparison == null) _previewPerson(commit),
               _previewStats(changes),
               _previewFileList(
                 commit,
@@ -3373,10 +3626,17 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   Widget _previewDiff(GitCommit commit, GitFileChange file) {
     final path = file.path;
-    final future = _previewDiffs.putIfAbsent((
-      sha: commit.sha,
-      path: path,
-    ), () => widget.repository.loadDiff(commit, file));
+    final key = _previewKey(commit);
+    final future = _previewDiffs.putIfAbsent((sha: key, path: path), () {
+      final comparison = _comparison;
+      return comparison == null
+          ? widget.repository.loadDiff(commit, file)
+          : widget.repository.loadDiffBetween(
+              comparison.baseTip,
+              comparison.compareTip,
+              file,
+            );
+    });
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
