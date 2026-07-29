@@ -93,18 +93,10 @@ class ExternalEditorService {
   final NativeFileOpener nativeFileOpener;
 
   Future<void> open({required String relativePath, int? line}) async {
-    final root = await Directory(repositoryRoot).resolveSymbolicLinks();
-    final target = File('$root${Platform.pathSeparator}$relativePath');
-    final file = await target.resolveSymbolicLinks();
-    final rootPrefix = root.endsWith(Platform.pathSeparator)
-        ? root
-        : '$root${Platform.pathSeparator}';
-    if (!file.startsWith(rootPrefix)) {
-      throw FileSystemException('File escapes repository root', file);
-    }
-    if ((await FileStat.stat(file)).type != FileSystemEntityType.file) {
-      throw FileSystemException('Editor target is not a regular file', file);
-    }
+    final file = (await resolveWorkingTreeFile(
+      repositoryRoot,
+      relativePath,
+    )).path;
 
     for (final key in const ['VISUAL', 'EDITOR']) {
       final configured = environment[key];

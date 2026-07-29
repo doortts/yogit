@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/external_editor.dart';
+import 'package:yogit/monaco_editor_screen.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -391,6 +393,56 @@ void main() {
       });
     },
   );
+
+  test('text documents preserve UTF-8 BOM and CRLF on save', () async {
+    final root = await Directory.systemTemp.createTemp('yogit_document_');
+    addTearDown(() => root.delete(recursive: true));
+    final file = File('${root.path}/windows.dart');
+    await file.writeAsBytes([
+      0xEF,
+      0xBB,
+      0xBF,
+      ...utf8.encode('one\r\ntwo\r\n'),
+    ]);
+
+    final document = await WorkingTreeTextDocument.load(
+      repositoryRoot: root.path,
+      relativePath: 'windows.dart',
+    );
+
+    expect(document.text, 'one\ntwo\n');
+    expect(document.hasBom, isTrue);
+    expect(document.lineEnding, TextLineEnding.crlf);
+    await document.save('changed\ntext\n');
+    expect(await file.readAsBytes(), [
+      0xEF,
+      0xBB,
+      0xBF,
+      ...utf8.encode('changed\r\ntext\r\n'),
+    ]);
+  });
+
+  test('text documents reject malformed UTF-8 and NUL bytes', () async {
+    final root = await Directory.systemTemp.createTemp('yogit_document_');
+    addTearDown(() => root.delete(recursive: true));
+    await File('${root.path}/invalid.txt').writeAsBytes([0xC3, 0x28]);
+    await File('${root.path}/binary.txt').writeAsBytes([0x61, 0, 0x62]);
+
+    await expectLater(
+      WorkingTreeTextDocument.load(
+        repositoryRoot: root.path,
+        relativePath: 'invalid.txt',
+      ),
+      throwsFormatException,
+    );
+    await expectLater(
+      WorkingTreeTextDocument.load(
+        repositoryRoot: root.path,
+        relativePath: 'binary.txt',
+      ),
+      throwsFormatException,
+    );
+  });
 }
 
 Future<File> _createExecutable(Directory directory, String name) async {

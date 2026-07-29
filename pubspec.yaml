@@ -30,6 +30,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_monaco: ^3.4.2
   highlighting: ^0.9.0+11.8.0
 
 dev_dependencies:
