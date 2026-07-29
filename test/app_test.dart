@@ -3246,6 +3246,31 @@ void main() {
     );
   });
 
+  test('deleted branch names round-trip per repository', () {
+    const settings = AppSettings(
+      deletedBranchNames: {
+        '/repos/one': {'tip-a': 'feature/one'},
+        '/repos/two': {'tip-b': 'fix/two'},
+      },
+    );
+
+    expect(AppSettings.fromJson(settings.toJson()), settings);
+  });
+
+  test('deleted branch names ignore malformed nested entries', () {
+    expect(
+      AppSettings.fromJson({
+        'deletedBranchNames': {
+          '/repos/one': {'tip-a': 'feature/one', 'bad': 42},
+          '/repos/bad': 'not-a-map',
+        },
+      }).deletedBranchNames,
+      {
+        '/repos/one': {'tip-a': 'feature/one'},
+      },
+    );
+  });
+
   test('timeline theme settings round-trip and reject unknown values', () {
     const settings = AppSettings(timelineTheme: TimelineThemeKind.carbon);
     expect(AppSettings.fromJson(settings.toJson()), settings);

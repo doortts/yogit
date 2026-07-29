@@ -226,6 +226,28 @@ Map<String, double> _parseRepositoryGraphWidths(Object? value) {
   return result;
 }
 
+Map<String, Map<String, String>> _parseNestedStringMap(Object? value) => {
+  if (value is Map)
+    for (final repository in value.entries)
+      if (repository.key is String && repository.value is Map)
+        repository.key as String: {
+          for (final entry in (repository.value as Map).entries)
+            if (entry.key is String && entry.value is String)
+              entry.key as String: entry.value as String,
+        },
+};
+
+bool _nestedStringMapEquals(
+  Map<String, Map<String, String>> left,
+  Map<String, Map<String, String>> right,
+) {
+  if (left.length != right.length) return false;
+  for (final entry in left.entries) {
+    if (!mapEquals(entry.value, right[entry.key])) return false;
+  }
+  return true;
+}
+
 class AppSettings {
   const AppSettings({
     this.showAvatars = true,
@@ -239,6 +261,7 @@ class AppSettings {
     this.previewWidth = 288,
     this.previewHeight = 280,
     this.baseBranches = const {},
+    this.deletedBranchNames = const {},
   });
 
   /// The neon palette, as stored.
@@ -276,6 +299,7 @@ class AppSettings {
   final FullDiffPreferences fullDiffPreferences;
   final List<String> laneColors;
   final Map<String, String> baseBranches;
+  final Map<String, Map<String, String>> deletedBranchNames;
 
   /// The detail panel's size, per placement axis.
   final double previewWidth;
@@ -333,6 +357,7 @@ class AppSettings {
     double? previewWidth,
     double? previewHeight,
     Map<String, String>? baseBranches,
+    Map<String, Map<String, String>>? deletedBranchNames,
   }) => AppSettings(
     showAvatars: showAvatars ?? this.showAvatars,
     timelineTheme: timelineTheme ?? this.timelineTheme,
@@ -345,6 +370,7 @@ class AppSettings {
     previewWidth: previewWidth ?? this.previewWidth,
     previewHeight: previewHeight ?? this.previewHeight,
     baseBranches: baseBranches ?? this.baseBranches,
+    deletedBranchNames: deletedBranchNames ?? this.deletedBranchNames,
   );
 
   factory AppSettings.fromJson(Object? value) {
@@ -389,6 +415,7 @@ class AppSettings {
       previewWidth: _clamped(value['previewWidth'], 288, 240, 560),
       previewHeight: _clamped(value['previewHeight'], 280, 200, 480),
       baseBranches: baseBranches,
+      deletedBranchNames: _parseNestedStringMap(value['deletedBranchNames']),
     );
   }
 
@@ -404,6 +431,7 @@ class AppSettings {
     'previewWidth': previewWidth,
     'previewHeight': previewHeight,
     'baseBranches': baseBranches,
+    'deletedBranchNames': deletedBranchNames,
   };
 
   @override
@@ -419,7 +447,8 @@ class AppSettings {
       listEquals(laneColors, other.laneColors) &&
       previewWidth == other.previewWidth &&
       previewHeight == other.previewHeight &&
-      mapEquals(baseBranches, other.baseBranches);
+      mapEquals(baseBranches, other.baseBranches) &&
+      _nestedStringMapEquals(deletedBranchNames, other.deletedBranchNames);
 
   @override
   int get hashCode => Object.hash(
@@ -439,6 +468,18 @@ class AppSettings {
     previewHeight,
     Object.hashAllUnordered(
       baseBranches.entries.map((entry) => Object.hash(entry.key, entry.value)),
+    ),
+    Object.hashAllUnordered(
+      deletedBranchNames.entries.map(
+        (repository) => Object.hash(
+          repository.key,
+          Object.hashAllUnordered(
+            repository.value.entries.map(
+              (entry) => Object.hash(entry.key, entry.value),
+            ),
+          ),
+        ),
+      ),
     ),
   );
 }
