@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'avatars.dart';
 import 'diff_screen.dart';
 import 'external_editor.dart';
+import 'full_diff_commit_message_cache.dart';
 import 'full_diff_model.dart';
 import 'git.dart';
 import 'monaco_editor_screen.dart';
@@ -39,6 +40,12 @@ const _main = Color(0xFF8AD6A1);
 const _behind = Color(0xFFF0A35E);
 
 const _weekdayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+String _commitMessageBody(String? message) {
+  if (message == null) return '';
+  final newline = message.indexOf('\n');
+  return newline < 0 ? '' : message.substring(newline + 1).trim();
+}
 
 /// Whole local calendar days from [day] to [now]. Counted in hours and rounded,
 /// so a DST shift cannot turn yesterday into today. Every relative label in the
@@ -3670,6 +3677,13 @@ class _TimelineScreenState extends State<TimelineScreen>
     });
   }
 
+  Future<String> _previewMessageFor(GitCommit commit) =>
+      FullDiffCommitMessageCache.shared.getOrLoad(
+        repositoryRoot: widget.repository.root,
+        sha: commit.sha,
+        loader: () => widget.repository.loadCommitMessage(commit.sha),
+      );
+
   /// Steps the open preview through the commit's files, clamped at both ends.
   void _stepPreviewFile(int delta, {bool animate = true}) {
     final commit = _selectedCommit;
@@ -3758,6 +3772,26 @@ class _TimelineScreenState extends State<TimelineScreen>
                   fontWeight: FontWeight.w500,
                 ),
               ),
+              if (!commit.isWorkingTree)
+                FutureBuilder<String>(
+                  future: _previewMessageFor(commit),
+                  builder: (context, snapshot) {
+                    final body = _commitMessageBody(snapshot.data);
+                    if (body.isEmpty) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        body,
+                        key: const Key('preview-commit-body'),
+                        style: TextStyle(
+                          color: _palette.text,
+                          fontSize: 12,
+                          height: 1.45,
+                        ),
+                      ),
+                    );
+                  },
+                ),
               const SizedBox(height: 9),
               Text(
                 _comparison != null
