@@ -704,6 +704,160 @@ void main() {
     },
   );
 
+  test('cherry-pick applies one commit and rejects a dirty worktree', () async {
+    final root = await Directory.systemTemp.createTemp('yogit_cherrypick_');
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    await File('${root.path}/base.txt').writeAsString('base\n');
+    await _git(root, ['add', 'base.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+    await _git(root, ['switch', '-c', 'source']);
+    await File('${root.path}/picked.txt').writeAsString('picked\n');
+    await _git(root, ['add', 'picked.txt']);
+    await _git(root, ['commit', '-m', 'picked']);
+    final sourceSha = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+    await _git(root, ['switch', 'main']);
+
+    final repository = GitRepository(root.path);
+    final result = await repository.cherryPick(sourceSha);
+
+    expect(result.outcome, CherryPickOutcome.applied);
+    expect(result.headSha, (await _git(root, ['rev-parse', 'HEAD'])).trim());
+    expect(await File('${root.path}/picked.txt').readAsString(), 'picked\n');
+    expect(await repository.loadCherryPickState(), isNull);
+
+    await _git(root, ['reset', '--hard', 'HEAD^']);
+    await File('${root.path}/base.txt').writeAsString('dirty\n');
+    final head = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+    await expectLater(
+      repository.cherryPick(sourceSha),
+      throwsA(isA<GitRepositoryException>()),
+    );
+    expect((await _git(root, ['rev-parse', 'HEAD'])).trim(), head);
+    expect(await File('${root.path}/base.txt').readAsString(), 'dirty\n');
+    expect(File('${root.path}/picked.txt').existsSync(), isFalse);
+  });
+
+  test('cherry-pick conflict can be restored, staged, and continued', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'yogit_cherrypick_conflict_',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    await File('${root.path}/shared.txt').writeAsString('base\n');
+    await _git(root, ['add', 'shared.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+    await _git(root, ['switch', '-c', 'source']);
+    await File('${root.path}/shared.txt').writeAsString('source\n');
+    await _git(root, ['commit', '-am', 'source']);
+    final sourceSha = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+    await _git(root, ['switch', 'main']);
+    await File('${root.path}/shared.txt').writeAsString('main\n');
+    await _git(root, ['commit', '-am', 'main']);
+
+    final repository = GitRepository(root.path);
+    final result = await repository.cherryPick(sourceSha);
+
+    expect(result.outcome, CherryPickOutcome.conflicts);
+    expect(result.state?.commitSha, sourceSha);
+    expect(result.state?.conflicts, ['shared.txt']);
+    expect((await repository.loadCherryPickState())?.conflicts, ['shared.txt']);
+    await expectLater(
+      repository.stageResolvedFile('shared.txt'),
+      throwsA(isA<GitRepositoryException>()),
+    );
+
+    await File('${root.path}/shared.txt').writeAsString('resolved\n');
+    await repository.stageResolvedFile('shared.txt');
+    expect((await repository.loadCherryPickState())?.canContinue, isTrue);
+    final continued = await repository.continueCherryPick();
+
+    expect(continued.outcome, CherryPickOutcome.applied);
+    expect(await repository.loadCherryPickState(), isNull);
+    expect(await File('${root.path}/shared.txt').readAsString(), 'resolved\n');
+  });
+
+  test(
+    'abortCherryPick restores the exact pre-pick HEAD and worktree',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'yogit_cherrypick_abort_',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      await _initRepository(root);
+      await File('${root.path}/shared.txt').writeAsString('base\n');
+      await _git(root, ['add', 'shared.txt']);
+      await _git(root, ['commit', '-m', 'base']);
+      await _git(root, ['switch', '-c', 'source']);
+      await File('${root.path}/shared.txt').writeAsString('source\n');
+      await _git(root, ['commit', '-am', 'source']);
+      final sourceSha = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+      await _git(root, ['switch', 'main']);
+      await File('${root.path}/shared.txt').writeAsString('main\n');
+      await _git(root, ['commit', '-am', 'main']);
+      final head = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+
+      final repository = GitRepository(root.path);
+      expect(
+        (await repository.cherryPick(sourceSha)).outcome,
+        CherryPickOutcome.conflicts,
+      );
+      await repository.abortCherryPick();
+
+      expect((await _git(root, ['rev-parse', 'HEAD'])).trim(), head);
+      expect(await File('${root.path}/shared.txt').readAsString(), 'main\n');
+      expect((await _git(root, ['status', '--porcelain'])).trim(), isEmpty);
+      expect(await repository.loadCherryPickState(), isNull);
+    },
+  );
+
+  test('cherry-pick skips an already applied empty change', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'yogit_cherrypick_empty_',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    await File('${root.path}/shared.txt').writeAsString('base\n');
+    await _git(root, ['add', 'shared.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+    await _git(root, ['switch', '-c', 'source']);
+    await File('${root.path}/shared.txt').writeAsString('same\n');
+    await _git(root, ['commit', '-am', 'source']);
+    final sourceSha = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+    await _git(root, ['switch', 'main']);
+    await File('${root.path}/shared.txt').writeAsString('same\n');
+    await _git(root, ['commit', '-am', 'main']);
+    final head = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+
+    final result = await GitRepository(root.path).cherryPick(sourceSha);
+
+    expect(result.outcome, CherryPickOutcome.empty);
+    expect((await _git(root, ['rev-parse', 'HEAD'])).trim(), head);
+    expect((await _git(root, ['status', '--porcelain'])).trim(), isEmpty);
+  });
+
+  test('working-tree path resolution rejects a symlink escape', () async {
+    final root = await Directory.systemTemp.createTemp('yogit_safe_path_');
+    final outside = await Directory.systemTemp.createTemp(
+      'yogit_safe_path_outside_',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    addTearDown(() => outside.delete(recursive: true));
+    final inside = File('${root.path}/inside.txt')..writeAsStringSync('inside');
+    final escaped = File('${outside.path}/outside.txt')
+      ..writeAsStringSync('outside');
+    await Link('${root.path}/escape.txt').create(escaped.path);
+
+    expect(
+      (await resolveWorkingTreeFile(root.path, 'inside.txt')).path,
+      await inside.resolveSymbolicLinks(),
+    );
+    await expectLater(
+      resolveWorkingTreeFile(root.path, 'escape.txt'),
+      throwsA(isA<FileSystemException>()),
+    );
+  });
+
   test('retains the commit SHA occupying each lane segment', () {
     final branch = _commit('B', [
       'R',

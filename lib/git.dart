@@ -110,6 +110,26 @@ Future<String> resolveRepositoryRoot(
   return root;
 }
 
+Future<File> resolveWorkingTreeFile(
+  String repositoryRoot,
+  String relativePath,
+) async {
+  final root = await Directory(repositoryRoot).resolveSymbolicLinks();
+  final resolved = await File(
+    '$root${Platform.pathSeparator}$relativePath',
+  ).resolveSymbolicLinks();
+  final prefix = root.endsWith(Platform.pathSeparator)
+      ? root
+      : '$root${Platform.pathSeparator}';
+  if (!resolved.startsWith(prefix)) {
+    throw FileSystemException('File escapes repository root', resolved);
+  }
+  if ((await FileStat.stat(resolved)).type != FileSystemEntityType.file) {
+    throw FileSystemException('Editor target is not a regular file', resolved);
+  }
+  return File(resolved);
+}
+
 class GitRepositoryException implements Exception {
   const GitRepositoryException(this.path, this.message);
 
@@ -264,6 +284,25 @@ class RebaseCheckResult {
   final String? stoppedCommit;
   final List<String> files;
   final String? error;
+}
+
+enum CherryPickOutcome { applied, conflicts, empty }
+
+class CherryPickState {
+  const CherryPickState({required this.commitSha, required this.conflicts});
+
+  final String commitSha;
+  final List<String> conflicts;
+
+  bool get canContinue => conflicts.isEmpty;
+}
+
+class CherryPickResult {
+  const CherryPickResult({required this.outcome, this.state, this.headSha});
+
+  final CherryPickOutcome outcome;
+  final CherryPickState? state;
+  final String? headSha;
 }
 
 class BranchComparisonResult {
@@ -1337,6 +1376,209 @@ class GitRepository implements FullDiffRepository {
       }
     }
     await _ignoreCommand(const ['worktree', 'prune'], workingDirectory: root);
+  }
+
+  Future<CherryPickResult> cherryPick(String sha) async {
+    final commitSha = await _cherryPickPreflight(sha);
+    final arguments = ['cherry-pick', commitSha];
+    return _cherryPickResult(await _runCherryPickCommand(arguments), arguments);
+  }
+
+  Future<CherryPickState?> loadCherryPickState() async {
+    final head = await runner(gitExecutable, const [
+      'rev-parse',
+      '--verify',
+      '-q',
+      'CHERRY_PICK_HEAD',
+    ], workingDirectory: root);
+    if (head.exitCode != 0) return null;
+    final conflicts = await runner(gitExecutable, const [
+      'diff',
+      '--name-only',
+      '--diff-filter=U',
+      '-z',
+    ], workingDirectory: root);
+    if (conflicts.exitCode != 0) {
+      throw ProcessException(
+        gitExecutable,
+        const ['diff', '--name-only', '--diff-filter=U', '-z'],
+        conflicts.stderr.toString(),
+        conflicts.exitCode,
+      );
+    }
+    return CherryPickState(
+      commitSha: head.stdout.toString().trim(),
+      conflicts: conflicts.stdout
+          .toString()
+          .split('\x00')
+          .where((path) => path.isNotEmpty)
+          .toList(),
+    );
+  }
+
+  Future<CherryPickResult> continueCherryPick() async {
+    final state = await loadCherryPickState();
+    if (state == null) {
+      throw GitRepositoryException(root, '진행 중인 체리픽이 없습니다.');
+    }
+    if (!state.canContinue) {
+      throw GitRepositoryException(root, '충돌 파일을 모두 해결해야 계속할 수 있습니다.');
+    }
+    const arguments = ['-c', 'core.editor=true', 'cherry-pick', '--continue'];
+    return _cherryPickResult(await _runCherryPickCommand(arguments), arguments);
+  }
+
+  Future<void> abortCherryPick() async {
+    if (await loadCherryPickState() == null) {
+      throw GitRepositoryException(root, '진행 중인 체리픽이 없습니다.');
+    }
+    await _run(['cherry-pick', '--abort']);
+  }
+
+  Future<void> stageResolvedFile(String relativePath) async {
+    await resolveWorkingTreeFile(root, relativePath);
+    final pathspec = ':(literal)$relativePath';
+    final check = await runner(gitExecutable, [
+      'diff',
+      '--check',
+      '--',
+      pathspec,
+    ], workingDirectory: root);
+    final output = '${check.stdout}\n${check.stderr}';
+    if (output.contains('leftover conflict marker')) {
+      throw GitRepositoryException(relativePath, '충돌 표시가 남아 있습니다.');
+    }
+    if (check.exitCode > 1) {
+      throw ProcessException(
+        gitExecutable,
+        ['diff', '--check', '--', pathspec],
+        check.stderr.toString(),
+        check.exitCode,
+      );
+    }
+    await _run(['add', '--', pathspec]);
+  }
+
+  Future<String> _cherryPickPreflight(String sha) async {
+    final current = (await _run(['branch', '--show-current'])).trim();
+    if (current.isEmpty) {
+      throw GitRepositoryException(root, '분리된 HEAD에서는 체리픽할 수 없습니다.');
+    }
+    final branch = await runner(gitExecutable, [
+      'show-ref',
+      '--verify',
+      '--quiet',
+      'refs/heads/$current',
+    ], workingDirectory: root);
+    if (branch.exitCode != 0) {
+      throw GitRepositoryException(root, '현재 로컬 브랜치를 찾을 수 없습니다.');
+    }
+    if (await _gitOperationInProgress()) {
+      throw GitRepositoryException(root, '다른 Git 작업이 진행 중입니다.');
+    }
+    if ((await _run(['status', '--porcelain=v1', '-z'])).isNotEmpty) {
+      throw GitRepositoryException(root, '작업 트리와 인덱스가 깨끗해야 합니다.');
+    }
+    final verify = await runner(gitExecutable, [
+      'rev-parse',
+      '--verify',
+      '--end-of-options',
+      '$sha^{commit}',
+    ], workingDirectory: root);
+    final commitSha = verify.stdout.toString().trim();
+    if (verify.exitCode != 0 || commitSha.isEmpty) {
+      throw GitRepositoryException(sha, '유효한 커밋이 아닙니다.');
+    }
+    final ancestor = await runner(gitExecutable, [
+      'merge-base',
+      '--is-ancestor',
+      commitSha,
+      'HEAD',
+    ], workingDirectory: root);
+    if (ancestor.exitCode == 0) {
+      throw GitRepositoryException(sha, '이미 현재 브랜치에 포함된 커밋입니다.');
+    }
+    if (ancestor.exitCode != 1) {
+      throw ProcessException(
+        gitExecutable,
+        ['merge-base', '--is-ancestor', commitSha, 'HEAD'],
+        ancestor.stderr.toString(),
+        ancestor.exitCode,
+      );
+    }
+    return commitSha;
+  }
+
+  Future<bool> _gitOperationInProgress() async {
+    for (final name in const [
+      'CHERRY_PICK_HEAD',
+      'MERGE_HEAD',
+      'REBASE_HEAD',
+    ]) {
+      final result = await runner(gitExecutable, [
+        'rev-parse',
+        '--verify',
+        '-q',
+        name,
+      ], workingDirectory: root);
+      if (result.exitCode == 0) return true;
+    }
+    final gitDirectory = (await _run([
+      'rev-parse',
+      '--absolute-git-dir',
+    ])).trim();
+    return Directory('$gitDirectory/rebase-merge').existsSync() ||
+        Directory('$gitDirectory/rebase-apply').existsSync();
+  }
+
+  Future<ProcessResult> _runCherryPickCommand(List<String> arguments) => runner(
+    gitExecutable,
+    arguments,
+    workingDirectory: root,
+    environment: {
+      ...Platform.environment,
+      'GIT_EDITOR': 'true',
+      'GIT_TERMINAL_PROMPT': '0',
+    },
+  );
+
+  Future<CherryPickResult> _cherryPickResult(
+    ProcessResult result,
+    List<String> arguments,
+  ) async {
+    if (result.exitCode == 0) {
+      return CherryPickResult(
+        outcome: CherryPickOutcome.applied,
+        headSha: (await _run(['rev-parse', 'HEAD'])).trim(),
+      );
+    }
+    final state = await loadCherryPickState();
+    if (state != null && state.conflicts.isNotEmpty) {
+      return CherryPickResult(
+        outcome: CherryPickOutcome.conflicts,
+        state: state,
+      );
+    }
+    if (state != null) {
+      final staged = await runner(gitExecutable, const [
+        'diff',
+        '--cached',
+        '--quiet',
+      ], workingDirectory: root);
+      if (staged.exitCode == 0) {
+        await _run(['cherry-pick', '--skip']);
+        return CherryPickResult(
+          outcome: CherryPickOutcome.empty,
+          headSha: (await _run(['rev-parse', 'HEAD'])).trim(),
+        );
+      }
+    }
+    throw ProcessException(
+      gitExecutable,
+      arguments,
+      result.stderr.toString(),
+      result.exitCode,
+    );
   }
 
   bool _isYogitRebasePath(String path) {
