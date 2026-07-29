@@ -285,6 +285,21 @@ class _YogitAppState extends State<YogitApp> {
           controller: widget.windowFrameController,
           onOpenRepository: _openRepository,
           avatarService: _avatarService,
+          deletedBranchNames:
+              _settings.deletedBranchNames[_repository.root] ?? const {},
+          deletedBranchNamesReady: _settingsLoaded,
+          onDeletedBranchNamesChanged: _settingsLoaded
+              ? (names) {
+                  final caches = {
+                    for (final entry in _settings.deletedBranchNames.entries)
+                      entry.key: Map<String, String>.of(entry.value),
+                    _repository.root: Map<String, String>.of(names),
+                  };
+                  _changeSettings(
+                    _settings.copyWith(deletedBranchNames: caches),
+                  );
+                }
+              : null,
           showRemoteAvatars: _settingsLoaded && _settings.showAvatars,
           preferredPreviewPlacement: _settings.previewPlacement,
           preferredBranch: _settingsLoaded

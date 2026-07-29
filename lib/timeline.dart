@@ -231,6 +231,16 @@ List<TimelineEntry> timelineEntries(List<GraphRow> rows, DateTime now) {
   return entries;
 }
 
+@visibleForTesting
+String? branchLineTipSha(List<GraphRow> rows, int branch) {
+  for (final row in rows) {
+    if (row.branch == branch && !row.commit.isWorkingTree) {
+      return row.commit.sha;
+    }
+  }
+  return null;
+}
+
 /// The lanes [above] hands down, with no node and no lane of its own, so the
 /// rails and the arriving sweeps run through a date heading unbroken.
 GraphRow passThroughRow({required GitCommit commit, GraphRow? above}) =>
@@ -325,6 +335,9 @@ class TimelineScreen extends StatefulWidget {
     this.preferredBranchReady = true,
     this.onPreferredBranchChanged,
     this.avatarService,
+    this.deletedBranchNames = const {},
+    this.deletedBranchNamesReady = true,
+    this.onDeletedBranchNamesChanged,
     this.showRemoteAvatars = true,
     this.preferredPreviewPlacement = PreviewPlacement.right,
     this.columnWidths = const TimelineColumnWidths(),
@@ -358,6 +371,9 @@ class TimelineScreen extends StatefulWidget {
   final bool preferredBranchReady;
   final ValueChanged<String>? onPreferredBranchChanged;
   final AvatarService? avatarService;
+  final Map<String, String> deletedBranchNames;
+  final bool deletedBranchNamesReady;
+  final ValueChanged<Map<String, String>>? onDeletedBranchNamesChanged;
   final bool showRemoteAvatars;
   final PreviewPlacement preferredPreviewPlacement;
   final TimelineColumnWidths columnWidths;
@@ -453,6 +469,9 @@ class _TimelineScreenState extends State<TimelineScreen>
   final _previewFileLists = <String, List<GitFileChange>>{};
   final _previewDiffs = <({String sha, String path}), Future<List<DiffLine>>>{};
   final _previewPaths = <String, String>{};
+  late final Map<String, String> _deletedBranchNames;
+  final _deletedBranchLookupAttempts = <String>{};
+  String? _resolvingDeletedBranchTip;
 
   var _refs = const RepoRefs();
   var _refsLoading = true;
@@ -520,7 +539,9 @@ class _TimelineScreenState extends State<TimelineScreen>
     WidgetsBinding.instance.addObserver(this);
     _ownsPreviewController = widget.controller == null;
     _previewController = widget.controller ?? WindowFrameController();
+    _deletedBranchNames = Map.of(widget.deletedBranchNames);
     _scrollController.addListener(_maybeLoadNextPage);
+    _selectedIndex.addListener(_selectedCommitChanged);
     // Refs load beside the first page, and neither blocks the first paint. The
     // detail pane stays hidden until Enter or Space asks for it.
     _loadNextPage();
@@ -616,6 +637,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         _rebuildGraph();
       });
       _scheduleRatchetUpdate();
+      unawaited(_resolveSelectedDeletedBranchName());
       if (comparisonStillExists) unawaited(_selectComparison(compared));
       if (widget.preferredBranchReady &&
           branch != null &&
@@ -635,6 +657,23 @@ class _TimelineScreenState extends State<TimelineScreen>
   @override
   void didUpdateWidget(covariant TimelineScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final deletedBranchNamesChanged = !mapEquals(
+      widget.deletedBranchNames,
+      oldWidget.deletedBranchNames,
+    );
+    if (deletedBranchNamesChanged) {
+      _deletedBranchNames
+        ..clear()
+        ..addAll(widget.deletedBranchNames);
+    }
+    if ((widget.deletedBranchNamesReady &&
+            !oldWidget.deletedBranchNamesReady) ||
+        deletedBranchNamesChanged ||
+        (widget.avatarService != null && oldWidget.avatarService == null)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_resolveSelectedDeletedBranchName());
+      });
+    }
     if (!identical(widget.repository, oldWidget.repository)) {
       _clearFullDiffRouteSession();
     } else if (widget.onFullDiffPreferencesChanged !=
@@ -698,6 +737,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     _fetchTimer?.cancel();
     _clearFullDiffRouteSession();
     if (_ownsPreviewController) _previewController.dispose();
+    _selectedIndex.removeListener(_selectedCommitChanged);
     _selectedIndex.dispose();
     _hoverIndex.dispose();
     _hoveredHeader.dispose();
@@ -857,6 +897,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         _loading = false;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) => _updateRatchet());
+      unawaited(_resolveSelectedDeletedBranchName());
       if (keepEndVisible) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (_scrollController.hasClients) {
@@ -1017,6 +1058,52 @@ class _TimelineScreenState extends State<TimelineScreen>
     _arrivedGoingDown = null;
     _selectedIndex.value = index;
     _focusNode.requestFocus();
+  }
+
+  void _selectedCommitChanged() =>
+      unawaited(_resolveSelectedDeletedBranchName());
+
+  ({String selectedSha, String tipSha})? _selectedDeletedBranchLine() {
+    if (!_refsLoaded || _comparison != null || _entries.isEmpty) return null;
+    final entry = _entries[_selectedIndex.value];
+    if (entry.rowIndex < 0 || entry.row.commit.isWorkingTree) return null;
+    final tipSha = branchLineTipSha(_normalRows, entry.row.branch);
+    if (tipSha == null || _refs.tips.values.contains(tipSha)) return null;
+    return (selectedSha: entry.row.commit.sha, tipSha: tipSha);
+  }
+
+  Future<void> _resolveSelectedDeletedBranchName() async {
+    if (!widget.deletedBranchNamesReady) return;
+    final line = _selectedDeletedBranchLine();
+    if (line == null ||
+        _deletedBranchNames.containsKey(line.tipSha) ||
+        !_deletedBranchLookupAttempts.add(line.tipSha)) {
+      return;
+    }
+    setState(() => _resolvingDeletedBranchTip = line.tipSha);
+    String? name;
+    try {
+      name = await widget.repository.loadLocalDeletedBranchName(
+        line.tipSha,
+        _normalCommits,
+      );
+      name ??= await widget.avatarService?.resolveMergedBranchName(line.tipSha);
+    } catch (_) {
+      name = null;
+    }
+    if (!mounted) return;
+    if (name == null && widget.avatarService == null) {
+      _deletedBranchLookupAttempts.remove(line.tipSha);
+    }
+    setState(() {
+      if (name != null) _deletedBranchNames[line.tipSha] = name;
+      if (_resolvingDeletedBranchTip == line.tipSha) {
+        _resolvingDeletedBranchTip = null;
+      }
+    });
+    if (name != null) {
+      widget.onDeletedBranchNamesChanged?.call(Map.of(_deletedBranchNames));
+    }
   }
 
   /// The branch or tag naming the focused commit's line: the topmost loaded row
@@ -2837,6 +2924,12 @@ class _TimelineScreenState extends State<TimelineScreen>
     // One branch line, one color: rails, chips, node ring and hash border.
     final branchColor = AvatarService.branchColor(row.branch);
     final refs = _rowRefs(commit);
+    final lineTip = selected && refs.isEmpty
+        ? branchLineTipSha(_normalRows, row.branch)
+        : null;
+    final deletedTip = lineTip != null && !_refs.tips.values.contains(lineTip)
+        ? lineTip
+        : null;
     final merge = commit.parents.length >= 2 && !commit.isWorkingTree;
     // Shrink stages: full spacing while the cell fits every lane, compressed
     // spacing below that, one collapsed lane at the narrowest.
@@ -2885,7 +2978,18 @@ class _TimelineScreenState extends State<TimelineScreen>
                 ),
               Row(
                 children: [
-                  _refsCell(entry.rowIndex, commit, refs, branchColor),
+                  _refsCell(
+                    entry.rowIndex,
+                    commit,
+                    refs,
+                    branchColor,
+                    deletedBranchName: deletedTip == null
+                        ? null
+                        : _deletedBranchNames[deletedTip],
+                    deletedBranchLoading:
+                        deletedTip != null &&
+                        _resolvingDeletedBranchTip == deletedTip,
+                  ),
                   _graphCell(
                     Key('graph-painter-${entry.rowIndex}'),
                     painter,
@@ -3025,12 +3129,30 @@ class _TimelineScreenState extends State<TimelineScreen>
     int index,
     GitCommit commit,
     List<GitRef> refs,
-    Color color,
-  ) => SizedBox(
+    Color color, {
+    String? deletedBranchName,
+    bool deletedBranchLoading = false,
+  }) => SizedBox(
     key: Key('refs-cell-$index'),
     width: _w('refs'),
     child: refs.isEmpty
-        ? null
+        ? deletedBranchLoading
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 5),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '브랜치 이름 찾는 중…',
+                      key: Key('deleted-branch-loading-${commit.sha}'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: _palette.muted, fontSize: 11),
+                    ),
+                  ),
+                )
+              : deletedBranchName == null
+              ? null
+              : _deletedBranchLabel(commit, deletedBranchName, color)
         : LayoutBuilder(
             builder: (context, constraints) {
               // Chips split the cell evenly, each keeping at least 40px, and
@@ -3056,6 +3178,42 @@ class _TimelineScreenState extends State<TimelineScreen>
             },
           ),
   );
+
+  Widget _deletedBranchLabel(GitCommit commit, String name, Color color) =>
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Row(
+          children: [
+            Container(
+              key: Key('deleted-branch-badge-${commit.sha}'),
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              decoration: BoxDecoration(
+                color: Theme.of(
+                  context,
+                ).colorScheme.error.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                '삭제됨',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.error,
+                  fontSize: 10,
+                ),
+              ),
+            ),
+            const SizedBox(width: 5),
+            Expanded(
+              child: Text(
+                name,
+                key: Key('deleted-branch-name-${commit.sha}'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: color, fontSize: 11),
+              ),
+            ),
+          ],
+        ),
+      );
 
   Widget _refChip(GitCommit commit, GitRef ref, Color color) => Container(
     key: Key('ref-chip-${commit.sha}-${ref.name}'),
