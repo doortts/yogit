@@ -49,6 +49,81 @@ void main() {
     ]);
   });
 
+  test('finds a deleted branch from recognized merge subjects', () {
+    for (final entry in {
+      "Merge branch 'feature/local'": 'feature/local',
+      "Merge remote-tracking branch 'origin/fix/remote'": 'fix/remote',
+      'Merge pull request #42 from octo/topic/pr': 'topic/pr',
+    }.entries) {
+      final commits = [
+        _commit('merge', ['main', 'tip'], subject: entry.key),
+        _commit('tip', ['base']),
+      ];
+
+      expect(deletedBranchNameFromMerge(commits, 'tip'), entry.value);
+    }
+  });
+
+  test(
+    'deleted branch merge lookup ignores arbitrary and first-parent text',
+    () {
+      expect(
+        deletedBranchNameFromMerge([
+          _commit('merge', ['tip', 'side'], subject: "Merge branch 'feature'"),
+          _commit('other', ['main', 'tip'], subject: 'Merge feature'),
+        ], 'tip'),
+        isNull,
+      );
+    },
+  );
+
+  test(
+    'deleted branch reflog finds the checkout source before the matching tip',
+    () {
+      const output =
+          'main-tip\x00checkout: moving from feature/gone to main\n'
+          'gone-tip\x00commit: finish feature\n';
+
+      expect(deletedBranchNameFromReflog(output, 'gone-tip'), 'feature/gone');
+    },
+  );
+
+  test('deleted branch reflog lookup rejects detached checkout sources', () {
+    for (final source in ['HEAD', '-', '307fc8b']) {
+      final output =
+          'main-tip\x00checkout: moving from $source to main\n'
+          'gone-tip\x00commit: finish feature\n';
+
+      expect(deletedBranchNameFromReflog(output, 'gone-tip'), isNull);
+    }
+  });
+
+  test(
+    'local deleted branch lookup falls back from merge to HEAD reflog',
+    () async {
+      late List<String> arguments;
+      final repository = GitRepository(
+        '/repo',
+        runner: (executable, args, {workingDirectory, environment}) async {
+          arguments = args;
+          return ProcessResult(
+            1,
+            0,
+            'main-tip\x00checkout: moving from feature/gone to main\n'
+                'gone-tip\x00commit: finish feature\n',
+            '',
+          );
+        },
+      );
+
+      expect(
+        await repository.loadLocalDeletedBranchName('gone-tip', const []),
+        'feature/gone',
+      );
+      expect(arguments, ['reflog', 'show', '--format=%H%x00%gs', 'HEAD']);
+    },
+  );
+
   test('resolves a saved local branch before current and first local', () {
     const refs = RepoRefs(local: ['main', 'release'], current: 'main');
     expect(resolveBaseBranch(refs, 'release'), 'release');
@@ -1567,6 +1642,7 @@ void _expectStableColumns(List<GraphRow> rows) {
 GitCommit _commit(
   String sha,
   List<String> parents, {
+  String? subject,
   GitIdentity committer = const GitIdentity(
     name: 'Committer',
     email: 'committer@example.com',
@@ -1580,7 +1656,7 @@ GitCommit _commit(
   committer: committer,
   committerTimestamp: 1,
   refs: const [],
-  subject: sha,
+  subject: subject ?? sha,
 );
 
 GitFileChange _file(String path) =>
