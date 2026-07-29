@@ -2368,6 +2368,106 @@ void main() {
     }
   });
 
+  testWidgets('local branch rows show only nonzero origin divergence', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(
+            local: ['main', 'release', 'local-only'],
+            remote: ['origin/main', 'origin/release'],
+            current: 'main',
+            aheadBehind: {
+              'main': BranchAheadBehind(ahead: 2, behind: 1),
+              'release': BranchAheadBehind(ahead: 0, behind: 0),
+            },
+          ),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final ahead = find.byKey(const Key('sidebar-ahead-main'));
+    final behind = find.byKey(const Key('sidebar-behind-main'));
+    expect(ahead, findsOneWidget);
+    expect(find.descendant(of: ahead, matching: find.text('↑2')), findsOne);
+    expect(behind, findsOneWidget);
+    expect(find.descendant(of: behind, matching: find.text('↓1')), findsOne);
+    expect(find.byKey(const Key('sidebar-ahead-release')), findsNothing);
+    expect(find.byKey(const Key('sidebar-behind-release')), findsNothing);
+    expect(find.byKey(const Key('sidebar-ahead-local-only')), findsNothing);
+    expect(
+      tester.widget<Text>(find.text('↑2')).style?.color,
+      isNot(tester.widget<Text>(find.text('↓1')).style?.color),
+    );
+  });
+
+  testWidgets('origin refresh skips an overlapping request', (tester) async {
+    final pending = Completer<FetchOriginResult>();
+    var calls = 0;
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          fetchOriginCallback: () {
+            calls++;
+            return pending.future;
+          },
+        ),
+        controller,
+      ),
+    );
+    await tester.pump();
+    expect(calls, 1);
+
+    await tester.pump(const Duration(minutes: 10));
+    expect(calls, 1);
+
+    pending.complete(FetchOriginResult.noOrigin);
+    await tester.pump();
+  });
+
+  testWidgets('fetch failure keeps existing refs and offers retry', (
+    tester,
+  ) async {
+    var fetches = 0;
+    var refLoads = 0;
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('1', 'first commit')],
+      refsLoader: () async {
+        refLoads++;
+        return RepoRefs(
+          local: const ['main'],
+          remote: const ['origin/main'],
+          current: 'main',
+          aheadBehind: {
+            'main': BranchAheadBehind(ahead: refLoads == 1 ? 1 : 2, behind: 0),
+          },
+        );
+      },
+      fetchOriginCallback: () async {
+        fetches++;
+        if (fetches == 1) throw StateError('offline');
+        return FetchOriginResult.updated;
+      },
+    );
+
+    await tester.pumpWidget(app(repository, controller));
+    await tester.pumpAndSettle();
+
+    expect(find.text('origin 갱신 실패'), findsOneWidget);
+    expect(find.text('↑1'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('retry-origin-fetch')));
+    await tester.pumpAndSettle();
+
+    expect(fetches, 2);
+    expect(find.text('origin 갱신 실패'), findsNothing);
+    expect(find.text('↑2'), findsOneWidget);
+  });
+
   testWidgets('tags show the newest ten and filtering reveals hidden matches', (
     tester,
   ) async {
@@ -10022,6 +10122,7 @@ class FakeGitRepository extends GitRepository {
     this.refs = const RepoRefs(local: ['main'], current: 'main'),
     this.gitDiffAlgorithmSetting = const GitDiffAlgorithmSetting.gitDefault(),
     this.refsLoader,
+    this.fetchOriginCallback,
     String root = '.',
     CommandRunner runner = runProcess,
   }) : super(root, runner: runner);
@@ -10029,6 +10130,7 @@ class FakeGitRepository extends GitRepository {
   final RepoRefs refs;
   final GitDiffAlgorithmSetting gitDiffAlgorithmSetting;
   final Future<RepoRefs> Function()? refsLoader;
+  final Future<FetchOriginResult> Function()? fetchOriginCallback;
   final Future<List<GitCommit>> Function(int skip, int limit) loader;
   final Future<GitCommit?> Function()? workingTree;
   final Future<List<GitFileChange>> Function(GitCommit commit, String? parent)?
@@ -10067,6 +10169,10 @@ class FakeGitRepository extends GitRepository {
   @override
   Future<RepoRefs> loadRefs() =>
       refsLoader?.call() ?? Future<RepoRefs>.value(refs);
+
+  @override
+  Future<FetchOriginResult> fetchOrigin() =>
+      fetchOriginCallback?.call() ?? Future.value(FetchOriginResult.noOrigin);
 
   @override
   Future<GitCommit?> loadWorkingTree() =>

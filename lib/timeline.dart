@@ -35,6 +35,7 @@ const _tooltipDelay = Duration(milliseconds: 400);
 
 /// The design's `--yo-main` accent: additions, lane dots, the name tint.
 const _main = Color(0xFF8AD6A1);
+const _behind = Color(0xFFF0A35E);
 
 const _weekdayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -366,6 +367,7 @@ class TimelineScreen extends StatefulWidget {
 
 class _TimelineScreenState extends State<TimelineScreen> {
   static const _collapsedTagLimit = 10;
+  static const _fetchInterval = Duration(minutes: 5);
 
   static const _pageSize = 500;
 
@@ -423,6 +425,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
   var _refsLoading = true;
   var _refsLoadFailed = false;
   var _refsLoaded = false;
+  Timer? _fetchTimer;
+  var _fetchingOrigin = false;
+  Object? _fetchError;
   String? _baseBranch;
   String? _pendingBaseBranch;
   var _pendingBaseBranchIsUserSelection = false;
@@ -482,6 +487,26 @@ class _TimelineScreenState extends State<TimelineScreen> {
     // detail pane stays hidden until Enter or Space asks for it.
     _loadNextPage();
     unawaited(_loadRefs());
+    unawaited(_refreshOrigin());
+    _fetchTimer = Timer.periodic(
+      _fetchInterval,
+      (_) => unawaited(_refreshOrigin()),
+    );
+  }
+
+  Future<void> _refreshOrigin() async {
+    if (_fetchingOrigin) return;
+    setState(() => _fetchingOrigin = true);
+    try {
+      final result = await widget.repository.fetchOrigin();
+      if (!mounted) return;
+      if (result == FetchOriginResult.updated) await _loadRefs();
+      if (mounted) setState(() => _fetchError = null);
+    } catch (error) {
+      if (mounted) setState(() => _fetchError = error);
+    } finally {
+      if (mounted) setState(() => _fetchingOrigin = false);
+    }
   }
 
   Future<void> _loadRefs() async {
@@ -582,6 +607,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
   @override
   void dispose() {
+    _fetchTimer?.cancel();
     _clearFullDiffRouteSession();
     if (_ownsPreviewController) _previewController.dispose();
     _selectedIndex.dispose();
@@ -1576,6 +1602,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
     final iconColor = name != null && section != _RefSection.tags
         ? _refTipColor(name)
         : _palette.muted;
+    final divergence = section == _RefSection.local && name != null
+        ? _refs.aheadBehind[name]
+        : null;
 
     void toggleFolder() => setState(() {
       if (!_collapsedRefFolders.remove(folderKey)) {
@@ -1655,6 +1684,24 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 ),
               ),
             ),
+            if ((divergence?.ahead ?? 0) > 0)
+              SizedBox(
+                key: Key('sidebar-ahead-$name'),
+                child: Text(
+                  '↑${divergence!.ahead}',
+                  style: const TextStyle(color: _main, fontSize: 11),
+                ),
+              ),
+            if ((divergence?.ahead ?? 0) > 0 && (divergence?.behind ?? 0) > 0)
+              const SizedBox(width: 5),
+            if ((divergence?.behind ?? 0) > 0)
+              SizedBox(
+                key: Key('sidebar-behind-$name'),
+                child: Text(
+                  '↓${divergence!.behind}',
+                  style: const TextStyle(color: _behind, fontSize: 11),
+                ),
+              ),
           ],
         ),
       ),
@@ -1673,13 +1720,35 @@ class _TimelineScreenState extends State<TimelineScreen> {
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Row(
-            children: [
-              _legend('commit', const _LegendDot()),
-              _legend('merge', const _LegendDot(filled: true)),
-              _legend('WIP', const _LegendDot(dashed: true)),
-            ],
-          ),
+          child: _fetchError == null
+              ? Row(
+                  children: [
+                    _legend('commit', const _LegendDot()),
+                    _legend('merge', const _LegendDot(filled: true)),
+                    _legend('WIP', const _LegendDot(dashed: true)),
+                  ],
+                )
+              : Row(
+                  children: [
+                    Text(
+                      'origin 갱신 실패',
+                      style: TextStyle(color: _behind, fontSize: 10),
+                    ),
+                    const SizedBox(width: 4),
+                    TextButton(
+                      key: const Key('retry-origin-fetch'),
+                      onPressed: _fetchingOrigin
+                          ? null
+                          : () => unawaited(_refreshOrigin()),
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(0, 24),
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text('다시 시도'),
+                    ),
+                  ],
+                ),
         ),
         // The branch the focused commit's line belongs to, under the column that
         // line's chip sits in.
