@@ -2642,7 +2642,7 @@ void main() {
     expect(find.byKey(const Key('branch-preview-rebase')), findsOneWidget);
     expect(find.text('Merge 미리보기'), findsWidgets);
     expect(find.text('Merge 성공'), findsOneWidget);
-    expect(find.text('VM'), findsOneWidget);
+    expect(find.byKey(const Key('virtual-merge-node')), findsOneWidget);
     expect(
       find.byKey(const Key('branch-preview-success-icon')),
       findsOneWidget,
@@ -3012,13 +3012,36 @@ void main() {
   testWidgets('rebase preview adds rewritten commits to the timeline', (
     tester,
   ) async {
-    final comparison = branchComparison();
+    final shortComparison = branchComparison();
+    final comparison = BranchComparisonResult(
+      baseRef: shortComparison.baseRef,
+      compareRef: shortComparison.compareRef,
+      baseTip: shortComparison.baseTip,
+      compareTip: shortComparison.compareTip,
+      baseParent: shortComparison.baseParent,
+      compareParent: shortComparison.compareParent,
+      mergeBases: shortComparison.mergeBases,
+      commits: [
+        shortComparison.commits.first,
+        for (var index = 0; index < 25; index++)
+          BranchComparisonCommit(
+            commit: commit('main-$index', 'main history $index'),
+            side: BranchCommitSide.baseOnly,
+          ),
+        ...shortComparison.commits.skip(1),
+      ],
+      files: shortComparison.files,
+      merge: shortComparison.merge,
+    );
     final original = comparison.commits
         .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
         .commit;
     late FakeGitRepository repository;
     repository = FakeGitRepository(
-      (_, _) async => [commit('normal', 'normal history')],
+      (_, _) async => [
+        for (var index = 0; index < 30; index++)
+          commit('normal-$index', 'normal history $index'),
+      ],
       refs: const RepoRefs(
         local: ['main', 'feature'],
         current: 'main',
@@ -3050,6 +3073,11 @@ void main() {
               ),
     );
     await tester.pumpWidget(app(repository, controller));
+    await tester.pumpAndSettle();
+    await tester.drag(
+      find.byKey(const Key('timeline-list')),
+      const Offset(0, -400),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('branch-diff-selector')));
     await tester.pumpAndSettle();
@@ -3120,6 +3148,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('fix/docs를 main에 Merge 실제 적용'), findsOneWidget);
+    expect(find.text('Merge 미리보기 성공'), findsOneWidget);
+    expect(find.text('가상 커밋'), findsOneWidget);
+    expect(find.text('부모 커밋'), findsOneWidget);
+    expect(find.text('충돌'), findsOneWidget);
+    expect(find.byKey(const Key('branch-preview-progress')), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
     await tester.tap(find.byKey(const Key('branch-preview-apply')));
     await tester.pumpAndSettle();
     expect(find.text('Merge 실제 적용'), findsWidgets);
@@ -3197,6 +3231,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('main 위로 fix/docs Rebase 실제 적용'), findsOneWidget);
+    expect(find.text('가상 rebase 성공'), findsOneWidget);
+    expect(find.text('가상 커밋'), findsOneWidget);
+    expect(find.text('원본 커밋'), findsOneWidget);
+    expect(find.text('점선 결과를 실제 브랜치에 적용할 수 있습니다.'), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
     await tester.tap(find.byKey(const Key('branch-preview-apply')));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Rebase 실제 적용'));

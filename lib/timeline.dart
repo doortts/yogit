@@ -42,6 +42,8 @@ const _tooltipDelay = Duration(milliseconds: 400);
 const _main = Color(0xFF8AD6A1);
 const _success = Color(0xFF34C759);
 const _behind = Color(0xFFF0A35E);
+const _previewPurple = Color(0xFFC69AFF);
+const _previewPurplePanel = Color(0xFF29243A);
 
 List<Color> rebaseMappingColors(Iterable<Color> reserved) {
   final used = reserved.map((color) => color.toARGB32()).toSet();
@@ -1748,6 +1750,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         _selectedIndex.value = 0;
       }
     });
+    _showFirstComparisonRow();
     widget.onBranchPreviewModeChanged?.call(mode);
     _scheduleRatchetUpdate();
     if (mode == BranchPreviewMode.rebase) {
@@ -1827,6 +1830,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         ];
       });
       _scheduleRatchetUpdate();
+      _showFirstComparisonRow();
       if (_branchPreviewMode == BranchPreviewMode.rebase) {
         unawaited(_startRebasePreview());
       } else if (result.merge.status == MergeConflictStatus.conflicts) {
@@ -2054,7 +2058,9 @@ class _TimelineScreenState extends State<TimelineScreen>
       await _previewController.setPreview(widget.preferredPreviewPlacement);
     }
     _scheduleRatchetUpdate();
-    if (result.status == RebasePreviewStatus.conflict) {
+    if (result.status == RebasePreviewStatus.clean) {
+      _showFirstComparisonRow();
+    } else if (result.status == RebasePreviewStatus.conflict) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final rowContext = _rebaseConflictRowContextKey.currentContext;
         if (!mounted || rowContext == null) return;
@@ -2069,6 +2075,18 @@ class _TimelineScreenState extends State<TimelineScreen>
         );
       });
     }
+  }
+
+  void _showFirstComparisonRow() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          _compareRef == null ||
+          !_scrollController.hasClients ||
+          _scrollController.offset == 0) {
+        return;
+      }
+      _scrollController.jumpTo(0);
+    });
   }
 
   void _dropRebasePreview() {
@@ -3404,16 +3422,43 @@ class _TimelineScreenState extends State<TimelineScreen>
   Widget _branchPreviewApplyCard() {
     final merge = _branchPreviewMode == BranchPreviewMode.merge;
     final result = _branchApplyResult;
+    final comparison = _comparison!;
     final busy =
         _branchApplyStatus == BranchApplyStatus.applying ||
         _branchApplyStatus == BranchApplyStatus.reverting;
+    final previewCommitCount = merge
+        ? 1
+        : _rebasePreview?.rewritten.length ?? 0;
+    Widget metric(String value, String label, String key) => Expanded(
+      child: Container(
+        key: Key(key),
+        padding: const EdgeInsets.symmetric(vertical: 7),
+        decoration: BoxDecoration(
+          color: const Color(0xFF202125),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Column(
+          children: [
+            Text(
+              value,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            Text(label, style: TextStyle(color: _palette.muted, fontSize: 10)),
+          ],
+        ),
+      ),
+    );
     return Container(
       key: const Key('branch-preview-apply-card'),
       margin: const EdgeInsets.only(top: 10),
       padding: const EdgeInsets.all(11),
       decoration: BoxDecoration(
-        color: Color.lerp(_palette.raised, _renamed, 0.14),
-        border: Border.all(color: _renamed.withValues(alpha: 0.48)),
+        color: _previewPurplePanel,
+        border: Border.all(color: const Color(0xFF695786)),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -3424,7 +3469,9 @@ class _TimelineScreenState extends State<TimelineScreen>
               Expanded(
                 child: Text(
                   result == null
-                      ? '가상 ${merge ? 'Merge' : 'Rebase'} 성공'
+                      ? merge
+                            ? 'Merge 미리보기 성공'
+                            : '가상 rebase 성공'
                       : '${merge ? 'Merge' : 'Rebase'} 적용 완료',
                   style: TextStyle(
                     color: _palette.text,
@@ -3433,27 +3480,72 @@ class _TimelineScreenState extends State<TimelineScreen>
                   ),
                 ),
               ),
-              Text(
-                switch (_branchApplyStatus) {
-                  BranchApplyStatus.idle => '아직 적용하지 않음',
-                  BranchApplyStatus.applying => '커밋 적용 중',
-                  BranchApplyStatus.applied => '로컬 브랜치 적용됨',
-                  BranchApplyStatus.reverting => '되돌리는 중',
-                  BranchApplyStatus.reverted => 'SHA 일치 확인',
-                  BranchApplyStatus.failed => '작업 실패',
-                },
-                style: TextStyle(
-                  color:
-                      _branchApplyStatus == BranchApplyStatus.reverted ||
-                          _branchApplyStatus == BranchApplyStatus.applied
-                      ? _success
-                      : _palette.muted,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
+              Flexible(
+                child: Text(
+                  result == null && _branchApplyStatus == BranchApplyStatus.idle
+                      ? '${comparison.baseRef}과 ${comparison.compareRef} 유지'
+                      : switch (_branchApplyStatus) {
+                          BranchApplyStatus.applying => '커밋 적용 중',
+                          BranchApplyStatus.applied => '로컬 브랜치 적용됨',
+                          BranchApplyStatus.reverting => '되돌리는 중',
+                          BranchApplyStatus.reverted => 'SHA 일치 확인',
+                          BranchApplyStatus.failed => '작업 실패',
+                          BranchApplyStatus.idle => '아직 적용하지 않음',
+                        },
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color:
+                        _branchApplyStatus == BranchApplyStatus.reverted ||
+                            _branchApplyStatus == BranchApplyStatus.applied
+                        ? _success
+                        : _palette.muted,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],
           ),
+          if (result == null) ...[
+            const SizedBox(height: 9),
+            Container(
+              key: const Key('branch-preview-progress'),
+              height: 5,
+              decoration: BoxDecoration(
+                color: const Color(0xFF17181B),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const FractionallySizedBox(
+                widthFactor: 1,
+                alignment: Alignment.centerLeft,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: _previewPurple,
+                    borderRadius: BorderRadius.all(Radius.circular(4)),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                metric(
+                  '$previewCommitCount',
+                  '가상 커밋',
+                  'branch-preview-virtual-count',
+                ),
+                const SizedBox(width: 5),
+                metric(
+                  '${merge ? 2 : previewCommitCount}',
+                  merge ? '부모 커밋' : '원본 커밋',
+                  'branch-preview-source-count',
+                ),
+                const SizedBox(width: 5),
+                metric('0', '충돌', 'branch-preview-conflict-count'),
+              ],
+            ),
+          ],
           if (result != null) ...[
             const SizedBox(height: 8),
             Text(
@@ -3474,23 +3566,57 @@ class _TimelineScreenState extends State<TimelineScreen>
             ),
           ],
           const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerRight,
-            child: result == null
-                ? FilledButton(
-                    key: const Key('branch-preview-apply'),
-                    onPressed: busy
-                        ? null
-                        : () => unawaited(_confirmBranchPreviewApply()),
-                    child: Text(_branchPreviewApplyLabel),
-                  )
-                : OutlinedButton(
+          LayoutBuilder(
+            builder: (context, constraints) {
+              if (result != null) {
+                return Align(
+                  alignment: Alignment.centerRight,
+                  child: OutlinedButton(
                     key: const Key('branch-preview-rollback'),
                     onPressed: _branchApplyStatus == BranchApplyStatus.applied
                         ? () => unawaited(_confirmBranchPreviewRollback())
                         : null,
                     child: Text('${merge ? 'Merge' : 'Rebase'} 이전 시점으로 되돌리기'),
                   ),
+                );
+              }
+              final note = Text(
+                merge
+                    ? '가상 결과를 실제 브랜치에 적용할 수 있습니다.'
+                    : '점선 결과를 실제 브랜치에 적용할 수 있습니다.',
+                style: TextStyle(color: _palette.muted, fontSize: 10),
+              );
+              final apply = FilledButton(
+                key: const Key('branch-preview-apply'),
+                onPressed: busy
+                    ? null
+                    : () => unawaited(_confirmBranchPreviewApply()),
+                style: FilledButton.styleFrom(
+                  foregroundColor: const Color(0xFFF1E7FF),
+                  backgroundColor: const Color(0xFF46385F),
+                  side: const BorderSide(color: Color(0xFF7D68A6)),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                ),
+                child: Text(_branchPreviewApplyLabel),
+              );
+              if (constraints.maxWidth >= 380) {
+                return Row(
+                  children: [
+                    Expanded(child: note),
+                    const SizedBox(width: 8),
+                    apply,
+                  ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  note,
+                  const SizedBox(height: 7),
+                  Align(alignment: Alignment.centerRight, child: apply),
+                ],
+              );
+            },
           ),
         ],
       ),
@@ -4195,7 +4321,11 @@ class _TimelineScreenState extends State<TimelineScreen>
                               ),
                             ),
                           ),
-                    node: commit.isWorkingTree || merge
+                    node:
+                        commit.isWorkingTree ||
+                            (merge &&
+                                previewKind !=
+                                    PreviewGraphNodeKind.virtualMerge)
                         ? null
                         : _graphNode(
                             commit: commit,
@@ -4341,7 +4471,27 @@ class _TimelineScreenState extends State<TimelineScreen>
         break;
       }
     }
-    final child = kind == PreviewGraphNodeKind.virtualRebase
+    final child = kind == PreviewGraphNodeKind.virtualMerge
+        ? Container(
+            key: const Key('virtual-merge-node'),
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _previewPurple,
+              border: Border.all(color: _palette.background, width: 2),
+            ),
+            child: const Text(
+              'VM',
+              style: TextStyle(
+                color: Colors.black,
+                fontSize: 8,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          )
+        : kind == PreviewGraphNodeKind.virtualRebase
         ? Container(
             key: Key('virtual-rebase-node-${commit.sha}'),
             width: size,
@@ -5253,7 +5403,9 @@ class _TimelineScreenState extends State<TimelineScreen>
               Text(
                 _comparison == null
                     ? commit.subject
-                    : '${_comparison!.baseRef} ↔ ${_comparison!.compareRef}',
+                    : _branchPreviewMode == BranchPreviewMode.merge
+                    ? '가상 병합 커밋'
+                    : '가상 리베이스 결과',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
