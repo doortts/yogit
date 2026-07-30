@@ -12043,7 +12043,7 @@ class FakeGitRepository extends GitRepository {
       await operationInProgressCallback?.call() ?? false;
 
   @override
-  Future<void> cleanupStaleRebaseWorktrees() async {}
+  Future<void> cleanupStalePreviewWorktrees() async {}
 
   @override
   Future<CherryPickState?> loadCherryPickState() =>

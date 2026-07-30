@@ -1797,7 +1797,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     int serial,
   ) async {
     try {
-      await widget.repository.cleanupStaleRebaseWorktrees();
+      await widget.repository.cleanupStalePreviewWorktrees();
       final result = await widget.repository.simulateRebase(
         baseRef: baseRef,
         compareRef: compareRef,

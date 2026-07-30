@@ -776,6 +776,55 @@ void main() {
   );
 
   test(
+    'merge preview resolves conflicts without moving either branch',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'yogit_merge_preview_fixture_',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      await _initRepository(root);
+      await File('${root.path}/shared.txt').writeAsString('base\n');
+      await _git(root, ['add', 'shared.txt']);
+      await _git(root, ['commit', '-m', 'base']);
+
+      await _git(root, ['switch', '-c', 'feature']);
+      await File('${root.path}/shared.txt').writeAsString('feature\n');
+      await _git(root, ['commit', '-am', 'feature']);
+      final featureBefore = (await _git(root, ['rev-parse', 'feature'])).trim();
+
+      await _git(root, ['switch', 'main']);
+      await File('${root.path}/shared.txt').writeAsString('main\n');
+      await _git(root, ['commit', '-am', 'main']);
+      final mainBefore = (await _git(root, ['rev-parse', 'main'])).trim();
+
+      final session = await GitRepository(
+        root.path,
+      ).openMergePreview(baseRef: 'main', compareRef: 'feature');
+      addTearDown(session.dispose);
+      final conflict = await session.start();
+
+      expect(conflict.status, MergePreviewStatus.conflict);
+      expect(conflict.conflictFiles, ['shared.txt']);
+      expect(Directory(session.worktreePath!).existsSync(), isTrue);
+
+      await session.resolveFile('shared.txt', MergeConflictChoice.compare);
+      final completed = await session.finish();
+
+      expect(completed.status, MergePreviewStatus.clean);
+      expect(completed.treeSha, isNotEmpty);
+      expect(
+        (await _git(root, ['show', '${completed.treeSha}:shared.txt'])).trim(),
+        'feature',
+      );
+      expect((await _git(root, ['rev-parse', 'main'])).trim(), mainBefore);
+      expect(
+        (await _git(root, ['rev-parse', 'feature'])).trim(),
+        featureBefore,
+      );
+    },
+  );
+
+  test(
     'rebase simulation reports first conflicting commit and cleans worktree',
     () async {
       final root = await Directory.systemTemp.createTemp(

@@ -342,11 +342,217 @@ class RebaseCheckResult {
   final String? error;
 }
 
+enum MergePreviewStatus { clean, conflict, failed }
+
+enum MergeConflictChoice { base, compare }
+
+class MergePreviewResult {
+  const MergePreviewResult({
+    required this.status,
+    required this.baseTip,
+    required this.compareTip,
+    this.treeSha,
+    this.resultFiles = const [],
+    this.conflictFiles = const [],
+    this.error,
+  });
+
+  final MergePreviewStatus status;
+  final String baseTip;
+  final String compareTip;
+  final String? treeSha;
+  final List<GitFileChange> resultFiles;
+  final List<String> conflictFiles;
+  final String? error;
+}
+
 enum RebasePreviewStatus { clean, conflict, failed }
 
 enum RebaseConflictChoice { base, commit }
 
 typedef RewrittenCommit = ({GitCommit original, String rewrittenSha});
+
+String _previewFilePath(String? worktreePath, String relativePath) {
+  final parts = relativePath.split(RegExp(r'[/\\]'));
+  if (worktreePath == null ||
+      relativePath.isEmpty ||
+      relativePath.startsWith('/') ||
+      RegExp(r'^[A-Za-z]:').hasMatch(relativePath) ||
+      parts.any((part) => part.isEmpty || part == '.' || part == '..')) {
+    throw FileSystemException('Invalid preview path', relativePath);
+  }
+  return '$worktreePath${Platform.pathSeparator}'
+      '${parts.join(Platform.pathSeparator)}';
+}
+
+class MergePreviewSession {
+  MergePreviewSession({
+    required GitRepository repository,
+    required this.baseTip,
+    required this.compareTip,
+  }) : _repository = repository;
+
+  final GitRepository _repository;
+  final String baseTip;
+  final String compareTip;
+  String? _worktreePath;
+  bool _disposed = false;
+
+  String? get worktreePath => _worktreePath;
+
+  String filePath(String relativePath) =>
+      _previewFilePath(_worktreePath, relativePath);
+
+  Future<MergePreviewResult> start() async {
+    if (_disposed) {
+      throw StateError('Merge preview session has been disposed.');
+    }
+    if (_worktreePath != null) {
+      throw StateError('Merge preview session has already started.');
+    }
+    final temporary = await Directory.systemTemp.createTemp(
+      'yogit_merge_preview_',
+    );
+    final path = temporary.path;
+    await temporary.delete();
+    _worktreePath = path;
+    final add = await _repository.runner(_repository.gitExecutable, [
+      'worktree',
+      'add',
+      '--detach',
+      path,
+      baseTip,
+    ], workingDirectory: _repository.root);
+    if (add.exitCode != 0) {
+      await dispose();
+      return MergePreviewResult(
+        status: MergePreviewStatus.failed,
+        baseTip: baseTip,
+        compareTip: compareTip,
+        error: add.stderr.toString().trim(),
+      );
+    }
+    final merge = await _repository.runner(
+      _repository.gitExecutable,
+      [
+        '-c',
+        'core.hooksPath=/dev/null',
+        '-c',
+        'commit.gpgSign=false',
+        'merge',
+        '--no-commit',
+        '--no-ff',
+        compareTip,
+      ],
+      workingDirectory: path,
+      environment: {
+        ...Platform.environment,
+        'GIT_EDITOR': 'true',
+        'GIT_TERMINAL_PROMPT': '0',
+      },
+    );
+    if (merge.exitCode == 0) return finish();
+    final conflicts = await _run(const [
+      'diff',
+      '--name-only',
+      '--diff-filter=U',
+      '-z',
+    ]);
+    final files = conflicts
+        .split('\x00')
+        .where((value) => value.isNotEmpty)
+        .toList();
+    return MergePreviewResult(
+      status: files.isEmpty
+          ? MergePreviewStatus.failed
+          : MergePreviewStatus.conflict,
+      baseTip: baseTip,
+      compareTip: compareTip,
+      conflictFiles: files,
+      error: files.isEmpty ? merge.stderr.toString().trim() : null,
+    );
+  }
+
+  Future<void> resolveFile(
+    String relativePath,
+    MergeConflictChoice choice,
+  ) async {
+    filePath(relativePath);
+    await _run([
+      'checkout',
+      choice == MergeConflictChoice.base ? '--ours' : '--theirs',
+      '--',
+      relativePath,
+    ]);
+    await markResolved(relativePath);
+  }
+
+  Future<void> markResolved(String relativePath) async {
+    filePath(relativePath);
+    await _run(['add', '--', relativePath]);
+  }
+
+  Future<MergePreviewResult> finish() async {
+    final conflicts = await _run(const [
+      'diff',
+      '--name-only',
+      '--diff-filter=U',
+    ]);
+    if (conflicts.trim().isNotEmpty) {
+      throw GitRepositoryException(_worktreePath!, '해결되지 않은 충돌 파일이 남아 있습니다.');
+    }
+    final treeSha = (await _run(const ['write-tree'])).trim();
+    return MergePreviewResult(
+      status: MergePreviewStatus.clean,
+      baseTip: baseTip,
+      compareTip: compareTip,
+      treeSha: treeSha,
+      resultFiles: await _repository.loadFilesBetween(baseTip, treeSha),
+    );
+  }
+
+  Future<String> _run(List<String> arguments) async {
+    final result = await _repository.runner(
+      _repository.gitExecutable,
+      arguments,
+      workingDirectory: _worktreePath,
+    );
+    if (result.exitCode != 0) {
+      throw ProcessException(
+        _repository.gitExecutable,
+        arguments,
+        result.stderr.toString(),
+        result.exitCode,
+      );
+    }
+    return result.stdout.toString();
+  }
+
+  Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
+    final path = _worktreePath;
+    if (path == null) return;
+    await _repository._ignoreCommand(const [
+      'merge',
+      '--abort',
+    ], workingDirectory: path);
+    await _repository._ignoreCommand([
+      'worktree',
+      'remove',
+      '--force',
+      path,
+    ], workingDirectory: _repository.root);
+    final directory = Directory(path);
+    if (await directory.exists()) {
+      await directory.delete(recursive: true);
+    }
+    await _repository._ignoreCommand(const [
+      'worktree',
+      'prune',
+    ], workingDirectory: _repository.root);
+  }
+}
 
 class RebasePreviewResult {
   const RebasePreviewResult({
@@ -392,18 +598,8 @@ class RebasePreviewSession {
 
   String? get worktreePath => _worktreePath;
 
-  String filePath(String relativePath) {
-    final path = _worktreePath;
-    final parts = relativePath.split(RegExp(r'[/\\]'));
-    if (path == null ||
-        relativePath.isEmpty ||
-        relativePath.startsWith('/') ||
-        RegExp(r'^[A-Za-z]:').hasMatch(relativePath) ||
-        parts.any((part) => part.isEmpty || part == '.' || part == '..')) {
-      throw FileSystemException('Invalid rebase preview path', relativePath);
-    }
-    return '$path${Platform.pathSeparator}${parts.join(Platform.pathSeparator)}';
-  }
+  String filePath(String relativePath) =>
+      _previewFilePath(_worktreePath, relativePath);
 
   Future<RebasePreviewResult> start() async {
     if (_disposed) {
@@ -1682,6 +1878,23 @@ class GitRepository implements FullDiffRepository {
     }
   }
 
+  Future<MergePreviewSession> openMergePreview({
+    required String baseRef,
+    required String compareRef,
+  }) async => MergePreviewSession(
+    repository: this,
+    baseTip: (await _run([
+      'rev-parse',
+      '--verify',
+      '$baseRef^{commit}',
+    ])).trim(),
+    compareTip: (await _run([
+      'rev-parse',
+      '--verify',
+      '$compareRef^{commit}',
+    ])).trim(),
+  );
+
   Future<RebasePreviewSession> openRebasePreview({
     required String baseRef,
     required String compareRef,
@@ -1712,7 +1925,7 @@ class GitRepository implements FullDiffRepository {
     );
   }
 
-  Future<void> cleanupStaleRebaseWorktrees() async {
+  Future<void> cleanupStalePreviewWorktrees() async {
     final result = await runner(gitExecutable, const [
       'worktree',
       'list',
@@ -1731,7 +1944,7 @@ class GitRepository implements FullDiffRepository {
         .split('\n')
         .where((line) => line.startsWith('worktree '))
         .map((line) => line.substring('worktree '.length))
-        .where(_isYogitRebasePath);
+        .where(_isYogitPreviewPath);
     for (final path in paths) {
       await _ignoreCommand([
         'worktree',
@@ -1953,13 +2166,13 @@ class GitRepository implements FullDiffRepository {
     );
   }
 
-  bool _isYogitRebasePath(String path) {
+  bool _isYogitPreviewPath(String path) {
     final directory = Directory(path).absolute;
     return directory.parent.path == Directory.systemTemp.absolute.path &&
         directory.uri.pathSegments
             .where((segment) => segment.isNotEmpty)
             .last
-            .startsWith('yogit_rebase_');
+            .startsWith(RegExp(r'yogit_(?:merge|rebase)_preview_'));
   }
 
   Future<void> _ignoreCommand(
