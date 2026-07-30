@@ -2901,6 +2901,21 @@ void main() {
     expect(find.byKey(const Key('virtual-preview-row')), findsOneWidget);
     expect(find.byKey(const Key('virtual-preview-chip')), findsOneWidget);
     expect(find.text('가상'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('virtual-preview-row')));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('virtual-preview-row')),
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget.key is ValueKey<String> &&
+              (widget.key! as ValueKey<String>).value.startsWith(
+                'selection-band-',
+              ),
+        ),
+      ),
+      findsOneWidget,
+    );
     expect(
       find.byKey(const Key('branch-preview-success-icon')),
       findsOneWidget,
@@ -2976,10 +2991,11 @@ void main() {
     expect(find.text('feature → main'), findsOneWidget);
   });
 
-  testWidgets('comparison preview stays on the branch tip diff', (
+  testWidgets('comparison preview follows the focused real commit', (
     tester,
   ) async {
-    final calls = <({String from, String to, String path})>[];
+    final rangeCalls = <({String from, String to, String path})>[];
+    final commitCalls = <({String sha, String path})>[];
     await tester.pumpWidget(
       app(
         FakeGitRepository(
@@ -2994,8 +3010,23 @@ void main() {
               Future.value(
                 const RebaseCheckResult(status: RebaseCheckStatus.clean),
               ),
+          files: (commit, _) async => [
+            GitFileChange(
+              path: '${commit.sha}.dart',
+              status: 'M',
+              additions: 1,
+              deletions: 0,
+            ),
+          ],
+          diff: (commit, _, path, _, _) async {
+            commitCalls.add((sha: commit.sha, path: path));
+            return const [
+              DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+              DiffLine(kind: DiffLineKind.add, text: 'focused', newNumber: 1),
+            ];
+          },
           diffBetween: (from, to, file) async {
-            calls.add((from: from, to: to, path: file.path));
+            rangeCalls.add((from: from, to: to, path: file.path));
             return const [
               DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
               DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
@@ -3015,13 +3046,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('lib/shared.dart'), findsWidgets);
-    expect(calls, [
+    expect(rangeCalls, [
       (from: 'main-tip', to: 'feature-tip', path: 'lib/shared.dart'),
     ]);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
-    expect(find.text('lib/shared.dart'), findsWidgets);
-    expect(calls, hasLength(1));
+    expect(find.text('선택한 커밋의 diff'), findsOneWidget);
+    expect(find.text('main-tip.dart'), findsWidgets);
+    expect(commitCalls, [(sha: 'main-tip', path: 'main-tip.dart')]);
+    expect(rangeCalls, hasLength(1));
   });
 
   testWidgets('branch preview diff switches between both full diff layouts', (
