@@ -118,10 +118,10 @@ void main() {
                   )
                   .child!
               as DecoratedBox;
-      expect(
-        ((fileRow.decoration as BoxDecoration).border! as Border).top.color,
-        const Color(0xFF303033),
-      );
+      final fileRowDecoration = fileRow.decoration as BoxDecoration;
+      expect(fileRowDecoration.color, TimelineThemePalette.carbon.neutralChip);
+      expect(fileRowDecoration.border, isNull);
+      expect(fileRowDecoration.borderRadius, BorderRadius.circular(6));
     },
   );
 
@@ -2842,16 +2842,23 @@ void main() {
       find.byKey(const Key('branch-preview-success-icon')),
       findsOneWidget,
     );
+    final painters = tester
+        .widgetList<CustomPaint>(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is CustomPaint && widget.painter is CommitGraphPainter,
+          ),
+        )
+        .map((paint) => paint.painter! as CommitGraphPainter);
     expect(
-      tester
-          .widgetList<CustomPaint>(
-            find.byWidgetPredicate(
-              (widget) =>
-                  widget is CustomPaint && widget.painter is CommitGraphPainter,
-            ),
-          )
-          .map((paint) => (paint.painter! as CommitGraphPainter).row.maxLane),
+      painters.map((painter) => painter.row.maxLane),
       everyElement(lessThanOrEqualTo(1)),
+    );
+    expect(
+      painters
+          .singleWhere((painter) => painter.row.commit.sha == 'root')
+          .committerColor,
+      TimelineThemePalette.systemGraphite.muted,
     );
   });
 
@@ -2893,6 +2900,10 @@ void main() {
     );
     expect(segmented.selected, {BranchPreviewMode.merge});
     expect(segmented.showSelectedIcon, isFalse);
+    expect(
+      segmented.style?.backgroundColor?.resolve({WidgetState.selected}),
+      TimelineThemePalette.systemGraphite.interactive,
+    );
     expect(find.byKey(const Key('branch-preview-merge')), findsOneWidget);
     expect(find.byKey(const Key('branch-preview-rebase')), findsOneWidget);
     expect(find.text('Merge 미리보기'), findsWidgets);
@@ -3090,6 +3101,34 @@ void main() {
     expect(find.text('가상 병합 커밋'), findsOneWidget);
     expect(find.text('feature.txt'), findsWidgets);
     expect(find.byType(UnifiedPresentationView), findsOneWidget);
+    final fileList = find.byKey(const Key('branch-preview-file-list'));
+    final selectedFileText = find.descendant(
+      of: fileList,
+      matching: find.text('feature.txt'),
+    );
+    expect(tester.widget<Text>(selectedFileText).style?.fontFamily, isNull);
+    final selectedFileBox = tester.widget<DecoratedBox>(
+      find
+          .ancestor(
+            of: selectedFileText,
+            matching: find.byWidgetPredicate(
+              (widget) =>
+                  widget is DecoratedBox &&
+                  (widget.decoration as BoxDecoration).color != null,
+            ),
+          )
+          .first,
+    );
+    expect(
+      (selectedFileBox.decoration as BoxDecoration).borderRadius,
+      BorderRadius.circular(6),
+    );
+    expect(
+      tester
+          .getSize(find.byKey(const Key('branch-preview-layout-unified')))
+          .height,
+      greaterThanOrEqualTo(22),
+    );
 
     await tester.tap(
       find.byKey(const Key('branch-preview-layout-side-by-side')),
@@ -4795,6 +4834,32 @@ void main() {
       colors.map((color) => HSLColor.fromColor(color).lightness),
       everyElement(lessThanOrEqualTo(0.42)),
     );
+  });
+
+  test(
+    'comparison target branch bends at the common parent in its own color',
+    () {
+      final rows = layoutBranchComparison(branchComparison().commits);
+      final target = rows.singleWhere((row) => row.commit.sha == 'feature-tip');
+      final transition = target.transitions.single;
+
+      expect(target.parentLanes, [0]);
+      expect(CommitGraphPainter.isMergeEdge(target, transition), isFalse);
+      expect(CommitGraphPainter.transitionBranch(target, transition), 1);
+    },
+  );
+
+  test('merge preview keeps each parent edge dashed until its parent node', () {
+    final graph = layoutMergePreviewGraph(branchComparison());
+    final targetIndex = graph.rows.indexWhere(
+      (row) => row.commit.sha == 'feature-tip',
+    );
+    final targetLane = graph.rows[targetIndex].lane;
+
+    for (var index = 0; index < targetIndex; index++) {
+      expect(graph.dashedLanes[index], contains(targetLane));
+    }
+    expect(graph.dashedLanes[targetIndex], isNot(contains(targetLane)));
   });
 
   test('preview graph adds virtual merge and rewritten rebase commits', () {

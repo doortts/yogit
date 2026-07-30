@@ -144,10 +144,19 @@ BranchPreviewGraph layoutMergePreviewGraph(BranchComparisonResult comparison) {
     ),
     ...existing,
   ];
+  final dashedLanes = <int, Set<int>>{};
+  for (final parent in [base, compare]) {
+    final parentIndex = rows.indexWhere(
+      (row) => row.commit.sha == parent.commit.sha,
+    );
+    for (var index = 0; index < parentIndex; index++) {
+      (dashedLanes[index] ??= {}).add(parent.lane);
+    }
+  }
   return BranchPreviewGraph(
     rows: rows,
     kinds: {sha: PreviewGraphNodeKind.virtualMerge},
-    dashedLanes: {0: lanes.toSet()},
+    dashedLanes: dashedLanes,
   );
 }
 
@@ -1771,7 +1780,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         ),
         backgroundColor: WidgetStateProperty.resolveWith(
           (states) => states.contains(WidgetState.selected)
-              ? _palette.selectedRow
+              ? _palette.interactive
               : _palette.background,
         ),
         side: WidgetStatePropertyAll(BorderSide(color: _palette.border)),
@@ -4565,6 +4574,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     bool selected,
     bool refConnector, {
     Color? committerColor,
+    Color? outgoingRailColor,
   }) => CommitGraphPainter(
     row: entry.row,
     previous: index > 0 ? _entries[index - 1].row : null,
@@ -4586,6 +4596,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               _branchPreviewHasConflict
         ? _previewConflict
         : _previewPurple,
+    outgoingRailColor: outgoingRailColor,
     backgroundColor: _palette.background,
     selectedRowColor: _palette.selectedRow,
   );
@@ -4600,8 +4611,17 @@ class _TimelineScreenState extends State<TimelineScreen>
     final entry = _entries[index];
     final row = entry.row;
     final commit = row.commit;
+    final commonBoundary =
+        _comparison?.commits.any(
+          (entry) =>
+              entry.commit.sha == commit.sha &&
+              entry.side == BranchCommitSide.commonBoundary,
+        ) ??
+        false;
     // One branch line, one color: rails, chips, node ring and hash border.
-    final branchColor = AvatarService.branchColor(row.branch);
+    final branchColor = commonBoundary
+        ? _palette.muted
+        : AvatarService.branchColor(row.branch);
     final previewKind = _previewGraph?.kinds[commit.sha];
     final rebaseConflict =
         _rebasePreview?.status == RebasePreviewStatus.conflict &&
@@ -4716,6 +4736,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       selected && !virtualPreview,
       refs.isNotEmpty,
       committerColor: previewColor,
+      outgoingRailColor: commonBoundary ? _palette.muted : null,
     );
     // Nodes keep their size at every width; only the overhang clips.
     const avatarSize = CommitGraphPainter.avatarDiameter;
@@ -4857,8 +4878,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                               vertical: 3,
                             ),
                             decoration: BoxDecoration(
-                              color:
-                                  rowAccentColor.withValues(alpha: 0.2),
+                              color: rowAccentColor.withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
@@ -6751,10 +6771,14 @@ class _TimelineScreenState extends State<TimelineScreen>
         height: 28,
         child: InkWell(
           onTap: () => _selectPreviewFile(commit, file.path),
+          borderRadius: BorderRadius.circular(6),
           child: DecoratedBox(
             decoration: BoxDecoration(
               color: selected ? _palette.neutralChip : null,
-              border: Border(top: BorderSide(color: _palette.border)),
+              borderRadius: selected ? BorderRadius.circular(6) : null,
+              border: selected
+                  ? null
+                  : Border(top: BorderSide(color: _palette.border)),
             ),
             child: Row(
               children: [
@@ -6791,7 +6815,6 @@ class _TimelineScreenState extends State<TimelineScreen>
                     style: TextStyle(
                       color: selected ? _palette.text : _palette.muted,
                       fontSize: 12,
-                      fontFamily: 'monospace',
                     ),
                   ),
                 ),
@@ -6967,14 +6990,14 @@ class _TimelineScreenState extends State<TimelineScreen>
   }) => InkWell(
     key: key,
     onTap: () => setState(() => _branchPreviewLayout = layout),
-    borderRadius: BorderRadius.circular(5),
+    borderRadius: BorderRadius.circular(6),
     child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
         color: _branchPreviewLayout == layout
             ? _palette.interactive
             : _palette.raised,
-        borderRadius: BorderRadius.circular(5),
+        borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
         label,
@@ -7654,6 +7677,7 @@ class CommitGraphPainter extends CustomPainter {
     this.dashedLanes = const {},
     this.previousDashedLanes = const {},
     this.previewRailColor,
+    this.outgoingRailColor,
     this.backgroundColor = const Color(0xFF1C1C1E),
     this.selectedRowColor = const Color(0xFF234D72),
   });
@@ -7734,6 +7758,7 @@ class CommitGraphPainter extends CustomPainter {
   final Set<int> dashedLanes;
   final Set<int> previousDashedLanes;
   final Color? previewRailColor;
+  final Color? outgoingRailColor;
 
   bool isDashedLane(int lane) => dashedLanes.contains(lane);
   bool isDashedAbove(int lane) =>
@@ -7875,6 +7900,7 @@ class CommitGraphPainter extends CustomPainter {
             row.nextLaneBranches[entry.key],
             row.nextLaneShas[entry.key],
             dashed: dashed,
+            colorOverride: entry.key == row.lane ? outgoingRailColor : null,
           );
           _drawVerticalRail(
             canvas,
@@ -8042,12 +8068,20 @@ class CommitGraphPainter extends CustomPainter {
   /// A rail paints in its branch line's color. Before [GraphRow] carries branch
   /// ids for a lane it falls back to the committer color, so the graph degrades
   /// to the old look instead of to one flat color.
-  Paint _railPaint(int? branch, String? sha, {bool dashed = false}) => Paint()
+  Paint _railPaint(
+    int? branch,
+    String? sha, {
+    bool dashed = false,
+    Color? colorOverride,
+  }) => Paint()
     ..color = dashed && previewRailColor != null
         ? previewRailColor!
-        : branch == null
-        ? AvatarService.color(committersBySha[sha] ?? row.commit.committer)
-        : AvatarService.branchColor(branch)
+        : colorOverride ??
+              (branch == null
+                  ? AvatarService.color(
+                      committersBySha[sha] ?? row.commit.committer,
+                    )
+                  : AvatarService.branchColor(branch))
     ..style = PaintingStyle.stroke
     ..strokeWidth = dashed ? previewRailWidth : railWidth
     ..strokeCap = StrokeCap.round
@@ -8110,6 +8144,7 @@ class CommitGraphPainter extends CustomPainter {
       !setEquals(oldDelegate.dashedLanes, dashedLanes) ||
       !setEquals(oldDelegate.previousDashedLanes, previousDashedLanes) ||
       oldDelegate.previewRailColor != previewRailColor ||
+      oldDelegate.outgoingRailColor != outgoingRailColor ||
       oldDelegate.backgroundColor != backgroundColor ||
       oldDelegate.selectedRowColor != selectedRowColor;
 }
