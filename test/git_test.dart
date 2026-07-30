@@ -966,8 +966,11 @@ void main() {
       final worktree = session.worktreePath!;
       expect(Directory(worktree).existsSync(), isTrue);
 
-      await File(session.filePath('shared.txt')).writeAsString('resolved\n');
-      await session.markResolved('shared.txt');
+      await session.resolveFile('shared.txt', RebaseConflictChoice.commit);
+      expect(
+        await File(session.filePath('shared.txt')).readAsString(),
+        'feature\n',
+      );
       final completed = await session.continueAfterResolving();
 
       expect(completed.status, RebasePreviewStatus.clean);

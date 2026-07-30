@@ -344,6 +344,8 @@ class RebaseCheckResult {
 
 enum RebasePreviewStatus { clean, conflict, failed }
 
+enum RebaseConflictChoice { base, commit }
+
 typedef RewrittenCommit = ({GitCommit original, String rewrittenSha});
 
 class RebasePreviewResult {
@@ -489,6 +491,20 @@ class RebasePreviewSession {
         result.exitCode,
       );
     }
+  }
+
+  Future<void> resolveFile(
+    String relativePath,
+    RebaseConflictChoice choice,
+  ) async {
+    filePath(relativePath);
+    await _run([
+      'checkout',
+      choice == RebaseConflictChoice.base ? '--ours' : '--theirs',
+      '--',
+      relativePath,
+    ]);
+    await markResolved(relativePath);
   }
 
   Future<RebasePreviewResult> continueAfterResolving() async {

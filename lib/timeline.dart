@@ -606,6 +606,12 @@ class _TimelineScreenState extends State<TimelineScreen>
   RebasePreviewSession? _rebasePreviewSession;
   RebasePreviewResult? _rebasePreview;
   var _rebasePreviewSerial = 0;
+  var _rebasePreviewBusy = false;
+  Object? _rebasePreviewError;
+  var _repositoryOperationInProgress = false;
+  final _rebaseResolvedFiles = <String>{};
+  final _rebaseEditedFiles = <String>{};
+  final _rebaseConflictRowContextKey = GlobalKey();
   Object? _comparisonError;
   var _comparisonSerial = 0;
   late BranchPreviewMode _branchPreviewMode = widget.branchPreviewMode;
@@ -1853,54 +1859,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         await session.dispose();
         return;
       }
-      final colors = rebaseMappingColors([
-        ...AvatarService.palette,
-        _palette.background,
-        _palette.surface,
-        _palette.panel,
-        _palette.raised,
-        _palette.border,
-        _palette.text,
-        _palette.muted,
-        _palette.selectedRow,
-        _palette.interactive,
-      ]);
-      final graph = layoutRebasePreviewGraph(comparison, result, colors);
-      setState(() {
-        _rebasePreview = result;
-        _rebaseCheck = switch (result.status) {
-          RebasePreviewStatus.clean => const RebaseCheckResult(
-            status: RebaseCheckStatus.clean,
-          ),
-          RebasePreviewStatus.conflict => RebaseCheckResult(
-            status: RebaseCheckStatus.conflicts,
-            stoppedCommit: result.currentCommit?.sha,
-            files: result.conflictFiles,
-          ),
-          RebasePreviewStatus.failed => RebaseCheckResult(
-            status: RebaseCheckStatus.failed,
-            error: result.error,
-          ),
-        };
-        _previewGraph = graph;
-        _comparisonRows = graph.rows;
-        _comparisonEntries = [
-          for (var index = 0; index < graph.rows.length; index++)
-            (rowIndex: index, label: null, row: graph.rows[index]),
-        ];
-        final conflictIndex = graph.rows.indexWhere(
-          (row) => row.commit.sha == result.currentCommit?.sha,
-        );
-        _selectedIndex.value =
-            result.status == RebasePreviewStatus.conflict && conflictIndex >= 0
-            ? conflictIndex
-            : 0;
-      });
-      if (result.status == RebasePreviewStatus.conflict &&
-          _previewController.previewPlacement == PreviewPlacement.closed) {
-        await _previewController.setPreview(widget.preferredPreviewPlacement);
-      }
-      _scheduleRatchetUpdate();
+      await _applyRebasePreviewResult(comparison, result);
     } catch (error) {
       if (!mounted || request != _rebasePreviewSerial) return;
       setState(
@@ -1912,11 +1871,91 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
   }
 
+  Future<void> _applyRebasePreviewResult(
+    BranchComparisonResult comparison,
+    RebasePreviewResult result,
+  ) async {
+    final colors = rebaseMappingColors([
+      ...AvatarService.palette,
+      _palette.background,
+      _palette.surface,
+      _palette.panel,
+      _palette.raised,
+      _palette.border,
+      _palette.text,
+      _palette.muted,
+      _palette.selectedRow,
+      _palette.interactive,
+    ]);
+    final graph = layoutRebasePreviewGraph(comparison, result, colors);
+    final conflictIndex = graph.rows.indexWhere(
+      (row) => row.commit.sha == result.currentCommit?.sha,
+    );
+    final operationInProgress = result.status == RebasePreviewStatus.conflict
+        ? await widget.repository.operationInProgress()
+        : false;
+    if (!mounted || _comparison != comparison) return;
+    setState(() {
+      _rebasePreview = result;
+      _rebasePreviewError = null;
+      _repositoryOperationInProgress = operationInProgress;
+      _rebaseResolvedFiles.clear();
+      _rebaseEditedFiles.clear();
+      _rebaseCheck = switch (result.status) {
+        RebasePreviewStatus.clean => const RebaseCheckResult(
+          status: RebaseCheckStatus.clean,
+        ),
+        RebasePreviewStatus.conflict => RebaseCheckResult(
+          status: RebaseCheckStatus.conflicts,
+          stoppedCommit: result.currentCommit?.sha,
+          files: result.conflictFiles,
+        ),
+        RebasePreviewStatus.failed => RebaseCheckResult(
+          status: RebaseCheckStatus.failed,
+          error: result.error,
+        ),
+      };
+      _previewGraph = graph;
+      _comparisonRows = graph.rows;
+      _comparisonEntries = [
+        for (var index = 0; index < graph.rows.length; index++)
+          (rowIndex: index, label: null, row: graph.rows[index]),
+      ];
+      _selectedIndex.value =
+          result.status == RebasePreviewStatus.conflict && conflictIndex >= 0
+          ? conflictIndex
+          : 0;
+    });
+    if (result.status == RebasePreviewStatus.conflict &&
+        _previewController.previewPlacement == PreviewPlacement.closed) {
+      await _previewController.setPreview(widget.preferredPreviewPlacement);
+    }
+    _scheduleRatchetUpdate();
+    if (result.status == RebasePreviewStatus.conflict) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final rowContext = _rebaseConflictRowContextKey.currentContext;
+        if (!mounted || rowContext == null) return;
+        unawaited(
+          Scrollable.ensureVisible(
+            rowContext,
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 220),
+            curve: Curves.easeOut,
+          ),
+        );
+      });
+    }
+  }
+
   void _dropRebasePreview() {
     _rebasePreviewSerial++;
     final session = _rebasePreviewSession;
     _rebasePreviewSession = null;
     _rebasePreview = null;
+    _rebaseResolvedFiles.clear();
+    _rebaseEditedFiles.clear();
+    _rebasePreviewError = null;
     if (session != null) unawaited(session.dispose());
   }
 
@@ -3647,7 +3686,10 @@ class _TimelineScreenState extends State<TimelineScreen>
         ),
       ),
     );
-    if (!_canCherryPick(commit)) return content;
+    final focusableContent = rebaseConflict
+        ? KeyedSubtree(key: _rebaseConflictRowContextKey, child: content)
+        : content;
+    if (!_canCherryPick(commit)) return focusableContent;
     return Draggable<GitCommit>(
       data: commit,
       affinity: Axis.horizontal,
@@ -3659,7 +3701,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           child: Text(commit.subject, style: TextStyle(color: _palette.text)),
         ),
       ),
-      child: content,
+      child: focusableContent,
     );
   }
 
@@ -4632,11 +4674,18 @@ class _TimelineScreenState extends State<TimelineScreen>
               ),
               if (_comparison == null) _previewPerson(commit),
               _previewStats(changes),
-              _previewFileList(
-                commit,
-                changes,
-                snapshot.hasError,
-                selectedPath,
+              KeyedSubtree(
+                key:
+                    _branchPreviewMode == BranchPreviewMode.rebase &&
+                        _rebasePreview?.status == RebasePreviewStatus.conflict
+                    ? const Key('rebase-conflict-files')
+                    : null,
+                child: _previewFileList(
+                  commit,
+                  changes,
+                  snapshot.hasError,
+                  selectedPath,
+                ),
               ),
               if (_comparison != null && _branchPreviewHasConflict)
                 _branchPreviewConflictChoices(),
@@ -4877,34 +4926,279 @@ class _TimelineScreenState extends State<TimelineScreen>
     final compare =
         _rebasePreview?.currentCommit ??
         (compareCommits.isEmpty ? null : compareCommits.first);
-    Widget choice(String branch, String subject) => Container(
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
-      decoration: BoxDecoration(
-        color: _palette.raised,
-        border: Border.all(color: _palette.border),
+    final interactive = _branchPreviewMode == BranchPreviewMode.rebase;
+    Widget choice({
+      required Key key,
+      required String branch,
+      required String subject,
+      required RebaseConflictChoice resolution,
+    }) => Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: InkWell(
+        key: key,
+        onTap:
+            !interactive || _rebasePreviewBusy || _repositoryOperationInProgress
+            ? null
+            : () => unawaited(_resolveRebaseConflict(resolution)),
         borderRadius: BorderRadius.circular(7),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              '$branch · $subject',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: _palette.text, fontSize: 11),
-            ),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+          decoration: BoxDecoration(
+            color: _palette.raised,
+            border: Border.all(color: _palette.border),
+            borderRadius: BorderRadius.circular(7),
           ),
-          Text('사용', style: TextStyle(color: _palette.muted, fontSize: 10)),
-        ],
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '$branch · $subject',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: _palette.text, fontSize: 11),
+                ),
+              ),
+              Text('사용', style: TextStyle(color: _palette.muted, fontSize: 10)),
+            ],
+          ),
+        ),
       ),
     );
     return Column(
       children: [
-        choice(comparison.baseRef, base?.subject ?? '현재 상태'),
-        choice(comparison.compareRef, compare?.subject ?? '적용할 변경'),
+        choice(
+          key: const Key('rebase-conflict-use-base'),
+          branch: comparison.baseRef,
+          subject: base?.subject ?? '현재 상태',
+          resolution: RebaseConflictChoice.base,
+        ),
+        choice(
+          key: const Key('rebase-conflict-use-compare'),
+          branch: comparison.compareRef,
+          subject: compare?.subject ?? '적용할 변경',
+          resolution: RebaseConflictChoice.commit,
+        ),
+        if (interactive) _rebaseConflictActions(),
       ],
     );
+  }
+
+  String? get _selectedRebaseConflictPath {
+    final preview = _rebasePreview;
+    final current = preview?.currentCommit;
+    if (preview == null || current == null || preview.conflictFiles.isEmpty) {
+      return null;
+    }
+    final selected = _previewPaths[_previewKey(current)];
+    return preview.conflictFiles.contains(selected)
+        ? selected
+        : preview.conflictFiles.first;
+  }
+
+  bool get _canContinueRebasePreview {
+    final files = _rebasePreview?.conflictFiles ?? const <String>[];
+    return files.isNotEmpty &&
+        files.every(
+          (path) =>
+              _rebaseResolvedFiles.contains(path) ||
+              _rebaseEditedFiles.contains(path),
+        );
+  }
+
+  Widget _rebaseConflictActions() => Padding(
+    padding: const EdgeInsets.only(top: 10),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_repositoryOperationInProgress)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 7),
+            child: Text(
+              '현재 Git 작업을 마친 뒤 해결할 수 있습니다',
+              style: TextStyle(color: _behind, fontSize: 10),
+            ),
+          ),
+        if (_rebasePreviewError != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 7),
+            child: Text(
+              _rebasePreviewError.toString(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: _behind, fontSize: 10),
+            ),
+          ),
+        Wrap(
+          alignment: WrapAlignment.end,
+          spacing: 7,
+          runSpacing: 7,
+          children: [
+            OutlinedButton(
+              key: const Key('rebase-conflict-open-editor'),
+              onPressed:
+                  _rebasePreviewBusy ||
+                      _repositoryOperationInProgress ||
+                      _selectedRebaseConflictPath == null
+                  ? null
+                  : () => unawaited(_openRebaseConflictEditor()),
+              child: const Text('편집기로 열기'),
+            ),
+            TextButton(
+              key: const Key('rebase-conflict-abort'),
+              onPressed: _rebasePreviewBusy
+                  ? null
+                  : () => _setBranchPreviewMode(BranchPreviewMode.merge),
+              child: const Text('미리보기 중단'),
+            ),
+            FilledButton(
+              key: const Key('rebase-conflict-continue'),
+              onPressed:
+                  !_rebasePreviewBusy &&
+                      !_repositoryOperationInProgress &&
+                      _canContinueRebasePreview
+                  ? () => unawaited(_continueRebasePreview())
+                  : null,
+              child: const Text('계속'),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+
+  Future<void> _resolveRebaseConflict(RebaseConflictChoice choice) async {
+    final session = _rebasePreviewSession;
+    final path = _selectedRebaseConflictPath;
+    if (session == null ||
+        path == null ||
+        _rebasePreviewBusy ||
+        _repositoryOperationInProgress) {
+      return;
+    }
+    setState(() {
+      _rebasePreviewBusy = true;
+      _rebasePreviewError = null;
+    });
+    try {
+      await session.resolveFile(path, choice);
+      if (mounted && identical(session, _rebasePreviewSession)) {
+        setState(() => _rebaseResolvedFiles.add(path));
+      }
+    } catch (error) {
+      if (mounted) setState(() => _rebasePreviewError = error);
+    } finally {
+      if (mounted) setState(() => _rebasePreviewBusy = false);
+    }
+  }
+
+  Future<void> _continueRebasePreview() async {
+    final session = _rebasePreviewSession;
+    final comparison = _comparison;
+    final request = _rebasePreviewSerial;
+    if (session == null ||
+        comparison == null ||
+        !_canContinueRebasePreview ||
+        _rebasePreviewBusy) {
+      return;
+    }
+    setState(() {
+      _rebasePreviewBusy = true;
+      _rebasePreviewError = null;
+    });
+    try {
+      for (final path in _rebaseEditedFiles.difference(_rebaseResolvedFiles)) {
+        await session.markResolved(path);
+      }
+      final result = await session.continueAfterResolving();
+      if (!mounted ||
+          request != _rebasePreviewSerial ||
+          !identical(session, _rebasePreviewSession)) {
+        return;
+      }
+      await _applyRebasePreviewResult(comparison, result);
+    } catch (error) {
+      if (mounted) setState(() => _rebasePreviewError = error);
+    } finally {
+      if (mounted) setState(() => _rebasePreviewBusy = false);
+    }
+  }
+
+  Future<void> _openRebaseConflictEditor() async {
+    final session = _rebasePreviewSession;
+    final path = _selectedRebaseConflictPath;
+    final worktree = session?.worktreePath;
+    if (session == null ||
+        path == null ||
+        worktree == null ||
+        _rebasePreviewBusy ||
+        _repositoryOperationInProgress) {
+      return;
+    }
+    setState(() {
+      _rebasePreviewBusy = true;
+      _rebasePreviewError = null;
+    });
+    try {
+      final overlay =
+          Overlay.of(context).context.findRenderObject()! as RenderBox;
+      final choice = await showMenu<String>(
+        context: context,
+        position: RelativeRect.fromLTRB(
+          overlay.size.width - 260,
+          overlay.size.height - 160,
+          16,
+          16,
+        ),
+        items: const [
+          PopupMenuItem(value: 'internal', child: Text('내장 에디터')),
+          PopupMenuItem(value: 'external', child: Text('외부 에디터')),
+        ],
+      );
+      if (!mounted || choice == null) return;
+      final externalEditor = ExternalEditorService(repositoryRoot: worktree);
+      if (choice == 'external') {
+        await externalEditor.open(relativePath: path);
+        if (mounted) setState(() => _rebaseEditedFiles.add(path));
+        return;
+      }
+      final document =
+          await widget.documentLoaderForTesting?.call(path) ??
+          await WorkingTreeTextDocument.load(
+            repositoryRoot: worktree,
+            relativePath: path,
+          );
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => MonacoEditorScreen(
+            title: path,
+            initialText: document.text,
+            language: monacoLanguageForPath(path),
+            readOnly: false,
+            onSave: (text) async {
+              await document.save(text);
+              await session.markResolved(path);
+              if (mounted) {
+                setState(() {
+                  _rebaseEditedFiles.add(path);
+                  _rebaseResolvedFiles.add(path);
+                });
+                Navigator.of(context).pop();
+              }
+            },
+            onOpenExternal: () async {
+              await externalEditor.open(relativePath: path);
+              if (mounted) setState(() => _rebaseEditedFiles.add(path));
+            },
+            editorForTesting: widget.editorForTesting,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _rebasePreviewError = error);
+    } finally {
+      if (mounted) setState(() => _rebasePreviewBusy = false);
+    }
   }
 
   Widget _previewFileList(

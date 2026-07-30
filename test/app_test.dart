@@ -2857,6 +2857,7 @@ void main() {
                   conflictFiles: const ['lib/shared.dart'],
                 ),
               ),
+      operationInProgressCallback: () async => true,
       diffBetween: (_, _, _) async => const [],
     );
     await tester.pumpWidget(app(repository, controller));
@@ -2875,7 +2876,127 @@ void main() {
     );
     expect(find.text('Rebase 충돌'), findsOneWidget);
     expect(find.text('진행 1/1'), findsOneWidget);
+    expect(find.text('현재 Git 작업을 마친 뒤 해결할 수 있습니다'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const Key('rebase-conflict-continue')),
+          )
+          .onPressed,
+      isNull,
+    );
     expect(controller.previewPlacement, PreviewPlacement.right);
+  });
+
+  testWidgets('rebase conflict preview advances to the next conflict', (
+    tester,
+  ) async {
+    final first = commit(
+      'feature-one',
+      'docs: update examples',
+      parents: const ['root'],
+    );
+    final second = commit(
+      'feature-two',
+      'docs: publish guide',
+      parents: const ['feature-one'],
+    );
+    final comparison = BranchComparisonResult(
+      baseRef: 'main',
+      compareRef: 'feature',
+      baseTip: 'main-tip',
+      compareTip: 'feature-two',
+      baseParent: 'root',
+      compareParent: 'feature-one',
+      mergeBases: const ['root'],
+      commits: [
+        BranchComparisonCommit(
+          commit: commit('main-tip', 'main only', parents: const ['root']),
+          side: BranchCommitSide.baseOnly,
+        ),
+        BranchComparisonCommit(
+          commit: second,
+          side: BranchCommitSide.compareOnly,
+        ),
+        BranchComparisonCommit(
+          commit: first,
+          side: BranchCommitSide.compareOnly,
+        ),
+        BranchComparisonCommit(
+          commit: commit('root', 'shared commit'),
+          side: BranchCommitSide.commonBoundary,
+        ),
+      ],
+      files: const [],
+      merge: const MergeConflictCheck(status: MergeConflictStatus.clean),
+    );
+    late FakeGitRepository repository;
+    late FakeRebasePreviewSession session;
+    repository = FakeGitRepository(
+      (_, _) async => [commit('normal', 'normal history')],
+      refs: const RepoRefs(
+        local: ['main', 'feature'],
+        current: 'main',
+        tips: {'main': 'main-tip', 'feature': 'feature-two'},
+      ),
+      compareBranchesCallback: (_, _) async => comparison,
+      openRebasePreviewCallback:
+          ({required baseRef, required compareRef}) async {
+            session = FakeRebasePreviewSession(
+              repository,
+              RebasePreviewResult(
+                status: RebasePreviewStatus.conflict,
+                baseTip: 'main-tip',
+                compareTip: 'feature-two',
+                currentCommit: first,
+                completed: 0,
+                total: 2,
+                conflictFiles: const ['lib/shared.dart'],
+              ),
+              continuations: [
+                RebasePreviewResult(
+                  status: RebasePreviewStatus.conflict,
+                  baseTip: 'main-tip',
+                  compareTip: 'feature-two',
+                  currentCommit: second,
+                  completed: 1,
+                  total: 2,
+                  conflictFiles: const ['lib/guide.dart'],
+                ),
+              ],
+            );
+            return session;
+          },
+      diffBetween: (_, _, _) async => const [],
+    );
+    await tester.pumpWidget(app(repository, controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-preview-rebase')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    await tester.tap(find.byKey(const Key('rebase-conflict-use-compare')));
+    await tester.pump();
+    expect(session.resolvedChoices, [
+      ('lib/shared.dart', RebaseConflictChoice.commit),
+    ]);
+
+    final continueButton = find.byKey(const Key('rebase-conflict-continue'));
+    await tester.ensureVisible(continueButton);
+    await tester.tap(continueButton);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 240));
+
+    expect(find.text('진행 2/2'), findsOneWidget);
+    expect(find.text('docs: publish guide'), findsWidgets);
+    expect(
+      find.byKey(const Key('rebase-conflict-current-row')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('a stale branch comparison cannot replace a newer selection', (
@@ -11627,6 +11748,7 @@ class FakeGitRepository extends GitRepository {
     this.compareBranchesCallback,
     this.simulateRebaseCallback,
     this.openRebasePreviewCallback,
+    this.operationInProgressCallback,
     this.filesBetween,
     this.diffBetween,
     this.loadCherryPickStateCallback,
@@ -11657,6 +11779,7 @@ class FakeGitRepository extends GitRepository {
     required String compareRef,
   })?
   openRebasePreviewCallback;
+  final Future<bool> Function()? operationInProgressCallback;
   final Future<List<GitFileChange>> Function(String from, String to)?
   filesBetween;
   final Future<List<DiffLine>> Function(
@@ -11781,6 +11904,10 @@ class FakeGitRepository extends GitRepository {
   }
 
   @override
+  Future<bool> operationInProgress() async =>
+      await operationInProgressCallback?.call() ?? false;
+
+  @override
   Future<void> cleanupStaleRebaseWorktrees() async {}
 
   @override
@@ -11877,18 +12004,39 @@ class FakeGitRepository extends GitRepository {
 }
 
 class FakeRebasePreviewSession extends RebasePreviewSession {
-  FakeRebasePreviewSession(GitRepository repository, this.result)
-    : super(
-        repository: repository,
-        baseTip: result.baseTip,
-        compareTip: result.compareTip,
-        originalCommits: const [],
-      );
+  FakeRebasePreviewSession(
+    GitRepository repository,
+    this.result, {
+    List<RebasePreviewResult> continuations = const [],
+  }) : _continuations = List.of(continuations),
+       super(
+         repository: repository,
+         baseTip: result.baseTip,
+         compareTip: result.compareTip,
+         originalCommits: const [],
+       );
 
   final RebasePreviewResult result;
+  final List<RebasePreviewResult> _continuations;
+  final resolvedChoices = <(String, RebaseConflictChoice)>[];
 
   @override
   Future<RebasePreviewResult> start() async => result;
+
+  @override
+  Future<void> resolveFile(
+    String relativePath,
+    RebaseConflictChoice choice,
+  ) async {
+    resolvedChoices.add((relativePath, choice));
+  }
+
+  @override
+  Future<void> markResolved(String relativePath) async {}
+
+  @override
+  Future<RebasePreviewResult> continueAfterResolving() async =>
+      _continuations.removeAt(0);
 
   @override
   Future<void> dispose() async {}
