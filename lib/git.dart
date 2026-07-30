@@ -915,6 +915,28 @@ class BranchComparisonResult {
       baseParent == compareParent;
 }
 
+enum BranchApplyMode { merge, rebase }
+
+class BranchApplyResult {
+  const BranchApplyResult({
+    required this.mode,
+    required this.baseBranch,
+    required this.compareBranch,
+    required this.baseBefore,
+    required this.baseAfter,
+    required this.compareBefore,
+    required this.compareAfter,
+  });
+
+  final BranchApplyMode mode;
+  final String baseBranch;
+  final String compareBranch;
+  final String baseBefore;
+  final String baseAfter;
+  final String compareBefore;
+  final String compareAfter;
+}
+
 class GraphRow {
   const GraphRow({
     required this.commit,
@@ -1958,6 +1980,138 @@ class GitRepository implements FullDiffRepository {
       }
     }
     await _ignoreCommand(const ['worktree', 'prune'], workingDirectory: root);
+  }
+
+  Future<BranchApplyResult> applyMergePreview({
+    required BranchComparisonResult comparison,
+    required String treeSha,
+  }) async {
+    await _verifyApplyTips(comparison);
+    final tree = (await _run([
+      'rev-parse',
+      '--verify',
+      '$treeSha^{tree}',
+    ])).trim();
+    final mergeCommit = (await _run([
+      '-c',
+      'commit.gpgSign=false',
+      'commit-tree',
+      tree,
+      '-p',
+      comparison.baseTip,
+      '-p',
+      comparison.compareTip,
+      '-m',
+      "Merge branch '${comparison.compareRef}' into ${comparison.baseRef}",
+    ])).trim();
+    await _moveLocalBranch(
+      branch: comparison.baseRef,
+      expected: comparison.baseTip,
+      next: mergeCommit,
+    );
+    return BranchApplyResult(
+      mode: BranchApplyMode.merge,
+      baseBranch: comparison.baseRef,
+      compareBranch: comparison.compareRef,
+      baseBefore: comparison.baseTip,
+      baseAfter: await _localBranchTip(comparison.baseRef),
+      compareBefore: comparison.compareTip,
+      compareAfter: await _localBranchTip(comparison.compareRef),
+    );
+  }
+
+  Future<BranchApplyResult> applyRebasePreview({
+    required BranchComparisonResult comparison,
+    required String virtualTip,
+  }) async {
+    await _verifyApplyTips(comparison);
+    final rewrittenTip = (await _run([
+      'rev-parse',
+      '--verify',
+      '$virtualTip^{commit}',
+    ])).trim();
+    await _moveLocalBranch(
+      branch: comparison.compareRef,
+      expected: comparison.compareTip,
+      next: rewrittenTip,
+    );
+    return BranchApplyResult(
+      mode: BranchApplyMode.rebase,
+      baseBranch: comparison.baseRef,
+      compareBranch: comparison.compareRef,
+      baseBefore: comparison.baseTip,
+      baseAfter: await _localBranchTip(comparison.baseRef),
+      compareBefore: comparison.compareTip,
+      compareAfter: await _localBranchTip(comparison.compareRef),
+    );
+  }
+
+  Future<void> restoreBranchApply(BranchApplyResult result) async {
+    final baseTip = await _localBranchTip(result.baseBranch);
+    final compareTip = await _localBranchTip(result.compareBranch);
+    if (baseTip != result.baseAfter || compareTip != result.compareAfter) {
+      throw GitRepositoryException(root, '적용 뒤 브랜치가 바뀌어 이전 시점으로 되돌릴 수 없습니다.');
+    }
+    if (baseTip != result.baseBefore) {
+      await _moveLocalBranch(
+        branch: result.baseBranch,
+        expected: result.baseAfter,
+        next: result.baseBefore,
+      );
+    }
+    if (compareTip != result.compareBefore) {
+      await _moveLocalBranch(
+        branch: result.compareBranch,
+        expected: result.compareAfter,
+        next: result.compareBefore,
+      );
+    }
+    if (await _localBranchTip(result.baseBranch) != result.baseBefore ||
+        await _localBranchTip(result.compareBranch) != result.compareBefore) {
+      throw GitRepositoryException(root, '브랜치를 적용 전 SHA로 되돌리지 못했습니다.');
+    }
+  }
+
+  Future<void> _verifyApplyTips(BranchComparisonResult comparison) async {
+    if (await _localBranchTip(comparison.baseRef) != comparison.baseTip ||
+        await _localBranchTip(comparison.compareRef) != comparison.compareTip) {
+      throw GitRepositoryException(root, '브랜치가 바뀌어 미리보기를 다시 계산해야 합니다.');
+    }
+  }
+
+  Future<String> _localBranchTip(String branch) async {
+    final result = await runner(gitExecutable, [
+      'rev-parse',
+      '--verify',
+      'refs/heads/$branch^{commit}',
+    ], workingDirectory: root);
+    final sha = result.stdout.toString().trim();
+    if (result.exitCode != 0 || sha.isEmpty) {
+      throw GitRepositoryException(branch, '로컬 브랜치를 찾을 수 없습니다.');
+    }
+    return sha;
+  }
+
+  Future<void> _moveLocalBranch({
+    required String branch,
+    required String expected,
+    required String next,
+  }) async {
+    if (await _localBranchTip(branch) != expected) {
+      throw GitRepositoryException(branch, '브랜치가 바뀌어 작업을 중단했습니다.');
+    }
+    final current = (await _run(['branch', '--show-current'])).trim();
+    if (current == branch) {
+      if (await _gitOperationInProgress()) {
+        throw GitRepositoryException(root, '다른 Git 작업이 진행 중입니다.');
+      }
+      if ((await _run(['status', '--porcelain=v1', '-z'])).isNotEmpty) {
+        throw GitRepositoryException(root, '작업 트리와 인덱스가 깨끗해야 합니다.');
+      }
+      await _run(['reset', '--hard', next]);
+      return;
+    }
+    await _run(['update-ref', 'refs/heads/$branch', next, expected]);
   }
 
   Future<CherryPickResult> cherryPick(String sha) async {
