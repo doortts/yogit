@@ -1921,6 +1921,14 @@ class _TimelineScreenState extends State<TimelineScreen>
                 borderRadius: BorderRadius.circular(5),
                 borderSide: BorderSide(color: _palette.border),
               ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(5),
+                borderSide: BorderSide(color: _palette.border),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(5),
+                borderSide: BorderSide(color: _palette.interactive),
+              ),
             ),
           ),
         ),
@@ -1969,6 +1977,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     final query = _filter.trim().toLowerCase();
     final filtering = query.isNotEmpty;
     final collapsed = !filtering && _collapsedRefSections.contains(section);
+    final headerColor = _palette.text.withValues(alpha: 0.82);
     yield GestureDetector(
       key: Key('sidebar-section-${section.name}'),
       behavior: HitTestBehavior.opaque,
@@ -1978,22 +1987,32 @@ class _TimelineScreenState extends State<TimelineScreen>
         }
       }),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(4, 10, 4, 5),
-        child: SizedBox(
+        padding: const EdgeInsets.only(top: 10, bottom: 5),
+        child: Container(
+          key: Key('sidebar-section-band-${section.name}'),
           height: 20,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          decoration: BoxDecoration(
+            color: _palette.raised.withValues(alpha: 0.7),
+            border: Border.symmetric(
+              horizontal: BorderSide(
+                color: _palette.border.withValues(alpha: 0.7),
+              ),
+            ),
+          ),
           child: Row(
             children: [
               Icon(
                 collapsed ? Icons.chevron_right : Icons.expand_more,
                 size: 16,
-                color: _palette.muted,
+                color: headerColor,
               ),
               const SizedBox(width: 2),
               Icon(
                 section.icon,
                 key: Key('sidebar-section-icon-${section.name}'),
                 size: 14,
-                color: _palette.muted,
+                color: headerColor,
               ),
               const SizedBox(width: 6),
               Expanded(
@@ -2002,7 +2021,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: _palette.muted,
+                    color: headerColor,
                     fontSize: 11,
                     fontWeight: FontWeight.w500,
                     letterSpacing: 0.8,
@@ -2014,7 +2033,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                 child: Text(
                   '${names.length}',
                   style: TextStyle(
-                    color: _palette.muted,
+                    color: headerColor,
                     fontSize: 11,
                     fontWeight: FontWeight.w500,
                   ),

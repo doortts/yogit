@@ -145,7 +145,7 @@ Keep the existing outer vertical spacing and replace the inner `SizedBox` with:
 ```dart
 Container(
   key: Key('sidebar-section-band-${section.name}'),
-  height: 28,
+  height: 20,
   padding: const EdgeInsets.symmetric(horizontal: 4),
   decoration: BoxDecoration(
     color: _palette.raised.withValues(alpha: 0.7),

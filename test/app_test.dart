@@ -2212,6 +2212,61 @@ void main() {
     },
   );
 
+  testWidgets('sidebar search stays subdued until focus', (tester) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(local: ['main'], current: 'main'),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final decoration = tester
+        .widget<TextField>(find.byKey(const Key('ref-filter')))
+        .decoration!;
+    final palette = TimelineThemePalette.systemGraphite;
+
+    expect(decoration.enabledBorder, isA<OutlineInputBorder>());
+    expect(decoration.focusedBorder, isA<OutlineInputBorder>());
+    expect(
+      (decoration.enabledBorder as OutlineInputBorder).borderSide.color,
+      palette.border,
+    );
+    expect(
+      (decoration.focusedBorder as OutlineInputBorder).borderSide.color,
+      palette.interactive,
+    );
+  });
+
+  testWidgets('sidebar category headers use thin raised section bars', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(local: ['main'], current: 'main'),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final band = tester.widget<Container>(
+      find.byKey(const Key('sidebar-section-band-local')),
+    );
+    final decoration = band.decoration! as BoxDecoration;
+    final border = decoration.border! as Border;
+    final palette = TimelineThemePalette.systemGraphite;
+
+    expect(decoration.color, palette.raised.withValues(alpha: 0.7));
+    expect(border.top.color, palette.border.withValues(alpha: 0.7));
+    expect(border.bottom, border.top);
+  });
+
   testWidgets(
     'sidebar lists refs as collapsible trees, filters them, and moves the selection',
     (tester) async {
