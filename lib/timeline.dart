@@ -6338,16 +6338,17 @@ class CommitGraphPainter extends CustomPainter {
     if (compact) {
       // Stage 3: one rail in this row's committer color, no lanes, no curves.
       final rail = compactRail(size);
-      _drawRailPath(
+      final dashed = isDashedLane(row.lane);
+      final paint = Paint()
+        ..color = committerColor
+        ..strokeWidth = dashed ? previewRailWidth : railWidth
+        ..strokeCap = StrokeCap.round;
+      _drawVerticalRail(
         canvas,
-        Path()
-          ..moveTo(laneInset, rail.top)
-          ..lineTo(laneInset, rail.bottom),
-        Paint()
-          ..color = committerColor
-          ..strokeWidth = isDashedLane(row.lane) ? previewRailWidth : railWidth
-          ..strokeCap = StrokeCap.round,
-        dashed: isDashedLane(row.lane),
+        Offset(laneInset, rail.top),
+        Offset(laneInset, rail.bottom),
+        paint,
+        dashed: dashed,
       );
     } else {
       // Halves are painted apart: above the node a lane carries the rail it
@@ -6355,31 +6356,33 @@ class CommitGraphPainter extends CustomPainter {
       for (final entry in laneVerticals(size).entries) {
         final x = laneX(entry.key);
         if (entry.value.top < centerY) {
-          _drawRailPath(
+          final dashed = isDashedLane(entry.key);
+          final paint = _railPaint(
+            row.activeLaneBranches[entry.key],
+            row.activeLaneShas[entry.key],
+            dashed: dashed,
+          );
+          _drawVerticalRail(
             canvas,
-            Path()
-              ..moveTo(x, entry.value.top)
-              ..lineTo(x, centerY),
-            _railPaint(
-              row.activeLaneBranches[entry.key],
-              row.activeLaneShas[entry.key],
-              dashed: isDashedLane(entry.key),
-            ),
-            dashed: isDashedLane(entry.key),
+            Offset(x, entry.value.top),
+            Offset(x, centerY),
+            paint,
+            dashed: dashed,
           );
         }
         if (entry.value.bottom > centerY) {
-          _drawRailPath(
+          final dashed = isDashedLane(entry.key);
+          final paint = _railPaint(
+            row.nextLaneBranches[entry.key],
+            row.nextLaneShas[entry.key],
+            dashed: dashed,
+          );
+          _drawVerticalRail(
             canvas,
-            Path()
-              ..moveTo(x, centerY)
-              ..lineTo(x, entry.value.bottom),
-            _railPaint(
-              row.nextLaneBranches[entry.key],
-              row.nextLaneShas[entry.key],
-              dashed: isDashedLane(entry.key),
-            ),
-            dashed: isDashedLane(entry.key),
+            Offset(x, centerY),
+            Offset(x, entry.value.bottom),
+            paint,
+            dashed: dashed,
           );
         }
       }
@@ -6550,6 +6553,27 @@ class CommitGraphPainter extends CustomPainter {
     // Mitered, so a join's square corner renders as a crisp right angle. Curves
     // are unaffected.
     ..strokeJoin = StrokeJoin.miter;
+
+  void _drawVerticalRail(
+    Canvas canvas,
+    Offset start,
+    Offset end,
+    Paint paint, {
+    required bool dashed,
+  }) {
+    if (!dashed) {
+      canvas.drawLine(start, end, paint);
+      return;
+    }
+    _drawRailPath(
+      canvas,
+      Path()
+        ..moveTo(start.dx, start.dy)
+        ..lineTo(end.dx, end.dy),
+      paint,
+      dashed: true,
+    );
+  }
 
   void _drawRailPath(
     Canvas canvas,
