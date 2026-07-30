@@ -9706,8 +9706,8 @@ void main() {
       const Offset(-400, 0),
     );
     await tester.pumpAndSettle();
-    expect(sidebarWidth(), 120);
-    expect(saved?.sidebar, 120);
+    expect(sidebarWidth(), 150);
+    expect(saved?.sidebar, 150);
 
     // Round-trips like every other width, clamped on the way in.
     expect(
@@ -9718,7 +9718,7 @@ void main() {
     );
     expect(
       TimelineColumnWidths.fromJson(<String, dynamic>{'sidebar': 40}).sidebar,
-      120,
+      150,
     );
     expect(
       TimelineColumnWidths.fromJson(<String, dynamic>{'sidebar': 900}).sidebar,
@@ -10245,6 +10245,21 @@ void main() {
     expect(previewWidth(), 240);
     expect(saved?.width, 240);
 
+    // The bottom panel can grow to the column headers, regardless of the old
+    // fixed 480px ceiling.
+    await tester.tap(find.text('하단'));
+    await tester.pumpAndSettle();
+    await tester.drag(
+      find.byKey(const Key('preview-resizer')),
+      const Offset(0, -1000),
+    );
+    await tester.pumpAndSettle();
+    final previewRect = tester.getRect(find.byKey(const Key('preview-panel')));
+    final headerRect = tester.getRect(find.byKey(const Key('refs-header')));
+    expect(previewRect.height, greaterThan(480));
+    expect(previewRect.top, closeTo(headerRect.bottom, 0.01));
+    expect(saved?.height, previewRect.height);
+
     // Round-trips with the rest of the settings, clamped on the way in.
     expect(const AppSettings().previewWidth, 288);
     expect(const AppSettings().previewHeight, 280);
@@ -10266,7 +10281,7 @@ void main() {
         'previewWidth': 40,
         'previewHeight': 4000,
       }).previewHeight,
-      480,
+      4000,
     );
   });
 
