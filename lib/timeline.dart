@@ -3212,8 +3212,7 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   // -------------------------------------------------------------- status bar
 
-  Widget _statusBar() =>
-      _compareRef == null ? _normalStatusBar() : _comparisonStatusBar();
+  Widget _statusBar() => _normalStatusBar();
 
   Widget _normalStatusBar() => Container(
     height: 29,
@@ -3323,57 +3322,6 @@ class _TimelineScreenState extends State<TimelineScreen>
       ],
     ),
   );
-
-  Widget _comparisonStatusBar() {
-    final comparison = _comparison;
-    final labels = comparison == null
-        ? [if (_comparisonError == null) '브랜치 비교 중' else '브랜치 비교 실패']
-        : [
-            comparison.sameFirstParent ? '부모 동일' : '부모 다름',
-            '공통 ${comparison.mergeBases.length}',
-            '${comparison.baseRef}만 ${comparison.commits.where((entry) => entry.side == BranchCommitSide.baseOnly).length}',
-            '${comparison.compareRef}만 ${comparison.commits.where((entry) => entry.side == BranchCommitSide.compareOnly).length}',
-            switch (comparison.merge.status) {
-              MergeConflictStatus.clean => '병합 충돌 없음',
-              MergeConflictStatus.conflicts =>
-                '병합 충돌 ${comparison.merge.files.length}',
-              MergeConflictStatus.failed => '병합 검사 실패',
-            },
-            switch (_rebaseCheck?.status) {
-              null => '리베이스 검사 중',
-              RebaseCheckStatus.clean => '리베이스 가능',
-              RebaseCheckStatus.conflicts =>
-                '리베이스 충돌 ${_rebaseCheck!.files.length}',
-              RebaseCheckStatus.failed => '리베이스 검사 실패',
-            },
-          ];
-    return Container(
-      key: const Key('comparison-status'),
-      height: 29,
-      decoration: BoxDecoration(
-        color: _palette.surface,
-        border: Border(top: BorderSide(color: _palette.border)),
-      ),
-      child: ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        scrollDirection: Axis.horizontal,
-        itemCount: labels.length,
-        separatorBuilder: (_, _) => Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Text('·', style: TextStyle(color: _palette.muted)),
-        ),
-        itemBuilder: (_, index) => Center(
-          child: Text(
-            labels[index],
-            style: TextStyle(
-              color: _comparisonError == null ? _palette.muted : _behind,
-              fontSize: 10,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 
   Widget _legend(String label, Widget dot) => Padding(
     padding: const EdgeInsets.only(right: 12),
@@ -3532,7 +3480,6 @@ class _TimelineScreenState extends State<TimelineScreen>
         if (mergeStatus == MergeConflictStatus.clean) {
           details.addAll([
             detail('가상 커밋 1', color: _previewPurple),
-            detail('두 부모'),
             detail('충돌 없음', color: _success),
           ]);
         } else if (mergeStatus == MergeConflictStatus.conflicts) {
@@ -3541,7 +3488,6 @@ class _TimelineScreenState extends State<TimelineScreen>
               comparison.merge.files.length;
           details.addAll([
             detail('충돌 $conflicts개', color: _previewConflict),
-            detail('두 부모'),
             detail('임시 공간 사용 중'),
           ]);
         }

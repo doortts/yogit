@@ -2942,7 +2942,6 @@ void main() {
     await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('comparison-status')), findsOneWidget);
     expect(find.text('normal history'), findsNothing);
     expect(find.text('main only'), findsOneWidget);
     expect(find.text('feature only'), findsOneWidget);
@@ -2951,8 +2950,11 @@ void main() {
     expect(find.text('feature만'), findsOneWidget);
     expect(find.text('공통'), findsOneWidget);
     expect(find.text('가상 커밋 1'), findsOneWidget);
-    expect(find.text('두 부모'), findsOneWidget);
+    expect(find.text('두 부모'), findsNothing);
     expect(find.text('충돌 없음'), findsOneWidget);
+    expect(find.text('commit'), findsOneWidget);
+    expect(find.byKey(const Key('status-timestamp')), findsOneWidget);
+    expect(find.byKey(const Key('comparison-status')), findsNothing);
     expect(
       find.descendant(
         of: find.byKey(const Key('branch-preview-summary')),
@@ -3155,7 +3157,7 @@ void main() {
 
     expectSuccess();
     expect(find.text('가상 커밋 1'), findsOneWidget);
-    expect(find.text('두 부모'), findsOneWidget);
+    expect(find.text('두 부모'), findsNothing);
     expect(find.text('충돌 없음'), findsOneWidget);
     expect(find.text('main ← feature'), findsOneWidget);
 
