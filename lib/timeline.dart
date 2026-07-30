@@ -5198,7 +5198,7 @@ class _TimelineScreenState extends State<TimelineScreen>
             builder: (context, constraints) {
               // Chips split the cell evenly, each keeping at least 40px, and
               // whatever no longer fits simply does not show.
-              final inset = _comparison == null ? 0.0 : 16.0;
+              final inset = _comparison == null ? 0.0 : 14.0;
               final width = constraints.maxWidth - inset * 2;
               final slots = math.max(1, (width / _minChipWidth).floor());
               final shown = refs.take(slots).toList();
@@ -7917,11 +7917,18 @@ class RebaseMappingPainter extends CustomPainter {
           centerY,
         );
         final arrow = Path()
-          ..moveTo(tip.dx, tip.dy)
-          ..lineTo(tip.dx + 5, tip.dy - 3)
-          ..lineTo(tip.dx + 5, tip.dy + 3)
-          ..close();
-        canvas.drawPath(arrow, Paint()..color = mapping.color);
+          ..moveTo(tip.dx + 5, tip.dy - 4)
+          ..lineTo(tip.dx, tip.dy)
+          ..lineTo(tip.dx + 5, tip.dy + 4);
+        canvas.drawPath(
+          arrow,
+          Paint()
+            ..color = mapping.color
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1
+            ..strokeCap = StrokeCap.round
+            ..strokeJoin = StrokeJoin.round,
+        );
       }
     }
   }
@@ -8139,17 +8146,30 @@ class CommitGraphPainter extends CustomPainter {
     if (compact) {
       // Stage 3: one rail in this row's committer color, no lanes, no curves.
       final rail = compactRail(size);
-      final dashed = isDashedLane(row.lane);
-      final paint = Paint()
-        ..color = dashed ? previewRailColor ?? committerColor : committerColor
-        ..strokeWidth = dashed ? previewRailWidth : railWidth
-        ..strokeCap = StrokeCap.round;
-      _drawVerticalRail(
-        canvas,
-        Offset(laneInset, rail.top),
-        Offset(laneInset, rail.bottom),
-        paint,
-        dashed: dashed,
+      void draw(double top, double bottom, {required bool dashed}) {
+        if (bottom <= top) return;
+        final paint = Paint()
+          ..color = dashed ? previewRailColor ?? committerColor : committerColor
+          ..strokeWidth = dashed ? previewRailWidth : railWidth
+          ..strokeCap = StrokeCap.round;
+        _drawVerticalRail(
+          canvas,
+          Offset(laneInset, top),
+          Offset(laneInset, bottom),
+          paint,
+          dashed: dashed,
+        );
+      }
+
+      draw(
+        rail.top,
+        math.min(rail.bottom, centerY),
+        dashed: isDashedAbove(row.lane),
+      );
+      draw(
+        math.max(rail.top, centerY),
+        rail.bottom,
+        dashed: isDashedLane(row.lane),
       );
     } else {
       // Halves are painted apart: above the node a lane carries the rail it

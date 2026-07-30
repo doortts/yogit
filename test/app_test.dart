@@ -882,6 +882,46 @@ void main() {
     expect(painter.isDashedAbove(1), isFalse);
   });
 
+  test(
+    'compact preview keeps the virtual segment dashed above its real parent',
+    () async {
+      final virtual = graphRow(
+        commit: commit('virtual', 'virtual', parents: const ['base']),
+        lane: 0,
+        activeLanes: const [0],
+        nextLanes: const [0],
+        activeLaneShas: const {0: 'virtual'},
+        nextLaneShas: const {0: 'base'},
+      );
+      final base = graphRow(
+        commit: commit('base', 'base', parents: const ['root']),
+        lane: 0,
+        activeLanes: const [0],
+        nextLanes: const [0],
+        activeLaneShas: const {0: 'base'},
+        nextLaneShas: const {0: 'root'},
+      );
+      final painter = CommitGraphPainter(
+        row: base,
+        previous: virtual,
+        selected: false,
+        compact: true,
+        committerColor: const Color(0xFF34C759),
+        previousDashedLanes: const {0},
+        previewRailColor: const Color(0xFFC69AFF),
+      );
+      final recorder = ui.PictureRecorder();
+      painter.paint(Canvas(recorder), const Size(56, 36));
+      final image = await recorder.endRecording().toImage(56, 36);
+      final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      int alphaAt(int y) => bytes!.getUint8((y * 56 + 28) * 4 + 3);
+
+      expect(alphaAt(1), greaterThan(0));
+      expect(alphaAt(4), 0);
+      expect(alphaAt(20), greaterThan(0));
+    },
+  );
+
   test('lane transitions turn on one 8px corner beside their node', () {
     GraphRow rowTo(int parentLane) => graphRow(
       commit: commit('1', 'first commit', parents: ['0']),
@@ -3623,7 +3663,7 @@ void main() {
     expect(virtualCell, findsOneWidget);
     expect(
       tester.getTopLeft(virtualChip).dx - tester.getTopLeft(virtualCell).dx,
-      16,
+      14,
     );
     expect(find.text('재작성 1/3'), findsOneWidget);
     expect(find.text('재작성 2/3'), findsOneWidget);
@@ -5115,6 +5155,43 @@ void main() {
     expect(alphaAt(57, height ~/ 2), 0);
     expect(alphaAt(58, 0), greaterThan(0));
     expect(alphaAt(58, height - 1), greaterThan(0));
+  });
+
+  test('rebase mapping arrowhead is an open one-pixel chevron', () async {
+    final rows = [
+      for (var index = 0; index < 3; index++)
+        graphRow(
+          commit: commit('row-$index', 'row $index'),
+          lane: 0,
+          activeLanes: const [0],
+          nextLanes: const [0],
+        ),
+    ];
+    final painter = RebaseMappingPainter(
+      rows: rows,
+      mappings: const [
+        (
+          originalSha: 'row-2',
+          rewrittenSha: 'row-0',
+          originalRow: 2,
+          rewrittenRow: 0,
+          routeLane: 0,
+          color: Color(0xFF547C68),
+        ),
+      ],
+      rowIndex: 0,
+      laneSpacing: 30.5,
+      compact: false,
+    );
+    final recorder = ui.PictureRecorder();
+    painter.paint(Canvas(recorder), const Size(100, 36));
+    final image = await recorder.endRecording().toImage(100, 36);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    int alphaAt(int x, int y) => bytes!.getUint8((y * 100 + x) * 4 + 3);
+
+    expect(alphaAt(42, 15), greaterThan(0));
+    expect(alphaAt(43, 16), 0);
+    expect(alphaAt(42, 21), greaterThan(0));
   });
 
   test(

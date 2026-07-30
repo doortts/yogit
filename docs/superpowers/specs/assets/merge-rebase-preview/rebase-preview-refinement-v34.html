@@ -152,6 +152,7 @@
       letter-spacing: .05em;
     }
     .table-head span, .commit-row > div { padding: 0 16px; }
+    .commit-row > div:first-child { padding: 0 14px; }
     .table-head span + span { border-left: 1px solid var(--line); }
     .rows { position: relative; }
     .commit-row {
@@ -399,13 +400,16 @@
           <div class="commit-row"><div><span class="ref common">공통</span></div><div></div><div class="hash">b806ad1</div><div class="message">chore: update shared base</div></div>
           <div class="graph-layer">
             <svg viewBox="0 0 220 448" aria-label="비교 브랜치 색에서 단계적으로 어두워지는 동일 커밋 연결선 시안">
-              <path class="virtual-rail" d="M56 28V140"/>
+              <path class="virtual-rail" d="M56 28V196"/>
               <path class="base-rail" d="M56 196V420"/>
               <path class="feature-rail" d="M126 252V364"/>
               <path class="feature-rail" d="M126 364 Q126 406 72 420"/>
               <path class="mapping" stroke="var(--map-1)" d="M126 252 H174 Q184 252 184 242 V38 Q184 28 174 28 H73"/>
               <path class="mapping" stroke="var(--map-2)" d="M126 308 H158 Q168 308 168 298 V94 Q168 84 158 84 H73"/>
               <path class="mapping" stroke="var(--map-3)" d="M126 364 H142 Q152 364 152 354 V150 Q152 140 142 140 H73"/>
+              <path class="mapping" stroke="var(--map-1)" d="M80 21L73 28L80 35"/>
+              <path class="mapping" stroke="var(--map-2)" d="M80 77L73 84L80 91"/>
+              <path class="mapping" stroke="var(--map-3)" d="M80 133L73 140L80 147"/>
               <g class="node virtual" transform="translate(56 28)"><circle class="ring" r="16.5" stroke="var(--map-1)"/><circle class="core" r="15"/><text>VR</text></g>
               <g class="node virtual" transform="translate(56 84)"><circle class="ring" r="16.5" stroke="var(--map-2)"/><circle class="core" r="15"/><text>VR</text></g>
               <g class="node virtual" transform="translate(56 140)"><circle class="ring" r="16.5" stroke="var(--map-3)"/><circle class="core" r="15"/><text>VR</text></g>
