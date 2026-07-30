@@ -2364,6 +2364,30 @@ void main() {
         find.byKey(const Key('sidebar-folder-remote-origin')),
         findsOneWidget,
       );
+      final sectionIcon = tester.getRect(
+        find.byKey(const Key('sidebar-section-icon-local')),
+      );
+      final folderChevron = tester.getRect(
+        find.byKey(const Key('sidebar-folder-local-feature')),
+      );
+      expect(folderChevron.left, sectionIcon.left);
+
+      final topLevelBranchName = tester.getRect(
+        find.descendant(
+          of: find.byKey(const Key('sidebar-ref-main')),
+          matching: find.text('main'),
+        ),
+      );
+      final folderName = tester.getRect(find.text('feature'));
+      final childBranchName = tester.getRect(
+        find.descendant(
+          of: find.byKey(const Key('sidebar-ref-feature/login')),
+          matching: find.text('login'),
+        ),
+      );
+      expect(folderName.left - topLevelBranchName.left, 18);
+      expect(childBranchName.left - folderName.left, 16);
+
       expect(
         find.byKey(const Key('sidebar-ref-feature/payments/api')),
         findsOneWidget,

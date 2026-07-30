@@ -2590,6 +2590,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     final selectedLocal =
         section == _RefSection.local && name != null && name == _baseBranch;
     final behind = selectedLocal ? _refs.aheadBehind[name]?.behind ?? 0 : 0;
+    final inFolderTree = name == null || depth > 0;
 
     void toggleFolder() => setState(() {
       if (!_collapsedRefFolders.remove(folderKey)) {
@@ -2601,7 +2602,10 @@ class _TimelineScreenState extends State<TimelineScreen>
       key: name == null ? null : Key('sidebar-row-$name'),
       height: birth == null ? 28 : 40,
       child: Padding(
-        padding: EdgeInsets.only(left: 4 + depth * 16.0, right: 4),
+        padding: EdgeInsets.only(
+          left: 4 + (inFolderTree ? 18 : 0) + depth * 16.0,
+          right: 4,
+        ),
         child: Row(
           children: [
             if (hasChildren)
