@@ -45,6 +45,8 @@ const _behind = Color(0xFFF0A35E);
 const _remoteBehind = Color(0xFFFF453A);
 const _previewPurple = Color(0xFFC69AFF);
 const _previewPurplePanel = Color(0xFF29243A);
+const _previewConflict = Color(0xFFFF7A84);
+const _previewConflictPanel = Color(0xFF4B252C);
 
 List<Color> rebaseMappingColors(Iterable<Color> reserved) {
   final used = reserved.map((color) => color.toARGB32()).toSet();
@@ -4196,20 +4198,25 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (_comparison case BranchComparisonResult comparison) {
       final previewKind = _previewGraph?.kinds[commit.sha];
       if (previewKind == PreviewGraphNodeKind.virtualMerge) {
-        return const [GitRef(name: 'Merge 미리보기', isHead: true)];
+        return [
+          GitRef(
+            name: _effectiveMergeStatus == MergeConflictStatus.conflicts
+                ? '! 병합 충돌'
+                : '가상 병합',
+            isHead: _effectiveMergeStatus != MergeConflictStatus.conflicts,
+          ),
+        ];
       }
       if (previewKind == PreviewGraphNodeKind.virtualRebase) {
         return [
           GitRef(
-            name: commit.sha == _rebasePreview?.virtualTip
-                ? '${comparison.compareRef} · 새 위치'
-                : 'rebase',
+            name: '${comparison.compareRef} · 가상',
             isHead: commit.sha == _rebasePreview?.virtualTip,
           ),
         ];
       }
       if (previewKind == PreviewGraphNodeKind.conflictTarget) {
-        return const [GitRef(name: 'rebase · 도착점')];
+        return const [GitRef(name: '가상 rebase 위치')];
       }
       final side = comparison.commits
           .firstWhere((entry) => entry.commit.sha == commit.sha)
@@ -4347,12 +4354,14 @@ class _TimelineScreenState extends State<TimelineScreen>
     int index,
     double graphWidth,
     bool selected,
-    bool refConnector,
-  ) => CommitGraphPainter(
+    bool refConnector, {
+    Color? committerColor,
+  }) => CommitGraphPainter(
     row: entry.row,
     previous: index > 0 ? _entries[index - 1].row : null,
     selected: selected,
-    committerColor: AvatarService.branchColor(entry.row.branch),
+    committerColor:
+        committerColor ?? AvatarService.branchColor(entry.row.branch),
     committersBySha: _committersBySha,
     laneSpacing: CommitGraphPainter.spacingFor(graphWidth, _ratchetLane),
     compact: graphWidth <= CommitGraphPainter.compactWidth,
@@ -4383,22 +4392,52 @@ class _TimelineScreenState extends State<TimelineScreen>
         _rebasePreview?.status == RebasePreviewStatus.conflict &&
         _rebasePreview?.currentCommit?.sha == commit.sha;
     final rebaseApplying = _rebaseApplyingSha == commit.sha;
+    final virtualPreview =
+        previewKind == PreviewGraphNodeKind.virtualMerge ||
+        previewKind == PreviewGraphNodeKind.virtualRebase;
+    final mergeConflict =
+        previewKind == PreviewGraphNodeKind.virtualMerge &&
+        _effectiveMergeStatus == MergeConflictStatus.conflicts;
+    final previewColor = virtualPreview
+        ? mergeConflict
+              ? _previewConflict
+              : _previewPurple
+        : branchColor;
     final refs = _rowRefs(commit);
     Widget refsCell() {
       final lineTip = selected && refs.isEmpty
           ? _deletedBranchTipSha(row.branch)
           : null;
-      return _refsCell(
+      final cell = _refsCell(
         entry.rowIndex,
         commit,
         refs,
-        branchColor,
+        previewColor,
         deletedBranchName: lineTip == null
             ? null
             : _deletedBranchNames[lineTip],
         deletedBranchLoading:
             lineTip != null && _resolvingDeletedBranchTips.contains(lineTip),
       );
+      if (mergeConflict) {
+        return KeyedSubtree(
+          key: const Key('virtual-merge-conflict-chip'),
+          child: cell,
+        );
+      }
+      if (previewKind == PreviewGraphNodeKind.virtualMerge) {
+        return KeyedSubtree(
+          key: const Key('virtual-preview-chip'),
+          child: cell,
+        );
+      }
+      if (previewKind == PreviewGraphNodeKind.virtualRebase) {
+        return KeyedSubtree(
+          key: Key('virtual-rebase-chip-${commit.sha}'),
+          child: cell,
+        );
+      }
+      return cell;
     }
 
     final merge = commit.parents.length >= 2 && !commit.isWorkingTree;
@@ -4408,8 +4447,9 @@ class _TimelineScreenState extends State<TimelineScreen>
       entry,
       index,
       graphWidth,
-      selected,
+      selected && !virtualPreview,
       refs.isNotEmpty,
+      committerColor: previewColor,
     );
     // Nodes keep their size at every width; only the overhang clips.
     const avatarSize = CommitGraphPainter.avatarDiameter;
@@ -4435,9 +4475,22 @@ class _TimelineScreenState extends State<TimelineScreen>
         onTap: () => _select(index),
         onSecondaryTapDown: (details) =>
             unawaited(_showCommitMenu(commit, details.globalPosition)),
-        child: ColoredBox(
-          color: rebaseConflict
+        child: Container(
+          key: mergeConflict
+              ? const Key('virtual-merge-conflict-row')
+              : previewKind == PreviewGraphNodeKind.virtualMerge
+              ? const Key('virtual-preview-row')
+              : previewKind == PreviewGraphNodeKind.virtualRebase
+              ? Key('virtual-rebase-row-${commit.sha}')
+              : null,
+          color: mergeConflict
+              ? _previewConflictPanel
+              : rebaseConflict
               ? const Color(0xFF8F2F3A)
+              : rebaseApplying
+              ? const Color(0xFF4D376D)
+              : virtualPreview
+              ? _previewPurplePanel
               : selected
               ? _palette.background
               : hovered
@@ -4445,7 +4498,15 @@ class _TimelineScreenState extends State<TimelineScreen>
               : _palette.background,
           child: Stack(
             children: [
-              if (selected && !rebaseConflict)
+              if (virtualPreview)
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: 3,
+                  child: ColoredBox(color: previewColor),
+                ),
+              if (selected && !rebaseConflict && !virtualPreview)
                 Positioned(
                   left: _w('refs') + painter.laneX(row.lane),
                   top: 0,
@@ -4499,6 +4560,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                             size: avatarSize,
                             stacked: stacked,
                             branchColor: branchColor,
+                            conflict: mergeConflict,
                           ),
                   ),
                   _cell(
@@ -4626,6 +4688,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     required double size,
     required bool stacked,
     required Color branchColor,
+    bool conflict = false,
   }) {
     Color? mappingColor;
     for (final mapping in _previewGraph?.mappings ?? const []) {
@@ -4635,7 +4698,27 @@ class _TimelineScreenState extends State<TimelineScreen>
         break;
       }
     }
-    final child = kind == PreviewGraphNodeKind.virtualMerge
+    final child = kind == PreviewGraphNodeKind.virtualMerge && conflict
+        ? Container(
+            key: const Key('virtual-merge-conflict-node'),
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _previewConflict,
+              border: Border.all(color: const Color(0xFFFFB8BD), width: 2),
+            ),
+            child: const Text(
+              '!',
+              style: TextStyle(
+                color: Color(0xFF4D1118),
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          )
+        : kind == PreviewGraphNodeKind.virtualMerge
         ? Container(
             key: const Key('virtual-merge-node'),
             width: size,
@@ -7324,6 +7407,8 @@ class CommitGraphPainter extends CustomPainter {
   final Set<int> previousDashedLanes;
 
   bool isDashedLane(int lane) => dashedLanes.contains(lane);
+  bool isDashedAbove(int lane) =>
+      isDashedLane(lane) || previousDashedLanes.contains(lane);
 
   double laneX(int lane) =>
       compact ? laneInset : laneInset + lane * laneSpacing;
@@ -7441,7 +7526,7 @@ class CommitGraphPainter extends CustomPainter {
       for (final entry in laneVerticals(size).entries) {
         final x = laneX(entry.key);
         if (entry.value.top < centerY) {
-          final dashed = isDashedLane(entry.key);
+          final dashed = isDashedAbove(entry.key);
           final paint = _railPaint(
             row.activeLaneBranches[entry.key],
             row.activeLaneShas[entry.key],

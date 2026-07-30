@@ -855,6 +855,33 @@ void main() {
     );
   });
 
+  test('preview rail inherits the previous row dash above its node', () {
+    final virtual = graphRow(
+      commit: commit('virtual', 'virtual preview', parents: const ['base']),
+      lane: 0,
+      activeLanes: const [0],
+      nextLanes: const [0],
+      activeLaneShas: const {0: 'virtual'},
+      nextLaneShas: const {0: 'base'},
+    );
+    final base = graphRow(
+      commit: commit('base', 'base tip'),
+      lane: 0,
+      activeLanes: const [0],
+      activeLaneShas: const {0: 'base'},
+    );
+    final painter = CommitGraphPainter(
+      row: base,
+      previous: virtual,
+      selected: false,
+      committerColor: const Color(0xFF34C759),
+      previousDashedLanes: const {0},
+    );
+
+    expect(painter.isDashedAbove(0), isTrue);
+    expect(painter.isDashedAbove(1), isFalse);
+  });
+
   test('lane transitions turn on one 8px corner beside their node', () {
     GraphRow rowTo(int parentLane) => graphRow(
       commit: commit('1', 'first commit', parents: ['0']),
@@ -2840,10 +2867,13 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull, reason: 'initial timeline');
     await tester.tap(find.byKey(const Key('branch-diff-selector')));
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull, reason: 'branch selector');
     await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull, reason: 'merge preview');
 
     expect(find.byKey(const Key('branch-preview-segmented')), findsOneWidget);
     final segmented = tester.widget<SegmentedButton<BranchPreviewMode>>(
@@ -2856,6 +2886,8 @@ void main() {
     expect(find.text('Merge 미리보기'), findsWidgets);
     expect(find.text('Merge 성공'), findsOneWidget);
     expect(find.byKey(const Key('virtual-merge-node')), findsOneWidget);
+    expect(find.byKey(const Key('virtual-preview-row')), findsOneWidget);
+    expect(find.byKey(const Key('virtual-preview-chip')), findsOneWidget);
     expect(
       find.byKey(const Key('branch-preview-success-icon')),
       findsOneWidget,
@@ -2867,6 +2899,7 @@ void main() {
 
     await tester.tap(find.byKey(const Key('branch-preview-rebase')));
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull, reason: 'rebase preview');
     expect(changedMode, BranchPreviewMode.rebase);
     expect(
       tester
@@ -3104,6 +3137,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Merge 충돌'), findsOneWidget);
+    expect(
+      find.byKey(const Key('virtual-merge-conflict-node')),
+      findsOneWidget,
+    );
+    expect(find.text('! 병합 충돌'), findsOneWidget);
     expect(find.text('lib/shared.dart'), findsWidgets);
     expect(find.text('main · main change'), findsOneWidget);
     expect(find.text('feature · feature change'), findsOneWidget);
