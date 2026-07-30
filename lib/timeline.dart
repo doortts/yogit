@@ -11,6 +11,9 @@ import 'diff_screen.dart';
 import 'external_editor.dart';
 import 'full_diff_commit_message_cache.dart';
 import 'full_diff_model.dart';
+import 'full_diff_side_by_side_view.dart';
+import 'full_diff_syntax.dart';
+import 'full_diff_unified_view.dart';
 import 'git.dart';
 import 'monaco_editor_screen.dart';
 import 'page_scroll_shortcuts.dart';
@@ -38,6 +41,159 @@ const _tooltipDelay = Duration(milliseconds: 400);
 /// The design's `--yo-main` accent: additions, lane dots, the name tint.
 const _main = Color(0xFF8AD6A1);
 const _behind = Color(0xFFF0A35E);
+
+List<Color> rebaseMappingColors(Iterable<Color> reserved) {
+  final used = reserved.map((color) => color.toARGB32()).toSet();
+  final colors = <Color>[];
+  for (var index = 0; index < 360 && colors.length < 5; index++) {
+    final color = HSLColor.fromAHSL(
+      1,
+      (18 + index * 67) % 360,
+      0.26,
+      0.38,
+    ).toColor();
+    if (used.add(color.toARGB32())) colors.add(color);
+  }
+  if (colors.length < 5) {
+    throw StateError('Could not allocate rebase mapping colors.');
+  }
+  return colors;
+}
+
+enum PreviewGraphNodeKind {
+  actual,
+  virtualMerge,
+  virtualRebase,
+  conflictTarget,
+}
+
+typedef RebaseGraphMapping = ({
+  String originalSha,
+  String rewrittenSha,
+  int originalRow,
+  int rewrittenRow,
+  int routeLane,
+  Color color,
+});
+
+class BranchPreviewGraph {
+  const BranchPreviewGraph({
+    required this.rows,
+    this.kinds = const {},
+    this.dashedLanes = const {},
+    this.mappings = const [],
+  });
+
+  final List<GraphRow> rows;
+  final Map<String, PreviewGraphNodeKind> kinds;
+  final Map<int, Set<int>> dashedLanes;
+  final List<RebaseGraphMapping> mappings;
+}
+
+BranchPreviewGraph layoutMergePreviewGraph(BranchComparisonResult comparison) {
+  final template = comparison.commits.first.commit;
+  final sha = 'virtual-merge-${comparison.baseTip}-${comparison.compareTip}';
+  final virtual = GitCommit(
+    sha: sha,
+    shortSha: 'VM',
+    parents: [comparison.baseTip, comparison.compareTip],
+    author: template.author,
+    authorTimestamp: template.authorTimestamp,
+    committer: template.committer,
+    committerTimestamp: template.committerTimestamp + 1,
+    refs: const [],
+    subject: 'Merge 미리보기',
+  );
+  final rows = layoutGraph([
+    virtual,
+    for (final entry in comparison.commits) entry.commit,
+  ]);
+  return BranchPreviewGraph(
+    rows: rows,
+    kinds: {sha: PreviewGraphNodeKind.virtualMerge},
+    dashedLanes: _previewDashedLanes(rows, {
+      comparison.baseTip,
+      comparison.compareTip,
+    }),
+  );
+}
+
+BranchPreviewGraph layoutRebasePreviewGraph(
+  BranchComparisonResult comparison,
+  RebasePreviewResult preview,
+  List<Color> colors,
+) {
+  if (preview.rewritten.isEmpty) {
+    return BranchPreviewGraph(rows: layoutBranchComparison(comparison.commits));
+  }
+  final virtualOldestFirst = <GitCommit>[];
+  var parent = comparison.baseTip;
+  for (final rewrite in preview.rewritten) {
+    final original = rewrite.original;
+    virtualOldestFirst.add(
+      GitCommit(
+        sha: rewrite.rewrittenSha,
+        shortSha: 'new SHA',
+        parents: [parent],
+        author: original.author,
+        authorTimestamp: original.authorTimestamp,
+        committer: original.committer,
+        committerTimestamp: original.committerTimestamp,
+        refs: const [],
+        subject: original.subject,
+      ),
+    );
+    parent = rewrite.rewrittenSha;
+  }
+  final virtualNewestFirst = virtualOldestFirst.reversed.toList();
+  final rows = layoutGraph([
+    ...virtualNewestFirst,
+    for (final entry in comparison.commits) entry.commit,
+  ]);
+  final rowBySha = {
+    for (var index = 0; index < rows.length; index++)
+      rows[index].commit.sha: index,
+  };
+  return BranchPreviewGraph(
+    rows: rows,
+    kinds: {
+      for (final commit in virtualOldestFirst)
+        commit.sha: PreviewGraphNodeKind.virtualRebase,
+    },
+    dashedLanes: _previewDashedLanes(rows, {
+      comparison.baseTip,
+      ...virtualOldestFirst.map((commit) => commit.sha),
+    }),
+    mappings: [
+      for (var index = 0; index < preview.rewritten.length; index++)
+        (
+          originalSha: preview.rewritten[index].original.sha,
+          rewrittenSha: preview.rewritten[index].rewrittenSha,
+          originalRow: rowBySha[preview.rewritten[index].original.sha]!,
+          rewrittenRow: rowBySha[preview.rewritten[index].rewrittenSha]!,
+          routeLane: index,
+          color: colors[index % colors.length],
+        ),
+    ],
+  );
+}
+
+Map<int, Set<int>> _previewDashedLanes(
+  List<GraphRow> rows,
+  Set<String> targets,
+) => {
+  for (var index = 0; index < rows.length; index++)
+    if ({
+          ...rows[index].activeLaneShas.entries
+              .where((entry) => targets.contains(entry.value))
+              .map((entry) => entry.key),
+          ...rows[index].nextLaneShas.entries
+              .where((entry) => targets.contains(entry.value))
+              .map((entry) => entry.key),
+        }
+        case final lanes when lanes.isNotEmpty)
+      index: lanes,
+};
 
 const _weekdayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -343,12 +499,14 @@ class TimelineScreen extends StatefulWidget {
     this.columnWidths = const TimelineColumnWidths(),
     this.fullDiffColumnWidths = const FullDiffColumnWidths(),
     this.fullDiffPreferences = const FullDiffPreferences(),
+    this.branchPreviewMode = BranchPreviewMode.merge,
     this.previewWidth = 288,
     this.previewHeight = 280,
     this.onPreviewPlacementChanged,
     this.onColumnWidthsChanged,
     this.onFullDiffColumnWidthsChanged,
     this.onFullDiffPreferencesChanged,
+    this.onBranchPreviewModeChanged,
     this.onPreviewSizeChanged,
     this.editorForTesting,
     this.documentLoaderForTesting,
@@ -379,12 +537,14 @@ class TimelineScreen extends StatefulWidget {
   final TimelineColumnWidths columnWidths;
   final FullDiffColumnWidths fullDiffColumnWidths;
   final FullDiffPreferences fullDiffPreferences;
+  final BranchPreviewMode branchPreviewMode;
   final double previewWidth;
   final double previewHeight;
   final ValueChanged<PreviewPlacement>? onPreviewPlacementChanged;
   final ValueChanged<TimelineColumnWidths>? onColumnWidthsChanged;
   final ValueChanged<FullDiffColumnWidths>? onFullDiffColumnWidthsChanged;
   final ValueChanged<FullDiffPreferences>? onFullDiffPreferencesChanged;
+  final ValueChanged<BranchPreviewMode>? onBranchPreviewModeChanged;
   final ValueChanged<({double width, double height})>? onPreviewSizeChanged;
 
   @visibleForTesting
@@ -441,13 +601,26 @@ class _TimelineScreenState extends State<TimelineScreen>
   BranchComparisonResult? _comparison;
   var _comparisonRows = <GraphRow>[];
   var _comparisonEntries = <TimelineEntry>[];
+  BranchPreviewGraph? _previewGraph;
   RebaseCheckResult? _rebaseCheck;
+  RebasePreviewSession? _rebasePreviewSession;
+  RebasePreviewResult? _rebasePreview;
+  var _rebasePreviewSerial = 0;
+  var _rebasePreviewBusy = false;
+  Object? _rebasePreviewError;
+  var _repositoryOperationInProgress = false;
+  final _rebaseResolvedFiles = <String>{};
+  final _rebaseEditedFiles = <String>{};
+  final _rebaseConflictRowContextKey = GlobalKey();
   Object? _comparisonError;
   var _comparisonSerial = 0;
+  late BranchPreviewMode _branchPreviewMode = widget.branchPreviewMode;
+  var _branchPreviewLayout = DiffLayout.unified;
+  final _branchPreviewHighlighter = HighlightJsSyntaxHighlighter();
 
   List<GitCommit> get _commits => _comparison == null
       ? _normalCommits
-      : [for (final entry in _comparison!.commits) entry.commit];
+      : [for (final row in _comparisonRows) row.commit];
   List<GraphRow> get _rows =>
       _comparison == null ? _normalRows : _comparisonRows;
   List<TimelineEntry> get _entries =>
@@ -685,6 +858,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       });
     }
     if (!identical(widget.repository, oldWidget.repository)) {
+      _dropRebasePreview();
       _clearFullDiffRouteSession();
     } else if (widget.onFullDiffPreferencesChanged !=
             oldWidget.onFullDiffPreferencesChanged ||
@@ -704,6 +878,9 @@ class _TimelineScreenState extends State<TimelineScreen>
         widget.previewHeight != oldWidget.previewHeight) {
       _previewWidth = widget.previewWidth;
       _previewHeight = widget.previewHeight;
+    }
+    if (widget.branchPreviewMode != oldWidget.branchPreviewMode) {
+      _branchPreviewMode = widget.branchPreviewMode;
     }
     final preferredBranchBecameReady =
         widget.preferredBranchReady && !oldWidget.preferredBranchReady;
@@ -745,6 +922,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _fetchTimer?.cancel();
+    _dropRebasePreview();
     _clearFullDiffRouteSession();
     if (_ownsPreviewController) _previewController.dispose();
     _selectedIndex.removeListener(_selectedCommitChanged);
@@ -811,6 +989,13 @@ class _TimelineScreenState extends State<TimelineScreen>
       for (final lane in [row.lane, ...row.activeLanes, ...row.nextLanes]) {
         if (lane > deepest) deepest = lane;
       }
+    }
+    if (_previewGraph?.mappings case final mappings? when mappings.isNotEmpty) {
+      final graphDeepest = _comparisonRows.fold<int>(
+        0,
+        (value, row) => math.max(value, row.maxLane),
+      );
+      deepest = math.max(deepest, graphDeepest + mappings.length);
     }
     if (deepest != _ratchetLane) setState(() => _ratchetLane = deepest);
   }
@@ -1206,7 +1391,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               ],
             ),
           ),
-          _statusBar(),
+          if (_compareRef == null) _statusBar(),
         ],
       ),
     ),
@@ -1373,9 +1558,13 @@ class _TimelineScreenState extends State<TimelineScreen>
       Expanded(
         child: LayoutBuilder(
           builder: (context, constraints) {
+            final previewControlsWidth = _compareRef == null ? 0.0 : 212.0;
             final selectorWidth = math.min(
               460.0,
-              math.max(0.0, constraints.maxWidth - _minDragWidth),
+              math.max(
+                0.0,
+                constraints.maxWidth - _minDragWidth - previewControlsWidth,
+              ),
             );
             return Row(
               children: [
@@ -1397,6 +1586,10 @@ class _TimelineScreenState extends State<TimelineScreen>
                     onComparisonCleared: _clearComparison,
                   ),
                 ),
+                if (_compareRef != null) ...[
+                  const SizedBox(width: 8),
+                  SizedBox(width: 204, child: _branchPreviewControls()),
+                ],
                 Expanded(child: _dragAndWordmark()),
               ],
             );
@@ -1441,6 +1634,83 @@ class _TimelineScreenState extends State<TimelineScreen>
     },
   );
 
+  Widget _branchPreviewControls() => Row(
+    children: [
+      Expanded(
+        child: _branchPreviewButton(
+          key: const Key('branch-preview-merge'),
+          mode: BranchPreviewMode.merge,
+          label: 'Merge 미리보기',
+        ),
+      ),
+      const SizedBox(width: 6),
+      Expanded(
+        child: _branchPreviewButton(
+          key: const Key('branch-preview-rebase'),
+          mode: BranchPreviewMode.rebase,
+          label: 'Rebase 미리보기',
+        ),
+      ),
+    ],
+  );
+
+  Widget _branchPreviewButton({
+    required Key key,
+    required BranchPreviewMode mode,
+    required String label,
+  }) {
+    final selected = _branchPreviewMode == mode;
+    return SizedBox(
+      height: 32,
+      child: OutlinedButton(
+        key: key,
+        onPressed: () {
+          if (selected) return;
+          _setBranchPreviewMode(mode);
+        },
+        style: OutlinedButton.styleFrom(
+          foregroundColor: selected ? _palette.text : _palette.muted,
+          backgroundColor: selected
+              ? _palette.selectedRow
+              : _palette.background,
+          side: BorderSide(
+            color: selected ? _palette.interactive : _palette.border,
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          textStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
+        ),
+        child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+      ),
+    );
+  }
+
+  void _setBranchPreviewMode(BranchPreviewMode mode) {
+    if (_branchPreviewMode == mode) return;
+    setState(() {
+      _branchPreviewMode = mode;
+      final comparison = _comparison;
+      if (comparison != null) {
+        _previewGraph = mode == BranchPreviewMode.merge
+            ? layoutMergePreviewGraph(comparison)
+            : null;
+        _comparisonRows =
+            _previewGraph?.rows ?? layoutBranchComparison(comparison.commits);
+        _comparisonEntries = [
+          for (var index = 0; index < _comparisonRows.length; index++)
+            (rowIndex: index, label: null, row: _comparisonRows[index]),
+        ];
+        _selectedIndex.value = 0;
+      }
+    });
+    widget.onBranchPreviewModeChanged?.call(mode);
+    _scheduleRatchetUpdate();
+    if (mode == BranchPreviewMode.rebase) {
+      unawaited(_startRebasePreview());
+    } else {
+      _dropRebasePreview();
+    }
+  }
+
   void _selectBaseBranch(String branch) {
     if (!_refs.local.contains(branch) || branch == _baseBranch) return;
     final compared = _compareRef;
@@ -1469,11 +1739,13 @@ class _TimelineScreenState extends State<TimelineScreen>
     final baseRef = _baseBranch;
     if (baseRef == null || compareRef == baseRef) return;
     final serial = ++_comparisonSerial;
+    _dropRebasePreview();
     setState(() {
       _compareRef = compareRef;
       _comparison = null;
       _comparisonRows = [];
       _comparisonEntries = [];
+      _previewGraph = null;
       _rebaseCheck = null;
       _comparisonError = null;
       _selectedIndex.value = 0;
@@ -1492,14 +1764,21 @@ class _TimelineScreenState extends State<TimelineScreen>
       final rows = layoutBranchComparison(result.commits);
       setState(() {
         _comparison = result;
-        _comparisonRows = rows;
+        _previewGraph = _branchPreviewMode == BranchPreviewMode.merge
+            ? layoutMergePreviewGraph(result)
+            : null;
+        _comparisonRows = _previewGraph?.rows ?? rows;
         _comparisonEntries = [
-          for (var index = 0; index < rows.length; index++)
-            (rowIndex: index, label: null, row: rows[index]),
+          for (var index = 0; index < _comparisonRows.length; index++)
+            (rowIndex: index, label: null, row: _comparisonRows[index]),
         ];
       });
       _scheduleRatchetUpdate();
-      unawaited(_checkRebase(baseRef, compareRef, serial));
+      if (_branchPreviewMode == BranchPreviewMode.rebase) {
+        unawaited(_startRebasePreview());
+      } else {
+        unawaited(_checkRebase(baseRef, compareRef, serial));
+      }
     } catch (error) {
       if (!mounted ||
           serial != _comparisonSerial ||
@@ -1543,14 +1822,153 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
   }
 
+  Future<void> _startRebasePreview() async {
+    final comparison = _comparison;
+    if (_branchPreviewMode != BranchPreviewMode.rebase || comparison == null) {
+      return;
+    }
+    final request = ++_rebasePreviewSerial;
+    final previous = _rebasePreviewSession;
+    _rebasePreviewSession = null;
+    _rebasePreview = null;
+    if (previous != null) await previous.dispose();
+    if (!mounted ||
+        request != _rebasePreviewSerial ||
+        _branchPreviewMode != BranchPreviewMode.rebase) {
+      return;
+    }
+    setState(() => _rebaseCheck = null);
+    try {
+      final session = await widget.repository.openRebasePreview(
+        baseRef: comparison.baseRef,
+        compareRef: comparison.compareRef,
+      );
+      if (!mounted ||
+          request != _rebasePreviewSerial ||
+          _comparison != comparison ||
+          _branchPreviewMode != BranchPreviewMode.rebase) {
+        await session.dispose();
+        return;
+      }
+      _rebasePreviewSession = session;
+      final result = await session.start();
+      if (!mounted ||
+          request != _rebasePreviewSerial ||
+          _comparison != comparison ||
+          _branchPreviewMode != BranchPreviewMode.rebase) {
+        await session.dispose();
+        return;
+      }
+      await _applyRebasePreviewResult(comparison, result);
+    } catch (error) {
+      if (!mounted || request != _rebasePreviewSerial) return;
+      setState(
+        () => _rebaseCheck = RebaseCheckResult(
+          status: RebaseCheckStatus.failed,
+          error: error.toString(),
+        ),
+      );
+    }
+  }
+
+  Future<void> _applyRebasePreviewResult(
+    BranchComparisonResult comparison,
+    RebasePreviewResult result,
+  ) async {
+    final colors = rebaseMappingColors([
+      ...AvatarService.palette,
+      _palette.background,
+      _palette.surface,
+      _palette.panel,
+      _palette.raised,
+      _palette.border,
+      _palette.text,
+      _palette.muted,
+      _palette.selectedRow,
+      _palette.interactive,
+    ]);
+    final graph = layoutRebasePreviewGraph(comparison, result, colors);
+    final conflictIndex = graph.rows.indexWhere(
+      (row) => row.commit.sha == result.currentCommit?.sha,
+    );
+    final operationInProgress = result.status == RebasePreviewStatus.conflict
+        ? await widget.repository.operationInProgress()
+        : false;
+    if (!mounted || _comparison != comparison) return;
+    setState(() {
+      _rebasePreview = result;
+      _rebasePreviewError = null;
+      _repositoryOperationInProgress = operationInProgress;
+      _rebaseResolvedFiles.clear();
+      _rebaseEditedFiles.clear();
+      _rebaseCheck = switch (result.status) {
+        RebasePreviewStatus.clean => const RebaseCheckResult(
+          status: RebaseCheckStatus.clean,
+        ),
+        RebasePreviewStatus.conflict => RebaseCheckResult(
+          status: RebaseCheckStatus.conflicts,
+          stoppedCommit: result.currentCommit?.sha,
+          files: result.conflictFiles,
+        ),
+        RebasePreviewStatus.failed => RebaseCheckResult(
+          status: RebaseCheckStatus.failed,
+          error: result.error,
+        ),
+      };
+      _previewGraph = graph;
+      _comparisonRows = graph.rows;
+      _comparisonEntries = [
+        for (var index = 0; index < graph.rows.length; index++)
+          (rowIndex: index, label: null, row: graph.rows[index]),
+      ];
+      _selectedIndex.value =
+          result.status == RebasePreviewStatus.conflict && conflictIndex >= 0
+          ? conflictIndex
+          : 0;
+    });
+    if (result.status == RebasePreviewStatus.conflict &&
+        _previewController.previewPlacement == PreviewPlacement.closed) {
+      await _previewController.setPreview(widget.preferredPreviewPlacement);
+    }
+    _scheduleRatchetUpdate();
+    if (result.status == RebasePreviewStatus.conflict) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final rowContext = _rebaseConflictRowContextKey.currentContext;
+        if (!mounted || rowContext == null) return;
+        unawaited(
+          Scrollable.ensureVisible(
+            rowContext,
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 220),
+            curve: Curves.easeOut,
+          ),
+        );
+      });
+    }
+  }
+
+  void _dropRebasePreview() {
+    _rebasePreviewSerial++;
+    final session = _rebasePreviewSession;
+    _rebasePreviewSession = null;
+    _rebasePreview = null;
+    _rebaseResolvedFiles.clear();
+    _rebaseEditedFiles.clear();
+    _rebasePreviewError = null;
+    if (session != null) unawaited(session.dispose());
+  }
+
   void _clearComparison() {
     if (_compareRef == null) return;
+    _dropRebasePreview();
     _comparisonSerial++;
     setState(() {
       _compareRef = null;
       _comparison = null;
       _comparisonRows = [];
       _comparisonEntries = [];
+      _previewGraph = null;
       _rebaseCheck = null;
       _comparisonError = null;
       if (_normalEntries.isNotEmpty) {
@@ -1574,6 +1992,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
     final comparison = _comparison;
     if (comparison == null) return true;
+    if (_previewGraph?.kinds.containsKey(commit.sha) == true) return false;
     return comparison.commits
             .firstWhere((entry) => entry.commit.sha == commit.sha)
             .side ==
@@ -2489,6 +2908,7 @@ class _TimelineScreenState extends State<TimelineScreen>
             width: fixed + commitWidth,
             child: Column(
               children: [
+                if (_compareRef != null) _branchPreviewSummary(),
                 SizedBox(
                   height: 29,
                   child: Row(
@@ -2539,6 +2959,92 @@ class _TimelineScreenState extends State<TimelineScreen>
   );
 
   bool get _showFooter => _compareRef == null;
+
+  Widget _branchPreviewSummary() {
+    final comparison = _comparison;
+    final mergeMode = _branchPreviewMode == BranchPreviewMode.merge;
+    final success = mergeMode
+        ? comparison?.merge.status == MergeConflictStatus.clean
+        : _rebaseCheck?.status == RebaseCheckStatus.clean;
+    final resultLabel = mergeMode
+        ? switch (comparison?.merge.status) {
+            MergeConflictStatus.clean => 'Merge 성공',
+            MergeConflictStatus.conflicts => 'Merge 충돌',
+            MergeConflictStatus.failed => 'Merge 검사 실패',
+            null => 'Merge 검사 중',
+          }
+        : switch (_rebaseCheck?.status) {
+            RebaseCheckStatus.clean => 'Rebase 성공',
+            RebaseCheckStatus.conflicts => 'Rebase 충돌',
+            RebaseCheckStatus.failed => 'Rebase 검사 실패',
+            null => 'Rebase 검사 중',
+          };
+    final details = comparison == null
+        ? <String>[]
+        : [
+            comparison.sameFirstParent ? '부모 동일' : '부모 다름',
+            '공통 ${comparison.mergeBases.length}',
+            '${comparison.baseRef}만 ${comparison.commits.where((entry) => entry.side == BranchCommitSide.baseOnly).length}',
+            '${comparison.compareRef}만 ${comparison.commits.where((entry) => entry.side == BranchCommitSide.compareOnly).length}',
+            if (!mergeMode &&
+                _rebasePreview?.status == RebasePreviewStatus.conflict)
+              '진행 ${_rebasePreview!.completed + 1}/${_rebasePreview!.total}',
+          ];
+    return Container(
+      key: const Key('branch-preview-summary'),
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: BoxDecoration(
+        color: _palette.surface,
+        border: Border(bottom: BorderSide(color: _palette.border)),
+      ),
+      child: Row(
+        children: [
+          Text(
+            mergeMode ? 'Merge 미리보기' : 'Rebase 미리보기',
+            style: TextStyle(
+              color: _palette.text,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+            decoration: BoxDecoration(
+              color: _palette.raised,
+              borderRadius: BorderRadius.circular(7),
+            ),
+            child: Row(
+              children: [
+                if (success) ...[
+                  const Icon(
+                    Icons.check_circle,
+                    key: Key('branch-preview-success-icon'),
+                    color: _main,
+                    size: 15,
+                  ),
+                  const SizedBox(width: 5),
+                ],
+                Text(
+                  resultLabel,
+                  style: TextStyle(
+                    color: success ? _main : _palette.muted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          for (final detail in details) ...[
+            const SizedBox(width: 12),
+            Text(detail, style: TextStyle(color: _palette.muted, fontSize: 10)),
+          ],
+        ],
+      ),
+    );
+  }
 
   Widget _header(String column, double width) => SizedBox(
     key: Key('$column-header'),
@@ -2806,6 +3312,20 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// unioned with the log decorations so remotes and detached HEAD still show.
   List<GitRef> _rowRefs(GitCommit commit) {
     if (_comparison case BranchComparisonResult comparison) {
+      final previewKind = _previewGraph?.kinds[commit.sha];
+      if (previewKind == PreviewGraphNodeKind.virtualMerge) {
+        return const [GitRef(name: 'Merge 미리보기', isHead: true)];
+      }
+      if (previewKind == PreviewGraphNodeKind.virtualRebase) {
+        return [
+          GitRef(
+            name: commit.sha == _rebasePreview?.virtualTip
+                ? '${comparison.compareRef} · 새 위치'
+                : 'rebase',
+            isHead: commit.sha == _rebasePreview?.virtualTip,
+          ),
+        ];
+      }
       final side = comparison.commits
           .firstWhere((entry) => entry.commit.sha == commit.sha)
           .side;
@@ -2910,6 +3430,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     CommitGraphPainter painter,
     double graphWidth, {
     Key? cellKey,
+    Widget? overlay,
     Widget? node,
   }) => SizedBox(
     key: cellKey,
@@ -2927,6 +3448,7 @@ class _TimelineScreenState extends State<TimelineScreen>
             ),
           ),
         ),
+        ?overlay,
         // Last, so a node always covers the rails behind it.
         ?node,
       ],
@@ -2951,6 +3473,10 @@ class _TimelineScreenState extends State<TimelineScreen>
     compact: graphWidth <= CommitGraphPainter.compactWidth,
     refConnector: refConnector,
     passThrough: entry.rowIndex < 0,
+    dashedLanes: _previewGraph?.dashedLanes[index] ?? const {},
+    previousDashedLanes: index > 0
+        ? _previewGraph?.dashedLanes[index - 1] ?? const {}
+        : const {},
     backgroundColor: _palette.background,
     selectedRowColor: _palette.selectedRow,
   );
@@ -2967,6 +3493,10 @@ class _TimelineScreenState extends State<TimelineScreen>
     final commit = row.commit;
     // One branch line, one color: rails, chips, node ring and hash border.
     final branchColor = AvatarService.branchColor(row.branch);
+    final previewKind = _previewGraph?.kinds[commit.sha];
+    final rebaseConflict =
+        _rebasePreview?.status == RebasePreviewStatus.conflict &&
+        _rebasePreview?.currentCommit?.sha == commit.sha;
     final refs = _rowRefs(commit);
     Widget refsCell() {
       final lineTip = selected && refs.isEmpty
@@ -3001,26 +3531,33 @@ class _TimelineScreenState extends State<TimelineScreen>
     // only shows while that stays clear of the next lane's rail.
     final stacked =
         avatarSize * 0.95 <= painter.laneSpacing - CommitGraphPainter.railWidth;
+    final mappings = _previewGraph?.mappings ?? const <RebaseGraphMapping>[];
     final content = MouseRegion(
       onEnter: (_) => _hoverIndex.value = index,
       onExit: (_) {
         if (_hoverIndex.value == index) _hoverIndex.value = -1;
       },
       child: GestureDetector(
-        key: selected ? Key('selected-row-${commit.sha}') : null,
+        key: rebaseConflict
+            ? const Key('rebase-conflict-current-row')
+            : selected
+            ? Key('selected-row-${commit.sha}')
+            : null,
         behavior: HitTestBehavior.opaque,
         onTap: () => _select(index),
         onSecondaryTapDown: (details) =>
             unawaited(_showCommitMenu(commit, details.globalPosition)),
         child: ColoredBox(
-          color: selected
+          color: rebaseConflict
+              ? const Color(0xFF8F2F3A)
+              : selected
               ? _palette.background
               : hovered
               ? _palette.neutralChip.withValues(alpha: 0.48)
               : _palette.background,
           child: Stack(
             children: [
-              if (selected)
+              if (selected && !rebaseConflict)
                 Positioned(
                   left: _w('refs') + painter.laneX(row.lane),
                   top: 0,
@@ -3044,19 +3581,32 @@ class _TimelineScreenState extends State<TimelineScreen>
                     painter,
                     graphWidth,
                     cellKey: Key('graph-cell-${entry.rowIndex}'),
+                    overlay: mappings.isEmpty
+                        ? null
+                        : Positioned.fill(
+                            child: IgnorePointer(
+                              child: CustomPaint(
+                                painter: RebaseMappingPainter(
+                                  rows: _comparisonRows,
+                                  mappings: mappings,
+                                  rowIndex: index,
+                                  laneSpacing: painter.laneSpacing,
+                                  compact: painter.compact,
+                                  backgroundColor: _palette.background,
+                                ),
+                              ),
+                            ),
+                          ),
                     node: commit.isWorkingTree || merge
                         ? null
-                        : Positioned(
-                            left: painter.laneX(row.lane) - avatarSize / 2,
-                            top: (TimelineScreen.rowHeight - avatarSize) / 2,
-                            child: CommitAvatarStack(
-                              commit: commit,
-                              avatarService: widget.avatarService,
-                              showRemoteAvatars: widget.showRemoteAvatars,
-                              size: avatarSize,
-                              stacked: stacked,
-                              discColor: branchColor,
-                            ),
+                        : _graphNode(
+                            commit: commit,
+                            kind: previewKind,
+                            painter: painter,
+                            row: row,
+                            size: avatarSize,
+                            stacked: stacked,
+                            branchColor: branchColor,
                           ),
                   ),
                   _cell(
@@ -3155,7 +3705,10 @@ class _TimelineScreenState extends State<TimelineScreen>
         ),
       ),
     );
-    if (!_canCherryPick(commit)) return content;
+    final focusableContent = rebaseConflict
+        ? KeyedSubtree(key: _rebaseConflictRowContextKey, child: content)
+        : content;
+    if (!_canCherryPick(commit)) return focusableContent;
     return Draggable<GitCommit>(
       data: commit,
       affinity: Axis.horizontal,
@@ -3167,7 +3720,73 @@ class _TimelineScreenState extends State<TimelineScreen>
           child: Text(commit.subject, style: TextStyle(color: _palette.text)),
         ),
       ),
-      child: content,
+      child: focusableContent,
+    );
+  }
+
+  Widget _graphNode({
+    required GitCommit commit,
+    required PreviewGraphNodeKind? kind,
+    required CommitGraphPainter painter,
+    required GraphRow row,
+    required double size,
+    required bool stacked,
+    required Color branchColor,
+  }) {
+    Color? mappingColor;
+    for (final mapping in _previewGraph?.mappings ?? const []) {
+      if (mapping.originalSha == commit.sha ||
+          mapping.rewrittenSha == commit.sha) {
+        mappingColor = mapping.color;
+        break;
+      }
+    }
+    final child = kind == PreviewGraphNodeKind.virtualRebase
+        ? Container(
+            key: Key('virtual-rebase-node-${commit.sha}'),
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0xFF8D6BB8),
+              border: Border.all(
+                color: mappingColor ?? const Color(0xFFB78BEF),
+                width: 1,
+              ),
+            ),
+            child: const Text(
+              'VR',
+              style: TextStyle(
+                color: Colors.black,
+                fontSize: 8,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          )
+        : Container(
+            padding: mappingColor == null
+                ? EdgeInsets.zero
+                : const EdgeInsets.all(1),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: mappingColor == null
+                  ? null
+                  : Border.all(color: mappingColor, width: 1),
+            ),
+            child: CommitAvatarStack(
+              commit: commit,
+              avatarService: widget.avatarService,
+              showRemoteAvatars: widget.showRemoteAvatars,
+              size: mappingColor == null ? size : size - 2,
+              stacked: stacked,
+              discColor: branchColor,
+            ),
+          );
+    return Positioned(
+      left: painter.laneX(row.lane) - size / 2,
+      top: (TimelineScreen.rowHeight - size) / 2,
+      child: child,
     );
   }
 
@@ -3865,16 +4484,74 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   /// The commit's changed files, remembered in resolved form as well so ⌘↑/⌘↓ can
   /// walk them without waiting on a future.
-  String _previewKey(GitCommit commit) => _comparison == null
-      ? commit.sha
-      : '${_comparison!.baseTip}..${_comparison!.compareTip}';
+  ({String from, String to})? get _branchPreviewRange {
+    final comparison = _comparison;
+    if (comparison == null) return null;
+    if (_branchPreviewMode == BranchPreviewMode.merge) {
+      return (
+        from: comparison.baseTip,
+        to: comparison.merge.treeSha ?? comparison.compareTip,
+      );
+    }
+    final preview = _rebasePreview;
+    if (preview?.status == RebasePreviewStatus.clean &&
+        preview?.virtualTip != null) {
+      return (from: comparison.baseTip, to: preview!.virtualTip!);
+    }
+    final current = preview?.currentCommit;
+    return (
+      from: current == null || current.parents.isEmpty
+          ? comparison.baseTip
+          : current.parents.first,
+      to: current?.sha ?? comparison.compareTip,
+    );
+  }
+
+  String _previewKey(GitCommit commit) {
+    final range = _branchPreviewRange;
+    return range == null
+        ? commit.sha
+        : '${_branchPreviewMode.name}:${range.from}..${range.to}';
+  }
 
   Future<List<GitFileChange>> _previewFilesFor(GitCommit commit) {
     final key = _previewKey(commit);
     return _previewFiles.putIfAbsent(key, () {
-      final request = _comparison == null
+      final comparison = _comparison;
+      final preview = _rebasePreview;
+      final request = comparison == null
           ? widget.repository.loadFiles(commit)
-          : Future.value(_comparison!.files);
+          : _branchPreviewMode == BranchPreviewMode.merge
+          ? Future.value(
+              comparison.merge.status == MergeConflictStatus.clean
+                  ? comparison.merge.treeSha == null
+                        ? comparison.files
+                        : comparison.merge.resultFiles
+                  : [
+                      for (final path in comparison.merge.files)
+                        GitFileChange(
+                          path: path,
+                          status: 'U',
+                          additions: null,
+                          deletions: null,
+                        ),
+                    ],
+            )
+          : preview?.status == RebasePreviewStatus.clean &&
+                preview?.virtualTip != null
+          ? widget.repository.loadFilesBetween(
+              comparison.baseTip,
+              preview!.virtualTip!,
+            )
+          : Future.value([
+              for (final path in preview?.conflictFiles ?? const <String>[])
+                GitFileChange(
+                  path: path,
+                  status: 'U',
+                  additions: null,
+                  deletions: null,
+                ),
+            ]);
       unawaited(
         request
             .then((files) => _previewFileLists[key] = files)
@@ -4016,12 +4693,21 @@ class _TimelineScreenState extends State<TimelineScreen>
               ),
               if (_comparison == null) _previewPerson(commit),
               _previewStats(changes),
-              _previewFileList(
-                commit,
-                changes,
-                snapshot.hasError,
-                selectedPath,
+              KeyedSubtree(
+                key:
+                    _branchPreviewMode == BranchPreviewMode.rebase &&
+                        _rebasePreview?.status == RebasePreviewStatus.conflict
+                    ? const Key('rebase-conflict-files')
+                    : null,
+                child: _previewFileList(
+                  commit,
+                  changes,
+                  snapshot.hasError,
+                  selectedPath,
+                ),
               ),
+              if (_comparison != null && _branchPreviewHasConflict)
+                _branchPreviewConflictChoices(),
             ],
           ),
         );
@@ -4064,11 +4750,13 @@ class _TimelineScreenState extends State<TimelineScreen>
     child: info,
   );
 
-  Widget _previewScrollableDiff(Widget diff) => _previewScrollable(
-    key: const Key('preview-diff-scroll'),
-    controller: _previewDiffScrollController,
-    child: diff,
-  );
+  Widget _previewScrollableDiff(Widget diff) => _comparison == null
+      ? _previewScrollable(
+          key: const Key('preview-diff-scroll'),
+          controller: _previewDiffScrollController,
+          child: diff,
+        )
+      : KeyedSubtree(key: const Key('preview-diff-scroll'), child: diff);
 
   Widget _previewScrollable({
     required Key key,
@@ -4238,13 +4926,309 @@ class _TimelineScreenState extends State<TimelineScreen>
     );
   }
 
+  bool get _branchPreviewHasConflict =>
+      _branchPreviewMode == BranchPreviewMode.merge
+      ? _comparison?.merge.status == MergeConflictStatus.conflicts
+      : _rebasePreview?.status == RebasePreviewStatus.conflict;
+
+  Widget _branchPreviewConflictChoices() {
+    final comparison = _comparison!;
+    final baseCommits = comparison.commits
+        .where((entry) => entry.side == BranchCommitSide.baseOnly)
+        .map((entry) => entry.commit)
+        .toList();
+    final compareCommits = comparison.commits
+        .where((entry) => entry.side == BranchCommitSide.compareOnly)
+        .map((entry) => entry.commit)
+        .toList();
+    final base = baseCommits.isEmpty ? null : baseCommits.first;
+    final compare =
+        _rebasePreview?.currentCommit ??
+        (compareCommits.isEmpty ? null : compareCommits.first);
+    final interactive = _branchPreviewMode == BranchPreviewMode.rebase;
+    Widget choice({
+      required Key key,
+      required String branch,
+      required String subject,
+      required RebaseConflictChoice resolution,
+    }) => Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: InkWell(
+        key: key,
+        onTap:
+            !interactive || _rebasePreviewBusy || _repositoryOperationInProgress
+            ? null
+            : () => unawaited(_resolveRebaseConflict(resolution)),
+        borderRadius: BorderRadius.circular(7),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+          decoration: BoxDecoration(
+            color: _palette.raised,
+            border: Border.all(color: _palette.border),
+            borderRadius: BorderRadius.circular(7),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '$branch · $subject',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: _palette.text, fontSize: 11),
+                ),
+              ),
+              Text('사용', style: TextStyle(color: _palette.muted, fontSize: 10)),
+            ],
+          ),
+        ),
+      ),
+    );
+    return Column(
+      children: [
+        choice(
+          key: const Key('rebase-conflict-use-base'),
+          branch: comparison.baseRef,
+          subject: base?.subject ?? '현재 상태',
+          resolution: RebaseConflictChoice.base,
+        ),
+        choice(
+          key: const Key('rebase-conflict-use-compare'),
+          branch: comparison.compareRef,
+          subject: compare?.subject ?? '적용할 변경',
+          resolution: RebaseConflictChoice.commit,
+        ),
+        if (interactive) _rebaseConflictActions(),
+      ],
+    );
+  }
+
+  String? get _selectedRebaseConflictPath {
+    final preview = _rebasePreview;
+    final current = preview?.currentCommit;
+    if (preview == null || current == null || preview.conflictFiles.isEmpty) {
+      return null;
+    }
+    final selected = _previewPaths[_previewKey(current)];
+    return preview.conflictFiles.contains(selected)
+        ? selected
+        : preview.conflictFiles.first;
+  }
+
+  bool get _canContinueRebasePreview {
+    final files = _rebasePreview?.conflictFiles ?? const <String>[];
+    return files.isNotEmpty &&
+        files.every(
+          (path) =>
+              _rebaseResolvedFiles.contains(path) ||
+              _rebaseEditedFiles.contains(path),
+        );
+  }
+
+  Widget _rebaseConflictActions() => Padding(
+    padding: const EdgeInsets.only(top: 10),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_repositoryOperationInProgress)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 7),
+            child: Text(
+              '현재 Git 작업을 마친 뒤 해결할 수 있습니다',
+              style: TextStyle(color: _behind, fontSize: 10),
+            ),
+          ),
+        if (_rebasePreviewError != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 7),
+            child: Text(
+              _rebasePreviewError.toString(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: _behind, fontSize: 10),
+            ),
+          ),
+        Wrap(
+          alignment: WrapAlignment.end,
+          spacing: 7,
+          runSpacing: 7,
+          children: [
+            OutlinedButton(
+              key: const Key('rebase-conflict-open-editor'),
+              onPressed:
+                  _rebasePreviewBusy ||
+                      _repositoryOperationInProgress ||
+                      _selectedRebaseConflictPath == null
+                  ? null
+                  : () => unawaited(_openRebaseConflictEditor()),
+              child: const Text('편집기로 열기'),
+            ),
+            TextButton(
+              key: const Key('rebase-conflict-abort'),
+              onPressed: _rebasePreviewBusy
+                  ? null
+                  : () => _setBranchPreviewMode(BranchPreviewMode.merge),
+              child: const Text('미리보기 중단'),
+            ),
+            FilledButton(
+              key: const Key('rebase-conflict-continue'),
+              onPressed:
+                  !_rebasePreviewBusy &&
+                      !_repositoryOperationInProgress &&
+                      _canContinueRebasePreview
+                  ? () => unawaited(_continueRebasePreview())
+                  : null,
+              child: const Text('계속'),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+
+  Future<void> _resolveRebaseConflict(RebaseConflictChoice choice) async {
+    final session = _rebasePreviewSession;
+    final path = _selectedRebaseConflictPath;
+    if (session == null ||
+        path == null ||
+        _rebasePreviewBusy ||
+        _repositoryOperationInProgress) {
+      return;
+    }
+    setState(() {
+      _rebasePreviewBusy = true;
+      _rebasePreviewError = null;
+    });
+    try {
+      await session.resolveFile(path, choice);
+      if (mounted && identical(session, _rebasePreviewSession)) {
+        setState(() => _rebaseResolvedFiles.add(path));
+      }
+    } catch (error) {
+      if (mounted) setState(() => _rebasePreviewError = error);
+    } finally {
+      if (mounted) setState(() => _rebasePreviewBusy = false);
+    }
+  }
+
+  Future<void> _continueRebasePreview() async {
+    final session = _rebasePreviewSession;
+    final comparison = _comparison;
+    final request = _rebasePreviewSerial;
+    if (session == null ||
+        comparison == null ||
+        !_canContinueRebasePreview ||
+        _rebasePreviewBusy) {
+      return;
+    }
+    setState(() {
+      _rebasePreviewBusy = true;
+      _rebasePreviewError = null;
+    });
+    try {
+      for (final path in _rebaseEditedFiles.difference(_rebaseResolvedFiles)) {
+        await session.markResolved(path);
+      }
+      final result = await session.continueAfterResolving();
+      if (!mounted ||
+          request != _rebasePreviewSerial ||
+          !identical(session, _rebasePreviewSession)) {
+        return;
+      }
+      await _applyRebasePreviewResult(comparison, result);
+    } catch (error) {
+      if (mounted) setState(() => _rebasePreviewError = error);
+    } finally {
+      if (mounted) setState(() => _rebasePreviewBusy = false);
+    }
+  }
+
+  Future<void> _openRebaseConflictEditor() async {
+    final session = _rebasePreviewSession;
+    final path = _selectedRebaseConflictPath;
+    final worktree = session?.worktreePath;
+    if (session == null ||
+        path == null ||
+        worktree == null ||
+        _rebasePreviewBusy ||
+        _repositoryOperationInProgress) {
+      return;
+    }
+    setState(() {
+      _rebasePreviewBusy = true;
+      _rebasePreviewError = null;
+    });
+    try {
+      final overlay =
+          Overlay.of(context).context.findRenderObject()! as RenderBox;
+      final choice = await showMenu<String>(
+        context: context,
+        position: RelativeRect.fromLTRB(
+          overlay.size.width - 260,
+          overlay.size.height - 160,
+          16,
+          16,
+        ),
+        items: const [
+          PopupMenuItem(value: 'internal', child: Text('내장 에디터')),
+          PopupMenuItem(value: 'external', child: Text('외부 에디터')),
+        ],
+      );
+      if (!mounted || choice == null) return;
+      final externalEditor = ExternalEditorService(repositoryRoot: worktree);
+      if (choice == 'external') {
+        await externalEditor.open(relativePath: path);
+        if (mounted) setState(() => _rebaseEditedFiles.add(path));
+        return;
+      }
+      final document =
+          await widget.documentLoaderForTesting?.call(path) ??
+          await WorkingTreeTextDocument.load(
+            repositoryRoot: worktree,
+            relativePath: path,
+          );
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => MonacoEditorScreen(
+            title: path,
+            initialText: document.text,
+            language: monacoLanguageForPath(path),
+            readOnly: false,
+            onSave: (text) async {
+              await document.save(text);
+              await session.markResolved(path);
+              if (mounted) {
+                setState(() {
+                  _rebaseEditedFiles.add(path);
+                  _rebaseResolvedFiles.add(path);
+                });
+                Navigator.of(context).pop();
+              }
+            },
+            onOpenExternal: () async {
+              await externalEditor.open(relativePath: path);
+              if (mounted) setState(() => _rebaseEditedFiles.add(path));
+            },
+            editorForTesting: widget.editorForTesting,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _rebasePreviewError = error);
+    } finally {
+      if (mounted) setState(() => _rebasePreviewBusy = false);
+    }
+  }
+
   Widget _previewFileList(
     GitCommit commit,
     List<GitFileChange>? changes,
     bool failed,
     String? selectedPath,
   ) => Container(
-    key: const Key('preview-files'),
+    key: Key(
+      _comparison == null ? 'preview-files' : 'branch-preview-file-list',
+    ),
     alignment: Alignment.topLeft,
     child: failed
         ? const Center(
@@ -4340,11 +5324,95 @@ class _TimelineScreenState extends State<TimelineScreen>
       return comparison == null
           ? widget.repository.loadDiff(commit, file)
           : widget.repository.loadDiffBetween(
-              comparison.baseTip,
-              comparison.compareTip,
+              _branchPreviewRange!.from,
+              _branchPreviewRange!.to,
               file,
             );
     });
+    if (_comparison != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 5),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    path,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: _palette.text,
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+                _branchPreviewLayoutButton(
+                  key: const Key('branch-preview-layout-unified'),
+                  label: 'Unified',
+                  layout: DiffLayout.unified,
+                ),
+                const SizedBox(width: 5),
+                _branchPreviewLayoutButton(
+                  key: const Key('branch-preview-layout-side-by-side'),
+                  label: 'Side-by-side',
+                  layout: DiffLayout.sideBySide,
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: FutureBuilder<List<DiffLine>>(
+              future: future,
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return const Center(
+                    child: Text(
+                      'Could not load diff',
+                      style: TextStyle(color: Color(0xFFF29AB2), fontSize: 12),
+                    ),
+                  );
+                }
+                if (snapshot.data case final lines?) {
+                  final document = DiffDocument.fromLines(lines);
+                  final anchors = {
+                    for (final hunk in document.hunks)
+                      hunk.anchor.id: GlobalKey(),
+                  };
+                  return _branchPreviewLayout == DiffLayout.unified
+                      ? UnifiedPresentationView(
+                          document: document,
+                          activeAnchor: null,
+                          path: path,
+                          wrapLines: false,
+                          highlighter: _branchPreviewHighlighter,
+                          anchorKeys: anchors,
+                        )
+                      : SideBySidePresentationView(
+                          document: document,
+                          activeAnchor: null,
+                          oldPath: file.oldPath ?? path,
+                          newPath: path,
+                          wrapLines: false,
+                          showOldSide: true,
+                          highlighter: _branchPreviewHighlighter,
+                          anchorKeys: anchors,
+                        );
+                }
+                return const Center(
+                  child: SizedBox.square(
+                    dimension: 14,
+                    child: CircularProgressIndicator(strokeWidth: 1.5),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -4396,6 +5464,33 @@ class _TimelineScreenState extends State<TimelineScreen>
       ],
     );
   }
+
+  Widget _branchPreviewLayoutButton({
+    required Key key,
+    required String label,
+    required DiffLayout layout,
+  }) => InkWell(
+    key: key,
+    onTap: () => setState(() => _branchPreviewLayout = layout),
+    borderRadius: BorderRadius.circular(5),
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      decoration: BoxDecoration(
+        color: _branchPreviewLayout == layout
+            ? _palette.interactive
+            : _palette.raised,
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: _palette.text,
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    ),
+  );
 
   Widget _previewDiffLine(DiffLine line) {
     final prefix = switch (line.kind) {
@@ -4951,6 +6046,103 @@ class _RowStateScopeState extends State<_RowStateScope> {
   Widget build(BuildContext context) => widget.builder(_selected, _hovered);
 }
 
+class RebaseMappingPainter extends CustomPainter {
+  const RebaseMappingPainter({
+    required this.rows,
+    required this.mappings,
+    required this.rowIndex,
+    required this.laneSpacing,
+    required this.compact,
+    required this.backgroundColor,
+  });
+
+  final List<GraphRow> rows;
+  final List<RebaseGraphMapping> mappings;
+  final int rowIndex;
+  final double laneSpacing;
+  final bool compact;
+  final Color backgroundColor;
+
+  double _laneX(int lane) => compact
+      ? CommitGraphPainter.laneInset
+      : CommitGraphPainter.laneInset + lane * laneSpacing;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (compact || rowIndex < 0 || rowIndex >= rows.length) return;
+    final deepest = rows.fold<int>(
+      0,
+      (value, row) => math.max(value, row.maxLane),
+    );
+    final centerY = size.height / 2;
+    for (final mapping in mappings) {
+      final top = math.min(mapping.rewrittenRow, mapping.originalRow);
+      final bottom = math.max(mapping.rewrittenRow, mapping.originalRow);
+      if (rowIndex < top || rowIndex > bottom) continue;
+      final routeX = _laneX(deepest + 1 + mapping.routeLane);
+      final rewrittenX = _laneX(rows[mapping.rewrittenRow].lane);
+      final originalX = _laneX(rows[mapping.originalRow].lane);
+      final path = Path();
+      if (rowIndex == mapping.rewrittenRow) {
+        path
+          ..moveTo(routeX, size.height)
+          ..lineTo(routeX, centerY + 6)
+          ..quadraticBezierTo(routeX, centerY, routeX - 6, centerY)
+          ..lineTo(rewrittenX + CommitGraphPainter.avatarDiameter / 2, centerY);
+      } else if (rowIndex == mapping.originalRow) {
+        path
+          ..moveTo(originalX + CommitGraphPainter.avatarDiameter / 2, centerY)
+          ..lineTo(routeX - 6, centerY)
+          ..quadraticBezierTo(routeX, centerY, routeX, centerY - 6)
+          ..lineTo(routeX, 0);
+      } else {
+        path
+          ..moveTo(routeX, 0)
+          ..lineTo(routeX, size.height);
+      }
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = backgroundColor
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round,
+      );
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = mapping.color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round,
+      );
+      if (rowIndex == mapping.rewrittenRow) {
+        final tip = Offset(
+          rewrittenX + CommitGraphPainter.avatarDiameter / 2,
+          centerY,
+        );
+        final arrow = Path()
+          ..moveTo(tip.dx, tip.dy)
+          ..lineTo(tip.dx + 5, tip.dy - 3)
+          ..lineTo(tip.dx + 5, tip.dy + 3)
+          ..close();
+        canvas.drawPath(arrow, Paint()..color = mapping.color);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant RebaseMappingPainter oldDelegate) =>
+      oldDelegate.rows != rows ||
+      oldDelegate.mappings != mappings ||
+      oldDelegate.rowIndex != rowIndex ||
+      oldDelegate.laneSpacing != laneSpacing ||
+      oldDelegate.compact != compact ||
+      oldDelegate.backgroundColor != backgroundColor;
+}
+
 /// Draws one row of the commit graph: pass-through rails, the rounded lane
 /// curves into parent lanes, and the row's own node.
 class CommitGraphPainter extends CustomPainter {
@@ -4964,6 +6156,8 @@ class CommitGraphPainter extends CustomPainter {
     this.compact = false,
     this.refConnector = false,
     this.passThrough = false,
+    this.dashedLanes = const {},
+    this.previousDashedLanes = const {},
     this.backgroundColor = const Color(0xFF1C1C1E),
     this.selectedRowColor = const Color(0xFF234D72),
   });
@@ -4971,6 +6165,7 @@ class CommitGraphPainter extends CustomPainter {
   static const laneInset = 28.0;
   static const defaultLaneSpacing = 30.0;
   static const railWidth = 2.0;
+  static const previewRailWidth = 1.0;
   static const avatarDiameter = 22.0;
   static const hashRailClearance = 3.0;
 
@@ -5040,6 +6235,10 @@ class CommitGraphPainter extends CustomPainter {
   /// A date heading: the rails and the arriving sweeps run through it, but it
   /// owns no node, no selected band and no ref connector.
   final bool passThrough;
+  final Set<int> dashedLanes;
+  final Set<int> previousDashedLanes;
+
+  bool isDashedLane(int lane) => dashedLanes.contains(lane);
 
   double laneX(int lane) =>
       compact ? laneInset : laneInset + lane * laneSpacing;
@@ -5139,13 +6338,16 @@ class CommitGraphPainter extends CustomPainter {
     if (compact) {
       // Stage 3: one rail in this row's committer color, no lanes, no curves.
       final rail = compactRail(size);
-      canvas.drawLine(
-        Offset(laneInset, rail.top),
-        Offset(laneInset, rail.bottom),
+      _drawRailPath(
+        canvas,
+        Path()
+          ..moveTo(laneInset, rail.top)
+          ..lineTo(laneInset, rail.bottom),
         Paint()
           ..color = committerColor
-          ..strokeWidth = railWidth
+          ..strokeWidth = isDashedLane(row.lane) ? previewRailWidth : railWidth
           ..strokeCap = StrokeCap.round,
+        dashed: isDashedLane(row.lane),
       );
     } else {
       // Halves are painted apart: above the node a lane carries the rail it
@@ -5153,23 +6355,31 @@ class CommitGraphPainter extends CustomPainter {
       for (final entry in laneVerticals(size).entries) {
         final x = laneX(entry.key);
         if (entry.value.top < centerY) {
-          canvas.drawLine(
-            Offset(x, entry.value.top),
-            Offset(x, centerY),
+          _drawRailPath(
+            canvas,
+            Path()
+              ..moveTo(x, entry.value.top)
+              ..lineTo(x, centerY),
             _railPaint(
               row.activeLaneBranches[entry.key],
               row.activeLaneShas[entry.key],
+              dashed: isDashedLane(entry.key),
             ),
+            dashed: isDashedLane(entry.key),
           );
         }
         if (entry.value.bottom > centerY) {
-          canvas.drawLine(
-            Offset(x, centerY),
-            Offset(x, entry.value.bottom),
+          _drawRailPath(
+            canvas,
+            Path()
+              ..moveTo(x, centerY)
+              ..lineTo(x, entry.value.bottom),
             _railPaint(
               row.nextLaneBranches[entry.key],
               row.nextLaneShas[entry.key],
+              dashed: isDashedLane(entry.key),
             ),
+            dashed: isDashedLane(entry.key),
           );
         }
       }
@@ -5179,7 +6389,11 @@ class CommitGraphPainter extends CustomPainter {
       // are the whole story.
       if (previous case final previous?) {
         for (final transition in previous.transitions) {
-          canvas.drawPath(
+          final dashed =
+              previousDashedLanes.contains(transition.from) ||
+              previousDashedLanes.contains(transition.to);
+          _drawRailPath(
+            canvas,
             transitionPath(
               transition.from,
               transition.to,
@@ -5189,12 +6403,20 @@ class CommitGraphPainter extends CustomPainter {
               // repeats its departure half's shape and color exactly.
               bendEarly: isMergeEdge(previous, transition),
             ),
-            _railPaint(transitionBranch(previous, transition), transition.sha),
+            _railPaint(
+              transitionBranch(previous, transition),
+              transition.sha,
+              dashed: dashed,
+            ),
+            dashed: dashed,
           );
         }
       }
       for (final transition in row.transitions) {
-        canvas.drawPath(
+        final dashed =
+            isDashedLane(transition.from) || isDashedLane(transition.to);
+        _drawRailPath(
+          canvas,
           transitionPath(
             transition.from,
             transition.to,
@@ -5202,7 +6424,12 @@ class CommitGraphPainter extends CustomPainter {
             size,
             bendEarly: isMergeEdge(row, transition),
           ),
-          _railPaint(transitionBranch(row, transition), transition.sha),
+          _railPaint(
+            transitionBranch(row, transition),
+            transition.sha,
+            dashed: dashed,
+          ),
+          dashed: dashed,
         );
       }
     }
@@ -5313,16 +6540,36 @@ class CommitGraphPainter extends CustomPainter {
   /// A rail paints in its branch line's color. Before [GraphRow] carries branch
   /// ids for a lane it falls back to the committer color, so the graph degrades
   /// to the old look instead of to one flat color.
-  Paint _railPaint(int? branch, String? sha) => Paint()
+  Paint _railPaint(int? branch, String? sha, {bool dashed = false}) => Paint()
     ..color = branch == null
         ? AvatarService.color(committersBySha[sha] ?? row.commit.committer)
         : AvatarService.branchColor(branch)
     ..style = PaintingStyle.stroke
-    ..strokeWidth = railWidth
+    ..strokeWidth = dashed ? previewRailWidth : railWidth
     ..strokeCap = StrokeCap.round
     // Mitered, so a join's square corner renders as a crisp right angle. Curves
     // are unaffected.
     ..strokeJoin = StrokeJoin.miter;
+
+  void _drawRailPath(
+    Canvas canvas,
+    Path path,
+    Paint paint, {
+    required bool dashed,
+  }) {
+    if (!dashed) {
+      canvas.drawPath(path, paint);
+      return;
+    }
+    for (final metric in path.computeMetrics()) {
+      for (var start = 0.0; start < metric.length; start += 6) {
+        canvas.drawPath(
+          metric.extractPath(start, math.min(start + 3, metric.length)),
+          paint,
+        );
+      }
+    }
+  }
 
   @override
   bool shouldRepaint(covariant CommitGraphPainter oldDelegate) =>
@@ -5335,6 +6582,8 @@ class CommitGraphPainter extends CustomPainter {
       oldDelegate.compact != compact ||
       oldDelegate.refConnector != refConnector ||
       oldDelegate.passThrough != passThrough ||
+      !setEquals(oldDelegate.dashedLanes, dashedLanes) ||
+      !setEquals(oldDelegate.previousDashedLanes, previousDashedLanes) ||
       oldDelegate.backgroundColor != backgroundColor ||
       oldDelegate.selectedRowColor != selectedRowColor;
 }

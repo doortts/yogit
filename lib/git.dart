@@ -314,11 +314,15 @@ class MergeConflictCheck {
   const MergeConflictCheck({
     required this.status,
     this.files = const [],
+    this.treeSha,
+    this.resultFiles = const [],
     this.error,
   });
 
   final MergeConflictStatus status;
   final List<String> files;
+  final String? treeSha;
+  final List<GitFileChange> resultFiles;
   final String? error;
 }
 
@@ -336,6 +340,333 @@ class RebaseCheckResult {
   final String? stoppedCommit;
   final List<String> files;
   final String? error;
+}
+
+enum RebasePreviewStatus { clean, conflict, failed }
+
+enum RebaseConflictChoice { base, commit }
+
+typedef RewrittenCommit = ({GitCommit original, String rewrittenSha});
+
+class RebasePreviewResult {
+  const RebasePreviewResult({
+    required this.status,
+    required this.baseTip,
+    required this.compareTip,
+    this.rewritten = const [],
+    this.currentCommit,
+    this.completed = 0,
+    this.total = 0,
+    this.conflictFiles = const [],
+    this.virtualTip,
+    this.error,
+  });
+
+  final RebasePreviewStatus status;
+  final String baseTip;
+  final String compareTip;
+  final List<RewrittenCommit> rewritten;
+  final GitCommit? currentCommit;
+  final int completed;
+  final int total;
+  final List<String> conflictFiles;
+  final String? virtualTip;
+  final String? error;
+}
+
+class RebasePreviewSession {
+  RebasePreviewSession({
+    required GitRepository repository,
+    required this.baseTip,
+    required this.compareTip,
+    required List<GitCommit> originalCommits,
+  }) : _repository = repository,
+       _originalCommits = originalCommits;
+
+  final GitRepository _repository;
+  final String baseTip;
+  final String compareTip;
+  final List<GitCommit> _originalCommits;
+  String? _worktreePath;
+  bool _disposed = false;
+
+  String? get worktreePath => _worktreePath;
+
+  String filePath(String relativePath) {
+    final path = _worktreePath;
+    final parts = relativePath.split(RegExp(r'[/\\]'));
+    if (path == null ||
+        relativePath.isEmpty ||
+        relativePath.startsWith('/') ||
+        RegExp(r'^[A-Za-z]:').hasMatch(relativePath) ||
+        parts.any((part) => part.isEmpty || part == '.' || part == '..')) {
+      throw FileSystemException('Invalid rebase preview path', relativePath);
+    }
+    return '$path${Platform.pathSeparator}${parts.join(Platform.pathSeparator)}';
+  }
+
+  Future<RebasePreviewResult> start() async {
+    if (_disposed) {
+      throw StateError('Rebase preview session has been disposed.');
+    }
+    if (_worktreePath != null) {
+      throw StateError('Rebase preview session has already started.');
+    }
+    final temporary = await Directory.systemTemp.createTemp(
+      'yogit_rebase_preview_',
+    );
+    final path = temporary.path;
+    await temporary.delete();
+    _worktreePath = path;
+    final add = await _repository.runner(_repository.gitExecutable, [
+      'worktree',
+      'add',
+      '--detach',
+      path,
+      compareTip,
+    ], workingDirectory: _repository.root);
+    if (add.exitCode != 0) {
+      await dispose();
+      return RebasePreviewResult(
+        status: RebasePreviewStatus.failed,
+        baseTip: baseTip,
+        compareTip: compareTip,
+        total: _originalCommits.length,
+        error: add.stderr.toString().trim(),
+      );
+    }
+    final result = await _repository.runner(
+      _repository.gitExecutable,
+      [
+        '-c',
+        'core.hooksPath=/dev/null',
+        '-c',
+        'rerere.enabled=false',
+        '-c',
+        'rebase.autoStash=false',
+        '-c',
+        'rebase.updateRefs=false',
+        '-c',
+        'commit.gpgSign=false',
+        'rebase',
+        '--no-autostash',
+        baseTip,
+      ],
+      workingDirectory: path,
+      environment: {
+        ...Platform.environment,
+        'GIT_EDITOR': 'true',
+        'GIT_SEQUENCE_EDITOR': 'true',
+        'GIT_TERMINAL_PROMPT': '0',
+      },
+    );
+    if (result.exitCode != 0) {
+      return _conflictOrFailure(result);
+    }
+    final rewritten = await _rewrittenCommits();
+    final virtualTip = (await _run(const ['rev-parse', 'HEAD'])).trim();
+    return RebasePreviewResult(
+      status: RebasePreviewStatus.clean,
+      baseTip: baseTip,
+      compareTip: compareTip,
+      rewritten: rewritten,
+      completed: rewritten.length,
+      total: _originalCommits.length,
+      virtualTip: virtualTip,
+    );
+  }
+
+  Future<void> markResolved(String relativePath) async {
+    filePath(relativePath);
+    final result = await _repository.runner(_repository.gitExecutable, [
+      'add',
+      '--',
+      relativePath,
+    ], workingDirectory: _worktreePath);
+    if (result.exitCode != 0) {
+      throw ProcessException(
+        _repository.gitExecutable,
+        ['add', '--', relativePath],
+        result.stderr.toString(),
+        result.exitCode,
+      );
+    }
+  }
+
+  Future<void> resolveFile(
+    String relativePath,
+    RebaseConflictChoice choice,
+  ) async {
+    filePath(relativePath);
+    await _run([
+      'checkout',
+      choice == RebaseConflictChoice.base ? '--ours' : '--theirs',
+      '--',
+      relativePath,
+    ]);
+    await markResolved(relativePath);
+  }
+
+  Future<RebasePreviewResult> continueAfterResolving() async {
+    final conflicts = await _run(const [
+      'diff',
+      '--name-only',
+      '--diff-filter=U',
+    ]);
+    if (conflicts.trim().isNotEmpty) {
+      throw GitRepositoryException(_worktreePath!, '해결되지 않은 충돌 파일이 남아 있습니다.');
+    }
+    final result = await _repository.runner(
+      _repository.gitExecutable,
+      [
+        '-c',
+        'core.hooksPath=/dev/null',
+        '-c',
+        'rerere.enabled=false',
+        '-c',
+        'rebase.updateRefs=false',
+        '-c',
+        'commit.gpgSign=false',
+        'rebase',
+        '--continue',
+      ],
+      workingDirectory: _worktreePath,
+      environment: {
+        ...Platform.environment,
+        'GIT_EDITOR': 'true',
+        'GIT_SEQUENCE_EDITOR': 'true',
+        'GIT_TERMINAL_PROMPT': '0',
+      },
+    );
+    if (result.exitCode != 0) {
+      return _conflictOrFailure(result);
+    }
+    final rewritten = await _rewrittenCommits();
+    return RebasePreviewResult(
+      status: RebasePreviewStatus.clean,
+      baseTip: baseTip,
+      compareTip: compareTip,
+      rewritten: rewritten,
+      completed: rewritten.length,
+      total: _originalCommits.length,
+      virtualTip: (await _run(const ['rev-parse', 'HEAD'])).trim(),
+    );
+  }
+
+  Future<List<RewrittenCommit>> _rewrittenCommits() async {
+    if (_originalCommits.isEmpty) return const [];
+    final parents = _originalCommits.first.parents;
+    if (parents.isEmpty) return const [];
+    final originalBase = parents.first;
+    final output = await _run([
+      'range-diff',
+      '--no-color',
+      '--no-dual-color',
+      '--abbrev=40',
+      '$originalBase..$compareTip',
+      '$baseTip..HEAD',
+    ]);
+    final originals = {
+      for (final commit in _originalCommits) commit.sha: commit,
+    };
+    final pairs = RegExp(
+      r'^\s*\d+:\s+([0-9a-f]{40})\s+[=!]\s+\d+:\s+([0-9a-f]{40})\s+',
+      multiLine: true,
+    ).allMatches(output);
+    return [
+      for (final pair in pairs)
+        if (originals[pair.group(1)] case final original?)
+          (original: original, rewrittenSha: pair.group(2)!),
+    ];
+  }
+
+  Future<String> _run(List<String> arguments) async {
+    final result = await _repository.runner(
+      _repository.gitExecutable,
+      arguments,
+      workingDirectory: _worktreePath,
+    );
+    if (result.exitCode != 0) {
+      throw ProcessException(
+        _repository.gitExecutable,
+        arguments,
+        result.stderr.toString(),
+        result.exitCode,
+      );
+    }
+    return result.stdout.toString();
+  }
+
+  Future<RebasePreviewResult> _conflictOrFailure(ProcessResult result) async {
+    final path = _worktreePath!;
+    final stopped = await _repository.runner(_repository.gitExecutable, const [
+      'rev-parse',
+      '--verify',
+      'REBASE_HEAD',
+    ], workingDirectory: path);
+    final conflicts = await _repository.runner(
+      _repository.gitExecutable,
+      const ['diff', '--name-only', '--diff-filter=U', '-z'],
+      workingDirectory: path,
+    );
+    final stoppedSha = stopped.exitCode == 0
+        ? stopped.stdout.toString().trim()
+        : null;
+    final files = conflicts.exitCode == 0
+        ? conflicts.stdout
+              .toString()
+              .split('\x00')
+              .where((value) => value.isNotEmpty)
+              .toList()
+        : const <String>[];
+    final currentIndex = stoppedSha == null
+        ? -1
+        : _originalCommits.indexWhere((commit) => commit.sha == stoppedSha);
+    if (currentIndex >= 0 && files.isNotEmpty) {
+      return RebasePreviewResult(
+        status: RebasePreviewStatus.conflict,
+        baseTip: baseTip,
+        compareTip: compareTip,
+        rewritten: await _rewrittenCommits(),
+        currentCommit: _originalCommits[currentIndex],
+        completed: currentIndex,
+        total: _originalCommits.length,
+        conflictFiles: files,
+      );
+    }
+    return RebasePreviewResult(
+      status: RebasePreviewStatus.failed,
+      baseTip: baseTip,
+      compareTip: compareTip,
+      total: _originalCommits.length,
+      error: result.stderr.toString().trim(),
+    );
+  }
+
+  Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
+    final path = _worktreePath;
+    if (path == null) return;
+    await _repository._ignoreCommand(const [
+      'rebase',
+      '--abort',
+    ], workingDirectory: path);
+    await _repository._ignoreCommand([
+      'worktree',
+      'remove',
+      '--force',
+      path,
+    ], workingDirectory: _repository.root);
+    final directory = Directory(path);
+    if (await directory.exists()) {
+      await directory.delete(recursive: true);
+    }
+    await _repository._ignoreCommand(const [
+      'worktree',
+      'prune',
+    ], workingDirectory: _repository.root);
+  }
 }
 
 enum CherryPickOutcome { applied, conflicts, empty }
@@ -1291,7 +1622,12 @@ class GitRepository implements FullDiffRepository {
       workingDirectory: root,
     );
     if (result.exitCode == 0) {
-      return const MergeConflictCheck(status: MergeConflictStatus.clean);
+      final treeSha = result.stdout.toString().split('\x00').first.trim();
+      return MergeConflictCheck(
+        status: MergeConflictStatus.clean,
+        treeSha: treeSha,
+        resultFiles: await _loadFilesBetween(baseTip, treeSha),
+      );
     }
     if (result.exitCode != 1) {
       return MergeConflictCheck(
@@ -1321,104 +1657,59 @@ class GitRepository implements FullDiffRepository {
     required String baseRef,
     required String compareRef,
   }) async {
-    final temporary = await Directory.systemTemp.createTemp('yogit_rebase_');
-    final path = temporary.path;
-    await temporary.delete();
-    var added = false;
+    final session = await openRebasePreview(
+      baseRef: baseRef,
+      compareRef: compareRef,
+    );
     try {
-      final add = await runner(gitExecutable, [
-        'worktree',
-        'add',
-        '--detach',
-        path,
-        compareRef,
-      ], workingDirectory: root);
-      if (add.exitCode != 0) {
-        return RebaseCheckResult(
-          status: RebaseCheckStatus.failed,
-          error: add.stderr.toString().trim(),
-        );
-      }
-      added = true;
-      final result = await runner(
-        gitExecutable,
-        [
-          '-c',
-          'core.hooksPath=/dev/null',
-          '-c',
-          'rerere.enabled=false',
-          '-c',
-          'rebase.autoStash=false',
-          '-c',
-          'rebase.updateRefs=false',
-          '-c',
-          'commit.gpgSign=false',
-          'rebase',
-          '--no-autostash',
-          baseRef,
-        ],
-        workingDirectory: path,
-        environment: {
-          ...Platform.environment,
-          'GIT_EDITOR': 'true',
-          'GIT_SEQUENCE_EDITOR': 'true',
-          'GIT_TERMINAL_PROMPT': '0',
-        },
-      );
-      if (result.exitCode == 0) {
-        return const RebaseCheckResult(status: RebaseCheckStatus.clean);
-      }
-      final stopped = await runner(gitExecutable, const [
-        'rev-parse',
-        '--verify',
-        'REBASE_HEAD',
-      ], workingDirectory: path);
-      final conflicts = await runner(gitExecutable, const [
-        'diff',
-        '--name-only',
-        '--diff-filter=U',
-        '-z',
-      ], workingDirectory: path);
-      final stoppedCommit = stopped.exitCode == 0
-          ? stopped.stdout.toString().trim()
-          : null;
-      final files = conflicts.exitCode == 0
-          ? conflicts.stdout
-                .toString()
-                .split('\x00')
-                .where((value) => value.isNotEmpty)
-                .toList()
-          : const <String>[];
-      if (stoppedCommit != null && files.isNotEmpty) {
-        return RebaseCheckResult(
+      final result = await session.start();
+      return switch (result.status) {
+        RebasePreviewStatus.clean => const RebaseCheckResult(
+          status: RebaseCheckStatus.clean,
+        ),
+        RebasePreviewStatus.conflict => RebaseCheckResult(
           status: RebaseCheckStatus.conflicts,
-          stoppedCommit: stoppedCommit,
-          files: files,
-        );
-      }
-      return RebaseCheckResult(
-        status: RebaseCheckStatus.failed,
-        error: result.stderr.toString().trim(),
-      );
+          stoppedCommit: result.currentCommit?.sha,
+          files: result.conflictFiles,
+        ),
+        RebasePreviewStatus.failed => RebaseCheckResult(
+          status: RebaseCheckStatus.failed,
+          error: result.error,
+        ),
+      };
     } finally {
-      if (added) {
-        await _ignoreCommand(const [
-          'rebase',
-          '--abort',
-        ], workingDirectory: path);
-        await _ignoreCommand([
-          'worktree',
-          'remove',
-          '--force',
-          path,
-        ], workingDirectory: root);
-      }
-      final directory = Directory(path);
-      if (await directory.exists()) {
-        await directory.delete(recursive: true);
-      }
-      await _ignoreCommand(const ['worktree', 'prune'], workingDirectory: root);
+      await session.dispose();
     }
+  }
+
+  Future<RebasePreviewSession> openRebasePreview({
+    required String baseRef,
+    required String compareRef,
+  }) async {
+    final baseTip = (await _run([
+      'rev-parse',
+      '--verify',
+      '$baseRef^{commit}',
+    ])).trim();
+    final compareTip = (await _run([
+      'rev-parse',
+      '--verify',
+      '$compareRef^{commit}',
+    ])).trim();
+    final originalCommits = parseGitLog(
+      await _run([
+        'log',
+        '--reverse',
+        '--format=$_gitLogFormat',
+        '$baseTip..$compareTip',
+      ]),
+    );
+    return RebasePreviewSession(
+      repository: this,
+      baseTip: baseTip,
+      compareTip: compareTip,
+      originalCommits: originalCommits,
+    );
   }
 
   Future<void> cleanupStaleRebaseWorktrees() async {
@@ -1587,6 +1878,8 @@ class GitRepository implements FullDiffRepository {
     }
     return commitSha;
   }
+
+  Future<bool> operationInProgress() => _gitOperationInProgress();
 
   Future<bool> _gitOperationInProgress() async {
     for (final name in const [
@@ -1828,6 +2121,9 @@ class GitRepository implements FullDiffRepository {
         ),
     ];
   }
+
+  Future<List<GitFileChange>> loadFilesBetween(String fromRef, String toRef) =>
+      _loadFilesBetween(fromRef, toRef);
 
   Future<List<GitFileChange>> _withFileSizes(
     GitCommit commit,

@@ -10,6 +10,14 @@ import 'git.dart';
 import 'timeline_theme.dart';
 import 'window_frame.dart';
 
+enum BranchPreviewMode {
+  merge,
+  rebase;
+
+  static BranchPreviewMode parse(Object? value) =>
+      value == 'rebase' ? rebase : merge;
+}
+
 class TimelineColumnWidths {
   const TimelineColumnWidths({
     this.sidebar = 150,
@@ -253,6 +261,7 @@ class AppSettings {
     this.showAvatars = true,
     this.timelineTheme = TimelineThemeKind.systemGraphite,
     this.previewPlacement = PreviewPlacement.right,
+    this.branchPreviewMode = BranchPreviewMode.merge,
     this.columnWidths = const TimelineColumnWidths(),
     this.repositoryGraphWidths = const {},
     this.fullDiffColumnWidths = const FullDiffColumnWidths(),
@@ -293,6 +302,7 @@ class AppSettings {
   final bool showAvatars;
   final TimelineThemeKind timelineTheme;
   final PreviewPlacement previewPlacement;
+  final BranchPreviewMode branchPreviewMode;
   final TimelineColumnWidths columnWidths;
   final Map<String, double> repositoryGraphWidths;
   final FullDiffColumnWidths fullDiffColumnWidths;
@@ -349,6 +359,7 @@ class AppSettings {
     bool? showAvatars,
     TimelineThemeKind? timelineTheme,
     PreviewPlacement? previewPlacement,
+    BranchPreviewMode? branchPreviewMode,
     TimelineColumnWidths? columnWidths,
     Map<String, double>? repositoryGraphWidths,
     FullDiffColumnWidths? fullDiffColumnWidths,
@@ -362,6 +373,7 @@ class AppSettings {
     showAvatars: showAvatars ?? this.showAvatars,
     timelineTheme: timelineTheme ?? this.timelineTheme,
     previewPlacement: previewPlacement ?? this.previewPlacement,
+    branchPreviewMode: branchPreviewMode ?? this.branchPreviewMode,
     columnWidths: columnWidths ?? this.columnWidths,
     repositoryGraphWidths: repositoryGraphWidths ?? this.repositoryGraphWidths,
     fullDiffColumnWidths: fullDiffColumnWidths ?? this.fullDiffColumnWidths,
@@ -401,6 +413,7 @@ class AppSettings {
         'left' => PreviewPlacement.left,
         _ => PreviewPlacement.right,
       },
+      branchPreviewMode: BranchPreviewMode.parse(value['branchPreviewMode']),
       columnWidths: TimelineColumnWidths.fromJson(value['columnWidths']),
       repositoryGraphWidths: _parseRepositoryGraphWidths(
         value['repositoryGraphWidths'],
@@ -423,6 +436,7 @@ class AppSettings {
     'showAvatars': showAvatars,
     'timelineTheme': timelineTheme.storageValue,
     'previewPlacement': previewPlacement.name,
+    'branchPreviewMode': branchPreviewMode.name,
     'columnWidths': columnWidths.withGraph(null).toJson(),
     'repositoryGraphWidths': repositoryGraphWidths,
     'fullDiffColumnWidths': fullDiffColumnWidths.toJson(),
@@ -440,6 +454,7 @@ class AppSettings {
       showAvatars == other.showAvatars &&
       timelineTheme == other.timelineTheme &&
       previewPlacement == other.previewPlacement &&
+      branchPreviewMode == other.branchPreviewMode &&
       columnWidths == other.columnWidths &&
       mapEquals(repositoryGraphWidths, other.repositoryGraphWidths) &&
       fullDiffColumnWidths == other.fullDiffColumnWidths &&
@@ -455,6 +470,7 @@ class AppSettings {
     showAvatars,
     timelineTheme,
     previewPlacement,
+    branchPreviewMode,
     columnWidths,
     Object.hashAllUnordered(
       repositoryGraphWidths.entries.map(

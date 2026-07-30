@@ -310,6 +310,7 @@ class _YogitAppState extends State<YogitApp> {
           columnWidths: _settings.columnWidthsForRepository(_repository.root),
           fullDiffColumnWidths: _settings.fullDiffColumnWidths,
           fullDiffPreferences: _settings.fullDiffPreferences,
+          branchPreviewMode: _settings.branchPreviewMode,
           previewWidth: _settings.previewWidth,
           previewHeight: _settings.previewHeight,
           onOpenSettings: _settingsLoaded ? () => _openSettings(context) : null,
@@ -345,6 +346,10 @@ class _YogitAppState extends State<YogitApp> {
               ? (preferences) => _changeSettings(
                   _settings.copyWith(fullDiffPreferences: preferences),
                 )
+              : null,
+          onBranchPreviewModeChanged: _settingsLoaded
+              ? (mode) =>
+                    _changeSettings(_settings.copyWith(branchPreviewMode: mode))
               : null,
           onPreviewSizeChanged: _settingsLoaded
               ? (size) => _changeSettings(
