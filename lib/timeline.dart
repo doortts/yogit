@@ -68,6 +68,8 @@ enum PreviewGraphNodeKind {
   conflictTarget,
 }
 
+enum BranchApplyStatus { idle, applying, applied, reverting, reverted, failed }
+
 typedef RebaseGraphMapping = ({
   String originalSha,
   String rewrittenSha,
@@ -634,6 +636,11 @@ class _TimelineScreenState extends State<TimelineScreen>
   final _rebaseResolvedFiles = <String>{};
   final _rebaseEditedFiles = <String>{};
   final _rebaseConflictRowContextKey = GlobalKey();
+  final _rebaseApplyRowContextKey = GlobalKey();
+  var _branchApplyStatus = BranchApplyStatus.idle;
+  BranchApplyResult? _branchApplyResult;
+  Object? _branchApplyError;
+  String? _rebaseApplyingSha;
   Object? _comparisonError;
   var _comparisonSerial = 0;
   late BranchPreviewMode _branchPreviewMode = widget.branchPreviewMode;
@@ -880,6 +887,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       });
     }
     if (!identical(widget.repository, oldWidget.repository)) {
+      _resetBranchApply();
       _dropRebasePreview();
       _clearFullDiffRouteSession();
     } else if (widget.onFullDiffPreferencesChanged !=
@@ -1708,9 +1716,14 @@ class _TimelineScreenState extends State<TimelineScreen>
   );
 
   void _setBranchPreviewMode(BranchPreviewMode mode) {
-    if (_branchPreviewMode == mode) return;
+    if (_branchPreviewMode == mode ||
+        _branchApplyStatus == BranchApplyStatus.applying ||
+        _branchApplyStatus == BranchApplyStatus.reverting) {
+      return;
+    }
     setState(() {
       _branchPreviewMode = mode;
+      _resetBranchApply();
       final comparison = _comparison;
       if (comparison != null) {
         _previewGraph = mode == BranchPreviewMode.merge
@@ -1739,6 +1752,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     final compared = _compareRef;
     setState(() {
       _baseBranch = branch;
+      _resetBranchApply();
       _rebuildGraph();
     });
     _scheduleRatchetUpdate();
@@ -1765,6 +1779,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     _dropRebasePreview();
     setState(() {
       _compareRef = compareRef;
+      _resetBranchApply();
       _comparison = null;
       _comparisonRows = [];
       _comparisonEntries = [];
@@ -1982,12 +1997,20 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (session != null) unawaited(session.dispose());
   }
 
+  void _resetBranchApply() {
+    _branchApplyStatus = BranchApplyStatus.idle;
+    _branchApplyResult = null;
+    _branchApplyError = null;
+    _rebaseApplyingSha = null;
+  }
+
   void _clearComparison() {
     if (_compareRef == null) return;
     _dropRebasePreview();
     _comparisonSerial++;
     setState(() {
       _compareRef = null;
+      _resetBranchApply();
       _comparison = null;
       _comparisonRows = [];
       _comparisonEntries = [];
@@ -3106,6 +3129,267 @@ class _TimelineScreenState extends State<TimelineScreen>
     );
   }
 
+  bool get _branchPreviewCanApply {
+    final comparison = _comparison;
+    if (comparison == null) return false;
+    return _branchPreviewMode == BranchPreviewMode.merge
+        ? comparison.merge.status == MergeConflictStatus.clean &&
+              comparison.merge.treeSha != null
+        : _rebasePreview?.status == RebasePreviewStatus.clean &&
+              _rebasePreview?.virtualTip != null;
+  }
+
+  String get _branchPreviewApplyLabel {
+    final comparison = _comparison!;
+    return _branchPreviewMode == BranchPreviewMode.merge
+        ? '${comparison.compareRef}를 ${comparison.baseRef}에 Merge 실제 적용'
+        : '${comparison.baseRef} 위로 ${comparison.compareRef} Rebase 실제 적용';
+  }
+
+  Future<void> _confirmBranchPreviewApply() async {
+    final comparison = _comparison;
+    if (comparison == null ||
+        !_branchPreviewCanApply ||
+        _branchApplyStatus == BranchApplyStatus.applying) {
+      return;
+    }
+    final merge = _branchPreviewMode == BranchPreviewMode.merge;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${merge ? 'Merge' : 'Rebase'} 실제 적용'),
+        content: Text(
+          '기준 브랜치 ${comparison.baseRef}\n'
+          '${comparison.baseTip}\n\n'
+          '대상 브랜치 ${comparison.compareRef}\n'
+          '${comparison.compareTip}\n\n'
+          '${merge ? comparison.baseRef : comparison.compareRef} 로컬 브랜치만 변경합니다. '
+          '원격 저장소로 push하지 않습니다.\n'
+          '완료한 뒤에도 두 브랜치를 이 시작 SHA의 이전 시점으로 되돌릴 수 있습니다.',
+        ),
+        actions: [
+          TextButton(
+            autofocus: true,
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('${merge ? 'Merge' : 'Rebase'} 실제 적용'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await _runBranchPreviewApply(comparison);
+    }
+  }
+
+  Future<void> _runBranchPreviewApply(BranchComparisonResult comparison) async {
+    final mode = _branchPreviewMode;
+    setState(() {
+      _branchApplyStatus = BranchApplyStatus.applying;
+      _branchApplyError = null;
+    });
+    try {
+      BranchApplyResult result;
+      if (mode == BranchPreviewMode.merge) {
+        result = await widget.repository.applyMergePreview(
+          comparison: comparison,
+          treeSha: comparison.merge.treeSha!,
+        );
+      } else {
+        final preview = _rebasePreview!;
+        final duration = MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 220);
+        for (final rewrite in preview.rewritten) {
+          if (!mounted) return;
+          final row = _comparisonRows.indexWhere(
+            (entry) => entry.commit.sha == rewrite.rewrittenSha,
+          );
+          setState(() => _rebaseApplyingSha = rewrite.rewrittenSha);
+          if (row >= 0) _selectedIndex.value = row;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final rowContext = _rebaseApplyRowContextKey.currentContext;
+            if (!mounted || rowContext == null) return;
+            unawaited(
+              Scrollable.ensureVisible(
+                rowContext,
+                duration: duration,
+                curve: Curves.easeOut,
+              ),
+            );
+          });
+          if (duration > Duration.zero) await Future<void>.delayed(duration);
+        }
+        result = await widget.repository.applyRebasePreview(
+          comparison: comparison,
+          virtualTip: preview.virtualTip!,
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _branchApplyStatus = BranchApplyStatus.applied;
+        _branchApplyResult = result;
+        _rebaseApplyingSha = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _branchApplyStatus = BranchApplyStatus.failed;
+        _branchApplyError = error;
+        _rebaseApplyingSha = null;
+      });
+    }
+  }
+
+  Future<void> _confirmBranchPreviewRollback() async {
+    final result = _branchApplyResult;
+    if (result == null || _branchApplyStatus != BranchApplyStatus.applied) {
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          '${result.mode == BranchApplyMode.merge ? 'Merge' : 'Rebase'} 이전 시점으로 되돌리기',
+        ),
+        content: Text(
+          '${result.baseBranch}: ${result.baseBefore}\n'
+          '${result.compareBranch}: ${result.compareBefore}\n\n'
+          '두 로컬 브랜치를 위 SHA로 되돌립니다. 원격 저장소는 변경하지 않습니다.',
+        ),
+        actions: [
+          TextButton(
+            autofocus: true,
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('되돌리기'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() {
+      _branchApplyStatus = BranchApplyStatus.reverting;
+      _branchApplyError = null;
+    });
+    try {
+      await widget.repository.restoreBranchApply(result);
+      if (mounted) {
+        setState(() => _branchApplyStatus = BranchApplyStatus.reverted);
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _branchApplyStatus = BranchApplyStatus.failed;
+          _branchApplyError = error;
+        });
+      }
+    }
+  }
+
+  Widget _branchPreviewApplyCard() {
+    final comparison = _comparison!;
+    final merge = _branchPreviewMode == BranchPreviewMode.merge;
+    final result = _branchApplyResult;
+    final busy =
+        _branchApplyStatus == BranchApplyStatus.applying ||
+        _branchApplyStatus == BranchApplyStatus.reverting;
+    return Container(
+      key: const Key('branch-preview-apply-card'),
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(11),
+      decoration: BoxDecoration(
+        color: Color.lerp(_palette.raised, _renamed, 0.14),
+        border: Border.all(color: _renamed.withValues(alpha: 0.48)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  result == null
+                      ? '가상 ${merge ? 'Merge' : 'Rebase'} 성공'
+                      : '${merge ? 'Merge' : 'Rebase'} 적용 완료',
+                  style: TextStyle(
+                    color: _palette.text,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Text(
+                switch (_branchApplyStatus) {
+                  BranchApplyStatus.idle => '아직 적용하지 않음',
+                  BranchApplyStatus.applying => '커밋 적용 중',
+                  BranchApplyStatus.applied => '로컬 브랜치 적용됨',
+                  BranchApplyStatus.reverting => '되돌리는 중',
+                  BranchApplyStatus.reverted => 'SHA 일치 확인',
+                  BranchApplyStatus.failed => '작업 실패',
+                },
+                style: TextStyle(
+                  color:
+                      _branchApplyStatus == BranchApplyStatus.reverted ||
+                          _branchApplyStatus == BranchApplyStatus.applied
+                      ? _success
+                      : _palette.muted,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          if (result != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              '${result.baseBranch}: ${result.baseBefore} → ${result.baseAfter}\n'
+              '${result.compareBranch}: ${result.compareBefore} → ${result.compareAfter}',
+              style: TextStyle(
+                color: _palette.muted,
+                fontSize: 10,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ],
+          if (_branchApplyError != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _branchApplyError.toString(),
+              style: TextStyle(color: _behind, fontSize: 10),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerRight,
+            child: result == null
+                ? FilledButton(
+                    key: const Key('branch-preview-apply'),
+                    onPressed: busy
+                        ? null
+                        : () => unawaited(_confirmBranchPreviewApply()),
+                    child: Text(_branchPreviewApplyLabel),
+                  )
+                : OutlinedButton(
+                    key: const Key('branch-preview-rollback'),
+                    onPressed: _branchApplyStatus == BranchApplyStatus.applied
+                        ? () => unawaited(_confirmBranchPreviewRollback())
+                        : null,
+                    child: Text('${merge ? 'Merge' : 'Rebase'} 이전 시점으로 되돌리기'),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _header(String column, double width) => SizedBox(
     key: Key('$column-header'),
     width: width,
@@ -3557,6 +3841,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     final rebaseConflict =
         _rebasePreview?.status == RebasePreviewStatus.conflict &&
         _rebasePreview?.currentCommit?.sha == commit.sha;
+    final rebaseApplying = _rebaseApplyingSha == commit.sha;
     final refs = _rowRefs(commit);
     Widget refsCell() {
       final lineTip = selected && refs.isEmpty
@@ -3600,6 +3885,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       child: GestureDetector(
         key: rebaseConflict
             ? const Key('rebase-conflict-current-row')
+            : rebaseApplying
+            ? const Key('rebase-apply-current-row')
             : selected
             ? Key('selected-row-${commit.sha}')
             : null,
@@ -3767,6 +4054,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     );
     final focusableContent = rebaseConflict
         ? KeyedSubtree(key: _rebaseConflictRowContextKey, child: content)
+        : rebaseApplying
+        ? KeyedSubtree(key: _rebaseApplyRowContextKey, child: content)
         : content;
     if (!_canCherryPick(commit)) return focusableContent;
     return Draggable<GitCommit>(
@@ -4751,6 +5040,8 @@ class _TimelineScreenState extends State<TimelineScreen>
                   fontFamily: 'monospace',
                 ),
               ),
+              if (_comparison != null && _branchPreviewCanApply)
+                _branchPreviewApplyCard(),
               if (_comparison == null) _previewPerson(commit),
               _previewStats(changes),
               KeyedSubtree(
