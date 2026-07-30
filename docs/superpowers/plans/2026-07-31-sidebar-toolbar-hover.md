@@ -4,7 +4,7 @@
 
 **Goal:** Add the approved hover feedback to clickable timeline controls and let the preview use up to 75% of the app window.
 
-**Architecture:** Reuse the current sidebar rows and toolbar controls. Keep hover state local to a small builder widget so only the hovered control rebuilds, and keep the runtime and persisted preview limits equal.
+**Architecture:** Reuse the current sidebar rows and toolbar controls. Keep hover state local to a small builder widget so only the hovered control rebuilds. Preserve the saved preferred width and apply the current window's 75% ceiling during layout and dragging.
 
 **Tech Stack:** Dart, Flutter widgets, Flutter widget tests
 
@@ -28,18 +28,17 @@
 
 **Interfaces:**
 - Adds: `_HoverBuilder`
-- Adds: `_SettingsButton`
-- Changes: `_ShowDiffButton` to a stateful hover-aware button
+- Changes: `_ShowDiffButton` to a hover-aware button
 - Produces: hover-only keys for focused widget assertions
 
-- [ ] **Step 1: Add failing mouse hover tests**
+- [x] **Step 1: Add failing mouse hover tests**
 
 Move a mouse pointer onto `sidebar-ref-main`, an unselected placement button,
 `toolbar-full-diff`, and `open-settings`. Assert the sidebar hover decoration is
 rectangular with a two-pixel leading border, the placement background changes,
 the diff background is `Color(0xFF3FB950)`, and the settings icon is rotated.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 ```bash
 flutter test test/app_test.dart --plain-name "sidebar refs use the approved rectangular hover surface"
@@ -48,13 +47,12 @@ flutter test test/app_test.dart --plain-name "toolbar controls expose their appr
 
 Expected: FAIL because the new hover decorations and colors do not exist.
 
-- [ ] **Step 3: Implement the smallest hover state**
+- [x] **Step 3: Implement the smallest hover state**
 
-Add one local hover builder and use it around clickable reference rows and
-unselected placement buttons. Convert `Show Diff` to local state and add a
-small settings button that paints its hover background and rotation.
+Add one local hover builder and use it around clickable reference rows,
+unselected placement buttons, `Show Diff`, and the settings button.
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run the commands from Step 2.
 
@@ -74,7 +72,7 @@ Expected: PASS.
 - Changes: preview layout and resizing to use the current app-window width
 - Changes: `AppSettings.fromJson` to keep finite saved widths without a fixed maximum
 
-- [ ] **Step 1: Change the width assertions and verify RED**
+- [x] **Step 1: Change the width assertions and verify RED**
 
 At a 1,600-pixel window width, expect a large drag to stop at 1,200 pixels.
 Resize the test window to 1,200 pixels and expect the visible preview to shrink
@@ -87,13 +85,13 @@ flutter test test/app_test.dart --plain-name "the preview panel resizes, persist
 
 Expected: FAIL because the drag still stops at 840 and settings still clamp.
 
-- [ ] **Step 2: Change both width limits**
+- [x] **Step 2: Change both width limits**
 
 Replace the fixed runtime maximum with 75% of `MediaQuery.sizeOf(context).width`.
 Apply the same limit while laying out and dragging the panel. Replace the saved
 width clamp with finite-number validation and the existing 240-pixel minimum.
 
-- [ ] **Step 3: Run the focused test and verify GREEN**
+- [x] **Step 3: Run the focused test and verify GREEN**
 
 Run the command from Step 1.
 
@@ -110,14 +108,14 @@ Expected: PASS.
 - Consumes: Tasks 1 and 2
 - Produces: a verified macOS debug build
 
-- [ ] **Step 1: Format and inspect**
+- [x] **Step 1: Format and inspect**
 
 ```bash
 dart format lib/timeline.dart lib/settings.dart test/app_test.dart
 git diff --check
 ```
 
-- [ ] **Step 2: Run the complete checks**
+- [x] **Step 2: Run the complete checks**
 
 ```bash
 flutter analyze
@@ -125,6 +123,6 @@ flutter test
 flutter build macos --debug --no-pub
 ```
 
-- [ ] **Step 3: Restart the debug app**
+- [x] **Step 3: Restart the debug app**
 
 Start the debug app against this worktree and leave it running for manual review.

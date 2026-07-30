@@ -10385,6 +10385,130 @@ void main() {
     expect(find.byKey(const Key('ref-filter')), findsOneWidget);
   });
 
+  testWidgets('sidebar refs use the approved rectangular hover surface', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            tags: ['v1.0'],
+            current: 'main',
+          ),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(pointer.removePointer);
+    await pointer.addPointer(location: Offset.zero);
+
+    for (final name in ['feature', 'v1.0']) {
+      await pointer.moveTo(
+        tester.getCenter(find.byKey(Key('sidebar-ref-$name'))),
+      );
+      await tester.pump();
+
+      final decoration =
+          tester
+                  .widget<Container>(find.byKey(Key('sidebar-ref-hover-$name')))
+                  .decoration!
+              as BoxDecoration;
+      final border = decoration.border! as Border;
+      expect(decoration.borderRadius, isNull, reason: name);
+      expect(
+        decoration.color,
+        TimelineThemePalette.systemGraphite.selectedRow,
+        reason: name,
+      );
+      expect(border.left.width, 2, reason: name);
+      expect(border.left.color, isNot(Colors.transparent), reason: name);
+      expect(border.top.width, 0, reason: name);
+      expect(border.right.width, 0, reason: name);
+      expect(border.bottom.width, 0, reason: name);
+    }
+  });
+
+  testWidgets('toolbar controls expose their approved hover feedback', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository((_, _) async => [commit('1', 'first commit')]),
+        controller,
+        onOpenSettings: () {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(pointer.removePointer);
+    await pointer.addPointer(location: Offset.zero);
+
+    await pointer.moveTo(
+      tester.getCenter(
+        find.byKey(const Key('placement-PreviewPlacement.left')),
+      ),
+    );
+    await tester.pump();
+    expect(
+      (tester
+                  .widget<Container>(
+                    find.byKey(
+                      const Key('placement-hover-PreviewPlacement.left'),
+                    ),
+                  )
+                  .decoration!
+              as BoxDecoration)
+          .color,
+      TimelineThemePalette.systemGraphite.selectedRow,
+    );
+
+    final diffButton = find.byKey(const Key('toolbar-full-diff'));
+    await pointer.moveTo(tester.getCenter(diffButton));
+    await tester.pump();
+    expect(
+      (tester
+                  .widget<Container>(
+                    find.descendant(
+                      of: diffButton,
+                      matching: find.byType(Container),
+                    ),
+                  )
+                  .decoration!
+              as BoxDecoration)
+          .color,
+      const Color(0xFF3FB950),
+    );
+
+    await pointer.moveTo(
+      tester.getCenter(find.byKey(const Key('open-settings'))),
+    );
+    await tester.pump();
+    expect(
+      (tester
+                  .widget<Container>(
+                    find.byKey(const Key('settings-hover-surface')),
+                  )
+                  .decoration!
+              as BoxDecoration)
+          .color,
+      TimelineThemePalette.systemGraphite.selectedRow,
+    );
+    expect(
+      tester
+          .widget<AnimatedRotation>(
+            find.byKey(const Key('settings-hover-turn')),
+          )
+          .turns,
+      closeTo(0.05, 0.0001),
+    );
+  });
+
   testWidgets('the sidebar reads a size up', (tester) async {
     await tester.pumpWidget(
       app(
@@ -10890,16 +11014,21 @@ void main() {
     expect(saved?.width, 348);
     expect(titleWidth(), title - 60);
 
-    // Clamps at both ends of the design range.
+    // The horizontal maximum follows 75% of the whole app window.
     await tester.drag(
       find.byKey(const Key('preview-resizer')),
-      const Offset(-800, 0),
+      const Offset(-1400, 0),
     );
     await tester.pumpAndSettle();
-    expect(previewWidth(), 840);
+    expect(previewWidth(), 1200);
+
+    tester.view.physicalSize = const Size(1200, 900);
+    await tester.pumpAndSettle();
+    expect(previewWidth(), 900);
+
     await tester.drag(
       find.byKey(const Key('preview-resizer')),
-      const Offset(600, 0),
+      const Offset(1200, 0),
     );
     await tester.pumpAndSettle();
     expect(previewWidth(), 240);
@@ -10929,8 +11058,10 @@ void main() {
       480,
     );
     expect(
-      AppSettings.fromJson(<String, dynamic>{'previewWidth': 900}).previewWidth,
-      840,
+      AppSettings.fromJson(<String, dynamic>{
+        'previewWidth': 1400,
+      }).previewWidth,
+      1400,
     );
   });
 
@@ -13642,12 +13773,14 @@ Widget app(
   WindowFrameController controller, {
   BranchPreviewMode branchPreviewMode = BranchPreviewMode.merge,
   ValueChanged<BranchPreviewMode>? onBranchPreviewModeChanged,
+  VoidCallback? onOpenSettings,
 }) => MaterialApp(
   home: TimelineScreen(
     repository: repository,
     controller: controller,
     branchPreviewMode: branchPreviewMode,
     onBranchPreviewModeChanged: onBranchPreviewModeChanged,
+    onOpenSettings: onOpenSettings,
   ),
 );
 

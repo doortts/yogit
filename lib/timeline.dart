@@ -694,7 +694,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     return segments.isEmpty ? root : segments.last;
   }
 
-  static const _previewWidthRange = (min: 240.0, max: 840.0);
+  static const _previewMinWidth = 240.0;
+  static const _previewMaxWidthFraction = 0.75;
   static const _previewHeightRange = (min: 200.0, max: 480.0);
 
   final _focusNode = FocusNode();
@@ -1566,7 +1567,11 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
     final onLeft = placement == PreviewPlacement.left;
     final beside = onLeft || placement == PreviewPlacement.right;
-    final extent = beside ? math.min(_previewWidth, constraints.maxWidth) : 0.0;
+    final maxPreviewWidth = math.min(
+      constraints.maxWidth,
+      MediaQuery.sizeOf(context).width * _previewMaxWidthFraction,
+    );
+    final extent = beside ? math.min(_previewWidth, maxPreviewWidth) : 0.0;
     final preview = _animatedPreview(
       axis: Axis.horizontal,
       extent: extent,
@@ -1591,11 +1596,14 @@ class _TimelineScreenState extends State<TimelineScreen>
     duration: const Duration(milliseconds: 180),
     curve: Curves.easeOutCubic,
     tween: Tween(begin: 0, end: extent),
-    builder: (context, value, child) => SizedBox(
-      width: axis == Axis.horizontal ? value : width,
-      height: axis == Axis.vertical ? value : height,
-      child: child,
-    ),
+    builder: (context, value, child) {
+      final visibleExtent = math.min(value, extent);
+      return SizedBox(
+        width: axis == Axis.horizontal ? visibleExtent : width,
+        height: axis == Axis.vertical ? visibleExtent : height,
+        child: child,
+      );
+    },
     child: visible
         ? ClipRect(
             child: OverflowBox(
@@ -2521,12 +2529,31 @@ class _TimelineScreenState extends State<TimelineScreen>
       const SizedBox(width: 12),
       _toolbarFullDiffButton(),
       const SizedBox(width: 8),
-      IconButton(
-        key: const Key('open-settings'),
-        tooltip: 'Settings',
-        visualDensity: VisualDensity.compact,
-        onPressed: widget.onOpenSettings,
-        icon: Icon(Icons.settings_outlined, size: 22, color: _palette.muted),
+      _HoverBuilder(
+        enabled: widget.onOpenSettings != null,
+        builder: (hovered) => Container(
+          key: const Key('settings-hover-surface'),
+          decoration: BoxDecoration(
+            color: hovered ? _palette.selectedRow : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: IconButton(
+            key: const Key('open-settings'),
+            tooltip: 'Settings',
+            visualDensity: VisualDensity.compact,
+            onPressed: widget.onOpenSettings,
+            icon: AnimatedRotation(
+              key: const Key('settings-hover-turn'),
+              turns: hovered ? 0.05 : 0,
+              duration: const Duration(milliseconds: 160),
+              child: Icon(
+                Icons.settings_outlined,
+                size: 22,
+                color: hovered ? _palette.text : _palette.muted,
+              ),
+            ),
+          ),
+        ),
       ),
     ],
   );
@@ -2543,27 +2570,30 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   Widget _placementButton(String label, PreviewPlacement placement) {
     final pressed = _activePlacement == placement;
-    return GestureDetector(
-      key: Key('placement-$placement'),
-      behavior: HitTestBehavior.opaque,
-      onTap: () {
-        widget.onPreviewPlacementChanged?.call(placement);
-        unawaited(_previewController.setPreview(placement));
-        _focusNode.requestFocus();
-      },
-      child: Container(
-        height: 30,
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 11),
-        decoration: BoxDecoration(
-          color: pressed ? _palette.selectedRow : null,
-          borderRadius: BorderRadius.circular(5),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: pressed ? Colors.white : _palette.muted,
-            fontSize: 14,
+    return _HoverBuilder(
+      builder: (hovered) => GestureDetector(
+        key: Key('placement-$placement'),
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          widget.onPreviewPlacementChanged?.call(placement);
+          unawaited(_previewController.setPreview(placement));
+          _focusNode.requestFocus();
+        },
+        child: Container(
+          key: Key('placement-hover-$placement'),
+          height: 30,
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 11),
+          decoration: BoxDecoration(
+            color: pressed || hovered ? _palette.selectedRow : null,
+            borderRadius: BorderRadius.circular(5),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: pressed || hovered ? Colors.white : _palette.muted,
+              fontSize: 14,
+            ),
           ),
         ),
       ),
@@ -2973,132 +3003,164 @@ class _TimelineScreenState extends State<TimelineScreen>
       }
     });
 
-    final row = SizedBox(
-      key: name == null ? null : Key('sidebar-row-$name'),
-      height: birth == null ? 28 : 40,
-      child: Padding(
-        padding: EdgeInsets.only(
-          left: 4 + (inFolderTree ? 18 : 0) + depth * 16.0,
-          right: 4,
-        ),
-        child: Row(
+    Widget buildRow(bool hovered) {
+      final content = Container(
+        height: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 5),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (hasChildren)
-              GestureDetector(
-                key: Key('sidebar-folder-${section.name}-$path'),
-                behavior: HitTestBehavior.opaque,
-                onTap: toggleFolder,
-                child: SizedBox(
-                  width: 18,
-                  height: double.infinity,
-                  child: Icon(
-                    folderCollapsed ? Icons.chevron_right : Icons.expand_more,
-                    size: 16,
-                    color: _palette.muted,
+            Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    node.segment,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: current || hovered
+                          ? _palette.text
+                          : _palette.muted,
+                      fontSize: 13,
+                    ),
                   ),
                 ),
-              )
-            else
-              const SizedBox(width: 18),
-            Icon(icon, size: 13, color: iconColor),
-            const SizedBox(width: 7),
-            Expanded(
-              child: GestureDetector(
-                key: name == null ? null : Key('sidebar-ref-$name'),
-                behavior: HitTestBehavior.opaque,
-                onTap: name == null
-                    ? toggleFolder
-                    : () => _selectRef(
-                        name,
-                        remote: section == _RefSection.remote,
+                if (current) const SizedBox(width: 2),
+                if (current)
+                  Tooltip(
+                    message: '현재 체크아웃된 브랜치입니다',
+                    child: Container(
+                      key: Key('sidebar-head-$name'),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 2,
+                        vertical: 1,
                       ),
-                child: Container(
-                  height: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 5),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              node.segment,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: current ? _palette.text : _palette.muted,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ),
-                          if (current) const SizedBox(width: 2),
-                          if (current)
-                            Tooltip(
-                              message: '현재 체크아웃된 브랜치입니다',
-                              child: Container(
-                                key: Key('sidebar-head-$name'),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 2,
-                                  vertical: 1,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: iconColor.withValues(alpha: 0.12),
-                                  border: Border.all(
-                                    color: iconColor.withValues(alpha: 0.8),
-                                  ),
-                                  borderRadius: BorderRadius.circular(3),
-                                ),
-                                child: Text(
-                                  'HEAD',
-                                  style: TextStyle(
-                                    color: iconColor,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.3,
-                                    fontFamily: technicalFontFamily,
-                                    fontFamilyFallback: technicalFontFallback,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (behind > 0) const SizedBox(width: 4),
-                          if (behind > 0)
-                            Tooltip(
-                              message: '원격보다 $behind개 커밋 뒤처져 있습니다',
-                              child: SizedBox(
-                                key: Key('sidebar-behind-$name'),
-                                child: Text(
-                                  '$behind',
-                                  style: const TextStyle(
-                                    color: _remoteBehind,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      // When the branch was cut, in the Date column's own words.
-                      if (birth != null)
-                        Text(
-                          socialTimeLabel(
-                            DateTime.fromMillisecondsSinceEpoch(birth * 1000),
-                            DateTime.now(),
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: _palette.muted, fontSize: 11),
+                      decoration: BoxDecoration(
+                        color: iconColor.withValues(alpha: 0.12),
+                        border: Border.all(
+                          color: iconColor.withValues(alpha: 0.8),
                         ),
-                    ],
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                      child: Text(
+                        'HEAD',
+                        style: TextStyle(
+                          color: iconColor,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.3,
+                          fontFamily: technicalFontFamily,
+                          fontFamilyFallback: technicalFontFallback,
+                        ),
+                      ),
+                    ),
                   ),
+                if (behind > 0) const SizedBox(width: 4),
+                if (behind > 0)
+                  Tooltip(
+                    message: '원격보다 $behind개 커밋 뒤처져 있습니다',
+                    child: SizedBox(
+                      key: Key('sidebar-behind-$name'),
+                      child: Text(
+                        '$behind',
+                        style: const TextStyle(
+                          color: _remoteBehind,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            // When the branch was cut, in the Date column's own words.
+            if (birth != null)
+              Text(
+                socialTimeLabel(
+                  DateTime.fromMillisecondsSinceEpoch(birth * 1000),
+                  DateTime.now(),
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: hovered
+                      ? _palette.text.withValues(alpha: 0.72)
+                      : _palette.muted,
+                  fontSize: 11,
                 ),
               ),
-            ),
           ],
         ),
-      ),
-    );
+      );
+      return SizedBox(
+        key: name == null ? null : Key('sidebar-row-$name'),
+        height: birth == null ? 28 : 40,
+        child: Padding(
+          padding: EdgeInsets.only(
+            left: 4 + (inFolderTree ? 18 : 0) + depth * 16.0,
+            right: 4,
+          ),
+          child: Row(
+            children: [
+              if (hasChildren)
+                GestureDetector(
+                  key: Key('sidebar-folder-${section.name}-$path'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: toggleFolder,
+                  child: SizedBox(
+                    width: 18,
+                    height: double.infinity,
+                    child: Icon(
+                      folderCollapsed ? Icons.chevron_right : Icons.expand_more,
+                      size: 16,
+                      color: _palette.muted,
+                    ),
+                  ),
+                )
+              else
+                const SizedBox(width: 18),
+              Icon(icon, size: 13, color: iconColor),
+              const SizedBox(width: 7),
+              Expanded(
+                child: name == null
+                    ? GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: toggleFolder,
+                        child: content,
+                      )
+                    : KeyedSubtree(
+                        key: Key('sidebar-ref-$name'),
+                        child: content,
+                      ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final row = name == null
+        ? buildRow(false)
+        : _HoverBuilder(
+            builder: (hovered) => GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () =>
+                  _selectRef(name, remote: section == _RefSection.remote),
+              child: Container(
+                key: Key('sidebar-ref-hover-$name'),
+                decoration: BoxDecoration(
+                  color: hovered ? _palette.selectedRow : Colors.transparent,
+                  border: Border(
+                    left: BorderSide(
+                      color: hovered ? iconColor : Colors.transparent,
+                      width: hovered ? 2 : 0,
+                    ),
+                  ),
+                ),
+                child: buildRow(hovered),
+              ),
+            ),
+          );
     if (!current) return row;
     return DragTarget<GitCommit>(
       onWillAcceptWithDetails: (details) => _canCherryPick(details.data),
@@ -5594,8 +5656,8 @@ class _TimelineScreenState extends State<TimelineScreen>
                     ? -details.delta.dx
                     : details.delta.dx;
                 _previewWidth = (_previewWidth + delta).clamp(
-                  _previewWidthRange.min,
-                  _previewWidthRange.max,
+                  _previewMinWidth,
+                  MediaQuery.sizeOf(context).width * _previewMaxWidthFraction,
                 );
               }),
         onHorizontalDragEnd: vertical ? null : (_) => _savePreviewSize(),
@@ -7594,6 +7656,28 @@ class _CloudBadgePainter extends CustomPainter {
   bool shouldRepaint(_CloudBadgePainter oldDelegate) => false;
 }
 
+class _HoverBuilder extends StatefulWidget {
+  const _HoverBuilder({required this.builder, this.enabled = true});
+
+  final Widget Function(bool hovered) builder;
+  final bool enabled;
+
+  @override
+  State<_HoverBuilder> createState() => _HoverBuilderState();
+}
+
+class _HoverBuilderState extends State<_HoverBuilder> {
+  var _hovered = false;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: widget.enabled ? SystemMouseCursors.click : MouseCursor.defer,
+    onEnter: widget.enabled ? (_) => setState(() => _hovered = true) : null,
+    onExit: widget.enabled ? (_) => setState(() => _hovered = false) : null,
+    child: widget.builder(_hovered),
+  );
+}
+
 /// A keycap that also works as a button — the Enter chip runs the same toggle the
 /// Enter key does.
 class _KeyCap extends StatefulWidget {
@@ -7703,6 +7787,7 @@ class _ShowDiffButton extends StatelessWidget {
   });
 
   static const green = Color(0xFF2EA043);
+  static const hoverGreen = Color(0xFF3FB950);
 
   final VoidCallback? onTap;
   final double height;
@@ -7713,38 +7798,45 @@ class _ShowDiffButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = context.timelineTheme;
     final ink = onTap == null ? palette.muted : AvatarService.onColor(green);
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Container(
-        height: height,
-        padding: EdgeInsets.symmetric(horizontal: height * 0.3),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: onTap == null ? palette.raised : green,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              'Show Diff',
-              style: TextStyle(
-                color: ink,
-                fontSize: labelSize,
-                fontWeight: FontWeight.w600,
-                height: 1.1,
+    return _HoverBuilder(
+      enabled: onTap != null,
+      builder: (hovered) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          height: height,
+          padding: EdgeInsets.symmetric(horizontal: height * 0.3),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: onTap == null
+                ? palette.raised
+                : hovered
+                ? hoverGreen
+                : green,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                'Show Diff',
+                style: TextStyle(
+                  color: ink,
+                  fontSize: labelSize,
+                  fontWeight: FontWeight.w600,
+                  height: 1.1,
+                ),
               ),
-            ),
-            Text(
-              '⌘D',
-              style: TextStyle(
-                color: ink.withValues(alpha: 0.75),
-                fontSize: shortcutSize,
-                height: 1.2,
+              Text(
+                '⌘D',
+                style: TextStyle(
+                  color: ink.withValues(alpha: 0.75),
+                  fontSize: shortcutSize,
+                  height: 1.2,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
