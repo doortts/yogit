@@ -627,11 +627,18 @@ class _TimelineScreenState extends State<TimelineScreen>
   var _comparisonEntries = <TimelineEntry>[];
   BranchPreviewGraph? _previewGraph;
   RebaseCheckResult? _rebaseCheck;
+  MergePreviewSession? _mergePreviewSession;
+  MergePreviewResult? _mergePreview;
+  var _mergePreviewSerial = 0;
+  var _mergePreviewBusy = false;
+  Object? _mergePreviewError;
+  final _mergeResolvedFiles = <String>{};
   RebasePreviewSession? _rebasePreviewSession;
   RebasePreviewResult? _rebasePreview;
   var _rebasePreviewSerial = 0;
   var _rebasePreviewBusy = false;
   Object? _rebasePreviewError;
+  var _rebaseHadConflict = false;
   var _repositoryOperationInProgress = false;
   final _rebaseResolvedFiles = <String>{};
   final _rebaseEditedFiles = <String>{};
@@ -641,6 +648,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   BranchApplyResult? _branchApplyResult;
   Object? _branchApplyError;
   String? _rebaseApplyingSha;
+  var _branchPreviewDropped = false;
   Object? _comparisonError;
   var _comparisonSerial = 0;
   late BranchPreviewMode _branchPreviewMode = widget.branchPreviewMode;
@@ -888,6 +896,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
     if (!identical(widget.repository, oldWidget.repository)) {
       _resetBranchApply();
+      _dropMergePreview();
       _dropRebasePreview();
       _clearFullDiffRouteSession();
     } else if (widget.onFullDiffPreferencesChanged !=
@@ -952,6 +961,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _fetchTimer?.cancel();
+    _dropMergePreview();
     _dropRebasePreview();
     _clearFullDiffRouteSession();
     if (_ownsPreviewController) _previewController.dispose();
@@ -1741,9 +1751,13 @@ class _TimelineScreenState extends State<TimelineScreen>
     widget.onBranchPreviewModeChanged?.call(mode);
     _scheduleRatchetUpdate();
     if (mode == BranchPreviewMode.rebase) {
+      _dropMergePreview();
       unawaited(_startRebasePreview());
     } else {
       _dropRebasePreview();
+      if (_comparison?.merge.status == MergeConflictStatus.conflicts) {
+        unawaited(_startMergePreview());
+      }
     }
   }
 
@@ -1776,6 +1790,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     final baseRef = _baseBranch;
     if (baseRef == null || compareRef == baseRef) return;
     final serial = ++_comparisonSerial;
+    _dropMergePreview();
     _dropRebasePreview();
     setState(() {
       _compareRef = compareRef;
@@ -1814,6 +1829,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       _scheduleRatchetUpdate();
       if (_branchPreviewMode == BranchPreviewMode.rebase) {
         unawaited(_startRebasePreview());
+      } else if (result.merge.status == MergeConflictStatus.conflicts) {
+        unawaited(_startMergePreview());
       } else {
         unawaited(_checkRebase(baseRef, compareRef, serial));
       }
@@ -1858,6 +1875,71 @@ class _TimelineScreenState extends State<TimelineScreen>
         ),
       );
     }
+  }
+
+  Future<void> _startMergePreview() async {
+    final comparison = _comparison;
+    if (_branchPreviewMode != BranchPreviewMode.merge ||
+        comparison == null ||
+        comparison.merge.status != MergeConflictStatus.conflicts) {
+      return;
+    }
+    final request = ++_mergePreviewSerial;
+    final previous = _mergePreviewSession;
+    _mergePreviewSession = null;
+    _mergePreview = null;
+    if (previous != null) await previous.dispose();
+    if (!mounted ||
+        request != _mergePreviewSerial ||
+        _branchPreviewMode != BranchPreviewMode.merge) {
+      return;
+    }
+    try {
+      final session = await widget.repository.openMergePreview(
+        baseRef: comparison.baseRef,
+        compareRef: comparison.compareRef,
+      );
+      if (!mounted ||
+          request != _mergePreviewSerial ||
+          _comparison != comparison ||
+          _branchPreviewMode != BranchPreviewMode.merge) {
+        await session.dispose();
+        return;
+      }
+      _mergePreviewSession = session;
+      final result = await session.start();
+      if (!mounted ||
+          request != _mergePreviewSerial ||
+          _comparison != comparison ||
+          _branchPreviewMode != BranchPreviewMode.merge) {
+        await session.dispose();
+        return;
+      }
+      setState(() {
+        _mergePreview = result;
+        _mergePreviewError = null;
+        _mergeResolvedFiles.clear();
+      });
+      if (result.status == MergePreviewStatus.conflict &&
+          _previewController.previewPlacement == PreviewPlacement.closed) {
+        await _previewController.setPreview(widget.preferredPreviewPlacement);
+      }
+    } catch (error) {
+      if (mounted && request == _mergePreviewSerial) {
+        setState(() => _mergePreviewError = error);
+      }
+    }
+  }
+
+  void _dropMergePreview() {
+    _mergePreviewSerial++;
+    final session = _mergePreviewSession;
+    _mergePreviewSession = null;
+    _mergePreview = null;
+    _mergePreviewBusy = false;
+    _mergePreviewError = null;
+    _mergeResolvedFiles.clear();
+    if (session != null) unawaited(session.dispose());
   }
 
   Future<void> _startRebasePreview() async {
@@ -1935,6 +2017,9 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (!mounted || _comparison != comparison) return;
     setState(() {
       _rebasePreview = result;
+      if (result.status == RebasePreviewStatus.conflict) {
+        _rebaseHadConflict = true;
+      }
       _rebasePreviewError = null;
       _repositoryOperationInProgress = operationInProgress;
       _rebaseResolvedFiles.clear();
@@ -1991,6 +2076,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     final session = _rebasePreviewSession;
     _rebasePreviewSession = null;
     _rebasePreview = null;
+    _rebaseHadConflict = false;
     _rebaseResolvedFiles.clear();
     _rebaseEditedFiles.clear();
     _rebasePreviewError = null;
@@ -2002,10 +2088,12 @@ class _TimelineScreenState extends State<TimelineScreen>
     _branchApplyResult = null;
     _branchApplyError = null;
     _rebaseApplyingSha = null;
+    _branchPreviewDropped = false;
   }
 
   void _clearComparison() {
     if (_compareRef == null) return;
+    _dropMergePreview();
     _dropRebasePreview();
     _comparisonSerial++;
     setState(() {
@@ -3028,14 +3116,22 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   bool get _showFooter => _compareRef == null;
 
+  MergeConflictStatus? get _effectiveMergeStatus =>
+      switch (_mergePreview?.status) {
+        MergePreviewStatus.clean => MergeConflictStatus.clean,
+        MergePreviewStatus.conflict => MergeConflictStatus.conflicts,
+        MergePreviewStatus.failed => MergeConflictStatus.failed,
+        null => _comparison?.merge.status,
+      };
+
   Widget _branchPreviewSummary() {
     final comparison = _comparison;
     final mergeMode = _branchPreviewMode == BranchPreviewMode.merge;
     final success = mergeMode
-        ? comparison?.merge.status == MergeConflictStatus.clean
+        ? _effectiveMergeStatus == MergeConflictStatus.clean
         : _rebaseCheck?.status == RebaseCheckStatus.clean;
     final resultLabel = mergeMode
-        ? switch (comparison?.merge.status) {
+        ? switch (_effectiveMergeStatus) {
             MergeConflictStatus.clean => 'Merge 성공',
             MergeConflictStatus.conflicts => 'Merge 충돌',
             MergeConflictStatus.failed => 'Merge 검사 실패',
@@ -3131,10 +3227,10 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   bool get _branchPreviewCanApply {
     final comparison = _comparison;
-    if (comparison == null) return false;
+    if (comparison == null || _branchPreviewDropped) return false;
     return _branchPreviewMode == BranchPreviewMode.merge
-        ? comparison.merge.status == MergeConflictStatus.clean &&
-              comparison.merge.treeSha != null
+        ? _effectiveMergeStatus == MergeConflictStatus.clean &&
+              (_mergePreview?.treeSha ?? comparison.merge.treeSha) != null
         : _rebasePreview?.status == RebasePreviewStatus.clean &&
               _rebasePreview?.virtualTip != null;
   }
@@ -3196,7 +3292,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       if (mode == BranchPreviewMode.merge) {
         result = await widget.repository.applyMergePreview(
           comparison: comparison,
-          treeSha: comparison.merge.treeSha!,
+          treeSha: (_mergePreview?.treeSha ?? comparison.merge.treeSha)!,
         );
       } else {
         final preview = _rebasePreview!;
@@ -3229,11 +3325,23 @@ class _TimelineScreenState extends State<TimelineScreen>
         );
       }
       if (!mounted) return;
+      final mergeSession = _mergePreviewSession;
+      final rebaseSession = _rebasePreviewSession;
       setState(() {
         _branchApplyStatus = BranchApplyStatus.applied;
         _branchApplyResult = result;
         _rebaseApplyingSha = null;
+        if (mode == BranchPreviewMode.merge) {
+          _mergePreviewSession = null;
+        } else {
+          _rebasePreviewSession = null;
+        }
       });
+      if (mode == BranchPreviewMode.merge && mergeSession != null) {
+        unawaited(mergeSession.dispose());
+      } else if (mode == BranchPreviewMode.rebase && rebaseSession != null) {
+        unawaited(rebaseSession.dispose());
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -3294,7 +3402,6 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   Widget _branchPreviewApplyCard() {
-    final comparison = _comparison!;
     final merge = _branchPreviewMode == BranchPreviewMode.merge;
     final result = _branchApplyResult;
     final busy =
@@ -3388,6 +3495,150 @@ class _TimelineScreenState extends State<TimelineScreen>
         ],
       ),
     );
+  }
+
+  bool get _branchPreviewResolutionComplete =>
+      !_branchPreviewDropped &&
+      (_branchPreviewMode == BranchPreviewMode.merge
+          ? _mergePreviewSession != null &&
+                _mergePreview?.status == MergePreviewStatus.clean
+          : _rebaseHadConflict &&
+                _rebasePreview?.status == RebasePreviewStatus.clean);
+
+  Widget _branchPreviewSafeWorkspace() {
+    final comparison = _comparison!;
+    Widget tag(String label) => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF173741),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Color(0xFF9ADCE7),
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+    return Container(
+      key: const Key('branch-preview-safe-workspace'),
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(11),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2D2328),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            '충돌 해결 과정은 임시 공간에서만 진행합니다. '
+            '기준 브랜치 ${comparison.baseRef}과 대상 브랜치 '
+            '${comparison.compareRef}를 직접 변경하지 않습니다.',
+            style: TextStyle(color: _palette.text, fontSize: 11, height: 1.4),
+          ),
+          const SizedBox(height: 9),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              tag('두 브랜치 변경 없음'),
+              tag('현재 작업 트리 변경 없음'),
+              tag('종료 시 자동 삭제'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _branchPreviewResolutionCard() => Container(
+    key: const Key('branch-preview-resolution-complete'),
+    margin: const EdgeInsets.only(top: 10),
+    padding: const EdgeInsets.all(11),
+    decoration: BoxDecoration(
+      color: Color.lerp(_palette.raised, _renamed, 0.14),
+      border: Border.all(color: _renamed.withValues(alpha: 0.48)),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          '충돌 해결과 테스트를 마쳤습니다',
+          style: TextStyle(
+            color: _palette.text,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '${_branchPreviewMode == BranchPreviewMode.merge ? 'Merge' : 'Rebase'} 가능',
+          style: const TextStyle(
+            color: _success,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            key: const Key('branch-preview-drop'),
+            onPressed: () => unawaited(_dropResolvedBranchPreview()),
+            child: const Text('Drop'),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _branchPreviewDroppedCard() => Container(
+    key: const Key('branch-preview-dropped'),
+    margin: const EdgeInsets.only(top: 10),
+    padding: const EdgeInsets.all(11),
+    decoration: BoxDecoration(
+      color: _palette.raised,
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            '임시 결과를 Drop했습니다',
+            style: TextStyle(
+              color: _palette.text,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        const Text(
+          '변경 없음',
+          style: TextStyle(
+            color: _success,
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Future<void> _dropResolvedBranchPreview() async {
+    final mergeSession = _mergePreviewSession;
+    final rebaseSession = _rebasePreviewSession;
+    setState(() {
+      _mergePreviewSession = null;
+      _rebasePreviewSession = null;
+      _resetBranchApply();
+      _branchPreviewDropped = true;
+    });
+    await mergeSession?.dispose();
+    await rebaseSession?.dispose();
   }
 
   Widget _header(String column, double width) => SizedBox(
@@ -4839,7 +5090,10 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (_branchPreviewMode == BranchPreviewMode.merge) {
       return (
         from: comparison.baseTip,
-        to: comparison.merge.treeSha ?? comparison.compareTip,
+        to:
+            _mergePreview?.treeSha ??
+            comparison.merge.treeSha ??
+            comparison.compareTip,
       );
     }
     final preview = _rebasePreview;
@@ -4872,12 +5126,15 @@ class _TimelineScreenState extends State<TimelineScreen>
           ? widget.repository.loadFiles(commit)
           : _branchPreviewMode == BranchPreviewMode.merge
           ? Future.value(
-              comparison.merge.status == MergeConflictStatus.clean
-                  ? comparison.merge.treeSha == null
+              _effectiveMergeStatus == MergeConflictStatus.clean
+                  ? (_mergePreview?.treeSha ?? comparison.merge.treeSha) == null
                         ? comparison.files
-                        : comparison.merge.resultFiles
+                        : _mergePreview?.resultFiles ??
+                              comparison.merge.resultFiles
                   : [
-                      for (final path in comparison.merge.files)
+                      for (final path
+                          in _mergePreview?.conflictFiles ??
+                              comparison.merge.files)
                         GitFileChange(
                           path: path,
                           status: 'U',
@@ -5040,6 +5297,12 @@ class _TimelineScreenState extends State<TimelineScreen>
                   fontFamily: 'monospace',
                 ),
               ),
+              if (_comparison != null && _branchPreviewHasConflict)
+                _branchPreviewSafeWorkspace(),
+              if (_comparison != null && _branchPreviewResolutionComplete)
+                _branchPreviewResolutionCard(),
+              if (_comparison != null && _branchPreviewDropped)
+                _branchPreviewDroppedCard(),
               if (_comparison != null && _branchPreviewCanApply)
                 _branchPreviewApplyCard(),
               if (_comparison == null) _previewPerson(commit),
@@ -5278,12 +5541,14 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   bool get _branchPreviewHasConflict =>
-      _branchPreviewMode == BranchPreviewMode.merge
-      ? _comparison?.merge.status == MergeConflictStatus.conflicts
-      : _rebasePreview?.status == RebasePreviewStatus.conflict;
+      !_branchPreviewDropped &&
+      (_branchPreviewMode == BranchPreviewMode.merge
+          ? _effectiveMergeStatus == MergeConflictStatus.conflicts
+          : _rebasePreview?.status == RebasePreviewStatus.conflict);
 
   Widget _branchPreviewConflictChoices() {
     final comparison = _comparison!;
+    final mergeMode = _branchPreviewMode == BranchPreviewMode.merge;
     final baseCommits = comparison.commits
         .where((entry) => entry.side == BranchCommitSide.baseOnly)
         .map((entry) => entry.commit)
@@ -5296,20 +5561,25 @@ class _TimelineScreenState extends State<TimelineScreen>
     final compare =
         _rebasePreview?.currentCommit ??
         (compareCommits.isEmpty ? null : compareCommits.first);
-    final interactive = _branchPreviewMode == BranchPreviewMode.rebase;
+    final interactive = mergeMode
+        ? _mergePreviewSession != null
+        : _rebasePreviewSession != null;
     Widget choice({
       required Key key,
       required String branch,
       required String subject,
-      required RebaseConflictChoice resolution,
+      required VoidCallback onTap,
     }) => Padding(
       padding: const EdgeInsets.only(top: 8),
       child: InkWell(
         key: key,
         onTap:
-            !interactive || _rebasePreviewBusy || _repositoryOperationInProgress
+            !interactive ||
+                _mergePreviewBusy ||
+                _rebasePreviewBusy ||
+                _repositoryOperationInProgress
             ? null
-            : () => unawaited(_resolveRebaseConflict(resolution)),
+            : onTap,
         borderRadius: BorderRadius.circular(7),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
@@ -5337,20 +5607,116 @@ class _TimelineScreenState extends State<TimelineScreen>
     return Column(
       children: [
         choice(
-          key: const Key('rebase-conflict-use-base'),
+          key: Key(
+            mergeMode ? 'merge-conflict-use-base' : 'rebase-conflict-use-base',
+          ),
           branch: comparison.baseRef,
           subject: base?.subject ?? '현재 상태',
-          resolution: RebaseConflictChoice.base,
+          onTap: () => unawaited(
+            mergeMode
+                ? _resolveMergeConflict(MergeConflictChoice.base)
+                : _resolveRebaseConflict(RebaseConflictChoice.base),
+          ),
         ),
         choice(
-          key: const Key('rebase-conflict-use-compare'),
+          key: Key(
+            mergeMode
+                ? 'merge-conflict-use-compare'
+                : 'rebase-conflict-use-compare',
+          ),
           branch: comparison.compareRef,
           subject: compare?.subject ?? '적용할 변경',
-          resolution: RebaseConflictChoice.commit,
+          onTap: () => unawaited(
+            mergeMode
+                ? _resolveMergeConflict(MergeConflictChoice.compare)
+                : _resolveRebaseConflict(RebaseConflictChoice.commit),
+          ),
         ),
-        if (interactive) _rebaseConflictActions(),
+        if (interactive)
+          mergeMode ? _mergeConflictActions() : _rebaseConflictActions(),
       ],
     );
+  }
+
+  String? get _selectedMergeConflictPath {
+    final preview = _mergePreview;
+    if (preview == null || preview.conflictFiles.isEmpty) return null;
+    final commit = _selectedCommit;
+    final selected = commit == null ? null : _previewPaths[_previewKey(commit)];
+    return preview.conflictFiles.contains(selected)
+        ? selected
+        : preview.conflictFiles.first;
+  }
+
+  bool get _canFinishMergePreview {
+    final files = _mergePreview?.conflictFiles ?? const <String>[];
+    return files.isNotEmpty && files.every(_mergeResolvedFiles.contains);
+  }
+
+  Widget _mergeConflictActions() => Padding(
+    padding: const EdgeInsets.only(top: 10),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        if (_mergePreviewError != null)
+          Expanded(
+            child: Text(
+              _mergePreviewError.toString(),
+              style: TextStyle(color: _behind, fontSize: 10),
+            ),
+          ),
+        FilledButton(
+          key: const Key('merge-conflict-continue'),
+          onPressed: !_mergePreviewBusy && _canFinishMergePreview
+              ? () => unawaited(_finishMergePreview())
+              : null,
+          child: const Text('해결 후 계속'),
+        ),
+      ],
+    ),
+  );
+
+  Future<void> _resolveMergeConflict(MergeConflictChoice choice) async {
+    final session = _mergePreviewSession;
+    final path = _selectedMergeConflictPath;
+    if (session == null || path == null || _mergePreviewBusy) return;
+    setState(() {
+      _mergePreviewBusy = true;
+      _mergePreviewError = null;
+    });
+    try {
+      await session.resolveFile(path, choice);
+      if (mounted && identical(session, _mergePreviewSession)) {
+        setState(() => _mergeResolvedFiles.add(path));
+      }
+    } catch (error) {
+      if (mounted) setState(() => _mergePreviewError = error);
+    } finally {
+      if (mounted) setState(() => _mergePreviewBusy = false);
+    }
+  }
+
+  Future<void> _finishMergePreview() async {
+    final session = _mergePreviewSession;
+    if (session == null || !_canFinishMergePreview || _mergePreviewBusy) return;
+    setState(() {
+      _mergePreviewBusy = true;
+      _mergePreviewError = null;
+    });
+    try {
+      final result = await session.finish();
+      if (!mounted || !identical(session, _mergePreviewSession)) return;
+      setState(() {
+        _mergePreview = result;
+        _previewFiles.clear();
+        _previewFileLists.clear();
+        _previewDiffs.clear();
+      });
+    } catch (error) {
+      if (mounted) setState(() => _mergePreviewError = error);
+    } finally {
+      if (mounted) setState(() => _mergePreviewBusy = false);
+    }
   }
 
   String? get _selectedRebaseConflictPath {

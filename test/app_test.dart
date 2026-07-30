@@ -2850,6 +2850,7 @@ void main() {
     await tester.pump();
     expect(find.byType(SideBySidePresentationView), findsOneWidget);
 
+    await tester.ensureVisible(find.text('other.txt').last);
     await tester.tap(find.text('other.txt').last);
     await tester.pump();
     expect(find.byType(SideBySidePresentationView), findsOneWidget);
@@ -2888,14 +2889,124 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
 
     expect(find.text('Merge 충돌'), findsOneWidget);
     expect(find.text('lib/shared.dart'), findsWidgets);
     expect(find.text('main · main change'), findsOneWidget);
     expect(find.text('feature · feature change'), findsOneWidget);
     expect(find.textContaining(RegExp(r'^[0-9a-f]{7} 사용$')), findsNothing);
+  });
+
+  testWidgets('temporary preview resolves merge conflicts and can be dropped', (
+    tester,
+  ) async {
+    final comparison = branchComparison(
+      compareRef: 'fix/docs',
+      baseSubject: 'main change',
+      compareSubject: 'docs change',
+      merge: const MergeConflictCheck(
+        status: MergeConflictStatus.conflicts,
+        files: ['lib/shared.dart'],
+      ),
+    );
+    late FakeGitRepository repository;
+    late FakeMergePreviewSession session;
+    repository = FakeGitRepository(
+      (_, _) async => [commit('normal', 'normal history')],
+      refs: const RepoRefs(
+        local: ['main', 'fix/docs'],
+        current: 'main',
+        tips: {'main': 'main-tip', 'fix/docs': 'feature-tip'},
+      ),
+      compareBranchesCallback: (_, _) async => comparison,
+      openMergePreviewCallback:
+          ({required baseRef, required compareRef}) async => session,
+      filesBetween: (_, _) async => const [
+        GitFileChange(
+          path: 'lib/shared.dart',
+          status: 'M',
+          additions: 1,
+          deletions: 1,
+        ),
+      ],
+      diffBetween: (_, _, _) async => const [
+        DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+        DiffLine(kind: DiffLineKind.delete, text: 'old', oldNumber: 1),
+        DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
+      ],
+    );
+    session = FakeMergePreviewSession(
+      repository,
+      const MergePreviewResult(
+        status: MergePreviewStatus.conflict,
+        baseTip: 'main-tip',
+        compareTip: 'feature-tip',
+        conflictFiles: ['lib/shared.dart'],
+      ),
+      finishResult: const MergePreviewResult(
+        status: MergePreviewStatus.clean,
+        baseTip: 'main-tip',
+        compareTip: 'feature-tip',
+        treeSha: 'resolved-tree',
+        resultFiles: [
+          GitFileChange(
+            path: 'lib/shared.dart',
+            status: 'M',
+            additions: 1,
+            deletions: 1,
+          ),
+        ],
+      ),
+    );
+    await tester.pumpWidget(app(repository, controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-fix/docs')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        '충돌 해결 과정은 임시 공간에서만 진행합니다. '
+        '기준 브랜치 main과 대상 브랜치 fix/docs를 직접 변경하지 않습니다.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('두 브랜치 변경 없음'), findsOneWidget);
+    expect(find.text('현재 작업 트리 변경 없음'), findsOneWidget);
+    expect(find.text('종료 시 자동 삭제'), findsOneWidget);
+    expect(find.text('임시 작업 공간 시작'), findsNothing);
+
+    await tester.ensureVisible(
+      find.byKey(const Key('merge-conflict-use-base')),
+    );
+    await tester.tap(find.byKey(const Key('merge-conflict-use-base')));
+    await tester.pumpAndSettle();
+    expect(session.resolvedChoices, [
+      ('lib/shared.dart', MergeConflictChoice.base),
+    ]);
+    await tester.ensureVisible(
+      find.byKey(const Key('merge-conflict-continue')),
+    );
+    await tester.tap(find.byKey(const Key('merge-conflict-continue')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('충돌 해결과 테스트를 마쳤습니다'), findsOneWidget);
+    expect(find.text('Merge 가능'), findsOneWidget);
+    expect(find.text('Drop'), findsOneWidget);
+    expect(find.byType(UnifiedPresentationView), findsOneWidget);
+    await tester.tap(
+      find.byKey(const Key('branch-preview-layout-side-by-side')),
+    );
+    await tester.pump();
+    expect(find.byType(SideBySidePresentationView), findsOneWidget);
+
+    await tester.ensureVisible(find.byKey(const Key('branch-preview-drop')));
+    await tester.tap(find.byKey(const Key('branch-preview-drop')));
+    await tester.pumpAndSettle();
+    expect(session.disposed, isTrue);
+    expect(find.text('임시 결과를 Drop했습니다'), findsOneWidget);
+    expect(find.text('변경 없음'), findsOneWidget);
   });
 
   testWidgets('rebase preview adds rewritten commits to the timeline', (
@@ -3251,6 +3362,9 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
+    await tester.ensureVisible(
+      find.byKey(const Key('rebase-conflict-use-compare')),
+    );
     await tester.tap(find.byKey(const Key('rebase-conflict-use-compare')));
     await tester.pump();
     expect(session.resolvedChoices, [
@@ -12063,6 +12177,7 @@ class FakeGitRepository extends GitRepository {
     this.originUrlCallback,
     this.compareBranchesCallback,
     this.simulateRebaseCallback,
+    this.openMergePreviewCallback,
     this.openRebasePreviewCallback,
     this.applyMergePreviewCallback,
     this.applyRebasePreviewCallback,
@@ -12093,6 +12208,11 @@ class FakeGitRepository extends GitRepository {
     required String compareRef,
   })?
   simulateRebaseCallback;
+  final Future<MergePreviewSession> Function({
+    required String baseRef,
+    required String compareRef,
+  })?
+  openMergePreviewCallback;
   final Future<RebasePreviewSession> Function({
     required String baseRef,
     required String compareRef,
@@ -12235,6 +12355,34 @@ class FakeGitRepository extends GitRepository {
   }
 
   @override
+  Future<MergePreviewSession> openMergePreview({
+    required String baseRef,
+    required String compareRef,
+  }) async {
+    if (openMergePreviewCallback != null) {
+      return openMergePreviewCallback!(
+        baseRef: baseRef,
+        compareRef: compareRef,
+      );
+    }
+    final comparison = await compareBranchesCallback!(baseRef, compareRef);
+    final result = MergePreviewResult(
+      status: switch (comparison.merge.status) {
+        MergeConflictStatus.clean => MergePreviewStatus.clean,
+        MergeConflictStatus.conflicts => MergePreviewStatus.conflict,
+        MergeConflictStatus.failed => MergePreviewStatus.failed,
+      },
+      baseTip: comparison.baseTip,
+      compareTip: comparison.compareTip,
+      treeSha: comparison.merge.treeSha,
+      resultFiles: comparison.merge.resultFiles,
+      conflictFiles: comparison.merge.files,
+      error: comparison.merge.error,
+    );
+    return FakeMergePreviewSession(this, result, finishResult: result);
+  }
+
+  @override
   Future<BranchApplyResult> applyMergePreview({
     required BranchComparisonResult comparison,
     required String treeSha,
@@ -12359,6 +12507,43 @@ class FakeGitRepository extends GitRepository {
   }) =>
       blame?.call(commit, file, parent, workingTreeBytes) ??
       Future.value(const []);
+}
+
+class FakeMergePreviewSession extends MergePreviewSession {
+  FakeMergePreviewSession(
+    GitRepository repository,
+    this.result, {
+    required this.finishResult,
+  }) : super(
+         repository: repository,
+         baseTip: result.baseTip,
+         compareTip: result.compareTip,
+       );
+
+  final MergePreviewResult result;
+  final MergePreviewResult finishResult;
+  final resolvedChoices = <(String, MergeConflictChoice)>[];
+  var disposed = false;
+
+  @override
+  Future<MergePreviewResult> start() async => result;
+
+  @override
+  Future<void> resolveFile(
+    String relativePath,
+    MergeConflictChoice choice,
+  ) async {
+    resolvedChoices.add((relativePath, choice));
+  }
+
+  @override
+  Future<void> markResolved(String relativePath) async {}
+
+  @override
+  Future<MergePreviewResult> finish() async => finishResult;
+
+  @override
+  Future<void> dispose() async => disposed = true;
 }
 
 class FakeRebasePreviewSession extends RebasePreviewSession {
