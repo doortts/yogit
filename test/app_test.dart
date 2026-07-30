@@ -3490,6 +3490,25 @@ void main() {
     final mappings = mappingPainter.mappings;
     expect(mappings, hasLength(3));
     expect(mappings.map((mapping) => mapping.color).toSet(), hasLength(3));
+    final virtualNode = tester.widget<Container>(
+      find.byKey(
+        const Key(
+          'virtual-rebase-node-3333333333333333333333333333333333333333',
+        ),
+      ),
+    );
+    final virtualBorder = virtualNode.decoration! as BoxDecoration;
+    expect((virtualBorder.border! as Border).top.width, 3);
+    expect(
+      (virtualBorder.border! as Border).top.color,
+      mappings
+          .singleWhere(
+            (mapping) =>
+                mapping.rewrittenSha ==
+                '3333333333333333333333333333333333333333',
+          )
+          .color,
+    );
 
     await tester.drag(
       find.byKey(const Key('timeline-list')),
@@ -3497,6 +3516,27 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('feature · 원본'), findsNWidgets(3));
+    final originalAvatar = find.byKey(
+      const ValueKey('author-avatar-feature-one'),
+    );
+    final mappedContainer = tester
+        .widgetList<Container>(
+          find.ancestor(of: originalAvatar, matching: find.byType(Container)),
+        )
+        .singleWhere((container) {
+          final decoration = container.decoration;
+          return decoration is BoxDecoration &&
+              decoration.shape == BoxShape.circle &&
+              decoration.border != null;
+        });
+    final originalBorder = mappedContainer.decoration! as BoxDecoration;
+    expect((originalBorder.border! as Border).top.width, 3);
+    expect(
+      (originalBorder.border! as Border).top.color,
+      mappings
+          .singleWhere((mapping) => mapping.originalSha == 'feature-one')
+          .color,
+    );
   });
 
   testWidgets('branch preview applies merge and restores its exact tips', (
@@ -4836,6 +4876,47 @@ void main() {
     );
   });
 
+  test('rebase mapping lines are one pixel with no outline or gaps', () async {
+    final rows = [
+      for (var index = 0; index < 3; index++)
+        graphRow(
+          commit: commit('row-$index', 'row $index'),
+          lane: 0,
+          activeLanes: const [0],
+          nextLanes: const [0],
+        ),
+    ];
+    const mappingColor = Color(0xFF547C68);
+    final painter = RebaseMappingPainter(
+      rows: rows,
+      mappings: const [
+        (
+          originalSha: 'row-2',
+          rewrittenSha: 'row-0',
+          originalRow: 2,
+          rewrittenRow: 0,
+          routeLane: 0,
+          color: mappingColor,
+        ),
+      ],
+      rowIndex: 1,
+      laneSpacing: 30.5,
+      compact: false,
+    );
+    const width = 100;
+    const height = 36;
+    final recorder = ui.PictureRecorder();
+    painter.paint(Canvas(recorder), const Size(100, 36));
+    final image = await recorder.endRecording().toImage(width, height);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    int alphaAt(int x, int y) => bytes!.getUint8((y * width + x) * 4 + 3);
+
+    // routeX is 58.5: the 1px stroke occupies x=58 only.
+    expect(alphaAt(57, height ~/ 2), 0);
+    expect(alphaAt(58, 0), greaterThan(0));
+    expect(alphaAt(58, height - 1), greaterThan(0));
+  });
+
   test(
     'comparison target branch bends at the common parent in its own color',
     () {
@@ -4897,6 +4978,65 @@ void main() {
     expect(rebase.mappings.single.rewrittenSha, 'rewritten-feature');
     expect(rebase.mappings.single.color, colors.first);
     expect(rebase.mappings.single.routeLane, 0);
+
+    final baseTipIndex = rebase.rows.indexWhere(
+      (row) => row.commit.sha == comparison.baseTip,
+    );
+    final originalIndex = rebase.rows.indexWhere(
+      (row) => row.commit.sha == feature.sha,
+    );
+    final originalLane = rebase.rows[originalIndex].lane;
+    final originalPainter = CommitGraphPainter(
+      row: rebase.rows[originalIndex],
+      previous: rebase.rows[originalIndex - 1],
+      selected: false,
+      committerColor: AvatarService.branchColor(originalLane),
+    );
+    expect(rebase.rows[baseTipIndex].nextLanes, isNot(contains(originalLane)));
+    expect(originalPainter.continuesFromAbove(originalLane), isFalse);
+
+    final olderBase = commit(
+      'older-main',
+      'older main commit',
+      parents: const ['root'],
+    );
+    final interleavedComparison = BranchComparisonResult(
+      baseRef: comparison.baseRef,
+      compareRef: comparison.compareRef,
+      baseTip: comparison.baseTip,
+      compareTip: comparison.compareTip,
+      baseParent: olderBase.sha,
+      compareParent: comparison.compareParent,
+      mergeBases: comparison.mergeBases,
+      commits: [
+        comparison.commits.first,
+        comparison.commits[1],
+        BranchComparisonCommit(
+          commit: olderBase,
+          side: BranchCommitSide.baseOnly,
+        ),
+        comparison.commits.last,
+      ],
+      files: comparison.files,
+      merge: comparison.merge,
+    );
+    final interleaved = layoutRebasePreviewGraph(
+      interleavedComparison,
+      RebasePreviewResult(
+        status: RebasePreviewStatus.clean,
+        baseTip: interleavedComparison.baseTip,
+        compareTip: interleavedComparison.compareTip,
+        rewritten: [(original: feature, rewrittenSha: 'interleaved-rewrite')],
+        completed: 1,
+        total: 1,
+        virtualTip: 'interleaved-rewrite',
+      ),
+      colors,
+    );
+    final olderBaseRow = interleaved.rows.singleWhere(
+      (row) => row.commit.sha == olderBase.sha,
+    );
+    expect(olderBaseRow.activeLanes, contains(originalLane));
   });
 
   test('rebase conflict keeps only a virtual target above the base tip', () {
@@ -4934,25 +5074,31 @@ void main() {
     expect(graph.mappings, isEmpty);
   });
 
-  test('preview graphs preserve every existing comparison row', () {
+  test('preview graphs preserve existing comparison commits', () {
     final comparison = branchComparison();
     final existing = layoutBranchComparison(comparison.commits);
     final merge = layoutMergePreviewGraph(comparison);
-    void expectExistingRows(List<GraphRow> rows, int offset) {
+    void expectExistingRows(
+      List<GraphRow> rows,
+      int offset, {
+      bool preserveRails = true,
+    }) {
       for (var index = 0; index < existing.length; index++) {
         final actual = rows[index + offset];
         final expected = existing[index];
         expect(actual.commit, same(expected.commit));
         expect(actual.lane, expected.lane);
         expect(actual.parentLanes, expected.parentLanes);
-        expect(actual.activeLanes, expected.activeLanes);
-        expect(actual.nextLanes, expected.nextLanes);
-        expect(actual.activeLaneShas, expected.activeLaneShas);
-        expect(actual.nextLaneShas, expected.nextLaneShas);
+        if (preserveRails) {
+          expect(actual.activeLanes, expected.activeLanes);
+          expect(actual.nextLanes, expected.nextLanes);
+          expect(actual.activeLaneShas, expected.activeLaneShas);
+          expect(actual.nextLaneShas, expected.nextLaneShas);
+          expect(actual.activeLaneBranches, expected.activeLaneBranches);
+          expect(actual.nextLaneBranches, expected.nextLaneBranches);
+        }
         expect(actual.transitions, expected.transitions);
         expect(actual.branch, expected.branch);
-        expect(actual.activeLaneBranches, expected.activeLaneBranches);
-        expect(actual.nextLaneBranches, expected.nextLaneBranches);
       }
     }
 
@@ -4975,7 +5121,7 @@ void main() {
       rebaseMappingColors(AvatarService.defaultColors),
     );
 
-    expectExistingRows(rebase.rows, 1);
+    expectExistingRows(rebase.rows, 1, preserveRails: false);
   });
 
   testWidgets('the app passes branch preview mode changes to settings', (

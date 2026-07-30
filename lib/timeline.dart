@@ -66,6 +66,8 @@ List<Color> rebaseMappingColors(Iterable<Color> reserved) {
   return colors;
 }
 
+const _rebaseMappingAvatarBorderWidth = 3.0;
+
 enum PreviewGraphNodeKind {
   actual,
   virtualMerge,
@@ -165,7 +167,42 @@ BranchPreviewGraph layoutRebasePreviewGraph(
   RebasePreviewResult preview,
   List<Color> colors,
 ) {
-  final existing = layoutBranchComparison(comparison.commits);
+  final laidOut = layoutBranchComparison(comparison.commits);
+  final compareLane = laidOut
+      .firstWhere((row) => row.commit.sha == comparison.compareTip)
+      .lane;
+  GraphRow hideCompareRail(GraphRow row) {
+    final activeLaneShas = Map<int, String>.of(row.activeLaneShas)
+      ..remove(compareLane);
+    final nextLaneShas = Map<int, String>.of(row.nextLaneShas)
+      ..remove(compareLane);
+    final activeLaneBranches = Map<int, int>.of(row.activeLaneBranches)
+      ..remove(compareLane);
+    final nextLaneBranches = Map<int, int>.of(row.nextLaneBranches)
+      ..remove(compareLane);
+    return _copyGraphRow(
+      row,
+      activeLanes: row.activeLanes
+          .where((lane) => lane != compareLane)
+          .toList(),
+      nextLanes: row.nextLanes.where((lane) => lane != compareLane).toList(),
+      activeLaneShas: activeLaneShas,
+      nextLaneShas: nextLaneShas,
+      activeLaneBranches: activeLaneBranches,
+      nextLaneBranches: nextLaneBranches,
+    );
+  }
+
+  final firstCompareRow = comparison.commits.indexWhere(
+    (entry) => entry.side == BranchCommitSide.compareOnly,
+  );
+  final existing = [
+    for (var index = 0; index < laidOut.length; index++)
+      index < firstCompareRow &&
+              comparison.commits[index].side == BranchCommitSide.baseOnly
+          ? hideCompareRail(laidOut[index])
+          : laidOut[index],
+  ];
   if (preview.status == RebasePreviewStatus.conflict) {
     final base = existing.firstWhere(
       (row) => row.commit.sha == comparison.baseTip,
@@ -4830,7 +4867,6 @@ class _TimelineScreenState extends State<TimelineScreen>
                                   rowIndex: index,
                                   laneSpacing: painter.laneSpacing,
                                   compact: painter.compact,
-                                  backgroundColor: _palette.background,
                                 ),
                               ),
                             ),
@@ -5070,7 +5106,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               color: const Color(0xFF8D6BB8),
               border: Border.all(
                 color: mappingColor ?? const Color(0xFFB78BEF),
-                width: 1,
+                width: _rebaseMappingAvatarBorderWidth,
               ),
             ),
             child: const Text(
@@ -5096,18 +5132,23 @@ class _TimelineScreenState extends State<TimelineScreen>
         : Container(
             padding: mappingColor == null
                 ? EdgeInsets.zero
-                : const EdgeInsets.all(1),
+                : const EdgeInsets.all(_rebaseMappingAvatarBorderWidth),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               border: mappingColor == null
                   ? null
-                  : Border.all(color: mappingColor, width: 1),
+                  : Border.all(
+                      color: mappingColor,
+                      width: _rebaseMappingAvatarBorderWidth,
+                    ),
             ),
             child: CommitAvatarStack(
               commit: commit,
               avatarService: widget.avatarService,
               showRemoteAvatars: widget.showRemoteAvatars,
-              size: mappingColor == null ? size : size - 2,
+              size: mappingColor == null
+                  ? size
+                  : size - _rebaseMappingAvatarBorderWidth * 2,
               stacked: stacked,
               discColor: branchColor,
             ),
@@ -7571,7 +7612,6 @@ class RebaseMappingPainter extends CustomPainter {
     required this.rowIndex,
     required this.laneSpacing,
     required this.compact,
-    required this.backgroundColor,
   });
 
   final List<GraphRow> rows;
@@ -7579,7 +7619,6 @@ class RebaseMappingPainter extends CustomPainter {
   final int rowIndex;
   final double laneSpacing;
   final bool compact;
-  final Color backgroundColor;
 
   double _laneX(int lane) => compact
       ? CommitGraphPainter.laneInset
@@ -7603,7 +7642,7 @@ class RebaseMappingPainter extends CustomPainter {
       final path = Path();
       if (rowIndex == mapping.rewrittenRow) {
         path
-          ..moveTo(routeX, size.height)
+          ..moveTo(routeX, size.height + 1)
           ..lineTo(routeX, centerY + 6)
           ..quadraticBezierTo(routeX, centerY, routeX - 6, centerY)
           ..lineTo(rewrittenX + CommitGraphPainter.avatarDiameter / 2, centerY);
@@ -7612,21 +7651,12 @@ class RebaseMappingPainter extends CustomPainter {
           ..moveTo(originalX + CommitGraphPainter.avatarDiameter / 2, centerY)
           ..lineTo(routeX - 6, centerY)
           ..quadraticBezierTo(routeX, centerY, routeX, centerY - 6)
-          ..lineTo(routeX, 0);
+          ..lineTo(routeX, -1);
       } else {
         path
-          ..moveTo(routeX, 0)
-          ..lineTo(routeX, size.height);
+          ..moveTo(routeX, -1)
+          ..lineTo(routeX, size.height + 1);
       }
-      canvas.drawPath(
-        path,
-        Paint()
-          ..color = backgroundColor
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 3
-          ..strokeCap = StrokeCap.round
-          ..strokeJoin = StrokeJoin.round,
-      );
       canvas.drawPath(
         path,
         Paint()
@@ -7657,8 +7687,7 @@ class RebaseMappingPainter extends CustomPainter {
       oldDelegate.mappings != mappings ||
       oldDelegate.rowIndex != rowIndex ||
       oldDelegate.laneSpacing != laneSpacing ||
-      oldDelegate.compact != compact ||
-      oldDelegate.backgroundColor != backgroundColor;
+      oldDelegate.compact != compact;
 }
 
 /// Draws one row of the commit graph: pass-through rails, the rounded lane
