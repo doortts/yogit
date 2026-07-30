@@ -343,12 +343,14 @@ class TimelineScreen extends StatefulWidget {
     this.columnWidths = const TimelineColumnWidths(),
     this.fullDiffColumnWidths = const FullDiffColumnWidths(),
     this.fullDiffPreferences = const FullDiffPreferences(),
+    this.branchPreviewMode = BranchPreviewMode.merge,
     this.previewWidth = 288,
     this.previewHeight = 280,
     this.onPreviewPlacementChanged,
     this.onColumnWidthsChanged,
     this.onFullDiffColumnWidthsChanged,
     this.onFullDiffPreferencesChanged,
+    this.onBranchPreviewModeChanged,
     this.onPreviewSizeChanged,
     this.editorForTesting,
     this.documentLoaderForTesting,
@@ -379,12 +381,14 @@ class TimelineScreen extends StatefulWidget {
   final TimelineColumnWidths columnWidths;
   final FullDiffColumnWidths fullDiffColumnWidths;
   final FullDiffPreferences fullDiffPreferences;
+  final BranchPreviewMode branchPreviewMode;
   final double previewWidth;
   final double previewHeight;
   final ValueChanged<PreviewPlacement>? onPreviewPlacementChanged;
   final ValueChanged<TimelineColumnWidths>? onColumnWidthsChanged;
   final ValueChanged<FullDiffColumnWidths>? onFullDiffColumnWidthsChanged;
   final ValueChanged<FullDiffPreferences>? onFullDiffPreferencesChanged;
+  final ValueChanged<BranchPreviewMode>? onBranchPreviewModeChanged;
   final ValueChanged<({double width, double height})>? onPreviewSizeChanged;
 
   @visibleForTesting

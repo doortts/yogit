@@ -3291,6 +3291,44 @@ void main() {
     expect(changed.copyWith(), changed);
   });
 
+  test('branch preview mode defaults to merge and restores rebase', () {
+    expect(const AppSettings().branchPreviewMode, BranchPreviewMode.merge);
+    const settings = AppSettings(branchPreviewMode: BranchPreviewMode.rebase);
+    expect(AppSettings.fromJson(settings.toJson()), settings);
+    expect(
+      AppSettings.fromJson(const {
+        'branchPreviewMode': 'unknown',
+      }).branchPreviewMode,
+      BranchPreviewMode.merge,
+    );
+  });
+
+  testWidgets('the app passes branch preview mode changes to settings', (
+    tester,
+  ) async {
+    final store = MemorySettingsStore()
+      ..current = const AppSettings(
+        branchPreviewMode: BranchPreviewMode.rebase,
+      );
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+        ),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final timeline = tester.widget<TimelineScreen>(find.byType(TimelineScreen));
+    expect(timeline.branchPreviewMode, BranchPreviewMode.rebase);
+    timeline.onBranchPreviewModeChanged!(BranchPreviewMode.merge);
+    await tester.pumpAndSettle();
+    expect(store.current.branchPreviewMode, BranchPreviewMode.merge);
+  });
+
   test(
     'copyWith replaces the base branch map without losing other settings',
     () {
