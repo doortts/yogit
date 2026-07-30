@@ -1634,55 +1634,56 @@ class _TimelineScreenState extends State<TimelineScreen>
     },
   );
 
-  Widget _branchPreviewControls() => Row(
-    children: [
-      Expanded(
-        child: _branchPreviewButton(
-          key: const Key('branch-preview-merge'),
-          mode: BranchPreviewMode.merge,
-          label: 'Merge 미리보기',
+  Widget _branchPreviewControls() => SizedBox(
+    height: 32,
+    child: SegmentedButton<BranchPreviewMode>(
+      key: const Key('branch-preview-segmented'),
+      segments: const [
+        ButtonSegment(
+          value: BranchPreviewMode.merge,
+          label: Text(
+            'Merge 미리보기',
+            key: Key('branch-preview-merge'),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
-      ),
-      const SizedBox(width: 6),
-      Expanded(
-        child: _branchPreviewButton(
-          key: const Key('branch-preview-rebase'),
-          mode: BranchPreviewMode.rebase,
-          label: 'Rebase 미리보기',
+        ButtonSegment(
+          value: BranchPreviewMode.rebase,
+          label: Text(
+            'Rebase 미리보기',
+            key: Key('branch-preview-rebase'),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
-      ),
-    ],
-  );
-
-  Widget _branchPreviewButton({
-    required Key key,
-    required BranchPreviewMode mode,
-    required String label,
-  }) {
-    final selected = _branchPreviewMode == mode;
-    return SizedBox(
-      height: 32,
-      child: OutlinedButton(
-        key: key,
-        onPressed: () {
-          if (selected) return;
-          _setBranchPreviewMode(mode);
-        },
-        style: OutlinedButton.styleFrom(
-          foregroundColor: selected ? _palette.text : _palette.muted,
-          backgroundColor: selected
+      ],
+      selected: {_branchPreviewMode},
+      showSelectedIcon: false,
+      onSelectionChanged: (selected) => _setBranchPreviewMode(selected.single),
+      style: ButtonStyle(
+        foregroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? _palette.text
+              : _palette.muted,
+        ),
+        backgroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
               ? _palette.selectedRow
               : _palette.background,
-          side: BorderSide(
-            color: selected ? _palette.interactive : _palette.border,
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 6),
-          textStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
         ),
-        child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+        side: WidgetStatePropertyAll(BorderSide(color: _palette.border)),
+        padding: const WidgetStatePropertyAll(
+          EdgeInsets.symmetric(horizontal: 6),
+        ),
+        textStyle: const WidgetStatePropertyAll(
+          TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
+        ),
+        visualDensity: VisualDensity.compact,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
-    );
-  }
+    ),
+  );
 
   void _setBranchPreviewMode(BranchPreviewMode mode) {
     if (_branchPreviewMode == mode) return;

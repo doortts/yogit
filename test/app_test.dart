@@ -2632,6 +2632,12 @@ void main() {
     await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
     await tester.pumpAndSettle();
 
+    expect(find.byKey(const Key('branch-preview-segmented')), findsOneWidget);
+    final segmented = tester.widget<SegmentedButton<BranchPreviewMode>>(
+      find.byKey(const Key('branch-preview-segmented')),
+    );
+    expect(segmented.selected, {BranchPreviewMode.merge});
+    expect(segmented.showSelectedIcon, isFalse);
     expect(find.byKey(const Key('branch-preview-merge')), findsOneWidget);
     expect(find.byKey(const Key('branch-preview-rebase')), findsOneWidget);
     expect(find.text('Merge 미리보기'), findsWidgets);
@@ -2649,6 +2655,14 @@ void main() {
     await tester.tap(find.byKey(const Key('branch-preview-rebase')));
     await tester.pumpAndSettle();
     expect(changedMode, BranchPreviewMode.rebase);
+    expect(
+      tester
+          .widget<SegmentedButton<BranchPreviewMode>>(
+            find.byKey(const Key('branch-preview-segmented')),
+          )
+          .selected,
+      {BranchPreviewMode.rebase},
+    );
     expect(find.text('Rebase 미리보기'), findsWidgets);
     expect(find.text('Rebase 성공'), findsOneWidget);
   });
