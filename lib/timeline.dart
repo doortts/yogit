@@ -7775,7 +7775,7 @@ class _WindowButtonState extends State<_WindowButton> {
   );
 }
 
-/// The green 'Show Diff' affordance, name over shortcut. The toolbar and the
+/// The green 'Full Diff' affordance, name over shortcut. The toolbar and the
 /// preview header show the same button at their own scale.
 class _ShowDiffButton extends StatelessWidget {
   const _ShowDiffButton({
@@ -7819,7 +7819,7 @@ class _ShowDiffButton extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(
-                'Show Diff',
+                'Full Diff',
                 style: TextStyle(
                   color: ink,
                   fontSize: labelSize,

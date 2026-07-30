@@ -10194,7 +10194,7 @@ void main() {
       tester.getRect(find.text('상세')).left,
       lessThan(tester.getRect(find.byKey(const Key('keycap-Enter'))).left),
     );
-    // Right cluster order: keycaps, caption, placement box, Show Diff, gear.
+    // Right cluster order: keycaps, caption, placement box, Full Diff, gear.
     final lefts = [
       tester.getRect(find.byKey(const Key('shortcut-hint'))).left,
       tester.getRect(find.text('미리보기')).left,
@@ -11758,7 +11758,7 @@ void main() {
   });
 
   // ------------------------------------------------------------------ C3/H2
-  testWidgets('the preview header carries the compact green Show Diff', (
+  testWidgets('the preview header carries the compact green Full Diff', (
     tester,
   ) async {
     final opened = <String>[];
@@ -11788,7 +11788,7 @@ void main() {
     expect(rect.height, 28);
     expect(rect.left, greaterThan(header.right));
     expect(
-      find.descendant(of: button, matching: find.text('Show Diff')),
+      find.descendant(of: button, matching: find.text('Full Diff')),
       findsOneWidget,
     );
     expect(
@@ -11812,7 +11812,7 @@ void main() {
     expect(
       tester
           .widget<Text>(
-            find.descendant(of: button, matching: find.text('Show Diff')),
+            find.descendant(of: button, matching: find.text('Full Diff')),
           )
           .style
           ?.fontSize,
@@ -11919,7 +11919,7 @@ void main() {
     expect(button, findsOneWidget);
     // The name with its shortcut underneath, on green.
     expect(
-      find.descendant(of: button, matching: find.text('Show Diff')),
+      find.descendant(of: button, matching: find.text('Full Diff')),
       findsOneWidget,
     );
     expect(
@@ -11933,7 +11933,7 @@ void main() {
       greaterThan(
         tester
             .getRect(
-              find.descendant(of: button, matching: find.text('Show Diff')),
+              find.descendant(of: button, matching: find.text('Full Diff')),
             )
             .top,
       ),

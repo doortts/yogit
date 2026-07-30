@@ -13,7 +13,7 @@
 - Add no dependency.
 - Keep all control geometry and click targets unchanged.
 - Use a rectangular sidebar hover fill with a straight 2-pixel leading line.
-- Use `#3FB950` for the enabled `Show Diff` hover color.
+- Use `#3FB950` for the enabled `Full Diff` hover color.
 - Keep the preview minimum at 240 and default at 288 logical pixels.
 - Set the preview maximum to 75% of the current app-window width.
 - Do not apply a fixed pixel maximum when reading a saved preview width.
@@ -50,7 +50,7 @@ Expected: FAIL because the new hover decorations and colors do not exist.
 - [x] **Step 3: Implement the smallest hover state**
 
 Add one local hover builder and use it around clickable reference rows,
-unselected placement buttons, `Show Diff`, and the settings button.
+unselected placement buttons, `Full Diff`, and the settings button.
 
 - [x] **Step 4: Run the focused tests and verify GREEN**
 
