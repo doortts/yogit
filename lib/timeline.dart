@@ -3259,57 +3259,66 @@ class _TimelineScreenState extends State<TimelineScreen>
           _sidebarWidth + _w('refs') + graphWidth + _w('hash') + commitWidth;
       return ColoredBox(
         color: _palette.background,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SizedBox(
-            width: fixed + commitWidth,
-            child: Column(
-              children: [
-                if (_compareRef != null) _branchPreviewSummary(),
-                SizedBox(
-                  height: 29,
-                  child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (_compareRef != null) _branchPreviewSummary(),
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: fixed + commitWidth,
+                  child: Column(
                     children: [
-                      for (final column in timelineColumns.keys)
-                        if (_columnVisible(column))
-                          _header(column, width(column)),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Stack(
-                    children: [
-                      ListView.builder(
-                        key: const Key('timeline-list'),
-                        controller: _scrollController,
-                        itemExtent: TimelineScreen.rowHeight,
-                        itemCount: _entries.length + (_showFooter ? 1 : 0),
-                        itemBuilder: (context, index) {
-                          if (index == _entries.length) return _footer();
-                          final entry = _entries[index];
-                          return entry.label == null
-                              ? _row(index, commitWidth, graphWidth)
-                              : _dateRow(index, entry, graphWidth);
-                        },
+                      SizedBox(
+                        height: 29,
+                        child: Row(
+                          children: [
+                            for (final column in timelineColumns.keys)
+                              if (_columnVisible(column))
+                                _header(column, width(column)),
+                          ],
+                        ),
                       ),
-                      Positioned.fill(
-                        child: LayoutBuilder(
-                          builder: (context, constraints) => ListenableBuilder(
-                            listenable: Listenable.merge([
-                              _selectedIndex,
-                              _scrollController,
-                            ]),
-                            builder: (context, _) =>
-                                _refsModal(constraints.maxHeight),
-                          ),
+                      Expanded(
+                        child: Stack(
+                          children: [
+                            ListView.builder(
+                              key: const Key('timeline-list'),
+                              controller: _scrollController,
+                              itemExtent: TimelineScreen.rowHeight,
+                              itemCount:
+                                  _entries.length + (_showFooter ? 1 : 0),
+                              itemBuilder: (context, index) {
+                                if (index == _entries.length) return _footer();
+                                final entry = _entries[index];
+                                return entry.label == null
+                                    ? _row(index, commitWidth, graphWidth)
+                                    : _dateRow(index, entry, graphWidth);
+                              },
+                            ),
+                            Positioned.fill(
+                              child: LayoutBuilder(
+                                builder: (context, constraints) =>
+                                    ListenableBuilder(
+                                      listenable: Listenable.merge([
+                                        _selectedIndex,
+                                        _scrollController,
+                                      ]),
+                                      builder: (context, _) =>
+                                          _refsModal(constraints.maxHeight),
+                                    ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
                 ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
       );
     },
@@ -3647,10 +3656,11 @@ class _TimelineScreenState extends State<TimelineScreen>
         ? null
         : () => unawaited(_confirmBranchPreviewApply()),
     style: FilledButton.styleFrom(
-      foregroundColor: const Color(0xFFF1E7FF),
-      backgroundColor: const Color(0xFF46385F),
-      side: const BorderSide(color: Color(0xFF7D68A6)),
-      padding: const EdgeInsets.symmetric(horizontal: 10),
+      foregroundColor: const Color(0xFFFFF4FF),
+      backgroundColor: const Color(0xFF594576),
+      side: const BorderSide(color: Color(0xFF9D79D0)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
     ),
     child: Text(
       _branchPreviewApplyLabel,
@@ -3662,7 +3672,6 @@ class _TimelineScreenState extends State<TimelineScreen>
   Widget _branchPreviewApplyCard() {
     final merge = _branchPreviewMode == BranchPreviewMode.merge;
     final result = _branchApplyResult;
-    final comparison = _comparison!;
     final previewCommitCount = merge
         ? 1
         : _rebasePreview?.rewritten.length ?? 0;
@@ -3717,31 +3726,30 @@ class _TimelineScreenState extends State<TimelineScreen>
                   ),
                 ),
               ),
-              Flexible(
-                child: Text(
-                  result == null && _branchApplyStatus == BranchApplyStatus.idle
-                      ? '${comparison.baseRef}과 ${comparison.compareRef} 유지'
-                      : switch (_branchApplyStatus) {
-                          BranchApplyStatus.applying => '커밋 적용 중',
-                          BranchApplyStatus.applied => '로컬 브랜치 적용됨',
-                          BranchApplyStatus.reverting => '되돌리는 중',
-                          BranchApplyStatus.reverted => 'SHA 일치 확인',
-                          BranchApplyStatus.failed => '작업 실패',
-                          BranchApplyStatus.idle => '아직 적용하지 않음',
-                        },
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color:
-                        _branchApplyStatus == BranchApplyStatus.reverted ||
-                            _branchApplyStatus == BranchApplyStatus.applied
-                        ? _success
-                        : _palette.muted,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
+              if (_branchApplyStatus != BranchApplyStatus.idle)
+                Flexible(
+                  child: Text(
+                    switch (_branchApplyStatus) {
+                      BranchApplyStatus.applying => '커밋 적용 중',
+                      BranchApplyStatus.applied => '로컬 브랜치 적용됨',
+                      BranchApplyStatus.reverting => '되돌리는 중',
+                      BranchApplyStatus.reverted => 'SHA 일치 확인',
+                      BranchApplyStatus.failed => '작업 실패',
+                      BranchApplyStatus.idle => '',
+                    },
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color:
+                          _branchApplyStatus == BranchApplyStatus.reverted ||
+                              _branchApplyStatus == BranchApplyStatus.applied
+                          ? _success
+                          : _palette.muted,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
           if (result == null) ...[
@@ -6868,64 +6876,83 @@ class _TimelineScreenState extends State<TimelineScreen>
           ),
   );
 
-  Widget _previewFileRow(GitCommit commit, GitFileChange file, bool selected) =>
-      SizedBox(
-        key: selected ? _selectedPreviewFileKey : null,
-        height: 28,
-        child: InkWell(
-          onTap: () => _selectPreviewFile(commit, file.path),
-          borderRadius: BorderRadius.circular(6),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: selected ? _palette.neutralChip : null,
-              borderRadius: selected ? BorderRadius.circular(6) : null,
-              border: selected
-                  ? null
-                  : Border(top: BorderSide(color: _palette.border)),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  key: Key('preview-state-${file.path}'),
-                  width: 20,
-                  height: 20,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: fileStateChipColor(
-                      file.status,
-                      palette: _palette,
-                    ).background,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    file.status,
-                    maxLines: 1,
-                    style: TextStyle(
-                      color: fileStateChipColor(
-                        file.status,
-                        palette: _palette,
-                      ).letter,
-                      fontSize: 10,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 7),
-                Expanded(
-                  child: Text(
-                    file.path,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: selected ? _palette.text : _palette.muted,
-                      fontSize: 12,
-                    ),
+  Widget _previewFileRow(GitCommit commit, GitFileChange file, bool selected) {
+    final branchPreview = _comparison != null;
+    final state = fileStateChipColor(file.status, palette: _palette);
+    final stats = [
+      if ((file.additions ?? 0) > 0) '+${file.additions}',
+      if ((file.deletions ?? 0) > 0) '-${file.deletions}',
+    ].join(' ');
+    final stateColor = switch (file.status.isEmpty ? '' : file.status[0]) {
+      'D' => _deleted,
+      'R' || 'C' => _renamed,
+      '!' => _hash,
+      _ => _main,
+    };
+    return SizedBox(
+      key: selected ? _selectedPreviewFileKey : null,
+      height: branchPreview ? 34 : 28,
+      child: InkWell(
+        onTap: () => _selectPreviewFile(commit, file.path),
+        borderRadius: BorderRadius.circular(6),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: selected ? _palette.neutralChip : null,
+            borderRadius: selected ? BorderRadius.circular(6) : null,
+            border: branchPreview || selected
+                ? null
+                : Border(top: BorderSide(color: _palette.border)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                key: Key('preview-state-${file.path}'),
+                width: branchPreview ? 28 : 20,
+                height: 20,
+                alignment: Alignment.center,
+                decoration: branchPreview
+                    ? null
+                    : BoxDecoration(
+                        color: state.background,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                child: Text(
+                  file.status,
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: branchPreview ? stateColor : state.letter,
+                    fontSize: branchPreview ? 12 : 10,
                   ),
                 ),
+              ),
+              if (!branchPreview) const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  file.path,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: branchPreview || selected
+                        ? _palette.text
+                        : _palette.muted,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              if (branchPreview && stats.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                Text(
+                  stats,
+                  style: TextStyle(color: _palette.muted, fontSize: 11),
+                ),
+                const SizedBox(width: 8),
               ],
-            ),
+            ],
           ),
         ),
-      );
+      ),
+    );
+  }
 
   Widget _previewDiff(GitCommit commit, GitFileChange file) {
     final path = file.path;
@@ -8069,9 +8096,12 @@ class CommitGraphPainter extends CustomPainter {
     return {
       for (final lane in row.nextLanes)
         if (lane == row.lane
-            // The node hands its first parent straight down, unless its lane
-            // joins another lane or a slide refills it.
-            ? !joining.contains(lane) && !arriving.contains(lane)
+            // Keep the first-parent rail when another branch joins it. A lane
+            // filled only by a collapsing slide remains owned by the curve.
+            ? !joining.contains(lane) &&
+                  (!arriving.contains(lane) ||
+                      (row.parentLanes.isNotEmpty &&
+                          row.parentLanes.first == lane))
             : row.activeLanes.contains(lane) && !departing.contains(lane))
           lane,
     };

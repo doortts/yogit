@@ -2939,6 +2939,25 @@ void main() {
       tester.getTopLeft(find.byKey(const Key('branch-preview-summary'))).dy,
       lessThan(tester.getTopLeft(find.byKey(const Key('graph-header'))).dy),
     );
+    expect(
+      find.ancestor(
+        of: find.byKey(const Key('branch-preview-summary')),
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is SingleChildScrollView &&
+              widget.scrollDirection == Axis.horizontal,
+        ),
+      ),
+      findsNothing,
+    );
+    final summaryRect = tester.getRect(
+      find.byKey(const Key('branch-preview-summary')),
+    );
+    final timelineRect = tester.getRect(
+      find.byKey(const Key('timeline-viewport')),
+    );
+    expect(summaryRect.left, timelineRect.left);
+    expect(summaryRect.right, timelineRect.right);
 
     await tester.tap(find.byKey(const Key('branch-preview-rebase')));
     await tester.pumpAndSettle();
@@ -3125,6 +3144,14 @@ void main() {
     expect(find.text('feature.txt'), findsWidgets);
     expect(find.byType(UnifiedPresentationView), findsOneWidget);
     final fileList = find.byKey(const Key('branch-preview-file-list'));
+    expect(
+      find.descendant(of: fileList, matching: find.text('+1 -1')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: fileList, matching: find.text('+1')),
+      findsOneWidget,
+    );
     final selectedFileText = find.descendant(
       of: fileList,
       matching: find.text('feature.txt'),
@@ -3702,6 +3729,21 @@ void main() {
     expect(find.text('부모 커밋'), findsOneWidget);
     expect(find.text('충돌'), findsOneWidget);
     expect(find.byKey(const Key('branch-preview-progress')), findsOneWidget);
+    expect(find.text('main과 fix/docs 유지'), findsNothing);
+    final applyButton = tester.widget<FilledButton>(
+      find.byKey(const Key('branch-preview-apply')),
+    );
+    final applyShape =
+        applyButton.style!.shape!.resolve({})! as RoundedRectangleBorder;
+    expect(applyShape.borderRadius, BorderRadius.circular(6));
+    expect(
+      applyButton.style!.backgroundColor!.resolve({}),
+      const Color(0xFF594576),
+    );
+    expect(
+      applyButton.style!.side!.resolve({})!.color,
+      const Color(0xFF9D79D0),
+    );
     await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
     await tester.tap(find.byKey(const Key('branch-preview-apply')));
     await tester.pumpAndSettle();
@@ -5038,6 +5080,37 @@ void main() {
       expect(CommitGraphPainter.transitionBranch(target, transition), 1);
     },
   );
+
+  test('common parent keeps the base rail when the other branch joins', () {
+    final comparison = branchComparison();
+    final olderBase = commit(
+      'older-main',
+      'older main commit',
+      parents: const ['root'],
+    );
+    final rows = layoutBranchComparison([
+      comparison.commits.first,
+      comparison.commits[1],
+      BranchComparisonCommit(
+        commit: olderBase,
+        side: BranchCommitSide.baseOnly,
+      ),
+      comparison.commits.last,
+    ]);
+    final olderBaseRow = rows.singleWhere(
+      (row) => row.commit.sha == olderBase.sha,
+    );
+    final commonRow = rows.singleWhere((row) => row.commit.sha == 'root');
+    final commonPainter = CommitGraphPainter(
+      row: commonRow,
+      previous: olderBaseRow,
+      selected: false,
+      committerColor: const Color(0xFF7AD6E8),
+    );
+
+    expect(CommitGraphPainter.railsBelow(olderBaseRow), contains(0));
+    expect(commonPainter.laneVerticals(const Size(168, 36))[0]!.top, 0);
+  });
 
   test('merge preview keeps each parent edge dashed until its parent node', () {
     final graph = layoutMergePreviewGraph(branchComparison());
