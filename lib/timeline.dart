@@ -448,6 +448,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   RebaseCheckResult? _rebaseCheck;
   Object? _comparisonError;
   var _comparisonSerial = 0;
+  late BranchPreviewMode _branchPreviewMode = widget.branchPreviewMode;
 
   List<GitCommit> get _commits => _comparison == null
       ? _normalCommits
@@ -708,6 +709,9 @@ class _TimelineScreenState extends State<TimelineScreen>
         widget.previewHeight != oldWidget.previewHeight) {
       _previewWidth = widget.previewWidth;
       _previewHeight = widget.previewHeight;
+    }
+    if (widget.branchPreviewMode != oldWidget.branchPreviewMode) {
+      _branchPreviewMode = widget.branchPreviewMode;
     }
     final preferredBranchBecameReady =
         widget.preferredBranchReady && !oldWidget.preferredBranchReady;
@@ -1210,7 +1214,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               ],
             ),
           ),
-          _statusBar(),
+          if (_compareRef == null) _statusBar(),
         ],
       ),
     ),
@@ -1377,9 +1381,13 @@ class _TimelineScreenState extends State<TimelineScreen>
       Expanded(
         child: LayoutBuilder(
           builder: (context, constraints) {
+            final previewControlsWidth = _compareRef == null ? 0.0 : 212.0;
             final selectorWidth = math.min(
               460.0,
-              math.max(0.0, constraints.maxWidth - _minDragWidth),
+              math.max(
+                0.0,
+                constraints.maxWidth - _minDragWidth - previewControlsWidth,
+              ),
             );
             return Row(
               children: [
@@ -1401,6 +1409,10 @@ class _TimelineScreenState extends State<TimelineScreen>
                     onComparisonCleared: _clearComparison,
                   ),
                 ),
+                if (_compareRef != null) ...[
+                  const SizedBox(width: 8),
+                  SizedBox(width: 204, child: _branchPreviewControls()),
+                ],
                 Expanded(child: _dragAndWordmark()),
               ],
             );
@@ -1444,6 +1456,57 @@ class _TimelineScreenState extends State<TimelineScreen>
       );
     },
   );
+
+  Widget _branchPreviewControls() => Row(
+    children: [
+      Expanded(
+        child: _branchPreviewButton(
+          key: const Key('branch-preview-merge'),
+          mode: BranchPreviewMode.merge,
+          label: 'Merge 미리보기',
+        ),
+      ),
+      const SizedBox(width: 6),
+      Expanded(
+        child: _branchPreviewButton(
+          key: const Key('branch-preview-rebase'),
+          mode: BranchPreviewMode.rebase,
+          label: 'Rebase 미리보기',
+        ),
+      ),
+    ],
+  );
+
+  Widget _branchPreviewButton({
+    required Key key,
+    required BranchPreviewMode mode,
+    required String label,
+  }) {
+    final selected = _branchPreviewMode == mode;
+    return SizedBox(
+      height: 32,
+      child: OutlinedButton(
+        key: key,
+        onPressed: () {
+          if (selected) return;
+          setState(() => _branchPreviewMode = mode);
+          widget.onBranchPreviewModeChanged?.call(mode);
+        },
+        style: OutlinedButton.styleFrom(
+          foregroundColor: selected ? _palette.text : _palette.muted,
+          backgroundColor: selected
+              ? _palette.selectedRow
+              : _palette.background,
+          side: BorderSide(
+            color: selected ? _palette.interactive : _palette.border,
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          textStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
+        ),
+        child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+      ),
+    );
+  }
 
   void _selectBaseBranch(String branch) {
     if (!_refs.local.contains(branch) || branch == _baseBranch) return;
@@ -2474,6 +2537,7 @@ class _TimelineScreenState extends State<TimelineScreen>
             width: fixed + commitWidth,
             child: Column(
               children: [
+                if (_compareRef != null) _branchPreviewSummary(),
                 SizedBox(
                   height: 29,
                   child: Row(
@@ -2524,6 +2588,89 @@ class _TimelineScreenState extends State<TimelineScreen>
   );
 
   bool get _showFooter => _compareRef == null;
+
+  Widget _branchPreviewSummary() {
+    final comparison = _comparison;
+    final mergeMode = _branchPreviewMode == BranchPreviewMode.merge;
+    final success = mergeMode
+        ? comparison?.merge.status == MergeConflictStatus.clean
+        : _rebaseCheck?.status == RebaseCheckStatus.clean;
+    final resultLabel = mergeMode
+        ? switch (comparison?.merge.status) {
+            MergeConflictStatus.clean => 'Merge 성공',
+            MergeConflictStatus.conflicts => 'Merge 충돌',
+            MergeConflictStatus.failed => 'Merge 검사 실패',
+            null => 'Merge 검사 중',
+          }
+        : switch (_rebaseCheck?.status) {
+            RebaseCheckStatus.clean => 'Rebase 성공',
+            RebaseCheckStatus.conflicts => 'Rebase 충돌',
+            RebaseCheckStatus.failed => 'Rebase 검사 실패',
+            null => 'Rebase 검사 중',
+          };
+    final details = comparison == null
+        ? <String>[]
+        : [
+            comparison.sameFirstParent ? '부모 동일' : '부모 다름',
+            '공통 ${comparison.mergeBases.length}',
+            '${comparison.baseRef}만 ${comparison.commits.where((entry) => entry.side == BranchCommitSide.baseOnly).length}',
+            '${comparison.compareRef}만 ${comparison.commits.where((entry) => entry.side == BranchCommitSide.compareOnly).length}',
+          ];
+    return Container(
+      key: const Key('branch-preview-summary'),
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: BoxDecoration(
+        color: _palette.surface,
+        border: Border(bottom: BorderSide(color: _palette.border)),
+      ),
+      child: Row(
+        children: [
+          Text(
+            mergeMode ? 'Merge 미리보기' : 'Rebase 미리보기',
+            style: TextStyle(
+              color: _palette.text,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+            decoration: BoxDecoration(
+              color: _palette.raised,
+              borderRadius: BorderRadius.circular(7),
+            ),
+            child: Row(
+              children: [
+                if (success) ...[
+                  const Icon(
+                    Icons.check_circle,
+                    key: Key('branch-preview-success-icon'),
+                    color: _main,
+                    size: 15,
+                  ),
+                  const SizedBox(width: 5),
+                ],
+                Text(
+                  resultLabel,
+                  style: TextStyle(
+                    color: success ? _main : _palette.muted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          for (final detail in details) ...[
+            const SizedBox(width: 12),
+            Text(detail, style: TextStyle(color: _palette.muted, fontSize: 10)),
+          ],
+        ],
+      ),
+    );
+  }
 
   Widget _header(String column, double width) => SizedBox(
     key: Key('$column-header'),

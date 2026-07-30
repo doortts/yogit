@@ -2532,7 +2532,7 @@ void main() {
     expect(find.text('feature만'), findsOneWidget);
     expect(find.text('공통'), findsOneWidget);
     expect(find.text('부모 동일'), findsOneWidget);
-    expect(find.text('병합 충돌 없음'), findsOneWidget);
+    expect(find.text('Merge 성공'), findsOneWidget);
     expect(
       tester
           .widgetList<CustomPaint>(
@@ -2544,6 +2544,55 @@ void main() {
           .map((paint) => (paint.painter! as CommitGraphPainter).row.maxLane),
       everyElement(lessThanOrEqualTo(1)),
     );
+  });
+
+  testWidgets('branch preview controls switch the summary above the timeline', (
+    tester,
+  ) async {
+    BranchPreviewMode? changedMode;
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            current: 'main',
+            tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async => branchComparison(),
+          simulateRebaseCallback: ({required baseRef, required compareRef}) =>
+              Future.value(
+                const RebaseCheckResult(status: RebaseCheckStatus.clean),
+              ),
+        ),
+        controller,
+        onBranchPreviewModeChanged: (mode) => changedMode = mode,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('branch-preview-merge')), findsOneWidget);
+    expect(find.byKey(const Key('branch-preview-rebase')), findsOneWidget);
+    expect(find.text('Merge 미리보기'), findsNWidgets(2));
+    expect(find.text('Merge 성공'), findsOneWidget);
+    expect(
+      find.byKey(const Key('branch-preview-success-icon')),
+      findsOneWidget,
+    );
+    expect(
+      tester.getTopLeft(find.byKey(const Key('branch-preview-summary'))).dy,
+      lessThan(tester.getTopLeft(find.byKey(const Key('graph-header'))).dy),
+    );
+
+    await tester.tap(find.byKey(const Key('branch-preview-rebase')));
+    await tester.pumpAndSettle();
+    expect(changedMode, BranchPreviewMode.rebase);
+    expect(find.text('Rebase 미리보기'), findsNWidgets(2));
+    expect(find.text('Rebase 성공'), findsOneWidget);
   });
 
   testWidgets('comparison preview stays on the branch tip diff', (
@@ -11258,10 +11307,19 @@ List<Offset> _samples(Path path) => path
 bool _touches(Path path, Offset point) =>
     _samples(path).any((sample) => (sample - point).distance < 0.5);
 
-Widget app(GitRepository repository, WindowFrameController controller) =>
-    MaterialApp(
-      home: TimelineScreen(repository: repository, controller: controller),
-    );
+Widget app(
+  GitRepository repository,
+  WindowFrameController controller, {
+  BranchPreviewMode branchPreviewMode = BranchPreviewMode.merge,
+  ValueChanged<BranchPreviewMode>? onBranchPreviewModeChanged,
+}) => MaterialApp(
+  home: TimelineScreen(
+    repository: repository,
+    controller: controller,
+    branchPreviewMode: branchPreviewMode,
+    onBranchPreviewModeChanged: onBranchPreviewModeChanged,
+  ),
+);
 
 class FakeGitRepository extends GitRepository {
   FakeGitRepository(
