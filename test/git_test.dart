@@ -713,6 +713,27 @@ void main() {
       expect(rows.first.activeLanes, [1]);
       expect(rows.first.activeLaneBranches, {1: 1});
       expect(rows.first.nextLanes, [0]);
+      expect(rows.first.transitions, [(from: 1, to: 0, sha: 'shared')]);
+    },
+  );
+
+  test(
+    'does not draw a compare transition when only the base branch is unique',
+    () {
+      final rows = layoutBranchComparison([
+        BranchComparisonCommit(
+          commit: _commit('main-tip', ['shared']),
+          side: BranchCommitSide.baseOnly,
+        ),
+        BranchComparisonCommit(
+          commit: _commit('shared', const []),
+          side: BranchCommitSide.commonBoundary,
+        ),
+      ]);
+
+      expect(rows.first.activeLanes, [0]);
+      expect(rows.first.nextLanes, [0]);
+      expect(rows.first.transitions, isEmpty);
     },
   );
 

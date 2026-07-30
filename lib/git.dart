@@ -469,7 +469,7 @@ List<GraphRow> layoutBranchComparison(List<BranchComparisonCommit> commits) {
             for (final next in nextLanes)
               next: next == lane ? entry.commit.sha : '',
           },
-          transitions: convergesHere
+          transitions: convergesHere && hasCompareOnly
               ? [(from: 1, to: 0, sha: commits[firstCommon].commit.sha)]
               : const [],
           branch: lane,
