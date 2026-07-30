@@ -42,6 +42,8 @@ const _tooltipDelay = Duration(milliseconds: 400);
 const _main = Color(0xFF8AD6A1);
 const _success = Color(0xFF34C759);
 const _behind = Color(0xFFF0A35E);
+const _previewPurple = Color(0xFFC69AFF);
+const _previewPurplePanel = Color(0xFF29243A);
 
 List<Color> rebaseMappingColors(Iterable<Color> reserved) {
   final used = reserved.map((color) => color.toARGB32()).toSet();
@@ -68,6 +70,8 @@ enum PreviewGraphNodeKind {
   conflictTarget,
 }
 
+enum BranchApplyStatus { idle, applying, applied, reverting, reverted, failed }
+
 typedef RebaseGraphMapping = ({
   String originalSha,
   String rewrittenSha,
@@ -92,6 +96,13 @@ class BranchPreviewGraph {
 }
 
 BranchPreviewGraph layoutMergePreviewGraph(BranchComparisonResult comparison) {
+  final existing = layoutBranchComparison(comparison.commits);
+  final base = existing.firstWhere(
+    (row) => row.commit.sha == comparison.baseTip,
+  );
+  final compare = existing.firstWhere(
+    (row) => row.commit.sha == comparison.compareTip,
+  );
   final template = comparison.commits.first.commit;
   final sha = 'virtual-merge-${comparison.baseTip}-${comparison.compareTip}';
   final virtual = GitCommit(
@@ -105,17 +116,32 @@ BranchPreviewGraph layoutMergePreviewGraph(BranchComparisonResult comparison) {
     refs: const [],
     subject: 'Merge 미리보기',
   );
-  final rows = layoutGraph([
-    virtual,
-    for (final entry in comparison.commits) entry.commit,
-  ]);
+  final lanes = {base.lane, compare.lane}.toList()..sort();
+  final rows = [
+    GraphRow(
+      commit: virtual,
+      lane: base.lane,
+      parentLanes: [base.lane, compare.lane],
+      activeLanes: [base.lane],
+      nextLanes: lanes,
+      activeLaneShas: {base.lane: sha},
+      nextLaneShas: {
+        base.lane: comparison.baseTip,
+        compare.lane: comparison.compareTip,
+      },
+      transitions: base.lane == compare.lane
+          ? const []
+          : [(from: base.lane, to: compare.lane, sha: comparison.compareTip)],
+      branch: base.branch,
+      activeLaneBranches: {base.lane: base.branch},
+      nextLaneBranches: {base.lane: base.branch, compare.lane: compare.branch},
+    ),
+    ...existing,
+  ];
   return BranchPreviewGraph(
     rows: rows,
     kinds: {sha: PreviewGraphNodeKind.virtualMerge},
-    dashedLanes: _previewDashedLanes(rows, {
-      comparison.baseTip,
-      comparison.compareTip,
-    }),
+    dashedLanes: {0: lanes.toSet()},
   );
 }
 
@@ -124,9 +150,53 @@ BranchPreviewGraph layoutRebasePreviewGraph(
   RebasePreviewResult preview,
   List<Color> colors,
 ) {
+  final existing = layoutBranchComparison(comparison.commits);
   if (preview.rewritten.isEmpty) {
-    return BranchPreviewGraph(rows: layoutBranchComparison(comparison.commits));
+    if (preview.status != RebasePreviewStatus.conflict) {
+      return BranchPreviewGraph(rows: existing);
+    }
+    final base = existing.firstWhere(
+      (row) => row.commit.sha == comparison.baseTip,
+    );
+    final template = comparison.commits.first.commit;
+    final sha =
+        'virtual-rebase-target-${comparison.baseTip}-${comparison.compareTip}';
+    final target = GitCommit(
+      sha: sha,
+      shortSha: '—',
+      parents: [comparison.baseTip],
+      author: template.author,
+      authorTimestamp: template.authorTimestamp,
+      committer: template.committer,
+      committerTimestamp: template.committerTimestamp + 1,
+      refs: const [],
+      subject: 'Rebase 미리보기 도착점',
+    );
+    return BranchPreviewGraph(
+      rows: [
+        GraphRow(
+          commit: target,
+          lane: base.lane,
+          parentLanes: [base.lane],
+          activeLanes: [base.lane],
+          nextLanes: [base.lane],
+          activeLaneShas: {base.lane: sha},
+          nextLaneShas: {base.lane: comparison.baseTip},
+          branch: base.branch,
+          activeLaneBranches: {base.lane: base.branch},
+          nextLaneBranches: {base.lane: base.branch},
+        ),
+        ...existing,
+      ],
+      kinds: {sha: PreviewGraphNodeKind.conflictTarget},
+      dashedLanes: {
+        0: {base.lane},
+      },
+    );
   }
+  final base = existing.firstWhere(
+    (row) => row.commit.sha == comparison.baseTip,
+  );
   final virtualOldestFirst = <GitCommit>[];
   var parent = comparison.baseTip;
   for (final rewrite in preview.rewritten) {
@@ -147,10 +217,22 @@ BranchPreviewGraph layoutRebasePreviewGraph(
     parent = rewrite.rewrittenSha;
   }
   final virtualNewestFirst = virtualOldestFirst.reversed.toList();
-  final rows = layoutGraph([
-    ...virtualNewestFirst,
-    for (final entry in comparison.commits) entry.commit,
-  ]);
+  final rows = [
+    for (final commit in virtualNewestFirst)
+      GraphRow(
+        commit: commit,
+        lane: base.lane,
+        parentLanes: [base.lane],
+        activeLanes: [base.lane],
+        nextLanes: [base.lane],
+        activeLaneShas: {base.lane: commit.sha},
+        nextLaneShas: {base.lane: commit.parents.single},
+        branch: base.branch,
+        activeLaneBranches: {base.lane: base.branch},
+        nextLaneBranches: {base.lane: base.branch},
+      ),
+    ...existing,
+  ];
   final rowBySha = {
     for (var index = 0; index < rows.length; index++)
       rows[index].commit.sha: index,
@@ -161,10 +243,10 @@ BranchPreviewGraph layoutRebasePreviewGraph(
       for (final commit in virtualOldestFirst)
         commit.sha: PreviewGraphNodeKind.virtualRebase,
     },
-    dashedLanes: _previewDashedLanes(rows, {
-      comparison.baseTip,
-      ...virtualOldestFirst.map((commit) => commit.sha),
-    }),
+    dashedLanes: {
+      for (var index = 0; index < virtualNewestFirst.length; index++)
+        index: {base.lane},
+    },
     mappings: [
       for (var index = 0; index < preview.rewritten.length; index++)
         (
@@ -178,23 +260,6 @@ BranchPreviewGraph layoutRebasePreviewGraph(
     ],
   );
 }
-
-Map<int, Set<int>> _previewDashedLanes(
-  List<GraphRow> rows,
-  Set<String> targets,
-) => {
-  for (var index = 0; index < rows.length; index++)
-    if ({
-          ...rows[index].activeLaneShas.entries
-              .where((entry) => targets.contains(entry.value))
-              .map((entry) => entry.key),
-          ...rows[index].nextLaneShas.entries
-              .where((entry) => targets.contains(entry.value))
-              .map((entry) => entry.key),
-        }
-        case final lanes when lanes.isNotEmpty)
-      index: lanes,
-};
 
 const _weekdayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -604,15 +669,29 @@ class _TimelineScreenState extends State<TimelineScreen>
   var _comparisonEntries = <TimelineEntry>[];
   BranchPreviewGraph? _previewGraph;
   RebaseCheckResult? _rebaseCheck;
+  MergePreviewSession? _mergePreviewSession;
+  MergePreviewResult? _mergePreview;
+  var _mergePreviewSerial = 0;
+  var _mergePreviewBusy = false;
+  Object? _mergePreviewError;
+  final _mergeResolvedFiles = <String>{};
   RebasePreviewSession? _rebasePreviewSession;
   RebasePreviewResult? _rebasePreview;
   var _rebasePreviewSerial = 0;
   var _rebasePreviewBusy = false;
   Object? _rebasePreviewError;
+  var _rebaseHadConflict = false;
   var _repositoryOperationInProgress = false;
   final _rebaseResolvedFiles = <String>{};
   final _rebaseEditedFiles = <String>{};
   final _rebaseConflictRowContextKey = GlobalKey();
+  final _rebaseApplyRowContextKey = GlobalKey();
+  var _branchApplyStatus = BranchApplyStatus.idle;
+  var _branchApplySerial = 0;
+  BranchApplyResult? _branchApplyResult;
+  Object? _branchApplyError;
+  String? _rebaseApplyingSha;
+  var _branchPreviewDropped = false;
   Object? _comparisonError;
   var _comparisonSerial = 0;
   late BranchPreviewMode _branchPreviewMode = widget.branchPreviewMode;
@@ -859,6 +938,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       });
     }
     if (!identical(widget.repository, oldWidget.repository)) {
+      _resetBranchApply();
+      _dropMergePreview();
       _dropRebasePreview();
       _clearFullDiffRouteSession();
     } else if (widget.onFullDiffPreferencesChanged !=
@@ -923,6 +1004,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _fetchTimer?.cancel();
+    _dropMergePreview();
     _dropRebasePreview();
     _clearFullDiffRouteSession();
     if (_ownsPreviewController) _previewController.dispose();
@@ -1482,6 +1564,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// Native folder chooser → `git rev-parse --show-toplevel`. A directory that
   /// is not a repository leaves the current one alone and says so inline.
   Future<void> _pickRepository() async {
+    if (_branchApplyBusy) return;
     final path = await _previewController.pickRepository();
     if (path == null || !mounted) return;
     try {
@@ -1571,20 +1654,24 @@ class _TimelineScreenState extends State<TimelineScreen>
               children: [
                 SizedBox(
                   width: selectorWidth,
-                  child: RepositoryBranchSelector(
-                    repositoryName: _repositoryName,
-                    repositoryPath: widget.repository.root,
-                    localBranches: _refs.local,
-                    remoteBranches: _refs.remote,
-                    selectedBranch: _baseBranch,
-                    comparedBranch: _compareRef,
-                    refsLoading: _refsLoading,
-                    refsLoadFailed: _refsLoadFailed,
-                    onRepositoryPressed: () => unawaited(_pickRepository()),
-                    onBranchSelected: _selectBaseBranch,
-                    onComparisonSelected: (branch) =>
-                        unawaited(_selectComparison(branch)),
-                    onComparisonCleared: _clearComparison,
+                  child: AbsorbPointer(
+                    key: const Key('branch-preview-toolbar-lock'),
+                    absorbing: _branchApplyBusy,
+                    child: RepositoryBranchSelector(
+                      repositoryName: _repositoryName,
+                      repositoryPath: widget.repository.root,
+                      localBranches: _refs.local,
+                      remoteBranches: _refs.remote,
+                      selectedBranch: _baseBranch,
+                      comparedBranch: _compareRef,
+                      refsLoading: _refsLoading,
+                      refsLoadFailed: _refsLoadFailed,
+                      onRepositoryPressed: () => unawaited(_pickRepository()),
+                      onBranchSelected: _selectBaseBranch,
+                      onComparisonSelected: (branch) =>
+                          unawaited(_selectComparison(branch)),
+                      onComparisonCleared: _clearComparison,
+                    ),
                   ),
                 ),
                 if (_compareRef != null) ...[
@@ -1661,7 +1748,9 @@ class _TimelineScreenState extends State<TimelineScreen>
       ],
       selected: {_branchPreviewMode},
       showSelectedIcon: false,
-      onSelectionChanged: (selected) => _setBranchPreviewMode(selected.single),
+      onSelectionChanged: _branchApplyBusy
+          ? null
+          : (selected) => _setBranchPreviewMode(selected.single),
       style: ButtonStyle(
         foregroundColor: WidgetStateProperty.resolveWith(
           (states) => states.contains(WidgetState.selected)
@@ -1687,9 +1776,14 @@ class _TimelineScreenState extends State<TimelineScreen>
   );
 
   void _setBranchPreviewMode(BranchPreviewMode mode) {
-    if (_branchPreviewMode == mode) return;
+    if (_branchPreviewMode == mode ||
+        _branchApplyStatus == BranchApplyStatus.applying ||
+        _branchApplyStatus == BranchApplyStatus.reverting) {
+      return;
+    }
     setState(() {
       _branchPreviewMode = mode;
+      _resetBranchApply();
       final comparison = _comparison;
       if (comparison != null) {
         _previewGraph = mode == BranchPreviewMode.merge
@@ -1704,20 +1798,30 @@ class _TimelineScreenState extends State<TimelineScreen>
         _selectedIndex.value = 0;
       }
     });
+    _showFirstComparisonRow();
     widget.onBranchPreviewModeChanged?.call(mode);
     _scheduleRatchetUpdate();
     if (mode == BranchPreviewMode.rebase) {
+      _dropMergePreview();
       unawaited(_startRebasePreview());
     } else {
       _dropRebasePreview();
+      if (_comparison?.merge.status == MergeConflictStatus.conflicts) {
+        unawaited(_startMergePreview());
+      }
     }
   }
 
   void _selectBaseBranch(String branch) {
-    if (!_refs.local.contains(branch) || branch == _baseBranch) return;
+    if (_branchApplyBusy ||
+        !_refs.local.contains(branch) ||
+        branch == _baseBranch) {
+      return;
+    }
     final compared = _compareRef;
     setState(() {
       _baseBranch = branch;
+      _resetBranchApply();
       _rebuildGraph();
     });
     _scheduleRatchetUpdate();
@@ -1739,11 +1843,13 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   Future<void> _selectComparison(String compareRef) async {
     final baseRef = _baseBranch;
-    if (baseRef == null || compareRef == baseRef) return;
+    if (_branchApplyBusy || baseRef == null || compareRef == baseRef) return;
     final serial = ++_comparisonSerial;
+    _dropMergePreview();
     _dropRebasePreview();
     setState(() {
       _compareRef = compareRef;
+      _resetBranchApply();
       _comparison = null;
       _comparisonRows = [];
       _comparisonEntries = [];
@@ -1776,8 +1882,11 @@ class _TimelineScreenState extends State<TimelineScreen>
         ];
       });
       _scheduleRatchetUpdate();
+      _showFirstComparisonRow();
       if (_branchPreviewMode == BranchPreviewMode.rebase) {
         unawaited(_startRebasePreview());
+      } else if (result.merge.status == MergeConflictStatus.conflicts) {
+        unawaited(_startMergePreview());
       } else {
         unawaited(_checkRebase(baseRef, compareRef, serial));
       }
@@ -1797,7 +1906,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     int serial,
   ) async {
     try {
-      await widget.repository.cleanupStaleRebaseWorktrees();
+      await widget.repository.cleanupStalePreviewWorktrees();
       final result = await widget.repository.simulateRebase(
         baseRef: baseRef,
         compareRef: compareRef,
@@ -1822,6 +1931,87 @@ class _TimelineScreenState extends State<TimelineScreen>
         ),
       );
     }
+  }
+
+  Future<void> _startMergePreview() async {
+    final comparison = _comparison;
+    if (_branchPreviewMode != BranchPreviewMode.merge ||
+        comparison == null ||
+        comparison.merge.status != MergeConflictStatus.conflicts) {
+      return;
+    }
+    final request = ++_mergePreviewSerial;
+    final previous = _mergePreviewSession;
+    _mergePreviewSession = null;
+    _mergePreview = null;
+    if (previous != null) await previous.dispose();
+    if (!mounted ||
+        request != _mergePreviewSerial ||
+        _branchPreviewMode != BranchPreviewMode.merge) {
+      return;
+    }
+    try {
+      final session = await widget.repository.openMergePreview(
+        baseRef: comparison.baseRef,
+        compareRef: comparison.compareRef,
+      );
+      if (!mounted ||
+          request != _mergePreviewSerial ||
+          _comparison != comparison ||
+          _branchPreviewMode != BranchPreviewMode.merge) {
+        await session.dispose();
+        return;
+      }
+      _mergePreviewSession = session;
+      final result = await session.start();
+      if (!mounted ||
+          request != _mergePreviewSerial ||
+          _comparison != comparison ||
+          _branchPreviewMode != BranchPreviewMode.merge) {
+        await session.dispose();
+        return;
+      }
+      if (result.baseTip != comparison.baseTip ||
+          result.compareTip != comparison.compareTip) {
+        _mergePreviewSession = null;
+        await session.dispose();
+        if (!mounted || request != _mergePreviewSerial) return;
+        setState(() {
+          _mergePreview = MergePreviewResult(
+            status: MergePreviewStatus.failed,
+            baseTip: result.baseTip,
+            compareTip: result.compareTip,
+            error: '브랜치가 변경되었습니다. 미리보기를 다시 선택해 주세요.',
+          );
+          _mergePreviewError = _mergePreview!.error;
+        });
+        return;
+      }
+      setState(() {
+        _mergePreview = result;
+        _mergePreviewError = null;
+        _mergeResolvedFiles.clear();
+      });
+      if (result.status == MergePreviewStatus.conflict &&
+          _previewController.previewPlacement == PreviewPlacement.closed) {
+        await _previewController.setPreview(widget.preferredPreviewPlacement);
+      }
+    } catch (error) {
+      if (mounted && request == _mergePreviewSerial) {
+        setState(() => _mergePreviewError = error);
+      }
+    }
+  }
+
+  void _dropMergePreview() {
+    _mergePreviewSerial++;
+    final session = _mergePreviewSession;
+    _mergePreviewSession = null;
+    _mergePreview = null;
+    _mergePreviewBusy = false;
+    _mergePreviewError = null;
+    _mergeResolvedFiles.clear();
+    if (session != null) unawaited(session.dispose());
   }
 
   Future<void> _startRebasePreview() async {
@@ -1861,7 +2051,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         await session.dispose();
         return;
       }
-      await _applyRebasePreviewResult(comparison, result);
+      await _applyRebasePreviewResult(comparison, result, request);
     } catch (error) {
       if (!mounted || request != _rebasePreviewSerial) return;
       setState(
@@ -1876,7 +2066,35 @@ class _TimelineScreenState extends State<TimelineScreen>
   Future<void> _applyRebasePreviewResult(
     BranchComparisonResult comparison,
     RebasePreviewResult result,
+    int request,
   ) async {
+    if (result.baseTip != comparison.baseTip ||
+        result.compareTip != comparison.compareTip) {
+      final session = _rebasePreviewSession;
+      _rebasePreviewSession = null;
+      await session?.dispose();
+      if (!mounted ||
+          request != _rebasePreviewSerial ||
+          _branchPreviewMode != BranchPreviewMode.rebase ||
+          _comparison != comparison) {
+        return;
+      }
+      const message = '브랜치가 변경되었습니다. 미리보기를 다시 선택해 주세요.';
+      setState(() {
+        _rebasePreview = RebasePreviewResult(
+          status: RebasePreviewStatus.failed,
+          baseTip: result.baseTip,
+          compareTip: result.compareTip,
+          error: message,
+        );
+        _rebasePreviewError = message;
+        _rebaseCheck = const RebaseCheckResult(
+          status: RebaseCheckStatus.failed,
+          error: message,
+        );
+      });
+      return;
+    }
     final colors = rebaseMappingColors([
       ...AvatarService.palette,
       _palette.background,
@@ -1893,12 +2111,22 @@ class _TimelineScreenState extends State<TimelineScreen>
     final conflictIndex = graph.rows.indexWhere(
       (row) => row.commit.sha == result.currentCommit?.sha,
     );
+    final session = _rebasePreviewSession;
     final operationInProgress = result.status == RebasePreviewStatus.conflict
         ? await widget.repository.operationInProgress()
         : false;
-    if (!mounted || _comparison != comparison) return;
+    if (!mounted ||
+        request != _rebasePreviewSerial ||
+        _branchPreviewMode != BranchPreviewMode.rebase ||
+        _comparison != comparison ||
+        !identical(_rebasePreviewSession, session)) {
+      return;
+    }
     setState(() {
       _rebasePreview = result;
+      if (result.status == RebasePreviewStatus.conflict) {
+        _rebaseHadConflict = true;
+      }
       _rebasePreviewError = null;
       _repositoryOperationInProgress = operationInProgress;
       _rebaseResolvedFiles.clear();
@@ -1933,7 +2161,9 @@ class _TimelineScreenState extends State<TimelineScreen>
       await _previewController.setPreview(widget.preferredPreviewPlacement);
     }
     _scheduleRatchetUpdate();
-    if (result.status == RebasePreviewStatus.conflict) {
+    if (result.status == RebasePreviewStatus.clean) {
+      _showFirstComparisonRow();
+    } else if (result.status == RebasePreviewStatus.conflict) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final rowContext = _rebaseConflictRowContextKey.currentContext;
         if (!mounted || rowContext == null) return;
@@ -1950,23 +2180,49 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
   }
 
+  void _showFirstComparisonRow() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          _compareRef == null ||
+          !_scrollController.hasClients ||
+          _scrollController.offset == 0) {
+        return;
+      }
+      _scrollController.jumpTo(0);
+    });
+  }
+
   void _dropRebasePreview() {
     _rebasePreviewSerial++;
     final session = _rebasePreviewSession;
     _rebasePreviewSession = null;
     _rebasePreview = null;
+    _rebasePreviewBusy = false;
+    _repositoryOperationInProgress = false;
+    _rebaseHadConflict = false;
     _rebaseResolvedFiles.clear();
     _rebaseEditedFiles.clear();
     _rebasePreviewError = null;
     if (session != null) unawaited(session.dispose());
   }
 
+  void _resetBranchApply() {
+    _branchApplySerial++;
+    _branchApplyStatus = BranchApplyStatus.idle;
+    _branchApplyResult = null;
+    _branchApplyError = null;
+    _rebaseApplyingSha = null;
+    _branchPreviewDropped = false;
+  }
+
   void _clearComparison() {
-    if (_compareRef == null) return;
+    if (_branchApplyBusy || _compareRef == null) return;
+    _dropMergePreview();
     _dropRebasePreview();
     _comparisonSerial++;
     setState(() {
       _compareRef = null;
+      _resetBranchApply();
       _comparison = null;
       _comparisonRows = [];
       _comparisonEntries = [];
@@ -2984,14 +3240,22 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   bool get _showFooter => _compareRef == null;
 
+  MergeConflictStatus? get _effectiveMergeStatus =>
+      switch (_mergePreview?.status) {
+        MergePreviewStatus.clean => MergeConflictStatus.clean,
+        MergePreviewStatus.conflict => MergeConflictStatus.conflicts,
+        MergePreviewStatus.failed => MergeConflictStatus.failed,
+        null => _comparison?.merge.status,
+      };
+
   Widget _branchPreviewSummary() {
     final comparison = _comparison;
     final mergeMode = _branchPreviewMode == BranchPreviewMode.merge;
     final success = mergeMode
-        ? comparison?.merge.status == MergeConflictStatus.clean
+        ? _effectiveMergeStatus == MergeConflictStatus.clean
         : _rebaseCheck?.status == RebaseCheckStatus.clean;
     final resultLabel = mergeMode
-        ? switch (comparison?.merge.status) {
+        ? switch (_effectiveMergeStatus) {
             MergeConflictStatus.clean => 'Merge 성공',
             MergeConflictStatus.conflicts => 'Merge 충돌',
             MergeConflictStatus.failed => 'Merge 검사 실패',
@@ -3083,6 +3347,542 @@ class _TimelineScreenState extends State<TimelineScreen>
         ],
       ),
     );
+  }
+
+  bool get _branchPreviewReady {
+    final comparison = _comparison;
+    if (comparison == null || _branchPreviewDropped) return false;
+    return _branchPreviewMode == BranchPreviewMode.merge
+        ? _effectiveMergeStatus == MergeConflictStatus.clean &&
+              (_mergePreview?.treeSha ?? comparison.merge.treeSha) != null
+        : _rebasePreview?.status == RebasePreviewStatus.clean &&
+              _rebasePreview?.virtualTip != null;
+  }
+
+  bool get _branchPreviewCanApply =>
+      _branchPreviewReady &&
+      _refs.local.contains(_comparison!.baseRef) &&
+      _refs.local.contains(_comparison!.compareRef);
+
+  bool get _branchApplyBusy =>
+      _branchApplyStatus == BranchApplyStatus.applying ||
+      _branchApplyStatus == BranchApplyStatus.reverting;
+
+  String get _branchPreviewApplyLabel {
+    final comparison = _comparison!;
+    return _branchPreviewMode == BranchPreviewMode.merge
+        ? '${comparison.compareRef}를 ${comparison.baseRef}에 Merge 실제 적용'
+        : '${comparison.baseRef} 위로 ${comparison.compareRef} Rebase 실제 적용';
+  }
+
+  Future<void> _confirmBranchPreviewApply() async {
+    final comparison = _comparison;
+    if (comparison == null || !_branchPreviewCanApply || _branchApplyBusy) {
+      return;
+    }
+    final merge = _branchPreviewMode == BranchPreviewMode.merge;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${merge ? 'Merge' : 'Rebase'} 실제 적용'),
+        content: Text(
+          '기준 브랜치 ${comparison.baseRef}\n'
+          '${comparison.baseTip}\n\n'
+          '대상 브랜치 ${comparison.compareRef}\n'
+          '${comparison.compareTip}\n\n'
+          '${merge ? comparison.baseRef : comparison.compareRef} 로컬 브랜치만 변경합니다. '
+          '원격 저장소로 push하지 않습니다.\n'
+          '완료한 뒤에도 두 브랜치를 이 시작 SHA의 이전 시점으로 되돌릴 수 있습니다.',
+        ),
+        actions: [
+          TextButton(
+            autofocus: true,
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('${merge ? 'Merge' : 'Rebase'} 실제 적용'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await _runBranchPreviewApply(comparison);
+    }
+  }
+
+  Future<void> _runBranchPreviewApply(BranchComparisonResult comparison) async {
+    final mode = _branchPreviewMode;
+    final request = ++_branchApplySerial;
+    setState(() {
+      _branchApplyStatus = BranchApplyStatus.applying;
+      _branchApplyError = null;
+    });
+    try {
+      BranchApplyResult result;
+      if (mode == BranchPreviewMode.merge) {
+        result = await widget.repository.applyMergePreview(
+          comparison: comparison,
+          treeSha: (_mergePreview?.treeSha ?? comparison.merge.treeSha)!,
+        );
+      } else {
+        final preview = _rebasePreview!;
+        final duration = MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 220);
+        for (final rewrite in preview.rewritten) {
+          if (!mounted || request != _branchApplySerial) return;
+          final row = _comparisonRows.indexWhere(
+            (entry) => entry.commit.sha == rewrite.rewrittenSha,
+          );
+          setState(() => _rebaseApplyingSha = rewrite.rewrittenSha);
+          if (row >= 0) _selectedIndex.value = row;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final rowContext = _rebaseApplyRowContextKey.currentContext;
+            if (!mounted || rowContext == null) return;
+            unawaited(
+              Scrollable.ensureVisible(
+                rowContext,
+                duration: duration,
+                curve: Curves.easeOut,
+              ),
+            );
+          });
+          if (duration > Duration.zero) await Future<void>.delayed(duration);
+        }
+        result = await widget.repository.applyRebasePreview(
+          comparison: comparison,
+          virtualTip: preview.virtualTip!,
+        );
+      }
+      if (!mounted || request != _branchApplySerial) return;
+      final mergeSession = _mergePreviewSession;
+      final rebaseSession = _rebasePreviewSession;
+      setState(() {
+        _branchApplyStatus = BranchApplyStatus.applied;
+        _branchApplyResult = result;
+        _rebaseApplyingSha = null;
+        if (mode == BranchPreviewMode.merge) {
+          _mergePreviewSession = null;
+        } else {
+          _rebasePreviewSession = null;
+        }
+      });
+      if (mode == BranchPreviewMode.merge && mergeSession != null) {
+        unawaited(mergeSession.dispose());
+      } else if (mode == BranchPreviewMode.rebase && rebaseSession != null) {
+        unawaited(rebaseSession.dispose());
+      }
+    } catch (error) {
+      if (!mounted || request != _branchApplySerial) return;
+      setState(() {
+        _branchApplyStatus = BranchApplyStatus.failed;
+        _branchApplyError = error;
+        _rebaseApplyingSha = null;
+      });
+    }
+  }
+
+  Future<void> _confirmBranchPreviewRollback() async {
+    final result = _branchApplyResult;
+    if (result == null || _branchApplyStatus != BranchApplyStatus.applied) {
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          '${result.mode == BranchApplyMode.merge ? 'Merge' : 'Rebase'} 이전 시점으로 되돌리기',
+        ),
+        content: Text(
+          '${result.baseBranch}: ${result.baseBefore}\n'
+          '${result.compareBranch}: ${result.compareBefore}\n\n'
+          '두 로컬 브랜치를 위 SHA로 되돌립니다. 원격 저장소는 변경하지 않습니다.',
+        ),
+        actions: [
+          TextButton(
+            autofocus: true,
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('되돌리기'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final request = ++_branchApplySerial;
+    setState(() {
+      _branchApplyStatus = BranchApplyStatus.reverting;
+      _branchApplyError = null;
+    });
+    try {
+      await widget.repository.restoreBranchApply(result);
+      if (mounted && request == _branchApplySerial) {
+        setState(() => _branchApplyStatus = BranchApplyStatus.reverted);
+      }
+    } catch (error) {
+      if (mounted && request == _branchApplySerial) {
+        setState(() {
+          _branchApplyStatus = BranchApplyStatus.failed;
+          _branchApplyError = error;
+        });
+      }
+    }
+  }
+
+  Widget _branchPreviewApplyCard() {
+    final merge = _branchPreviewMode == BranchPreviewMode.merge;
+    final result = _branchApplyResult;
+    final comparison = _comparison!;
+    final busy = _branchApplyBusy;
+    final previewCommitCount = merge
+        ? 1
+        : _rebasePreview?.rewritten.length ?? 0;
+    Widget metric(String value, String label, String key) => Expanded(
+      child: Container(
+        key: Key(key),
+        padding: const EdgeInsets.symmetric(vertical: 7),
+        decoration: BoxDecoration(
+          color: const Color(0xFF202125),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Column(
+          children: [
+            Text(
+              value,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            Text(label, style: TextStyle(color: _palette.muted, fontSize: 10)),
+          ],
+        ),
+      ),
+    );
+    return Container(
+      key: const Key('branch-preview-apply-card'),
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(11),
+      decoration: BoxDecoration(
+        color: _previewPurplePanel,
+        border: Border.all(color: const Color(0xFF695786)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  result == null
+                      ? merge
+                            ? 'Merge 미리보기 성공'
+                            : '가상 rebase 성공'
+                      : '${merge ? 'Merge' : 'Rebase'} 적용 완료',
+                  style: TextStyle(
+                    color: _palette.text,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Flexible(
+                child: Text(
+                  result == null && _branchApplyStatus == BranchApplyStatus.idle
+                      ? '${comparison.baseRef}과 ${comparison.compareRef} 유지'
+                      : switch (_branchApplyStatus) {
+                          BranchApplyStatus.applying => '커밋 적용 중',
+                          BranchApplyStatus.applied => '로컬 브랜치 적용됨',
+                          BranchApplyStatus.reverting => '되돌리는 중',
+                          BranchApplyStatus.reverted => 'SHA 일치 확인',
+                          BranchApplyStatus.failed => '작업 실패',
+                          BranchApplyStatus.idle => '아직 적용하지 않음',
+                        },
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color:
+                        _branchApplyStatus == BranchApplyStatus.reverted ||
+                            _branchApplyStatus == BranchApplyStatus.applied
+                        ? _success
+                        : _palette.muted,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (result == null) ...[
+            const SizedBox(height: 9),
+            Container(
+              key: const Key('branch-preview-progress'),
+              height: 5,
+              decoration: BoxDecoration(
+                color: const Color(0xFF17181B),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const FractionallySizedBox(
+                widthFactor: 1,
+                alignment: Alignment.centerLeft,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: _previewPurple,
+                    borderRadius: BorderRadius.all(Radius.circular(4)),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                metric(
+                  '$previewCommitCount',
+                  '가상 커밋',
+                  'branch-preview-virtual-count',
+                ),
+                const SizedBox(width: 5),
+                metric(
+                  '${merge ? 2 : previewCommitCount}',
+                  merge ? '부모 커밋' : '원본 커밋',
+                  'branch-preview-source-count',
+                ),
+                const SizedBox(width: 5),
+                metric('0', '충돌', 'branch-preview-conflict-count'),
+              ],
+            ),
+          ],
+          if (result != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              '${result.baseBranch}: ${result.baseBefore} → ${result.baseAfter}\n'
+              '${result.compareBranch}: ${result.compareBefore} → ${result.compareAfter}',
+              style: TextStyle(
+                color: _palette.muted,
+                fontSize: 10,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ],
+          if (_branchApplyError != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _branchApplyError.toString(),
+              style: TextStyle(color: _behind, fontSize: 10),
+            ),
+          ],
+          const SizedBox(height: 10),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              if (result != null) {
+                return Align(
+                  alignment: Alignment.centerRight,
+                  child: OutlinedButton(
+                    key: const Key('branch-preview-rollback'),
+                    onPressed: _branchApplyStatus == BranchApplyStatus.applied
+                        ? () => unawaited(_confirmBranchPreviewRollback())
+                        : null,
+                    child: Text('${merge ? 'Merge' : 'Rebase'} 이전 시점으로 되돌리기'),
+                  ),
+                );
+              }
+              final note = Text(
+                !_branchPreviewCanApply
+                    ? '원격 브랜치는 바로 적용할 수 없습니다. 로컬 브랜치를 선택해 주세요.'
+                    : merge
+                    ? '가상 결과를 실제 브랜치에 적용할 수 있습니다.'
+                    : '점선 결과를 실제 브랜치에 적용할 수 있습니다.',
+                style: TextStyle(color: _palette.muted, fontSize: 10),
+              );
+              final apply = FilledButton(
+                key: const Key('branch-preview-apply'),
+                onPressed: busy || !_branchPreviewCanApply
+                    ? null
+                    : () => unawaited(_confirmBranchPreviewApply()),
+                style: FilledButton.styleFrom(
+                  foregroundColor: const Color(0xFFF1E7FF),
+                  backgroundColor: const Color(0xFF46385F),
+                  side: const BorderSide(color: Color(0xFF7D68A6)),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                ),
+                child: Text(_branchPreviewApplyLabel),
+              );
+              if (constraints.maxWidth >= 380) {
+                return Row(
+                  children: [
+                    Expanded(child: note),
+                    const SizedBox(width: 8),
+                    apply,
+                  ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  note,
+                  const SizedBox(height: 7),
+                  Align(alignment: Alignment.centerRight, child: apply),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  bool get _branchPreviewResolutionComplete =>
+      !_branchPreviewDropped &&
+      (_branchPreviewMode == BranchPreviewMode.merge
+          ? _mergePreviewSession != null &&
+                _mergePreview?.status == MergePreviewStatus.clean
+          : _rebaseHadConflict &&
+                _rebasePreview?.status == RebasePreviewStatus.clean);
+
+  Widget _branchPreviewSafeWorkspace() {
+    final comparison = _comparison!;
+    Widget tag(String label) => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF173741),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Color(0xFF9ADCE7),
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+    return Container(
+      key: const Key('branch-preview-safe-workspace'),
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(11),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2D2328),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            '충돌 해결 과정은 임시 공간에서만 진행합니다. '
+            '기준 브랜치 ${comparison.baseRef}과 대상 브랜치 '
+            '${comparison.compareRef}를 직접 변경하지 않습니다.',
+            style: TextStyle(color: _palette.text, fontSize: 11, height: 1.4),
+          ),
+          const SizedBox(height: 9),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              tag('두 브랜치 변경 없음'),
+              tag('현재 작업 트리 변경 없음'),
+              tag('종료 시 자동 삭제'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _branchPreviewResolutionCard() => Container(
+    key: const Key('branch-preview-resolution-complete'),
+    margin: const EdgeInsets.only(top: 10),
+    padding: const EdgeInsets.all(11),
+    decoration: BoxDecoration(
+      color: Color.lerp(_palette.raised, _renamed, 0.14),
+      border: Border.all(color: _renamed.withValues(alpha: 0.48)),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          '충돌 해결을 마쳤습니다',
+          style: TextStyle(
+            color: _palette.text,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '${_branchPreviewMode == BranchPreviewMode.merge ? 'Merge' : 'Rebase'} 가능',
+          style: const TextStyle(
+            color: _success,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            key: const Key('branch-preview-drop'),
+            onPressed: _branchApplyBusy
+                ? null
+                : () => unawaited(_dropResolvedBranchPreview()),
+            child: const Text('Drop'),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _branchPreviewDroppedCard() => Container(
+    key: const Key('branch-preview-dropped'),
+    margin: const EdgeInsets.only(top: 10),
+    padding: const EdgeInsets.all(11),
+    decoration: BoxDecoration(
+      color: _palette.raised,
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            '임시 결과를 Drop했습니다',
+            style: TextStyle(
+              color: _palette.text,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        const Text(
+          '변경 없음',
+          style: TextStyle(
+            color: _success,
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Future<void> _dropResolvedBranchPreview() async {
+    if (_branchApplyBusy) return;
+    final mergeSession = _mergePreviewSession;
+    final rebaseSession = _rebasePreviewSession;
+    setState(() {
+      _mergePreviewSession = null;
+      _rebasePreviewSession = null;
+      _resetBranchApply();
+      _branchPreviewDropped = true;
+    });
+    await mergeSession?.dispose();
+    await rebaseSession?.dispose();
   }
 
   Widget _header(String column, double width) => SizedBox(
@@ -3365,6 +4165,9 @@ class _TimelineScreenState extends State<TimelineScreen>
           ),
         ];
       }
+      if (previewKind == PreviewGraphNodeKind.conflictTarget) {
+        return const [GitRef(name: 'rebase · 도착점')];
+      }
       final side = comparison.commits
           .firstWhere((entry) => entry.commit.sha == commit.sha)
           .side;
@@ -3536,6 +4339,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     final rebaseConflict =
         _rebasePreview?.status == RebasePreviewStatus.conflict &&
         _rebasePreview?.currentCommit?.sha == commit.sha;
+    final rebaseApplying = _rebaseApplyingSha == commit.sha;
     final refs = _rowRefs(commit);
     Widget refsCell() {
       final lineTip = selected && refs.isEmpty
@@ -3579,6 +4383,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       child: GestureDetector(
         key: rebaseConflict
             ? const Key('rebase-conflict-current-row')
+            : rebaseApplying
+            ? const Key('rebase-apply-current-row')
             : selected
             ? Key('selected-row-${commit.sha}')
             : null,
@@ -3636,7 +4442,11 @@ class _TimelineScreenState extends State<TimelineScreen>
                               ),
                             ),
                           ),
-                    node: commit.isWorkingTree || merge
+                    node:
+                        commit.isWorkingTree ||
+                            (merge &&
+                                previewKind !=
+                                    PreviewGraphNodeKind.virtualMerge)
                         ? null
                         : _graphNode(
                             commit: commit,
@@ -3746,6 +4556,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     );
     final focusableContent = rebaseConflict
         ? KeyedSubtree(key: _rebaseConflictRowContextKey, child: content)
+        : rebaseApplying
+        ? KeyedSubtree(key: _rebaseApplyRowContextKey, child: content)
         : content;
     if (!_canCherryPick(commit)) return focusableContent;
     return Draggable<GitCommit>(
@@ -3780,7 +4592,27 @@ class _TimelineScreenState extends State<TimelineScreen>
         break;
       }
     }
-    final child = kind == PreviewGraphNodeKind.virtualRebase
+    final child = kind == PreviewGraphNodeKind.virtualMerge
+        ? Container(
+            key: const Key('virtual-merge-node'),
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _previewPurple,
+              border: Border.all(color: _palette.background, width: 2),
+            ),
+            child: const Text(
+              'VM',
+              style: TextStyle(
+                color: Colors.black,
+                fontSize: 8,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          )
+        : kind == PreviewGraphNodeKind.virtualRebase
         ? Container(
             key: Key('virtual-rebase-node-${commit.sha}'),
             width: size,
@@ -3801,6 +4633,17 @@ class _TimelineScreenState extends State<TimelineScreen>
                 fontSize: 8,
                 fontWeight: FontWeight.w800,
               ),
+            ),
+          )
+        : kind == PreviewGraphNodeKind.conflictTarget
+        ? Container(
+            key: const Key('rebase-conflict-target-node'),
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _palette.background,
+              border: Border.all(color: _previewPurple, width: 1),
             ),
           )
         : Container(
@@ -4529,7 +5372,10 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (_branchPreviewMode == BranchPreviewMode.merge) {
       return (
         from: comparison.baseTip,
-        to: comparison.merge.treeSha ?? comparison.compareTip,
+        to:
+            _mergePreview?.treeSha ??
+            comparison.merge.treeSha ??
+            comparison.compareTip,
       );
     }
     final preview = _rebasePreview;
@@ -4562,12 +5408,15 @@ class _TimelineScreenState extends State<TimelineScreen>
           ? widget.repository.loadFiles(commit)
           : _branchPreviewMode == BranchPreviewMode.merge
           ? Future.value(
-              comparison.merge.status == MergeConflictStatus.clean
-                  ? comparison.merge.treeSha == null
+              _effectiveMergeStatus == MergeConflictStatus.clean
+                  ? (_mergePreview?.treeSha ?? comparison.merge.treeSha) == null
                         ? comparison.files
-                        : comparison.merge.resultFiles
+                        : _mergePreview?.resultFiles ??
+                              comparison.merge.resultFiles
                   : [
-                      for (final path in comparison.merge.files)
+                      for (final path
+                          in _mergePreview?.conflictFiles ??
+                              comparison.merge.files)
                         GitFileChange(
                           path: path,
                           status: 'U',
@@ -4686,7 +5535,9 @@ class _TimelineScreenState extends State<TimelineScreen>
               Text(
                 _comparison == null
                     ? commit.subject
-                    : '${_comparison!.baseRef} ↔ ${_comparison!.compareRef}',
+                    : _branchPreviewMode == BranchPreviewMode.merge
+                    ? '가상 병합 커밋'
+                    : '가상 리베이스 결과',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -4730,6 +5581,30 @@ class _TimelineScreenState extends State<TimelineScreen>
                   fontFamily: 'monospace',
                 ),
               ),
+              if (_comparison != null && _branchPreviewHasConflict)
+                _branchPreviewSafeWorkspace(),
+              if (_comparison != null && _branchPreviewResolutionComplete)
+                _branchPreviewResolutionCard(),
+              if (_comparison != null && _branchPreviewDropped)
+                _branchPreviewDroppedCard(),
+              if (_comparison != null && _branchPreviewReady)
+                _branchPreviewApplyCard(),
+              if (_comparison != null &&
+                  !_branchPreviewHasConflict &&
+                  (_branchPreviewMode == BranchPreviewMode.merge
+                          ? _mergePreviewError
+                          : _rebasePreviewError) !=
+                      null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    (_branchPreviewMode == BranchPreviewMode.merge
+                            ? _mergePreviewError
+                            : _rebasePreviewError)
+                        .toString(),
+                    style: const TextStyle(color: _behind, fontSize: 10),
+                  ),
+                ),
               if (_comparison == null) _previewPerson(commit),
               _previewStats(changes),
               KeyedSubtree(
@@ -4966,12 +5841,14 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   bool get _branchPreviewHasConflict =>
-      _branchPreviewMode == BranchPreviewMode.merge
-      ? _comparison?.merge.status == MergeConflictStatus.conflicts
-      : _rebasePreview?.status == RebasePreviewStatus.conflict;
+      !_branchPreviewDropped &&
+      (_branchPreviewMode == BranchPreviewMode.merge
+          ? _effectiveMergeStatus == MergeConflictStatus.conflicts
+          : _rebasePreview?.status == RebasePreviewStatus.conflict);
 
   Widget _branchPreviewConflictChoices() {
     final comparison = _comparison!;
+    final mergeMode = _branchPreviewMode == BranchPreviewMode.merge;
     final baseCommits = comparison.commits
         .where((entry) => entry.side == BranchCommitSide.baseOnly)
         .map((entry) => entry.commit)
@@ -4984,20 +5861,25 @@ class _TimelineScreenState extends State<TimelineScreen>
     final compare =
         _rebasePreview?.currentCommit ??
         (compareCommits.isEmpty ? null : compareCommits.first);
-    final interactive = _branchPreviewMode == BranchPreviewMode.rebase;
+    final interactive = mergeMode
+        ? _mergePreviewSession != null
+        : _rebasePreviewSession != null;
     Widget choice({
       required Key key,
       required String branch,
       required String subject,
-      required RebaseConflictChoice resolution,
+      required VoidCallback onTap,
     }) => Padding(
       padding: const EdgeInsets.only(top: 8),
       child: InkWell(
         key: key,
         onTap:
-            !interactive || _rebasePreviewBusy || _repositoryOperationInProgress
+            !interactive ||
+                _mergePreviewBusy ||
+                _rebasePreviewBusy ||
+                _repositoryOperationInProgress
             ? null
-            : () => unawaited(_resolveRebaseConflict(resolution)),
+            : onTap,
         borderRadius: BorderRadius.circular(7),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
@@ -5025,20 +5907,119 @@ class _TimelineScreenState extends State<TimelineScreen>
     return Column(
       children: [
         choice(
-          key: const Key('rebase-conflict-use-base'),
+          key: Key(
+            mergeMode ? 'merge-conflict-use-base' : 'rebase-conflict-use-base',
+          ),
           branch: comparison.baseRef,
           subject: base?.subject ?? '현재 상태',
-          resolution: RebaseConflictChoice.base,
+          onTap: () => unawaited(
+            mergeMode
+                ? _resolveMergeConflict(MergeConflictChoice.base)
+                : _resolveRebaseConflict(RebaseConflictChoice.base),
+          ),
         ),
         choice(
-          key: const Key('rebase-conflict-use-compare'),
+          key: Key(
+            mergeMode
+                ? 'merge-conflict-use-compare'
+                : 'rebase-conflict-use-compare',
+          ),
           branch: comparison.compareRef,
           subject: compare?.subject ?? '적용할 변경',
-          resolution: RebaseConflictChoice.commit,
+          onTap: () => unawaited(
+            mergeMode
+                ? _resolveMergeConflict(MergeConflictChoice.compare)
+                : _resolveRebaseConflict(RebaseConflictChoice.commit),
+          ),
         ),
-        if (interactive) _rebaseConflictActions(),
+        if (interactive)
+          mergeMode ? _mergeConflictActions() : _rebaseConflictActions(),
       ],
     );
+  }
+
+  String? get _selectedMergeConflictPath {
+    final preview = _mergePreview;
+    if (preview == null || preview.conflictFiles.isEmpty) return null;
+    final commit = _selectedCommit;
+    final selected = commit == null ? null : _previewPaths[_previewKey(commit)];
+    return preview.conflictFiles.contains(selected)
+        ? selected
+        : preview.conflictFiles.first;
+  }
+
+  bool get _canFinishMergePreview {
+    final files = _mergePreview?.conflictFiles ?? const <String>[];
+    return files.isNotEmpty && files.every(_mergeResolvedFiles.contains);
+  }
+
+  Widget _mergeConflictActions() => Padding(
+    padding: const EdgeInsets.only(top: 10),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        if (_mergePreviewError != null)
+          Expanded(
+            child: Text(
+              _mergePreviewError.toString(),
+              style: TextStyle(color: _behind, fontSize: 10),
+            ),
+          ),
+        FilledButton(
+          key: const Key('merge-conflict-continue'),
+          onPressed: !_mergePreviewBusy && _canFinishMergePreview
+              ? () => unawaited(_finishMergePreview())
+              : null,
+          child: const Text('해결 후 계속'),
+        ),
+      ],
+    ),
+  );
+
+  Future<void> _resolveMergeConflict(MergeConflictChoice choice) async {
+    final session = _mergePreviewSession;
+    final path = _selectedMergeConflictPath;
+    if (session == null || path == null || _mergePreviewBusy) return;
+    setState(() {
+      _mergePreviewBusy = true;
+      _mergePreviewError = null;
+    });
+    try {
+      await session.resolveFile(path, choice);
+      if (mounted && identical(session, _mergePreviewSession)) {
+        setState(() {
+          _mergeResolvedFiles.add(path);
+          _previewDiffs.removeWhere((key, _) => key.path == path);
+        });
+      }
+    } catch (error) {
+      if (mounted) setState(() => _mergePreviewError = error);
+    } finally {
+      if (mounted) setState(() => _mergePreviewBusy = false);
+    }
+  }
+
+  Future<void> _finishMergePreview() async {
+    final session = _mergePreviewSession;
+    if (session == null || !_canFinishMergePreview || _mergePreviewBusy) return;
+    setState(() {
+      _mergePreviewBusy = true;
+      _mergePreviewError = null;
+    });
+    try {
+      final result = await session.finish();
+      if (!mounted || !identical(session, _mergePreviewSession)) return;
+      setState(() {
+        _mergePreview = result;
+        _previewFiles.clear();
+        _previewFileLists.clear();
+        _previewDiffs.clear();
+      });
+    } catch (error) {
+      if (mounted) setState(() => _mergePreviewError = error);
+    } finally {
+      if (mounted) setState(() => _mergePreviewBusy = false);
+    }
   }
 
   String? get _selectedRebaseConflictPath {
@@ -5140,7 +6121,10 @@ class _TimelineScreenState extends State<TimelineScreen>
     try {
       await session.resolveFile(path, choice);
       if (mounted && identical(session, _rebasePreviewSession)) {
-        setState(() => _rebaseResolvedFiles.add(path));
+        setState(() {
+          _rebaseResolvedFiles.add(path);
+          _previewDiffs.removeWhere((key, _) => key.path == path);
+        });
       }
     } catch (error) {
       if (mounted) setState(() => _rebasePreviewError = error);
@@ -5173,11 +6157,19 @@ class _TimelineScreenState extends State<TimelineScreen>
           !identical(session, _rebasePreviewSession)) {
         return;
       }
-      await _applyRebasePreviewResult(comparison, result);
+      await _applyRebasePreviewResult(comparison, result, request);
     } catch (error) {
-      if (mounted) setState(() => _rebasePreviewError = error);
+      if (mounted &&
+          request == _rebasePreviewSerial &&
+          identical(session, _rebasePreviewSession)) {
+        setState(() => _rebasePreviewError = error);
+      }
     } finally {
-      if (mounted) setState(() => _rebasePreviewBusy = false);
+      if (mounted &&
+          request == _rebasePreviewSerial &&
+          identical(session, _rebasePreviewSession)) {
+        setState(() => _rebasePreviewBusy = false);
+      }
     }
   }
 
@@ -5240,6 +6232,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                 setState(() {
                   _rebaseEditedFiles.add(path);
                   _rebaseResolvedFiles.add(path);
+                  _previewDiffs.removeWhere((key, _) => key.path == path);
                 });
                 Navigator.of(context).pop();
               }
@@ -5360,13 +6353,23 @@ class _TimelineScreenState extends State<TimelineScreen>
     final key = _previewKey(commit);
     final future = _previewDiffs.putIfAbsent((sha: key, path: path), () {
       final comparison = _comparison;
-      return comparison == null
-          ? widget.repository.loadDiff(commit, file)
-          : widget.repository.loadDiffBetween(
-              _branchPreviewRange!.from,
-              _branchPreviewRange!.to,
-              file,
-            );
+      if (comparison == null) return widget.repository.loadDiff(commit, file);
+      if (_branchPreviewHasConflict) {
+        final session = _branchPreviewMode == BranchPreviewMode.merge
+            ? _mergePreviewSession
+            : _rebasePreviewSession;
+        if (session is MergePreviewSession) {
+          return session.loadConflictDiff(path);
+        }
+        if (session is RebasePreviewSession) {
+          return session.loadConflictDiff(path);
+        }
+      }
+      return widget.repository.loadDiffBetween(
+        _branchPreviewRange!.from,
+        _branchPreviewRange!.to,
+        file,
+      );
     });
     if (_comparison != null) {
       return Column(

@@ -776,6 +776,75 @@ void main() {
   );
 
   test(
+    'merge preview resolves conflicts without moving either branch',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'yogit_merge_preview_fixture_',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      await _initRepository(root);
+      await File('${root.path}/shared.txt').writeAsString('base\n');
+      await _git(root, ['add', 'shared.txt']);
+      await _git(root, ['commit', '-m', 'base']);
+
+      await _git(root, ['switch', '-c', 'feature']);
+      await File('${root.path}/shared.txt').writeAsString('feature\n');
+      await _git(root, ['commit', '-am', 'feature']);
+      final featureBefore = (await _git(root, ['rev-parse', 'feature'])).trim();
+
+      await _git(root, ['switch', 'main']);
+      await File('${root.path}/shared.txt').writeAsString('main\n');
+      await _git(root, ['commit', '-am', 'main']);
+      final mainBefore = (await _git(root, ['rev-parse', 'main'])).trim();
+
+      final session = await GitRepository(
+        root.path,
+      ).openMergePreview(baseRef: 'main', compareRef: 'feature');
+      addTearDown(session.dispose);
+      final conflict = await session.start();
+
+      expect(conflict.status, MergePreviewStatus.conflict);
+      expect(conflict.conflictFiles, ['shared.txt']);
+      expect(Directory(session.worktreePath!).existsSync(), isTrue);
+      final conflictDiff = await session.loadConflictDiff('shared.txt');
+      expect(
+        conflictDiff
+            .where((line) => line.kind == DiffLineKind.delete)
+            .map((line) => line.text),
+        contains('main'),
+      );
+      expect(
+        conflictDiff
+            .where((line) => line.kind == DiffLineKind.add)
+            .map((line) => line.text),
+        contains('feature'),
+      );
+
+      await session.resolveFile('shared.txt', MergeConflictChoice.compare);
+      final resolvedDiff = await session.loadConflictDiff('shared.txt');
+      expect(
+        resolvedDiff
+            .where((line) => line.kind == DiffLineKind.add)
+            .map((line) => line.text),
+        contains('feature'),
+      );
+      final completed = await session.finish();
+
+      expect(completed.status, MergePreviewStatus.clean);
+      expect(completed.treeSha, isNotEmpty);
+      expect(
+        (await _git(root, ['show', '${completed.treeSha}:shared.txt'])).trim(),
+        'feature',
+      );
+      expect((await _git(root, ['rev-parse', 'main'])).trim(), mainBefore);
+      expect(
+        (await _git(root, ['rev-parse', 'feature'])).trim(),
+        featureBefore,
+      );
+    },
+  );
+
+  test(
     'rebase simulation reports first conflicting commit and cleans worktree',
     () async {
       final root = await Directory.systemTemp.createTemp(
@@ -799,6 +868,15 @@ void main() {
       await File('${root.path}/shared.txt').writeAsString('main\n');
       await _git(root, ['commit', '-am', 'main']);
       final originalHead = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+      final existingPreviewPaths = {
+        await for (final entry in Directory.systemTemp.list())
+          if (entry is Directory &&
+              entry.uri.pathSegments
+                  .where((segment) => segment.isNotEmpty)
+                  .last
+                  .startsWith('yogit_rebase_'))
+            entry.path,
+      };
 
       final repository = GitRepository(root.path);
       final result = await repository.simulateRebase(
@@ -812,20 +890,15 @@ void main() {
       expect((await _git(root, ['rev-parse', 'HEAD'])).trim(), originalHead);
       expect((await _git(root, ['branch', '--show-current'])).trim(), 'main');
       expect((await _git(root, ['status', '--porcelain'])).trim(), isEmpty);
-      expect(
-        await Directory.systemTemp
-            .list()
-            .where(
-              (entry) =>
-                  entry is Directory &&
-                  entry.uri.pathSegments
-                      .where((segment) => segment.isNotEmpty)
-                      .last
-                      .startsWith('yogit_rebase_'),
-            )
-            .toList(),
-        isEmpty,
-      );
+      expect({
+        await for (final entry in Directory.systemTemp.list())
+          if (entry is Directory &&
+              entry.uri.pathSegments
+                  .where((segment) => segment.isNotEmpty)
+                  .last
+                  .startsWith('yogit_rebase_'))
+            entry.path,
+      }, existingPreviewPaths);
     },
   );
 
@@ -986,6 +1059,19 @@ void main() {
       expect(conflict.conflictFiles, ['shared.txt']);
       final worktree = session.worktreePath!;
       expect(Directory(worktree).existsSync(), isTrue);
+      final conflictDiff = await session.loadConflictDiff('shared.txt');
+      expect(
+        conflictDiff
+            .where((line) => line.kind == DiffLineKind.delete)
+            .map((line) => line.text),
+        contains('main'),
+      );
+      expect(
+        conflictDiff
+            .where((line) => line.kind == DiffLineKind.add)
+            .map((line) => line.text),
+        contains('feature'),
+      );
 
       await session.resolveFile('shared.txt', RebaseConflictChoice.commit);
       expect(
@@ -998,6 +1084,198 @@ void main() {
       expect(completed.virtualTip, isNotEmpty);
       await session.dispose();
       expect(Directory(worktree).existsSync(), isFalse);
+    },
+  );
+
+  test('first rebase conflict has no rewritten commits', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'yogit_first_rebase_conflict_',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    await File('${root.path}/shared.txt').writeAsString('base\n');
+    await _git(root, ['add', 'shared.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+    await _git(root, ['switch', '-c', 'feature']);
+    await File('${root.path}/shared.txt').writeAsString('feature\n');
+    await _git(root, ['commit', '-am', 'feature conflict']);
+    await _git(root, ['switch', 'main']);
+    await File('${root.path}/shared.txt').writeAsString('main\n');
+    await _git(root, ['commit', '-am', 'main']);
+
+    final repository = GitRepository(root.path);
+    final comparison = await repository.compareBranches('main', 'feature');
+    final session = await repository.openRebasePreview(
+      baseRef: 'main',
+      compareRef: 'feature',
+    );
+    addTearDown(session.dispose);
+    final conflict = await session.start();
+
+    expect(conflict.status, RebasePreviewStatus.conflict);
+    expect(conflict.rewritten, isEmpty);
+    expect(
+      layoutRebasePreviewGraph(
+        comparison,
+        conflict,
+        rebaseMappingColors(AvatarService.defaultColors),
+      ).kinds.values,
+      contains(PreviewGraphNodeKind.conflictTarget),
+    );
+  });
+
+  test('merge preview applies locally and restores both exact tips', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+
+    final applied = await repository.applyMergePreview(
+      comparison: fixture.comparison,
+      treeSha: fixture.comparison.merge.treeSha!,
+    );
+
+    expect(applied.mode, BranchApplyMode.merge);
+    expect(applied.baseBefore, fixture.comparison.baseTip);
+    expect(applied.baseAfter, isNot(fixture.comparison.baseTip));
+    expect(
+      (await _git(fixture.root, [
+        'rev-list',
+        '--parents',
+        '-n',
+        '1',
+        'main',
+      ])).trim().split(' '),
+      [
+        applied.baseAfter,
+        fixture.comparison.baseTip,
+        fixture.comparison.compareTip,
+      ],
+    );
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
+      fixture.comparison.compareTip,
+    );
+
+    await repository.restoreBranchApply(applied);
+
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+      fixture.comparison.baseTip,
+    );
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
+      fixture.comparison.compareTip,
+    );
+  });
+
+  test(
+    'rebase preview applies its virtual tip and restores both tips',
+    () async {
+      final fixture = await _branchPreviewFixture();
+      addTearDown(() => fixture.root.delete(recursive: true));
+      final repository = GitRepository(fixture.root.path);
+      final session = await repository.openRebasePreview(
+        baseRef: 'main',
+        compareRef: 'feature',
+      );
+      addTearDown(session.dispose);
+      final preview = await session.start();
+
+      final applied = await repository.applyRebasePreview(
+        comparison: fixture.comparison,
+        virtualTip: preview.virtualTip!,
+      );
+
+      expect(applied.mode, BranchApplyMode.rebase);
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+        fixture.comparison.baseTip,
+      );
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
+        preview.virtualTip,
+      );
+
+      await repository.restoreBranchApply(applied);
+
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+        fixture.comparison.baseTip,
+      );
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
+        fixture.comparison.compareTip,
+      );
+    },
+  );
+
+  test('branch preview apply rejects a dirty checked-out branch', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    await File('${fixture.root.path}/main.txt').writeAsString('dirty\n');
+
+    await expectLater(
+      repository.applyMergePreview(
+        comparison: fixture.comparison,
+        treeSha: fixture.comparison.merge.treeSha!,
+      ),
+      throwsA(isA<GitRepositoryException>()),
+    );
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+      fixture.comparison.baseTip,
+    );
+  });
+
+  test('branch preview apply rejects a changed comparison tip', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    await _git(fixture.root, ['branch', '-f', 'feature', 'main']);
+
+    await expectLater(
+      repository.applyMergePreview(
+        comparison: fixture.comparison,
+        treeSha: fixture.comparison.merge.treeSha!,
+      ),
+      throwsA(isA<GitRepositoryException>()),
+    );
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+      fixture.comparison.baseTip,
+    );
+  });
+
+  test(
+    'branch preview restore rejects changed tips without partial moves',
+    () async {
+      final fixture = await _branchPreviewFixture();
+      addTearDown(() => fixture.root.delete(recursive: true));
+      final repository = GitRepository(fixture.root.path);
+      final applied = await repository.applyMergePreview(
+        comparison: fixture.comparison,
+        treeSha: fixture.comparison.merge.treeSha!,
+      );
+      await _git(fixture.root, [
+        'branch',
+        '-f',
+        'feature',
+        fixture.comparison.baseTip,
+      ]);
+
+      await expectLater(
+        repository.restoreBranchApply(applied),
+        throwsA(isA<GitRepositoryException>()),
+      );
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+        applied.baseAfter,
+      );
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
+        fixture.comparison.baseTip,
+      );
     },
   );
 
@@ -1945,4 +2223,29 @@ Future<void> _initRepository(Directory root) async {
   await _git(root, ['init', '-b', 'main']);
   await _git(root, ['config', 'user.name', 'Test User']);
   await _git(root, ['config', 'user.email', 'test@example.com']);
+}
+
+Future<({Directory root, BranchComparisonResult comparison})>
+_branchPreviewFixture() async {
+  final root = await Directory.systemTemp.createTemp(
+    'yogit_branch_preview_apply_',
+  );
+  await _initRepository(root);
+  await File('${root.path}/base.txt').writeAsString('base\n');
+  await _git(root, ['add', 'base.txt']);
+  await _git(root, ['commit', '-m', 'base']);
+  await _git(root, ['switch', '-c', 'feature']);
+  await File('${root.path}/feature.txt').writeAsString('feature\n');
+  await _git(root, ['add', 'feature.txt']);
+  await _git(root, ['commit', '-m', 'feature']);
+  await _git(root, ['switch', 'main']);
+  await File('${root.path}/main.txt').writeAsString('main\n');
+  await _git(root, ['add', 'main.txt']);
+  await _git(root, ['commit', '-m', 'main']);
+  return (
+    root: root,
+    comparison: await GitRepository(
+      root.path,
+    ).compareBranches('main', 'feature'),
+  );
 }

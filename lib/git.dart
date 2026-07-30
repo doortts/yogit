@@ -342,11 +342,220 @@ class RebaseCheckResult {
   final String? error;
 }
 
+enum MergePreviewStatus { clean, conflict, failed }
+
+enum MergeConflictChoice { base, compare }
+
+class MergePreviewResult {
+  const MergePreviewResult({
+    required this.status,
+    required this.baseTip,
+    required this.compareTip,
+    this.treeSha,
+    this.resultFiles = const [],
+    this.conflictFiles = const [],
+    this.error,
+  });
+
+  final MergePreviewStatus status;
+  final String baseTip;
+  final String compareTip;
+  final String? treeSha;
+  final List<GitFileChange> resultFiles;
+  final List<String> conflictFiles;
+  final String? error;
+}
+
 enum RebasePreviewStatus { clean, conflict, failed }
 
 enum RebaseConflictChoice { base, commit }
 
 typedef RewrittenCommit = ({GitCommit original, String rewrittenSha});
+
+String _previewFilePath(String? worktreePath, String relativePath) {
+  final parts = relativePath.split(RegExp(r'[/\\]'));
+  if (worktreePath == null ||
+      relativePath.isEmpty ||
+      relativePath.startsWith('/') ||
+      RegExp(r'^[A-Za-z]:').hasMatch(relativePath) ||
+      parts.any((part) => part.isEmpty || part == '.' || part == '..')) {
+    throw FileSystemException('Invalid preview path', relativePath);
+  }
+  return '$worktreePath${Platform.pathSeparator}'
+      '${parts.join(Platform.pathSeparator)}';
+}
+
+class MergePreviewSession {
+  MergePreviewSession({
+    required GitRepository repository,
+    required this.baseTip,
+    required this.compareTip,
+  }) : _repository = repository;
+
+  final GitRepository _repository;
+  final String baseTip;
+  final String compareTip;
+  String? _worktreePath;
+  bool _disposed = false;
+
+  String? get worktreePath => _worktreePath;
+
+  String filePath(String relativePath) =>
+      _previewFilePath(_worktreePath, relativePath);
+
+  Future<List<DiffLine>> loadConflictDiff(String relativePath) =>
+      _repository._loadPreviewConflictDiff(_worktreePath!, relativePath);
+
+  Future<MergePreviewResult> start() async {
+    if (_disposed) {
+      throw StateError('Merge preview session has been disposed.');
+    }
+    if (_worktreePath != null) {
+      throw StateError('Merge preview session has already started.');
+    }
+    final temporary = await Directory.systemTemp.createTemp(
+      'yogit_merge_preview_',
+    );
+    final path = temporary.path;
+    await temporary.delete();
+    _worktreePath = path;
+    final add = await _repository.runner(_repository.gitExecutable, [
+      'worktree',
+      'add',
+      '--detach',
+      path,
+      baseTip,
+    ], workingDirectory: _repository.root);
+    if (add.exitCode != 0) {
+      await dispose();
+      return MergePreviewResult(
+        status: MergePreviewStatus.failed,
+        baseTip: baseTip,
+        compareTip: compareTip,
+        error: add.stderr.toString().trim(),
+      );
+    }
+    final merge = await _repository.runner(
+      _repository.gitExecutable,
+      [
+        '-c',
+        'core.hooksPath=/dev/null',
+        '-c',
+        'commit.gpgSign=false',
+        'merge',
+        '--no-commit',
+        '--no-ff',
+        compareTip,
+      ],
+      workingDirectory: path,
+      environment: {
+        ...Platform.environment,
+        'GIT_EDITOR': 'true',
+        'GIT_TERMINAL_PROMPT': '0',
+      },
+    );
+    if (merge.exitCode == 0) return finish();
+    final conflicts = await _run(const [
+      'diff',
+      '--name-only',
+      '--diff-filter=U',
+      '-z',
+    ]);
+    final files = conflicts
+        .split('\x00')
+        .where((value) => value.isNotEmpty)
+        .toList();
+    return MergePreviewResult(
+      status: files.isEmpty
+          ? MergePreviewStatus.failed
+          : MergePreviewStatus.conflict,
+      baseTip: baseTip,
+      compareTip: compareTip,
+      conflictFiles: files,
+      error: files.isEmpty ? merge.stderr.toString().trim() : null,
+    );
+  }
+
+  Future<void> resolveFile(
+    String relativePath,
+    MergeConflictChoice choice,
+  ) async {
+    filePath(relativePath);
+    await _run([
+      'checkout',
+      choice == MergeConflictChoice.base ? '--ours' : '--theirs',
+      '--',
+      relativePath,
+    ]);
+    await markResolved(relativePath);
+  }
+
+  Future<void> markResolved(String relativePath) async {
+    filePath(relativePath);
+    await _run(['add', '--', relativePath]);
+  }
+
+  Future<MergePreviewResult> finish() async {
+    final conflicts = await _run(const [
+      'diff',
+      '--name-only',
+      '--diff-filter=U',
+    ]);
+    if (conflicts.trim().isNotEmpty) {
+      throw GitRepositoryException(_worktreePath!, '해결되지 않은 충돌 파일이 남아 있습니다.');
+    }
+    final treeSha = (await _run(const ['write-tree'])).trim();
+    return MergePreviewResult(
+      status: MergePreviewStatus.clean,
+      baseTip: baseTip,
+      compareTip: compareTip,
+      treeSha: treeSha,
+      resultFiles: await _repository.loadFilesBetween(baseTip, treeSha),
+    );
+  }
+
+  Future<String> _run(List<String> arguments) async {
+    final result = await _repository.runner(
+      _repository.gitExecutable,
+      arguments,
+      workingDirectory: _worktreePath,
+    );
+    if (result.exitCode != 0) {
+      throw ProcessException(
+        _repository.gitExecutable,
+        arguments,
+        result.stderr.toString(),
+        result.exitCode,
+      );
+    }
+    return result.stdout.toString();
+  }
+
+  Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
+    final path = _worktreePath;
+    if (path == null) return;
+    await _repository._ignoreCommand(const [
+      'merge',
+      '--abort',
+    ], workingDirectory: path);
+    await _repository._ignoreCommand([
+      'worktree',
+      'remove',
+      '--force',
+      path,
+    ], workingDirectory: _repository.root);
+    final directory = Directory(path);
+    if (await directory.exists()) {
+      await directory.delete(recursive: true);
+    }
+    await _repository._ignoreCommand(const [
+      'worktree',
+      'prune',
+    ], workingDirectory: _repository.root);
+  }
+}
 
 class RebasePreviewResult {
   const RebasePreviewResult({
@@ -392,18 +601,11 @@ class RebasePreviewSession {
 
   String? get worktreePath => _worktreePath;
 
-  String filePath(String relativePath) {
-    final path = _worktreePath;
-    final parts = relativePath.split(RegExp(r'[/\\]'));
-    if (path == null ||
-        relativePath.isEmpty ||
-        relativePath.startsWith('/') ||
-        RegExp(r'^[A-Za-z]:').hasMatch(relativePath) ||
-        parts.any((part) => part.isEmpty || part == '.' || part == '..')) {
-      throw FileSystemException('Invalid rebase preview path', relativePath);
-    }
-    return '$path${Platform.pathSeparator}${parts.join(Platform.pathSeparator)}';
-  }
+  String filePath(String relativePath) =>
+      _previewFilePath(_worktreePath, relativePath);
+
+  Future<List<DiffLine>> loadConflictDiff(String relativePath) =>
+      _repository._loadPreviewConflictDiff(_worktreePath!, relativePath);
 
   Future<RebasePreviewResult> start() async {
     if (_disposed) {
@@ -555,6 +757,9 @@ class RebasePreviewSession {
 
   Future<List<RewrittenCommit>> _rewrittenCommits() async {
     if (_originalCommits.isEmpty) return const [];
+    if ((await _run(const ['rev-parse', 'HEAD'])).trim() == baseTip) {
+      return const [];
+    }
     final parents = _originalCommits.first.parents;
     if (parents.isEmpty) return const [];
     final originalBase = parents.first;
@@ -717,6 +922,28 @@ class BranchComparisonResult {
       baseParent != null &&
       compareParent != null &&
       baseParent == compareParent;
+}
+
+enum BranchApplyMode { merge, rebase }
+
+class BranchApplyResult {
+  const BranchApplyResult({
+    required this.mode,
+    required this.baseBranch,
+    required this.compareBranch,
+    required this.baseBefore,
+    required this.baseAfter,
+    required this.compareBefore,
+    required this.compareAfter,
+  });
+
+  final BranchApplyMode mode;
+  final String baseBranch;
+  final String compareBranch;
+  final String baseBefore;
+  final String baseAfter;
+  final String compareBefore;
+  final String compareAfter;
 }
 
 class GraphRow {
@@ -1682,6 +1909,23 @@ class GitRepository implements FullDiffRepository {
     }
   }
 
+  Future<MergePreviewSession> openMergePreview({
+    required String baseRef,
+    required String compareRef,
+  }) async => MergePreviewSession(
+    repository: this,
+    baseTip: (await _run([
+      'rev-parse',
+      '--verify',
+      '$baseRef^{commit}',
+    ])).trim(),
+    compareTip: (await _run([
+      'rev-parse',
+      '--verify',
+      '$compareRef^{commit}',
+    ])).trim(),
+  );
+
   Future<RebasePreviewSession> openRebasePreview({
     required String baseRef,
     required String compareRef,
@@ -1712,7 +1956,7 @@ class GitRepository implements FullDiffRepository {
     );
   }
 
-  Future<void> cleanupStaleRebaseWorktrees() async {
+  Future<void> cleanupStalePreviewWorktrees() async {
     final result = await runner(gitExecutable, const [
       'worktree',
       'list',
@@ -1731,7 +1975,7 @@ class GitRepository implements FullDiffRepository {
         .split('\n')
         .where((line) => line.startsWith('worktree '))
         .map((line) => line.substring('worktree '.length))
-        .where(_isYogitRebasePath);
+        .where(_isYogitPreviewPath);
     for (final path in paths) {
       await _ignoreCommand([
         'worktree',
@@ -1745,6 +1989,138 @@ class GitRepository implements FullDiffRepository {
       }
     }
     await _ignoreCommand(const ['worktree', 'prune'], workingDirectory: root);
+  }
+
+  Future<BranchApplyResult> applyMergePreview({
+    required BranchComparisonResult comparison,
+    required String treeSha,
+  }) async {
+    await _verifyApplyTips(comparison);
+    final tree = (await _run([
+      'rev-parse',
+      '--verify',
+      '$treeSha^{tree}',
+    ])).trim();
+    final mergeCommit = (await _run([
+      '-c',
+      'commit.gpgSign=false',
+      'commit-tree',
+      tree,
+      '-p',
+      comparison.baseTip,
+      '-p',
+      comparison.compareTip,
+      '-m',
+      "Merge branch '${comparison.compareRef}' into ${comparison.baseRef}",
+    ])).trim();
+    await _moveLocalBranch(
+      branch: comparison.baseRef,
+      expected: comparison.baseTip,
+      next: mergeCommit,
+    );
+    return BranchApplyResult(
+      mode: BranchApplyMode.merge,
+      baseBranch: comparison.baseRef,
+      compareBranch: comparison.compareRef,
+      baseBefore: comparison.baseTip,
+      baseAfter: await _localBranchTip(comparison.baseRef),
+      compareBefore: comparison.compareTip,
+      compareAfter: await _localBranchTip(comparison.compareRef),
+    );
+  }
+
+  Future<BranchApplyResult> applyRebasePreview({
+    required BranchComparisonResult comparison,
+    required String virtualTip,
+  }) async {
+    await _verifyApplyTips(comparison);
+    final rewrittenTip = (await _run([
+      'rev-parse',
+      '--verify',
+      '$virtualTip^{commit}',
+    ])).trim();
+    await _moveLocalBranch(
+      branch: comparison.compareRef,
+      expected: comparison.compareTip,
+      next: rewrittenTip,
+    );
+    return BranchApplyResult(
+      mode: BranchApplyMode.rebase,
+      baseBranch: comparison.baseRef,
+      compareBranch: comparison.compareRef,
+      baseBefore: comparison.baseTip,
+      baseAfter: await _localBranchTip(comparison.baseRef),
+      compareBefore: comparison.compareTip,
+      compareAfter: await _localBranchTip(comparison.compareRef),
+    );
+  }
+
+  Future<void> restoreBranchApply(BranchApplyResult result) async {
+    final baseTip = await _localBranchTip(result.baseBranch);
+    final compareTip = await _localBranchTip(result.compareBranch);
+    if (baseTip != result.baseAfter || compareTip != result.compareAfter) {
+      throw GitRepositoryException(root, '적용 뒤 브랜치가 바뀌어 이전 시점으로 되돌릴 수 없습니다.');
+    }
+    if (baseTip != result.baseBefore) {
+      await _moveLocalBranch(
+        branch: result.baseBranch,
+        expected: result.baseAfter,
+        next: result.baseBefore,
+      );
+    }
+    if (compareTip != result.compareBefore) {
+      await _moveLocalBranch(
+        branch: result.compareBranch,
+        expected: result.compareAfter,
+        next: result.compareBefore,
+      );
+    }
+    if (await _localBranchTip(result.baseBranch) != result.baseBefore ||
+        await _localBranchTip(result.compareBranch) != result.compareBefore) {
+      throw GitRepositoryException(root, '브랜치를 적용 전 SHA로 되돌리지 못했습니다.');
+    }
+  }
+
+  Future<void> _verifyApplyTips(BranchComparisonResult comparison) async {
+    if (await _localBranchTip(comparison.baseRef) != comparison.baseTip ||
+        await _localBranchTip(comparison.compareRef) != comparison.compareTip) {
+      throw GitRepositoryException(root, '브랜치가 바뀌어 미리보기를 다시 계산해야 합니다.');
+    }
+  }
+
+  Future<String> _localBranchTip(String branch) async {
+    final result = await runner(gitExecutable, [
+      'rev-parse',
+      '--verify',
+      'refs/heads/$branch^{commit}',
+    ], workingDirectory: root);
+    final sha = result.stdout.toString().trim();
+    if (result.exitCode != 0 || sha.isEmpty) {
+      throw GitRepositoryException(branch, '로컬 브랜치를 찾을 수 없습니다.');
+    }
+    return sha;
+  }
+
+  Future<void> _moveLocalBranch({
+    required String branch,
+    required String expected,
+    required String next,
+  }) async {
+    if (await _localBranchTip(branch) != expected) {
+      throw GitRepositoryException(branch, '브랜치가 바뀌어 작업을 중단했습니다.');
+    }
+    final current = (await _run(['branch', '--show-current'])).trim();
+    if (current == branch) {
+      if (await _gitOperationInProgress()) {
+        throw GitRepositoryException(root, '다른 Git 작업이 진행 중입니다.');
+      }
+      if ((await _run(['status', '--porcelain=v1', '-z'])).isNotEmpty) {
+        throw GitRepositoryException(root, '작업 트리와 인덱스가 깨끗해야 합니다.');
+      }
+      await _run(['reset', '--hard', next]);
+      return;
+    }
+    await _run(['update-ref', 'refs/heads/$branch', next, expected]);
   }
 
   Future<CherryPickResult> cherryPick(String sha) async {
@@ -1953,13 +2329,13 @@ class GitRepository implements FullDiffRepository {
     );
   }
 
-  bool _isYogitRebasePath(String path) {
+  bool _isYogitPreviewPath(String path) {
     final directory = Directory(path).absolute;
     return directory.parent.path == Directory.systemTemp.absolute.path &&
         directory.uri.pathSegments
             .where((segment) => segment.isNotEmpty)
             .last
-            .startsWith('yogit_rebase_');
+            .startsWith(RegExp(r'yogit_(?:merge|rebase)_preview_'));
   }
 
   Future<void> _ignoreCommand(
@@ -2275,6 +2651,121 @@ class GitRepository implements FullDiffRepository {
         ? await _run(arguments)
         : await _runDiff(arguments);
     return parseUnifiedDiff(output);
+  }
+
+  Future<List<DiffLine>> _loadPreviewConflictDiff(
+    String worktreePath,
+    String relativePath,
+  ) async {
+    _previewFilePath(worktreePath, relativePath);
+    final pathspec = ':(literal)$relativePath';
+    final unmerged = await runner(gitExecutable, [
+      'ls-files',
+      '-u',
+      '-z',
+      '--',
+      pathspec,
+    ], workingDirectory: worktreePath);
+    if (unmerged.exitCode != 0) {
+      throw ProcessException(
+        gitExecutable,
+        ['ls-files', '-u', '-z', '--', pathspec],
+        unmerged.stderr.toString(),
+        unmerged.exitCode,
+      );
+    }
+    final stages = <int, String>{};
+    final record = RegExp(r'^[^ ]+ ([0-9a-f]+) ([123])\t');
+    for (final line in unmerged.stdout.toString().split('\x00')) {
+      final match = record.firstMatch(line);
+      if (match != null) {
+        stages[int.parse(match.group(2)!)] = match.group(1)!;
+      }
+    }
+    if (stages.isEmpty) {
+      return _runPreviewDiff(worktreePath, [
+        'diff',
+        ...safeDiffArguments,
+        '--unified=3',
+        '--cached',
+        'HEAD',
+        '--',
+        pathspec,
+      ]);
+    }
+    final before = stages[2];
+    final after = stages[3];
+    if (before != null && after != null) {
+      return _runPreviewDiff(worktreePath, [
+        'diff',
+        ...safeDiffArguments,
+        '--unified=3',
+        before,
+        after,
+        '--',
+      ]);
+    }
+    final blob = before ?? after!;
+    final show = await runner(gitExecutable, [
+      'show',
+      blob,
+    ], workingDirectory: worktreePath);
+    if (show.exitCode != 0) {
+      throw ProcessException(
+        gitExecutable,
+        ['show', blob],
+        show.stderr.toString(),
+        show.exitCode,
+      );
+    }
+    final text = show.stdout.toString();
+    final content = text.endsWith('\n')
+        ? text.substring(0, text.length - 1)
+        : text;
+    final lines = content.isEmpty ? const <String>[] : content.split('\n');
+    return [
+      DiffLine(
+        kind: DiffLineKind.header,
+        text: before == null ? '--- /dev/null' : '--- a/$relativePath',
+      ),
+      DiffLine(
+        kind: DiffLineKind.header,
+        text: after == null ? '+++ /dev/null' : '+++ b/$relativePath',
+      ),
+      DiffLine(
+        kind: DiffLineKind.hunk,
+        text: before == null
+            ? '@@ -0,0 +1,${lines.length} @@'
+            : '@@ -1,${lines.length} +0,0 @@',
+      ),
+      for (var index = 0; index < lines.length; index++)
+        DiffLine(
+          kind: before == null ? DiffLineKind.add : DiffLineKind.delete,
+          text: lines[index],
+          oldNumber: before == null ? null : index + 1,
+          newNumber: before == null ? index + 1 : null,
+        ),
+    ];
+  }
+
+  Future<List<DiffLine>> _runPreviewDiff(
+    String worktreePath,
+    List<String> arguments,
+  ) async {
+    final result = await runner(
+      gitExecutable,
+      arguments,
+      workingDirectory: worktreePath,
+    );
+    if (result.exitCode > 1) {
+      throw ProcessException(
+        gitExecutable,
+        arguments,
+        result.stderr.toString(),
+        result.exitCode,
+      );
+    }
+    return parseUnifiedDiff(result.stdout.toString());
   }
 
   @override

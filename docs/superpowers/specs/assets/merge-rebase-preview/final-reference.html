@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Yogit Merge·Rebase 적용 확인 흐름</title>
+<style>
+:root{color-scheme:dark;--bg:#111214;--panel:#191a1d;--panel2:#202226;--line:#34363c;--text:#e8e9ec;--muted:#9699a2;--cyan:#10d5ef;--blue:#4388ee;--green:#52c96e;--gold:#ffdf18;--purple:#c69aff;--red:#ff6767}*{box-sizing:border-box}body{margin:0;background:#0b0c0e;color:var(--text);font:13px -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif}.page{max-width:1500px;margin:auto;padding:28px 34px 55px}h1{font-size:24px;margin:0 0 7px}.lead{margin:0 0 18px;color:var(--muted)}.scenario-bar{display:flex;gap:8px;margin-bottom:12px}.scenario{border:1px solid #50545e;background:#25272c;color:#cfd2d8;border-radius:8px;padding:8px 12px;cursor:pointer}.scenario.active{background:#3a3150;border-color:var(--purple);color:#f0e8ff}.scenario.conflict.active{background:#4a292d;border-color:var(--red);color:#ffd7d7}.app{height:735px;border:1px solid #41434a;border-radius:14px;overflow:hidden;background:var(--bg);box-shadow:0 20px 55px #0009}.toolbar{height:62px;display:flex;align-items:center;gap:30px;padding:0 21px;background:#1c1d20;border-bottom:1px solid var(--line)}.lights{display:flex;gap:8px}.lights i{display:block;width:11px;height:11px;border-radius:50%}.lights i:nth-child(1){background:#ff5f57}.lights i:nth-child(2){background:#ffbd2e}.lights i:nth-child(3){background:#28c840}.select{display:flex;flex-direction:column;gap:4px;min-width:145px}.select small{font-size:10px;color:var(--muted)}.select b{font-size:16px}.spacer{flex:1}.mode{color:var(--muted)}.mode b{padding:8px 10px;border-radius:7px;background:#32343a;color:#fff}.show{border:0;border-radius:8px;background:#35a653;color:#07130a;font-weight:750;padding:11px 16px}.body{display:flex;height:673px}.sidebar{width:220px;flex:none;background:#18191d;border-right:1px solid var(--line);padding:17px 14px}.search{border:1px solid #7b7e85;border-radius:6px;padding:8px 10px;color:#aaaeb7;margin-bottom:20px}.cap{font-size:10px;color:#a4a7ae;letter-spacing:.1em;margin:0 0 8px}.branch{padding:8px 10px;border-radius:7px;margin:3px 0}.branch.active{background:#34543d}.branch span{float:right;color:#a7abb4}.side-section{margin-bottom:24px}.work{flex:1;min-width:0;display:flex;flex-direction:column}.summary{height:70px;flex:none;display:flex;align-items:center;gap:8px;padding:0 18px;background:#22242a;border-bottom:1px solid var(--line)}.summary h3{font-size:14px;margin:0 11px 0 0}.chip{padding:5px 8px;border-radius:6px;background:#30333a;color:#cfd2d8;font-size:11px}.chip.sim{background:#40345b;color:#edddff}.chip.bad{background:#4b292e;color:#ffcece}.summary small{margin-left:auto;color:var(--muted)}.content{display:grid;grid-template-columns:minmax(660px,1.25fr) minmax(350px,.72fr);flex:1;min-height:0}.timeline{min-width:0;overflow:hidden}.head,.row{display:grid;grid-template-columns:150px 135px 90px 1fr 115px;align-items:center;padding:0 14px}.head{height:36px;border-bottom:1px solid var(--line);font-size:10px;letter-spacing:.08em;color:#aaaeb7}.rows{height:calc(100% - 36px);position:relative}.graph-svg{position:absolute;left:164px;top:0;width:135px;height:336px;z-index:2;pointer-events:none}.row{height:56px;border-bottom:1px solid #25262a}.row.selected{background:#343539}.row.virtual{background:linear-gradient(90deg,#282236,#1b1c1f);box-shadow:inset 3px 0 0 var(--purple)}.row.conflict{background:linear-gradient(90deg,#3b2226,#1c1c1f);box-shadow:inset 3px 0 0 var(--red)}.ref-pill{display:inline-flex;align-items:center;gap:6px;border:1px solid currentColor;border-radius:7px;padding:5px 8px;font-size:11px;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ref-main{color:var(--cyan)}.ref-feature{color:#f3b95f}.ref-common{color:var(--green)}.ref-virtual{color:var(--purple)}.ref-conflict{color:var(--red)}.hash{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;color:#ed7878}.msg{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.msg .tag{display:inline-block;padding:3px 6px;margin-right:7px;border-radius:99px;background:#44385f;color:#ecddff;font-size:10px}.msg .tag.bad{background:#552c32;color:#ffd1d1}.date{text-align:right;color:#a1a4ac;font-size:11px}.preview{border-left:1px solid var(--line);background:#161719;min-width:0;display:flex;flex-direction:column}.preview-head{padding:15px 16px;border-bottom:1px solid var(--line);display:flex}.preview-head b{font-size:14px}.preview-head small{margin-left:auto;color:var(--muted)}.notice{margin:12px 14px 7px;padding:10px;border-radius:7px;background:#30284a;color:#e5d7ff;font-size:11px}.notice.bad{background:#4a292e;color:#ffd2d2}.files{padding:5px 12px 12px;border-bottom:1px solid var(--line)}.file{display:flex;gap:8px;padding:9px 8px;border-radius:6px}.file.active{background:#2b3036}.file em{font-style:normal;color:var(--green)}.file em.bad{color:var(--red)}.file small{margin-left:auto;color:var(--muted)}.code{padding:14px 16px;font:11px/1.9 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap;overflow:hidden}.ctx{color:#a3a7af}.add{display:block;background:#173624;color:#acf0bd}.del{display:block;background:#402026;color:#ffb1b1}.marker{display:block;background:#4a292e;color:#ffd1d1}.legend{display:flex;gap:17px;margin-top:11px;color:var(--muted);font-size:11px}.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}.caption{margin:9px 0 0;color:var(--muted)}
+</style>
+<style>
+.code.diff-editor{padding:0;white-space:normal;overflow:auto}
+.diff-toolbar{display:flex;align-items:center;height:34px;padding:0 10px;border-bottom:1px solid var(--line);background:#202226;color:#aeb2ba;font:11px -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif}
+.diff-toolbar b{color:#e7e9ed}.diff-toolbar span{margin-left:auto;color:#ff9d9d}
+.view-switch{display:flex;margin-left:10px;padding:2px;border-radius:6px;background:#151619}
+.view-switch button{border:0;border-radius:4px;background:transparent;color:#8f939b;padding:4px 7px;font-size:9px;cursor:pointer}.view-switch button.active{background:#3b3e45;color:#fff}
+.diff-columns{display:grid;grid-template-columns:1fr 1fr;min-width:560px}
+.unified-diff{display:none}.code.diff-editor.unified .diff-columns{display:none}.code.diff-editor.unified .unified-diff{display:block}
+.unified-head{padding:6px 9px;border-bottom:1px solid var(--line);background:#1c1e21;color:#a6aab2;font-size:10px}
+.unified-line{display:grid;grid-template-columns:30px 30px 1fr;min-height:22px;line-height:22px}.unified-line i{padding-right:6px;text-align:right;color:#666b74;background:#18191b;font-style:normal}.unified-line code{padding:0 8px}.unified-line.del code{background:#482328;color:#ffc0c0}.unified-line.add code{background:#173e29;color:#baf2c6}
+.diff-pane{min-width:0;border-right:1px solid var(--line)}.diff-pane:last-child{border-right:0}
+.diff-title{display:flex;align-items:center;height:30px;padding:0 9px;border-bottom:1px solid var(--line);background:#1c1e21;color:#c6c9cf;font:10px -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif}
+.diff-title span{margin-left:6px;color:#8e929b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.diff-title small{margin-left:auto;padding-left:8px;color:#8e929b;white-space:nowrap}
+.diff-line{display:grid;grid-template-columns:32px 1fr;min-height:22px;line-height:22px}
+.diff-line i{padding-right:7px;text-align:right;color:#666b74;background:#18191b;font-style:normal;user-select:none}
+.diff-line code{padding:0 8px;overflow:hidden;text-overflow:ellipsis}
+.diff-line.changed-left code{background:#482328;color:#ffc0c0}
+.diff-line.changed-right code{background:#173e29;color:#baf2c6}
+.diff-line.conflict-line code{box-shadow:inset 3px 0 0 var(--red)}
+.conflict-choice{display:flex;gap:6px;padding:8px;border-top:1px solid #71363d;background:#382126;font:10px -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif}
+.conflict-choice button{border:1px solid #62565b;border-radius:5px;background:#292a2e;color:#d5d7db;padding:4px 7px}
+.row.rebase-current{background:#8f2f38;box-shadow:inset 4px 0 0 #ff969d}.row.rebase-current .ref-pill{background:#f5d9dc;border-color:#fff;color:#711f27;font-weight:800}.row.rebase-current .hash,.row.rebase-current .msg,.row.rebase-current .date{color:#fff}.row.rebase-current .tag.bad{background:#5b1119;color:#fff}
+.notice.state-panel{padding:10px 11px;background:#2d2428}.state-head{display:flex;align-items:center}.state-head b{color:#fff}.state-head span{margin-left:auto;color:#ffb7bd}.state-progress{height:5px;margin:9px 0 8px;border-radius:4px;background:#17181b;overflow:hidden}.state-progress i{display:block;width:50%;height:100%;background:linear-gradient(90deg,var(--purple) 50%,var(--red) 50%)}.state-counts{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}.state-counts span{padding:5px;border-radius:5px;background:#202125;text-align:center;color:#b9bdc5}.state-counts b{display:block;margin-bottom:1px;color:#fff}.state-current{margin:8px 0 0;color:#ffced2}.decision-label{align-self:center;margin-right:2px;color:#ffced2}.rebase-actions{display:flex;justify-content:flex-end;gap:7px;padding:9px 8px;border-top:1px solid var(--line);background:#1e1f22}.rebase-actions button{border:1px solid #52555d;border-radius:6px;background:#2b2d31;color:#d8dade;padding:6px 9px;font-size:10px}.rebase-actions .danger{margin-right:auto;color:#ff939b}.rebase-actions .primary{border-color:#448cd7;background:#347bc3;color:#fff;font-weight:700}
+.graph-svg{height:504px}.ref-rebase{color:var(--purple)}
+.row.ghost{opacity:.56}.ref-history{color:#a28f6b}.notice.complete-panel{background:#29243a}.complete-panel .state-progress i{width:100%;background:var(--purple)}.ff-note{display:flex;align-items:center;gap:8px;margin-top:9px;padding-top:8px;border-top:1px solid #514766;color:#c8bddb}.ff-button{margin-left:auto;border:1px solid #9d79d0;border-radius:6px;background:#594576;color:#fff4ff;padding:6px 9px;font-size:10px;font-weight:750}
+.row{position:relative;z-index:1}.rebase-focus{position:absolute;left:0;right:0;top:112px;height:56px;z-index:0;opacity:0;background:linear-gradient(90deg,#a63540,#8b2c35);box-shadow:inset 5px 0 0 #ffabb1;transition:top .62s cubic-bezier(.22,.75,.22,1),opacity .22s}.rows.has-rebase-focus .rebase-focus{opacity:1}.rows.has-rebase-focus .row.rebase-current{background:transparent;box-shadow:none}.rows.has-rebase-focus .row.rebase-current .ref-pill{background:#f5d9dc;border-color:#fff;color:#711f27}.rows.has-rebase-focus .row.rebase-current .hash,.rows.has-rebase-focus .row.rebase-current .msg,.rows.has-rebase-focus .row.rebase-current .date{color:#fff}.row.rebase-applied{background:linear-gradient(90deg,#29243a,#17181b);box-shadow:inset 3px 0 0 var(--purple)}.rebase-anchor{animation:anchorPulse 1.8s ease-in-out infinite;transform-origin:center}@keyframes anchorPulse{0%,100%{opacity:.48}50%{opacity:1}}
+.preview-mode-switch{display:flex;padding:3px;border:1px solid #41444c;border-radius:8px;background:#141518}.preview-mode-switch button{border:0;border-radius:6px;background:transparent;color:#989ca5;padding:7px 10px;font-size:11px;cursor:pointer}.preview-mode-switch button.active{background:#3d3454;color:#f1e8ff;box-shadow:0 1px 3px #0008}
+.success-check{display:inline-grid;place-items:center;width:16px;height:16px;margin-left:5px;border-radius:50%;background:#2fa34a;color:#fff;font-size:11px;font-weight:900;vertical-align:-2px}
+</style>
+<style>
+.app{position:relative}
+.chip.safe{background:#263d43;color:#c7edf3}
+.safe-workspace{margin-top:9px;padding-top:9px;border-top:1px solid #71444a;color:#d9dce2}
+.safe-workspace-head{display:flex;align-items:center;gap:7px}.safe-workspace-head i{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#235466;color:#d8f6ff;font-style:normal;font-size:10px}.safe-workspace-head b{font-size:11px}.safe-workspace-head span{margin-left:auto;color:#9fd9e7;font-size:10px}
+.safe-workspace p{margin:7px 0;color:#c5c8cf;line-height:1.45}.safe-workspace-tags{display:flex;flex-wrap:wrap;gap:5px}.safe-workspace-tags span{padding:4px 7px;border:1px solid #477984;border-radius:5px;background:#24434a;color:#effcff;font-size:9px;font-weight:750;box-shadow:inset 0 1px 0 #ffffff0b}
+.safe-workspace-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:8px}.safe-workspace-actions button{border:1px solid #526069;border-radius:6px;background:#2b3035;color:#dce0e5;padding:5px 8px;font-size:10px}.safe-workspace-actions .primary{border-color:#4b91ac;background:#2e7089;color:#f4fbff;font-weight:700}.safe-workspace-actions .apply{border-color:#7d68a6;background:#46385f;color:#f1e7ff;font-weight:700}
+.safe-workspace.tested{border-top-color:#42684c}.safe-workspace.tested .safe-workspace-head i{background:#2f8f49}.safe-workspace.tested .safe-workspace-head span{color:#89d99e}.safe-workspace.tested .safe-workspace-tags span{background:#203126;color:#bce7c7}
+.safe-dialog-backdrop{position:absolute;inset:0;z-index:20;display:grid;place-items:center;background:#050608b8;backdrop-filter:blur(2px)}.safe-dialog{width:430px;padding:18px;border:1px solid #5a5269;border-radius:12px;background:#242129;box-shadow:0 20px 70px #000c}.safe-dialog h3{margin:0 0 7px;font-size:16px}.safe-dialog>p{margin:0 0 12px;color:#bfc2ca;line-height:1.5}.safe-dialog .destination{padding:10px;border-radius:8px;background:#30283e;color:#eee4ff}.safe-dialog ul{margin:12px 0;padding-left:19px;color:#c8cbd1;line-height:1.7}.safe-dialog small{display:block;padding-top:9px;border-top:1px solid #49444f;color:#969aa3}.safe-dialog .safe-workspace-actions{margin-top:13px}
+.final-review{margin:12px 14px 7px;padding:11px;border:1px solid #49614f;border-radius:8px;background:#202d24;color:#d7eadc}.final-review.rebase{border-color:#695786;background:#29243a;color:#e7dcf8}.final-review-head{display:flex;align-items:center;gap:7px}.final-review-head i{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#2fa34a;color:#fff;font-style:normal;font-weight:900}.final-review-head b{font-size:12px}.final-review-head span{margin-left:auto;color:#91d8a2;font-size:10px}.final-review.rebase .final-review-head span{color:#cbb2ec}.final-review p{margin:8px 0;color:#c7d0ca;line-height:1.45}.final-review.rebase p{color:#cbc3d7}.final-review-actions{display:flex;justify-content:flex-end;gap:7px}.final-review-actions button{border:1px solid #596168;border-radius:6px;background:#2b3035;color:#dce0e5;padding:6px 9px;font-size:10px}.final-review-actions .apply{border-color:#6c9c76;background:#31553a;color:#e6ffeb;font-weight:700}.final-review.rebase .final-review-actions .apply{border-color:#7d68a6;background:#46385f;color:#f1e7ff}.final-review.dropped{border-color:#545860;background:#24262a;color:#c8cbd1}.final-review.applied{border-color:#4f855d;background:#203227}
+.rows.real-rebase-focus .rebase-focus{opacity:1;background:linear-gradient(90deg,#4d376d,#302542);box-shadow:inset 5px 0 0 #d3adff}.rows.real-rebase-focus .row.rebase-live-current{background:transparent;box-shadow:none}.rows.real-rebase-focus .row.rebase-live-current .ref-pill{background:#eadcff;border-color:#fff;color:#4f2e72;font-weight:800}.rows.real-rebase-focus .row.rebase-live-current .hash,.rows.real-rebase-focus .row.rebase-live-current .msg,.rows.real-rebase-focus .row.rebase-live-current .date{color:#fff}.applying-node{animation:applyPulse .8s ease-in-out infinite;transform-origin:center;transform-box:fill-box}@keyframes applyPulse{0%,100%{filter:drop-shadow(0 0 0 #c69aff);transform:scale(1)}50%{filter:drop-shadow(0 0 7px #c69aff);transform:scale(1.12)}}.rebase-rollback{margin-left:auto;border:1px solid #9b6f79!important;background:#4d3037!important;color:#ffe7ec!important;font-weight:750}.sha-pair{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:10px 0}.sha-pair div{padding:9px;border-radius:7px;background:#1d1e22;color:#bec2ca}.sha-pair b{display:block;margin-bottom:4px;color:#fff}.sha-pair code{color:#f08b8b}.apply-status{margin-top:8px;color:#d8c7ee}.apply-status b{color:#fff}
+.row.merge-live-current{background:linear-gradient(90deg,#29402f,#252238);box-shadow:inset 4px 0 0 #77d88c}.row.merge-live-current .ref-pill{background:#dff4e4;border-color:#fff;color:#285a34;font-weight:800}.row.merge-live-current .hash,.row.merge-live-current .msg,.row.merge-live-current .date{color:#fff}.row.merge-applied{background:linear-gradient(90deg,#203427,#181d1a);box-shadow:inset 3px 0 0 #52c96e}
+</style>
+</head>
+<body>
+<main class="page">
+  <h1>안전한 Merge·Rebase 미리보기</h1>
+  <p class="lead">네 상태를 전환해 보세요. 충돌 해결은 자동으로 준비된 임시 공간에서 진행하고, 마지막에는 최종 diff를 확인한 뒤 반영하거나 Drop할 수 있습니다.</p>
+  <nav class="scenario-bar">
+    <button class="scenario active" data-id="mergeClean" onclick="showScenario('mergeClean')">Merge 성공<span class="success-check">✓</span></button>
+    <button class="scenario" data-id="rebaseClean" onclick="showScenario('rebaseClean')">Rebase 성공<span class="success-check">✓</span></button>
+    <button class="scenario conflict" data-id="mergeConflict" onclick="showScenario('mergeConflict')">병합 충돌</button>
+    <button class="scenario conflict" data-id="rebaseConflict" onclick="showScenario('rebaseConflict')">리베이스 충돌</button>
+  </nav>
+  <section class="app">
+    <header class="toolbar"><div class="lights"><i></i><i></i><i></i></div><div class="select"><small>기준 브랜치</small><b>main　⌄</b></div><div class="select"><small>브랜치 diff</small><b>fix/docs　⌄</b></div><div class="preview-mode-switch"><button id="mergePreviewButton" onclick="choosePreview('merge')">Merge 미리보기</button><button id="rebasePreviewButton" onclick="choosePreview('rebase')">Rebase 미리보기</button></div><div class="spacer"></div><span class="mode">상세　 <b>미리보기</b></span><button class="show">Show Diff</button></header>
+    <div class="body">
+      <aside class="sidebar"><div class="search">브랜치와 태그 찾기</div><div class="side-section"><p class="cap">⌄　LOCAL</p><div class="branch active">⌁　main <span>2</span></div><div class="branch">⌁　fix/docs <span>1</span></div><div class="branch">⌁　release</div></div><div class="side-section"><p class="cap">⌄　REMOTE</p><div class="branch">◉　origin</div><div class="branch">　⌁　main</div></div><div class="side-section"><p class="cap">⌄　TAGS</p><div class="branch">◇　v1.4.0</div></div></aside>
+      <section class="work">
+        <div id="summary" class="summary"></div>
+        <div class="content">
+          <section class="timeline">
+            <div class="head"><span>BRANCH / TAG</span><span>GRAPH</span><span>HASH</span><span>COMMIT MESSAGE</span><span>DATE</span></div>
+            <div id="timelineRows" class="rows"><div id="rebaseFocus" class="rebase-focus"></div><svg id="graph" class="graph-svg" viewBox="0 0 135 504" aria-label="커밋 그래프"></svg><div id="rowList"></div></div>
+          </section>
+          <aside class="preview"><div id="previewHead" class="preview-head"></div><div id="notice" class="notice"></div><div id="files" class="files"></div><div id="code" class="code"></div></aside>
+        </div>
+      </section>
+    </div>
+  </section>
+  <div class="legend"><span><i style="background:var(--cyan)"></i>main</span><span><i style="background:#f3b95f"></i>fix/docs 원본</span><span><i style="background:var(--purple)"></i>rebase 시뮬레이션</span><span><i style="background:var(--green)"></i>공통</span><span><i style="background:var(--red)"></i>충돌 중단</span></div>
+  <p id="caption" class="caption"></p>
+</main>
+<script>
+const node=(x,y,fill,label,stroke="#111214")=>`<circle cx="${x}" cy="${y}" r="17" fill="${fill}" stroke="${stroke}" stroke-width="3"/><text x="${x}" y="${y+4}" text-anchor="middle" fill="#081014" font-size="10" font-weight="800">${label}</text>`;
+const line=(d,color,dash="")=>`<path d="${d}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" ${dash?`stroke-dasharray="${dash}"`:""}/>`;
+const thinLine=(d,color,dash="3 4")=>`<path d="${d}" fill="none" stroke="${color}" stroke-width="1" stroke-linecap="round" stroke-dasharray="${dash}"/>`;
+const arrowLine=(d,color,marker)=>`<path d="${d}" fill="none" stroke="${color}" stroke-width="1" stroke-linecap="round" marker-end="url(#${marker})"/>`;
+const row=(kind,refClass,ref,hash,message,date,attrs="")=>`<div class="row ${kind}" ${attrs}><span><span class="ref-pill ${refClass}">${ref}</span></span><span></span><span class="hash">${hash}</span><span class="msg">${message}</span><span class="date">${date}</span></div>`;
+const file=(kind,path,count,bad=false,active=false)=>`<div class="file ${active?"active":""}"><em class="${bad?"bad":""}">${kind}</em><span>${path}</span><small>${count}</small></div>`;
+const scenarios={
+mergeClean:{
+ summary:`<h3>Merge 미리보기<span class="success-check">✓</span></h3><span class="chip sim">가상 커밋 1</span><span class="chip">두 부모</span><span class="chip">충돌 없음</span><small>main ← fix/docs</small>`,
+ graph:line("M42 84 L42 252","#10d5ef")+line("M42 252 C91 220 91 180 91 140","#f3b95f")+thinLine("M42 28 L42 84","#10d5ef")+thinLine("M42 28 C42 65 91 70 91 140","#f3b95f")+node(42,28,"#c69aff","VM")+node(42,84,"#10d5ef","SC")+node(91,140,"#f3b95f","SC")+node(42,196,"#10d5ef","SC")+node(42,252,"#52c96e","SC"),
+ rows:row("virtual","ref-virtual","✓ 가상 병합","virtual",`<span class="tag">가상</span>Merge branch 'fix/docs' into main`,"예상 결과",`data-merge-result`)+row("","ref-main","main만","a91c3e2","fix: validate merged files","1 hour ago")+row("","ref-feature","fix/docs만","f11d320","docs: add merge documentation","2 hours ago")+row("selected","ref-main","main만","7ce12a4","feat: update request client","3 hours ago")+row("","ref-common","공통","b806ad1","chore: update shared base","1 day ago"),
+ head:`<b>가상 병합 커밋</b><small>아직 적용하지 않음</small>`,noticeHtml:`<div class="state-head"><b>Merge 미리보기 성공</b><span>main과 fix/docs 유지</span></div><div class="state-progress"><i></i></div><div class="state-counts"><span><b>1</b>가상 커밋</span><span><b>2</b>부모 커밋</span><span><b>0</b>충돌</span></div><div class="ff-note">가상 결과를 실제 브랜치에 적용할 수 있습니다.<button class="ff-button" onclick="openRealMergeDialog()">fix/docs를 main에 Merge 실제 적용</button></div>`,bad:false,state:true,complete:true,
+ files:file("M","lib/api.dart","+12 -2",false,true)+file("A","docs/merge.md","+38")+file("M","test/api_test.dart","+7"),
+ editor:true,
+ code:`<div class="diff-toolbar"><b>lib/api.dart</b><span>Merge 결과 · fix/docs → main</span><div class="view-switch"><button onclick="setDiffView('unified',this)">Unified</button><button class="active" onclick="setDiffView('split',this)">Side-by-side</button></div></div><div class="diff-columns"><section class="diff-pane"><div class="diff-title"><b>main</b><span>fix: validate merged files</span><small>기준 브랜치</small></div><div class="diff-line"><i>18</i><code>return client.request(path);</code></div><div class="diff-line changed-left"><i>19</i><code>return client.request(path, legacy: true);</code></div></section><section class="diff-pane"><div class="diff-title"><b>fix/docs</b><span>Merge 미리보기 결과</span><small>가상 결과</small></div><div class="diff-line"><i>18</i><code>return client.request(path);</code></div><div class="diff-line changed-right"><i>19</i><code>return client.request(path, retry: true);</code></div></section></div><div class="unified-diff"><div class="unified-head">main　←　fix/docs · Merge 미리보기 결과</div><div class="unified-line"><i>18</i><i>18</i><code> return client.request(path);</code></div><div class="unified-line del"><i>19</i><i></i><code>-return client.request(path, legacy: true);</code></div><div class="unified-line add"><i></i><i>19</i><code>+return client.request(path, retry: true);</code></div></div>`,
+ caption:"기존 main과 fix/docs 기록은 실선입니다. 두 부모에서 가상 머지 커밋 VM으로 이어지는 구간만 점선으로 표시합니다."
+},
+rebaseClean:{
+ summary:`<h3>Rebase 미리보기<span class="success-check">✓</span></h3><span class="chip sim">가상 커밋 3개</span><span class="chip">점선 이동 경로</span><span class="chip">실제 브랜치 변경 없음</span><small>fix/docs → main</small>`,
+ graph:`<defs><marker id="moveArrow1" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7 Z" fill="#a66f87"/></marker><marker id="moveArrow2" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7 Z" fill="#6f9c98"/></marker><marker id="moveArrow3" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7 Z" fill="#96875a"/></marker><marker id="moveArrow4" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7 Z" fill="#7583a6"/></marker><marker id="moveArrow5" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7 Z" fill="#8c72a0"/></marker></defs>`+line("M42 196 L42 476","#10d5ef")+line("M42 476 C96 450 96 405 96 364 L96 252","#f3b95f")+`<path id="virtualRebaseRail" d="M42 196 L42 28" fill="none" stroke="#c69aff" stroke-width="1" stroke-linecap="round" stroke-dasharray="3 4"/>`+arrowLine("M114 252 H124 Q130 252 130 246 V34 Q130 28 124 28 H60","#a66f87","moveArrow1")+arrowLine("M114 308 H118 Q124 308 124 302 V90 Q124 84 118 84 H60","#6f9c98","moveArrow2")+arrowLine("M114 364 Q118 364 118 358 V146 Q118 140 112 140 H60","#96875a","moveArrow3")+node(42,28,"#c69aff","VR","#a66f87")+node(42,84,"#c69aff","VR","#6f9c98")+node(42,140,"#c69aff","VR","#96875a")+node(42,196,"#10d5ef","SC")+node(96,252,"#f3b95f","SC","#a66f87")+node(96,308,"#f3b95f","SC","#6f9c98")+node(96,364,"#f3b95f","SC","#96875a")+node(42,420,"#10d5ef","SC")+node(42,476,"#52c96e","SC"),
+ rows:row("virtual selected","ref-rebase","fix/docs · 가상","new SHA",`<span class="tag">재작성 3/3</span>docs: publish API guide`,"가상 결과",`data-apply-step="3"`)+row("virtual","ref-rebase","fix/docs · 가상","new SHA",`<span class="tag">재작성 2/3</span>docs: update API examples`,"가상 결과",`data-apply-step="2"`)+row("virtual","ref-rebase","fix/docs · 가상","new SHA",`<span class="tag">재작성 1/3</span>docs: add merge documentation`,"가상 결과",`data-apply-step="1"`)+row("","ref-main","main","a91c3e2","fix: validate merged files","변경 없음")+row("","ref-feature","fix/docs · 원본","c43a821","docs: publish API guide","이동 3/3")+row("","ref-feature","fix/docs · 원본","f11d320","docs: update API examples","이동 2/3")+row("","ref-feature","fix/docs · 원본","d02b114","docs: add merge documentation","이동 1/3")+row("","ref-main","main","7ce12a4","feat: update request client","3 hours ago")+row("","ref-common","공통","b806ad1","chore: update shared base","1 day ago"),
+ head:`<b>가상 리베이스 결과</b><small>아직 적용하지 않음</small>`,noticeHtml:`<div class="state-head"><b>가상 rebase 성공</b><span>main과 fix/docs 유지</span></div><div class="state-progress"><i></i></div><div class="state-counts"><span><b>3</b>가상 커밋</span><span><b>3</b>원본 커밋</span><span><b>0</b>충돌</span></div><div class="ff-note">점선 결과를 실제 브랜치에 적용할 수 있습니다.<button class="ff-button" onclick="openRealRebaseDialog()">main 위로 fix/docs Rebase 실제 적용</button></div>`,bad:false,state:true,complete:true,
+ files:file("M","lib/api.dart","재적용",false,true)+file("A","docs/merge.md","재적용"),
+ editor:true,
+ code:`<div class="diff-toolbar"><b>lib/api.dart</b><span>Rebase 결과 · fix/docs → main</span><div class="view-switch"><button onclick="setDiffView('unified',this)">Unified</button><button class="active" onclick="setDiffView('split',this)">Side-by-side</button></div></div><div class="diff-columns"><section class="diff-pane"><div class="diff-title"><b>main</b><span>fix: validate merged files</span><small>기준 브랜치</small></div><div class="diff-line"><i>18</i><code>return client.request(path);</code></div><div class="diff-line changed-left"><i>19</i><code>retry: 3</code></div></section><section class="diff-pane"><div class="diff-title"><b>fix/docs</b><span>Rebase 미리보기 결과</span><small>가상 결과</small></div><div class="diff-line"><i>18</i><code>return client.request(path);</code></div><div class="diff-line changed-right"><i>19</i><code>retry: 5</code></div></section></div><div class="unified-diff"><div class="unified-head">main　←　fix/docs · Rebase 미리보기 결과</div><div class="unified-line"><i>18</i><i>18</i><code> return client.request(path);</code></div><div class="unified-line del"><i>19</i><i></i><code>-retry: 3</code></div><div class="unified-line add"><i></i><i>19</i><code>+retry: 5</code></div></div>`,
+ caption:"가상 커밋은 main 레일의 연장선 위에 표시합니다. 원본 fix/docs는 실선으로 남기고 같은 커밋의 이동 경로만 가는 화살표로 연결합니다."
+},
+mergeConflict:{
+ summary:`<h3>Merge 충돌</h3><span class="chip bad">충돌 2개</span><span class="chip">두 부모</span><span class="chip safe">임시 공간 사용 중</span><small>main ← fix/docs</small>`,
+ graph:line("M42 84 L42 252","#10d5ef")+line("M42 252 C91 220 91 180 91 140","#f3b95f")+thinLine("M42 28 L42 84","#10d5ef")+thinLine("M42 28 C42 65 91 70 91 140","#f3b95f")+node(42,28,"#ff6767","!","#ffb0b0")+node(42,84,"#10d5ef","SC")+node(91,140,"#f3b95f","SC")+node(42,196,"#10d5ef","SC")+node(42,252,"#52c96e","SC"),
+ rows:row("conflict","ref-conflict","! 병합 충돌","중단",`<span class="tag bad">충돌</span>Merge fix/docs into main`,"해결 필요")+row("","ref-main","main만","a91c3e2","fix: validate merged files","1 hour ago")+row("","ref-feature","fix/docs만","f11d320","docs: add merge documentation","2 hours ago")+row("selected","ref-main","main만","7ce12a4","feat: update request client","3 hours ago")+row("","ref-common","공통","b806ad1","chore: update shared base","1 day ago"),
+ head:`<b>Merge 충돌 해결</b><small>파일 2개</small>`,noticeHtml:`<div class="state-head"><b>가상 Merge 커밋을 만들 수 없습니다</b><span>충돌 파일 2개</span></div><p class="state-current">아래 diff에서 충돌을 해결하세요. 임시 공간은 자동으로 준비했습니다.</p><div id="safeWorkspace"></div>`,bad:true,state:true,safeKind:"merge",
+ files:file("!","lib/api.dart","충돌",true,true)+file("!","pubspec.yaml","충돌",true)+file("A","docs/merge.md","정상"),
+ editor:true,
+ code:`<div class="diff-toolbar"><b>lib/api.dart</b><span>병합 충돌 1개 · fix/docs → main</span><div class="view-switch"><button onclick="setDiffView('unified',this)">Unified</button><button class="active" onclick="setDiffView('split',this)">Side-by-side</button></div></div><div class="diff-columns"><section class="diff-pane"><div class="diff-title"><b>main</b><span>fix: validate merged files</span><small>기준 브랜치</small></div><div class="diff-line"><i>17</i><code>Future&lt;Client&gt; createClient() {</code></div><div class="diff-line changed-left conflict-line"><i>18</i><code>  return legacyClient;</code></div><div class="diff-line"><i>19</i><code>}</code></div></section><section class="diff-pane"><div class="diff-title"><b>fix/docs</b><span>docs: add merge documentation</span><small>비교 브랜치</small></div><div class="diff-line"><i>17</i><code>Future&lt;Client&gt; createClient() {</code></div><div class="diff-line changed-right conflict-line"><i>18</i><code>  return retryingClient;</code></div><div class="diff-line"><i>19</i><code>}</code></div></section></div><div class="unified-diff"><div class="unified-head">main · fix: validate merged files　←　fix/docs · docs: add merge documentation</div><div class="unified-line"><i>17</i><i>17</i><code> Future&lt;Client&gt; createClient() {</code></div><div class="unified-line del"><i>18</i><i></i><code>-  return legacyClient;</code></div><div class="unified-line add"><i></i><i>18</i><code>+  return retryingClient;</code></div><div class="unified-line"><i>19</i><i>19</i><code> }</code></div></div><div class="conflict-choice"><button onclick="showFinalDiff('merge')">main 사용</button><button onclick="showFinalDiff('merge')">fix/docs 사용</button><button onclick="showFinalDiff('merge')">둘 다 사용</button></div>`,
+ caption:"Merge 충돌 해결은 자동으로 만든 임시 공간에서 진행합니다. 마지막 확인 전까지 main과 fix/docs는 변경하지 않습니다."
+},
+rebaseConflict:{
+ summary:`<h3>Rebase 충돌</h3><span class="chip bad">최초 충돌</span><span class="chip">진행 2/3</span><span class="chip safe">임시 공간 사용 중</span><small>fix/docs → main</small>`,
+ graph:thinLine("M42 28 L42 84","#c69aff")+line("M42 84 L42 364","#10d5ef")+line("M42 364 C96 338 96 294 96 252 L96 140","#f3b95f")+`<circle class="rebase-anchor" cx="42" cy="28" r="18" fill="#1c1924" stroke="#c69aff" stroke-width="1" stroke-dasharray="3 4"/><circle cx="42" cy="28" r="4" fill="#c69aff"/>`+node(42,84,"#10d5ef","SC")+node(96,140,"#f3b95f","SC")+node(96,196,"#f3b95f","SC")+node(96,252,"#f3b95f","SC")+node(42,308,"#10d5ef","SC")+node(42,364,"#52c96e","SC"),
+ rows:row("ghost","ref-rebase","가상 rebase 위치","—","main HEAD 위 예상 위치","점선")+row("","ref-main","main · HEAD","a91c3e2","fix: validate merged files","기준점")+row("","ref-feature","fix/docs · 대기","c43a821",`<span class="tag">다음</span>docs: publish API guide`,"3번째 커밋",`data-rebase-step="3"`)+row("rebase-current","ref-feature","fix/docs · 현재 충돌","f11d320",`<span class="tag bad">현재 적용 중</span>docs: update API examples`,"2번째 커밋",`data-rebase-step="2"`)+row("rebase-applied","ref-rebase","fix/docs · 적용됨","d02b114",`<span class="tag">해결 완료</span>docs: add merge documentation`,"1번째 커밋",`data-rebase-step="1"`)+row("","ref-main","main","7ce12a4","feat: update request client","3 hours ago")+row("","ref-common","공통","b806ad1","chore: update shared base","1 day ago"),
+ head:`<b>Rebase 상태 및 결정</b><small>충돌 커밋에 포커스</small>`,noticeHtml:`<div class="state-head"><b id="rebaseProgressLabel">리베이스 진행 2/3</b><span>fix/docs → main</span></div><div class="state-progress"><i id="rebaseProgressBar" style="width:66%"></i></div><div class="state-counts"><span><b id="appliedCount">1</b>적용 완료</span><span><b>1</b>현재 충돌</span><span><b id="pendingCount">1</b>적용 대기</span></div><p id="rebaseCurrent" class="state-current">현재: docs: update API examples</p><div id="safeWorkspace"></div>`,bad:true,state:true,focusTop:168,safeKind:"rebase",
+ files:file("!","docs/api.md","충돌",true,true)+file("!","lib/api.dart","충돌",true),
+ editor:true,
+ code:`<div class="diff-toolbar"><b>docs/api.md</b><span id="rebaseDiffStatus">현재 충돌 · docs: update API examples</span><div class="view-switch"><button onclick="setDiffView('unified',this)">Unified</button><button class="active" onclick="setDiffView('split',this)">Side-by-side</button></div></div><div class="diff-columns"><section class="diff-pane"><div class="diff-title"><b>main</b><span>fix: validate merged files</span><small>기준 브랜치</small></div><div class="diff-line"><i>42</i><code>requestClient(</code></div><div class="diff-line changed-left conflict-line"><i>43</i><code>  retry: 3,</code></div><div class="diff-line"><i>44</i><code>);</code></div></section><section class="diff-pane"><div class="diff-title"><b>fix/docs</b><span id="incomingCommit">docs: update API examples</span><small>적용 중</small></div><div class="diff-line"><i>42</i><code>requestClient(</code></div><div class="diff-line changed-right conflict-line"><i>43</i><code>  retry: 5,</code></div><div class="diff-line"><i>44</i><code>);</code></div></section></div><div class="unified-diff"><div class="unified-head">main · fix: validate merged files　←　fix/docs · 적용 중인 커밋</div><div class="unified-line"><i>42</i><i>42</i><code> requestClient(</code></div><div class="unified-line del"><i>43</i><i></i><code>-  retry: 3,</code></div><div class="unified-line add"><i></i><i>43</i><code>+  retry: 5,</code></div><div class="unified-line"><i>44</i><i>44</i><code> );</code></div></div><div class="conflict-choice"><span class="decision-label">이 충돌 해결:</span><button>main 사용</button><button>fix/docs 사용</button><button>직접 편집</button></div><div class="rebase-actions"><button class="danger">리베이스 중단</button><button>편집기로 열기</button><button id="rebaseContinue" class="primary" onclick="advanceRebase()">해결 후 계속</button></div>`,
+ caption:"Rebase 충돌 해결은 자동으로 만든 임시 공간에서 진행합니다. 마지막 확인 전까지 main과 fix/docs는 변경하지 않습니다."
+}};
+let diffView="split";
+let previewMode="merge";
+let realRebaseTimer=0;
+let realMergeTimer=0;
+try{previewMode=localStorage.getItem("yogit-preview-mode")||"merge"}catch(_){}
+function choosePreview(mode){
+ previewMode=mode;
+ try{localStorage.setItem("yogit-preview-mode",mode)}catch(_){}
+ showScenario(mode==="rebase"?"rebaseClean":"mergeClean");
+}
+function setDiffView(view,button){
+ diffView=view;
+ const code=document.getElementById("code");
+ code.classList.toggle("unified",view==="unified");
+ code.querySelectorAll(".view-switch button").forEach(b=>b.classList.toggle("active",b===button));
+}
+function safeWorkspaceHtml(){
+ return `<div class="safe-workspace"><div class="safe-workspace-head"><i>✓</i><b>임시 공간에서 해결 중</b><span>자동 준비됨</span></div><p>충돌 해결 과정은 임시 공간에서만 진행합니다. 기준 브랜치 main과 대상 브랜치 fix/docs를 직접 변경하지 않습니다.</p><div class="safe-workspace-tags"><span>두 브랜치 변경 없음</span><span>현재 작업 트리 변경 없음</span><span>종료 시 자동 삭제</span></div></div>`;
+}
+function renderSafeWorkspace(kind){
+ const app=document.querySelector(".app");
+ app.dataset.safePhase="active";
+ const target=document.getElementById("safeWorkspace");
+ if(target)target.innerHTML=safeWorkspaceHtml();
+ const chip=document.querySelector(".summary .chip.safe");
+ if(chip)chip.textContent="임시 공간 사용 중";
+}
+function openSafeApplyDialog(kind){
+ closeSafeApplyDialog();
+ const destination=kind==="merge"?"main":"fix/docs";
+ const operation=kind==="merge"?"Merge":"Rebase";
+ document.querySelector(".app").insertAdjacentHTML("beforeend",`<div id="safeApplyDialog" class="safe-dialog-backdrop"><section class="safe-dialog"><h3>${destination}에 ${operation} 결과 반영</h3><p>미리보기와 테스트 단계에서는 두 브랜치를 건드리지 않았습니다. 아래 확인을 누르는 이 단계에서만 선택한 로컬 브랜치 하나가 갱신됩니다.</p><div class="destination"><b>반영 대상</b>　${destination}<br><small>${kind==="merge"?"fix/docs를 main에 Merge한 결과":"main 위로 재작성한 fix/docs 결과"}</small></div><ul><li>미리보기 시작 시점과 현재 브랜치 tip이 같습니다.</li><li>원본 작업 트리와 다른 브랜치는 변경하지 않습니다.</li><li>원격 저장소로 push하지 않습니다.</li></ul><small>브랜치 tip이 달라졌다면 반영을 중단하고 미리보기를 다시 계산합니다.</small><div class="safe-workspace-actions"><button onclick="closeSafeApplyDialog()">취소</button><button class="apply" onclick="confirmSafeApply('${kind}')">반영 확인</button></div></section></div>`);
+}
+function closeSafeApplyDialog(){document.getElementById("safeApplyDialog")?.remove()}
+function openRealMergeDialog(){
+ closeSafeApplyDialog();
+ document.querySelector(".app").insertAdjacentHTML("beforeend",`<div id="safeApplyDialog" class="safe-dialog-backdrop"><section class="safe-dialog"><h3>fix/docs를 main에 Merge 실제 적용</h3><p>fix/docs를 main에 병합하고 main에 Merge 커밋을 만듭니다. 작업이 끝난 뒤에도 언제든 이전 시점으로 되돌릴 수 있으니 걱정하지 않으셔도 됩니다.</p><div class="sha-pair"><div><b>기준 브랜치 main</b><code>a91c3e2</code> · 시작 SHA 저장</div><div><b>대상 브랜치 fix/docs</b><code>f11d320</code> · 변경 없음</div></div><ul><li>적용 전 두 브랜치의 SHA를 함께 기록합니다.</li><li>원격 저장소로 push하지 않습니다.</li><li>완료 화면에서 두 브랜치를 시작 SHA로 되돌릴 수 있습니다.</li></ul><small>적용 직전에 브랜치 tip이 달라졌다면 Merge를 시작하지 않고 미리보기를 다시 계산합니다.</small><div class="safe-workspace-actions"><button onclick="closeSafeApplyDialog()">취소</button><button class="apply" onclick="startRealMerge()">Merge 실제 적용</button></div></section></div>`);
+}
+function startRealMerge(){
+ closeSafeApplyDialog();
+ clearTimeout(realMergeTimer);
+ const result=document.querySelector("[data-merge-result]");
+ result.classList.add("merge-live-current");
+ result.querySelector(".ref-pill").textContent="main · Merge 적용 중";
+ result.querySelector(".tag").textContent="Merge 중";
+ result.querySelector(".date").textContent="적용 중";
+ document.querySelector("#graph > circle")?.classList.add("applying-node");
+ document.getElementById("summary").innerHTML=`<h3>Merge 실제 적용 중</h3><span class="chip sim">Merge 커밋 생성</span><span class="chip">main 갱신 중</span><span class="chip">fix/docs 변경 없음</span><small>main ← fix/docs</small>`;
+ document.getElementById("previewHead").innerHTML=`<b>Merge 실제 적용 중</b><small>main에 Merge 커밋 생성</small>`;
+ const notice=document.getElementById("notice");
+ notice.className="notice state-panel";
+ notice.innerHTML=`<div class="state-head"><b>Merge 진행</b><span>적용 중</span></div><div class="state-progress"><i style="width:72%;background:var(--green)"></i></div><div class="state-counts"><span><b>main</b>기준 브랜치</span><span><b>fix/docs</b>대상 브랜치</span><span><b>1</b>Merge 커밋</span></div><p class="apply-status"><b>현재:</b> Merge branch 'fix/docs' into main</p>`;
+ realMergeTimer=setTimeout(finishRealMerge,950);
+}
+function finishRealMerge(){
+ document.querySelector("#graph > circle")?.classList.remove("applying-node");
+ document.querySelectorAll("#graph > path[stroke-dasharray]").forEach(p=>{p.removeAttribute("stroke-dasharray");p.setAttribute("stroke-width","3")});
+ const result=document.querySelector("[data-merge-result]");
+ result.classList.remove("virtual","merge-live-current");
+ result.classList.add("merge-applied");
+ result.querySelector(".ref-pill").textContent="✓ main · HEAD";
+ result.querySelector(".hash").textContent="91df0a8";
+ result.querySelector(".tag").textContent="Merge 완료";
+ result.querySelector(".date").textContent="적용 완료";
+ const graphNode=document.querySelector("#graph > circle");graphNode?.setAttribute("fill","#52c96e");graphNode?.setAttribute("stroke","#9be7aa");
+ const graphLabel=document.querySelector("#graph > text");if(graphLabel)graphLabel.textContent="MC";
+ document.getElementById("summary").innerHTML=`<h3>Merge 완료<span class="success-check">✓</span></h3><span class="chip sim">Merge 커밋 생성</span><span class="chip">main 갱신됨</span><span class="chip">원복 지점 저장됨</span><small>main ← fix/docs</small>`;
+ document.getElementById("previewHead").innerHTML=`<b>Merge 적용 결과</b><small>main 갱신 완료</small>`;
+ const notice=document.getElementById("notice");
+ notice.className="final-review applied";
+ notice.innerHTML=`<div class="final-review-head"><i>✓</i><b>Merge를 마쳤습니다</b><span>언제든 원복 가능</span></div><p>fix/docs는 그대로 두고 main에 Merge 커밋을 만들었습니다. 적용 전에 저장한 SHA로 두 브랜치를 정확히 되돌릴 수 있습니다.</p><div class="sha-pair"><div><b>main</b><code>a91c3e2</code> → <code>91df0a8</code></div><div><b>fix/docs</b><code>f11d320</code> · 유지</div></div><div class="final-review-actions"><button class="rebase-rollback" onclick="openMergeRollbackDialog()">Merge 이전 시점으로 되돌리기</button></div>`;
+ document.getElementById("caption").textContent="Merge 적용을 마쳤습니다. main과 fix/docs의 적용 전 SHA를 보관하고 있어 두 브랜치를 이전 시점으로 정확히 되돌릴 수 있습니다.";
+}
+function openMergeRollbackDialog(){
+ closeSafeApplyDialog();
+ document.querySelector(".app").insertAdjacentHTML("beforeend",`<div id="safeApplyDialog" class="safe-dialog-backdrop"><section class="safe-dialog"><h3>Merge 이전 시점으로 되돌리기</h3><p>두 로컬 브랜치를 Merge 직전 SHA로 되돌립니다. 원격 저장소는 변경하지 않습니다.</p><div class="sha-pair"><div><b>main 복원 SHA</b><code>a91c3e2</code></div><div><b>fix/docs 복원 SHA</b><code>f11d320</code></div></div><small>현재 Merge 커밋은 사라지지만 원격 저장소로 push한 내용은 없습니다.</small><div class="safe-workspace-actions"><button onclick="closeSafeApplyDialog()">취소</button><button class="apply" onclick="confirmMergeRollback()">두 브랜치 SHA 복원</button></div></section></div>`);
+}
+function confirmMergeRollback(){
+ closeSafeApplyDialog();
+ showScenario("mergeClean");
+ document.getElementById("summary").innerHTML=`<h3>Merge 원복 완료<span class="success-check">✓</span></h3><span class="chip sim">이전 SHA 복원</span><span class="chip">main a91c3e2</span><span class="chip">fix/docs f11d320</span><small>Merge 전 상태</small>`;
+ document.getElementById("previewHead").innerHTML=`<b>Merge 이전 상태</b><small>두 브랜치 복원 완료</small>`;
+ const notice=document.getElementById("notice");
+ notice.className="final-review applied";
+ notice.innerHTML=`<div class="final-review-head"><i>✓</i><b>Merge 이전 시점으로 돌아왔습니다</b><span>SHA 일치 확인</span></div><p>main과 fix/docs를 Merge 직전 SHA로 복원했습니다.</p><div class="sha-pair"><div><b>main</b><code>a91c3e2</code></div><div><b>fix/docs</b><code>f11d320</code></div></div>`;
+ document.getElementById("caption").textContent="두 브랜치가 Merge 직전 SHA와 정확히 일치합니다.";
+}
+function openRealRebaseDialog(){
+ closeSafeApplyDialog();
+ document.querySelector(".app").insertAdjacentHTML("beforeend",`<div id="safeApplyDialog" class="safe-dialog-backdrop"><section class="safe-dialog"><h3>main 위로 fix/docs Rebase 실제 적용</h3><p>fix/docs의 커밋 3개를 main 위에 차례로 다시 적용합니다. 작업이 끝난 뒤에도 언제든 이전 시점으로 되돌릴 수 있으니 걱정하지 않으셔도 됩니다.</p><div class="sha-pair"><div><b>기준 브랜치 main</b><code>a91c3e2</code> · 변경 없음</div><div><b>대상 브랜치 fix/docs</b><code>c43a821</code> · 시작 SHA 저장</div></div><ul><li>적용 전 두 브랜치의 SHA를 함께 기록합니다.</li><li>원격 저장소로 push하지 않습니다.</li><li>완료 화면에서 두 브랜치를 시작 SHA로 되돌릴 수 있습니다.</li></ul><small>적용 직전에 브랜치 tip이 달라졌다면 Rebase를 시작하지 않고 미리보기를 다시 계산합니다.</small><div class="safe-workspace-actions"><button onclick="closeSafeApplyDialog()">취소</button><button class="apply" onclick="startRealRebase()">Rebase 실제 적용</button></div></section></div>`);
+}
+function startRealRebase(){
+ closeSafeApplyDialog();
+ clearTimeout(realRebaseTimer);
+ document.querySelectorAll("[data-apply-step]").forEach(r=>r.classList.remove("selected","rebase-live-current"));
+ document.getElementById("timelineRows").classList.add("real-rebase-focus");
+ document.getElementById("previewHead").innerHTML=`<b>Rebase 실제 적용 중</b><small>fix/docs 커밋을 순서대로 적용</small>`;
+ applyRealRebaseStep(1);
+}
+function applyRealRebaseStep(step){
+ const commits=["docs: add merge documentation","docs: update API examples","docs: publish API guide"];
+ const rows=[...document.querySelectorAll("[data-apply-step]")];
+ rows.forEach(r=>r.classList.remove("rebase-live-current"));
+ document.querySelectorAll("#graph circle").forEach(c=>c.classList.remove("applying-node"));
+ if(step>3){finishRealRebase();return}
+ const current=document.querySelector(`[data-apply-step="${step}"]`);
+ current.classList.add("rebase-live-current");
+ current.querySelector(".ref-pill").textContent="fix/docs · 적용 중";
+ current.querySelector(".tag").textContent=`적용 ${step}/3`;
+ current.querySelector(".date").textContent="적용 중";
+ document.getElementById("rebaseFocus").style.top=`${(3-step)*56}px`;
+ const graphNodes=document.querySelectorAll("#graph circle");
+ graphNodes[3-step]?.classList.add("applying-node");
+ document.getElementById("summary").innerHTML=`<h3>Rebase 실제 적용 중</h3><span class="chip sim">진행 ${step}/3</span><span class="chip">main 변경 없음</span><span class="chip">fix/docs 갱신 중</span><small>fix/docs → main</small>`;
+ const notice=document.getElementById("notice");
+ notice.className="notice state-panel";
+ notice.innerHTML=`<div class="state-head"><b>커밋별 Rebase 진행</b><span>${step}/3</span></div><div class="state-progress"><i style="width:${step*33.34}%;background:var(--purple)"></i></div><div class="state-counts"><span><b>${step-1}</b>적용 완료</span><span><b>1</b>적용 중</span><span><b>${3-step}</b>대기</span></div><p class="apply-status"><b>현재:</b> ${commits[step-1]}</p>`;
+ realRebaseTimer=setTimeout(()=>{
+  current.classList.remove("rebase-live-current");
+  current.classList.add("rebase-applied");
+  current.querySelector(".ref-pill").textContent="fix/docs · 적용됨";
+  current.querySelector(".tag").textContent="적용 완료";
+  current.querySelector(".date").textContent=`완료 ${step}/3`;
+  applyRealRebaseStep(step+1);
+ },950);
+}
+function finishRealRebase(){
+ document.getElementById("timelineRows").classList.remove("real-rebase-focus");
+ document.querySelectorAll("#graph circle").forEach(c=>c.classList.remove("applying-node"));
+ const rail=document.getElementById("virtualRebaseRail");
+ rail?.removeAttribute("stroke-dasharray");rail?.setAttribute("stroke-width","3");
+ const shas={1:"2bd4e61",2:"53a8f90",3:"7fd9c1a"};
+ document.querySelectorAll("[data-apply-step]").forEach(r=>{
+  const step=Number(r.dataset.applyStep);
+  r.classList.remove("virtual","rebase-live-current");
+  r.classList.add("rebase-applied");
+  r.querySelector(".ref-pill").textContent=step===3?"✓ fix/docs · HEAD":"fix/docs · 적용됨";
+  r.querySelector(".hash").textContent=shas[step];
+  r.querySelector(".date").textContent="Rebase 완료";
+ });
+ document.getElementById("summary").innerHTML=`<h3>Rebase 완료<span class="success-check">✓</span></h3><span class="chip sim">3개 커밋 적용</span><span class="chip">main 변경 없음</span><span class="chip">원복 지점 저장됨</span><small>fix/docs → main</small>`;
+ document.getElementById("previewHead").innerHTML=`<b>Rebase 적용 결과</b><small>fix/docs 갱신 완료</small>`;
+ const notice=document.getElementById("notice");
+ notice.className="final-review rebase applied";
+ notice.innerHTML=`<div class="final-review-head"><i>✓</i><b>Rebase를 마쳤습니다</b><span>언제든 원복 가능</span></div><p>main은 그대로 두고 fix/docs를 새 커밋으로 갱신했습니다. 적용 전에 저장한 SHA로 두 브랜치를 정확히 되돌릴 수 있습니다.</p><div class="sha-pair"><div><b>main</b><code>a91c3e2</code> · 유지</div><div><b>fix/docs</b><code>c43a821</code> → <code>7fd9c1a</code></div></div><div class="final-review-actions"><button class="rebase-rollback" onclick="openRebaseRollbackDialog()">Rebase 이전 시점으로 되돌리기</button></div>`;
+ document.getElementById("caption").textContent="Rebase 적용을 마쳤습니다. main과 fix/docs의 적용 전 SHA를 보관하고 있어 두 브랜치를 이전 시점으로 정확히 되돌릴 수 있습니다.";
+}
+function openRebaseRollbackDialog(){
+ closeSafeApplyDialog();
+ document.querySelector(".app").insertAdjacentHTML("beforeend",`<div id="safeApplyDialog" class="safe-dialog-backdrop"><section class="safe-dialog"><h3>Rebase 이전 시점으로 되돌리기</h3><p>두 로컬 브랜치를 Rebase 직전 SHA로 되돌립니다. 원격 저장소는 변경하지 않습니다.</p><div class="sha-pair"><div><b>main 복원 SHA</b><code>a91c3e2</code></div><div><b>fix/docs 복원 SHA</b><code>c43a821</code></div></div><small>현재 Rebase 결과는 사라지지만 원격 저장소로 push한 내용은 없습니다.</small><div class="safe-workspace-actions"><button onclick="closeSafeApplyDialog()">취소</button><button class="apply" onclick="confirmRebaseRollback()">두 브랜치 SHA 복원</button></div></section></div>`);
+}
+function confirmRebaseRollback(){
+ closeSafeApplyDialog();
+ showScenario("rebaseClean");
+ document.getElementById("summary").innerHTML=`<h3>Rebase 원복 완료<span class="success-check">✓</span></h3><span class="chip sim">이전 SHA 복원</span><span class="chip">main a91c3e2</span><span class="chip">fix/docs c43a821</span><small>Rebase 전 상태</small>`;
+ document.getElementById("previewHead").innerHTML=`<b>Rebase 이전 상태</b><small>두 브랜치 복원 완료</small>`;
+ const notice=document.getElementById("notice");
+ notice.className="final-review rebase applied";
+ notice.innerHTML=`<div class="final-review-head"><i>✓</i><b>Rebase 이전 시점으로 돌아왔습니다</b><span>SHA 일치 확인</span></div><p>main과 fix/docs를 Rebase 직전 SHA로 복원했습니다.</p><div class="sha-pair"><div><b>main</b><code>a91c3e2</code></div><div><b>fix/docs</b><code>c43a821</code></div></div>`;
+ document.getElementById("caption").textContent="두 브랜치가 Rebase 직전 SHA와 정확히 일치합니다.";
+}
+function confirmSafeApply(kind){
+ closeSafeApplyDialog();
+ const destination=kind==="merge"?"main":"fix/docs";
+ const panel=document.querySelector(".final-review");
+ if(panel){
+  panel.className=`final-review ${kind==="rebase"?"rebase ":""}applied`;
+  panel.innerHTML=`<div class="final-review-head"><i>✓</i><b>${destination}에 반영 완료</b><span>로컬만 변경</span></div><p>확인한 결과를 ${destination}에 반영했습니다. 임시 공간은 삭제했고 원격 저장소는 변경하지 않았습니다.</p>`;
+ }
+}
+function showFinalDiff(kind){
+ const destination=kind==="merge"?"main":"fix/docs";
+ const operation=kind==="merge"?"Merge":"Rebase";
+ const applyAction=kind==="rebase"?"openRealRebaseDialog()":"openRealMergeDialog()";
+ showScenario(kind==="merge"?"mergeClean":"rebaseClean");
+ document.getElementById("summary").innerHTML=`<h3>${operation} 미리보기<span class="success-check">✓</span></h3><span class="chip sim">충돌 해결 완료</span><span class="chip">테스트 통과</span><span class="chip">${operation} 가능</span><small>${kind==="merge"?"main ← fix/docs":"fix/docs → main"}</small>`;
+ document.getElementById("previewHead").innerHTML=`<b>최종 두 브랜치 diff</b><small>반영 전 마지막 확인</small>`;
+ const notice=document.getElementById("notice");
+ notice.className=`final-review ${kind==="rebase"?"rebase":""}`;
+ notice.innerHTML=`<div class="final-review-head"><i>✓</i><b>충돌 해결과 테스트를 마쳤습니다</b><span>${operation} 가능</span></div><p>최종 diff를 확인한 뒤 ${destination}에 반영하거나 임시 결과를 Drop하세요. 아직 두 브랜치는 변경하지 않았습니다.</p><div class="final-review-actions"><button onclick="dropFinalResult('${kind}')">Drop</button><button class="apply" onclick="${applyAction}">${kind==="rebase"?"main 위로 fix/docs Rebase 실제 적용":"fix/docs를 main에 Merge 실제 적용"}</button></div>`;
+ document.getElementById("caption").textContent=`임시 공간에서 만든 최종 ${operation} 결과입니다. 반영을 확인하기 전까지 main과 fix/docs는 그대로 유지됩니다.`;
+}
+function dropFinalResult(kind){
+ const panel=document.querySelector(".final-review");
+ panel.className=`final-review ${kind==="rebase"?"rebase ":""}dropped`;
+ panel.innerHTML=`<div class="final-review-head"><i>✓</i><b>임시 결과를 Drop했습니다</b><span>변경 없음</span></div><p>임시 공간을 삭제했습니다. main과 fix/docs는 모두 그대로입니다.</p>`;
+}
+function advanceRebase(){
+ const current=document.querySelector('[data-rebase-step="2"]');
+ const next=document.querySelector('[data-rebase-step="3"]');
+ if(!current||!next)return;
+ if(next.classList.contains("rebase-current")){showFinalDiff("rebase");return}
+ current.classList.remove("rebase-current");current.classList.add("rebase-applied");
+ current.querySelector(".ref-pill").textContent="fix/docs · 적용됨";
+ current.querySelector(".tag").className="tag";current.querySelector(".tag").textContent="해결 완료";
+ next.classList.add("rebase-current");
+ next.querySelector(".ref-pill").textContent="fix/docs · 현재 충돌";
+ next.querySelector(".tag").className="tag bad";next.querySelector(".tag").textContent="현재 적용 중";
+ document.getElementById("rebaseFocus").style.top="112px";
+ document.getElementById("rebaseProgressLabel").textContent="리베이스 진행 3/3";
+ document.getElementById("rebaseProgressBar").style.width="100%";
+ document.getElementById("appliedCount").textContent="2";
+ document.getElementById("pendingCount").textContent="0";
+ document.getElementById("rebaseCurrent").textContent="현재: docs: publish API guide";
+ document.getElementById("rebaseDiffStatus").textContent="다음 충돌 · docs: publish API guide";
+ document.getElementById("incomingCommit").textContent="docs: publish API guide";
+ document.getElementById("rebaseContinue").textContent="마지막 충돌 해결 후 계속";
+ document.getElementById("summary").innerHTML=`<h3>리베이스 충돌</h3><span class="chip bad">다음 충돌</span><span class="chip">진행 3/3</span><span class="chip">2개 적용 · 0개 대기</span><small>fix/docs → main</small>`;
+}
+function showScenario(id){
+ clearTimeout(realRebaseTimer);
+ clearTimeout(realMergeTimer);
+ const s=scenarios[id];
+ const scenarioMode=id.startsWith("rebase")?"rebase":"merge";
+ document.getElementById("mergePreviewButton").classList.toggle("active",scenarioMode==="merge");
+ document.getElementById("rebasePreviewButton").classList.toggle("active",scenarioMode==="rebase");
+ document.querySelectorAll(".scenario").forEach(b=>b.classList.toggle("active",b.dataset.id===id));
+ document.getElementById("summary").innerHTML=s.summary;
+ document.getElementById("graph").innerHTML=s.graph;
+ document.getElementById("rowList").innerHTML=s.rows;
+ const timelineRows=document.getElementById("timelineRows");timelineRows.classList.toggle("has-rebase-focus",Number.isFinite(s.focusTop));
+ const focus=document.getElementById("rebaseFocus");focus.style.top=`${s.focusTop||0}px`;
+ document.getElementById("previewHead").innerHTML=s.head;
+ const notice=document.getElementById("notice");notice.innerHTML=s.noticeHtml||s.notice;notice.className=`notice ${s.bad?"bad":""} ${s.state?"state-panel":""} ${s.complete?"complete-panel":""}`;
+ document.getElementById("files").innerHTML=s.files;
+ const code=document.getElementById("code");code.innerHTML=s.code;code.classList.toggle("diff-editor",!!s.editor);code.classList.toggle("unified",!!s.editor&&diffView==="unified");
+ code.querySelectorAll(".view-switch button").forEach(b=>b.classList.toggle("active",(diffView==="unified"&&b.textContent==="Unified")||(diffView==="split"&&b.textContent==="Side-by-side")));
+ document.getElementById("caption").textContent=s.caption;
+ const app=document.querySelector(".app");
+ if(s.safeKind)renderSafeWorkspace(s.safeKind);else delete app.dataset.safePhase;
+}
+showScenario(previewMode==="rebase"?"rebaseClean":"mergeClean");
+</script>
+</body>
+</html>
