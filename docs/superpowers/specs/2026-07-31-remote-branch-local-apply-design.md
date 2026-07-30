@@ -1,203 +1,214 @@
-# Remote Branch Preview Local Apply Design
+# 원격 브랜치 미리보기의 로컬 적용 설계
 
-**Date:** 2026-07-31
+**작성일:** 2026-07-31
 
-## Goal
+## 목표
 
-Allow Merge Preview and Rebase Preview results that include remote-tracking
-branches to be applied safely. A preview may read local or remote-tracking refs,
-but applying and undoing a result must change local branches only.
+원격 추적 브랜치가 포함된 Merge 미리보기와 Rebase 미리보기 결과도
+안전하게 적용할 수 있게 한다. 미리보기는 로컬 브랜치와 원격 추적
+브랜치를 모두 읽을 수 있지만 적용과 원복은 로컬 브랜치만 변경해야
+한다.
 
-Yogit never pushes as part of this workflow. There is no Push confirmation,
-`Do not ask again` preference, or related Settings entry.
+Yogit은 이 흐름에서 Push하지 않는다. Push 확인창과 `다시 묻지 않기`
+설정도 제공하지 않는다.
 
-## Current Behavior
+## 현재 동작
 
-The preview accepts local and remote-tracking refs, but the apply button is
-enabled only when both refs are local branches. The Git layer also resolves both
-tips through `refs/heads/*`, so a remote-tracking source or destination cannot
-reach the existing apply path.
+미리보기에서는 로컬 브랜치와 원격 추적 브랜치를 모두 선택할 수 있다.
+하지만 현재는 두 ref가 모두 로컬 브랜치일 때만 적용 버튼이 활성화된다.
+Git 계층도 두 tip을 모두 `refs/heads/*`에서 찾기 때문에 원격 추적
+브랜치가 기준이나 비교 대상이면 기존 적용 흐름을 사용할 수 없다.
 
-## Decisions
+## 결정 사항
 
-- Remote-tracking refs are read-only inputs.
-- Merge changes the local form of the base ref.
-- Rebase changes the local form of the comparison ref.
-- A remote source does not need a matching local branch.
-- A remote destination is mapped to a writable local branch before applying.
-- Existing local branches are never reset to a remote SHA.
-- Apply, undo, and failure cleanup never change `refs/remotes/*`.
-- No Git command in this workflow uses `push`.
+- 원격 추적 ref는 읽기 전용 입력으로 사용한다.
+- Merge는 기준 ref에 대응하는 로컬 브랜치를 변경한다.
+- Rebase는 비교 ref에 대응하는 로컬 브랜치를 변경한다.
+- 원격 ref를 입력으로만 사용할 때는 같은 이름의 로컬 브랜치가 없어도
+  된다.
+- 변경 대상이 원격 ref라면 적용 전에 쓰기 가능한 로컬 브랜치로
+  대응시킨다.
+- 기존 로컬 브랜치를 원격 SHA에 강제로 맞추지 않는다.
+- 적용, 원복, 실패 정리 과정에서 `refs/remotes/*`를 변경하지 않는다.
+- 이 흐름에서는 `push` 명령을 실행하지 않는다.
 
-## Destination Rules
+## 변경 대상 결정 규칙
 
-The operation determines which ref must be writable:
+미리보기 방식에 따라 쓰기 가능한 ref가 달라진다.
 
-| Preview | Base ref | Comparison ref | Local branch changed |
+| 미리보기 | 기준 ref | 비교 ref | 변경할 로컬 브랜치 |
 | --- | --- | --- | --- |
-| Merge | local | remote | Existing local base |
-| Merge | remote | local or remote | Local form of the base |
-| Rebase | local or remote | local | Existing local comparison |
-| Rebase | local or remote | remote | Local form of the comparison |
+| Merge | 로컬 | 원격 | 기존 로컬 기준 브랜치 |
+| Merge | 원격 | 로컬 또는 원격 | 기준 ref의 로컬 브랜치 |
+| Rebase | 로컬 또는 원격 | 로컬 | 기존 로컬 비교 브랜치 |
+| Rebase | 로컬 또는 원격 | 원격 | 비교 ref의 로컬 브랜치 |
 
-When both refs are local, the current behavior remains unchanged.
+두 ref가 모두 로컬 브랜치라면 현재 동작을 그대로 유지한다.
 
-### Mapping a Remote Destination
+### 원격 변경 대상을 로컬 브랜치에 대응시키는 방법
 
-The local candidate is the remote-tracking name without its remote prefix.
-For example, `origin/team/feature` maps to `team/feature`.
+원격 추적 브랜치 이름에서 원격 이름을 뺀 값을 로컬 브랜치 이름으로
+사용한다. 예를 들어 `origin/team/feature`는 `team/feature`에 대응한다.
 
-- If the local candidate does not exist, applying creates it at the remote
-  destination tip and records the selected remote ref as its upstream.
-- If the local candidate exists at the same SHA, Yogit reuses it.
-- If it exists at another SHA, Yogit does not move it. The remote-destination
-  preview is replaced with a preview against the current local candidate, and
-  the user must confirm that recalculated result.
-- An existing local candidate keeps its current upstream configuration.
+- 해당 로컬 브랜치가 없으면 원격 변경 대상의 tip에서 브랜치를 만들고
+  선택한 원격 ref를 upstream으로 설정한다.
+- 해당 로컬 브랜치가 같은 SHA에 있으면 그대로 사용한다.
+- 해당 로컬 브랜치가 다른 SHA에 있으면 이동시키지 않는다. 원격
+  변경 대상을 사용한 미리보기를 현재 로컬 브랜치 기준으로 다시
+  계산하고 사용자가 새 결과를 확인하게 한다.
+- 기존 로컬 브랜치의 upstream 설정은 변경하지 않는다.
 
-This prevents a same-named local branch from losing commits or being silently
-repurposed.
+이 규칙은 같은 이름의 로컬 브랜치가 커밋을 잃거나 다른 용도로
+바뀌는 일을 막는다.
 
-## Preview and Apply Flow
+## 미리보기와 적용 흐름
 
-1. Resolve the selected base and comparison refs and calculate the preview as
-   today.
-2. Determine the writable destination from the preview mode.
-3. If the destination is remote and a different same-named local branch exists,
-   switch the destination to that local branch and recalculate the preview.
-4. Show the exact local branch that will change in the result card and
-   confirmation dialog.
-5. Immediately before applying, verify every preview input ref still points to
-   the recorded SHA.
-6. Create the local destination when it does not exist.
-7. Apply the preview result to that local branch.
-8. Record enough state to undo the local change exactly.
+1. 선택한 기준 ref와 비교 ref를 확인하고 지금과 같은 방식으로
+   미리보기를 계산한다.
+2. 미리보기 방식에 따라 쓰기 가능한 변경 대상을 정한다.
+3. 변경 대상이 원격이고 같은 이름의 로컬 브랜치가 다른 SHA에 있으면
+   해당 로컬 브랜치로 변경 대상을 바꿔 미리보기를 다시 계산한다.
+4. 결과 카드와 확인창에 실제로 변경할 로컬 브랜치 이름을 표시한다.
+5. 적용 직전에 미리보기 입력으로 사용한 모든 ref가 기록된 SHA를
+   그대로 가리키는지 확인한다.
+6. 로컬 변경 대상이 없으면 새로 만든다.
+7. 미리보기 결과를 해당 로컬 브랜치에 적용한다.
+8. 로컬 변경을 정확히 되돌리는 데 필요한 상태를 기록한다.
 
-The existing remote refresh policy is unchanged. Applying does not fetch from or
-push to a network remote.
+기존 원격 갱신 방식은 바꾸지 않는다. 적용 과정에서는 네트워크
+원격에서 Fetch하거나 원격으로 Push하지 않는다.
 
-## Merge Apply
+## Merge 적용
 
-The Merge destination is the base branch. The comparison ref may remain a
-remote-tracking ref because it is only a merge parent.
+Merge의 변경 대상은 기준 브랜치다. 비교 ref는 Merge 부모로만
+사용하므로 원격 추적 ref인 상태로 둘 수 있다.
 
-Yogit creates the Merge commit from the preview tree, the current local base
-tip, and the recorded comparison tip. It then moves only the local base branch
-to the Merge commit.
+Yogit은 미리보기 tree, 현재 로컬 기준 브랜치 tip, 기록된 비교 ref
+tip으로 Merge 커밋을 만든다. 그다음 로컬 기준 브랜치만 새 Merge
+커밋으로 이동한다.
 
-If the selected base was remote, the confirmation and completion views use the
-mapped local name:
+선택한 기준 ref가 원격이면 확인창과 완료 화면에 대응하는 로컬 이름을
+표시한다.
 
-`origin/main` selected → create or reuse local `main` → apply to local `main`
+`origin/main` 선택 → 로컬 `main` 생성 또는 재사용 → 로컬 `main`에 적용
 
-## Rebase Apply
+## Rebase 적용
 
-The Rebase destination is the comparison branch. The base ref may remain a
-remote-tracking ref because it is only the new parent.
+Rebase의 변경 대상은 비교 브랜치다. 기준 ref는 새 부모로만 사용하므로
+원격 추적 ref인 상태로 둘 수 있다.
 
-If the comparison ref was remote, Yogit creates or reuses its local form and
-moves only that local branch to the verified virtual tip. The commit-by-commit
-focus animation remains unchanged.
+비교 ref가 원격이면 대응하는 로컬 브랜치를 만들거나 재사용한 뒤,
+검증한 가상 tip으로 해당 로컬 브랜치만 이동한다. 커밋별 포커스 이동
+애니메이션은 지금과 같이 유지한다.
 
-## User Interface
+## 화면 구성
 
-The disabled remote-branch message is replaced with a local-only explanation.
+원격 브랜치를 바로 적용할 수 없다는 기존 문구는 로컬에만 적용된다는
+안내로 바꾼다.
 
-- Remote source, local destination:
+- 원격 입력, 로컬 변경 대상:
   `origin/feature는 입력으로만 사용합니다. 실제 변경은 로컬 main에 적용됩니다.`
-- Remote destination without a local branch:
+- 로컬 브랜치가 없는 원격 변경 대상:
   `로컬 feature를 origin/feature에서 만든 뒤 결과를 적용합니다.`
-- Existing local destination with another SHA:
+- 같은 이름의 로컬 브랜치가 다른 SHA에 있는 경우:
   `기존 로컬 feature 기준으로 미리보기를 다시 계산했습니다.`
 
-The apply button always names the writable local destination:
+적용 버튼에는 쓰기 가능한 로컬 변경 대상의 이름을 표시한다.
 
 - Merge: `origin/feature를 main에 Merge 실제 적용`
 - Rebase: `origin/main 위로 feature Rebase 실제 적용`
 
-The confirmation dialog states that only the named local branch changes and
-that no Push is performed. The completion card shows the local branch before
-and after SHA and labels the selected remote refs as unchanged.
+확인창에는 지정한 로컬 브랜치만 변경되며 Push하지 않는다고 안내한다.
+완료 카드에는 로컬 브랜치의 적용 전후 SHA를 표시하고 선택한 원격
+ref는 변경되지 않았다고 표시한다.
 
-There is no Push button, Push dialog, or Settings control.
+Push 버튼, Push 확인창, 관련 설정은 만들지 않는다.
 
-## Apply Result and Undo
+## 적용 결과와 원복
 
-The apply result records the one local branch that may change:
+적용 결과에는 변경될 수 있는 로컬 브랜치 하나의 상태만 기록한다.
 
-- operation mode
-- selected base and comparison refs and their preview tips
-- applied local branch name
-- local branch tip before apply, or no value when the branch was created
-- local branch tip after apply
-- whether applying created the local branch
+- 적용 방식
+- 선택한 기준 ref와 비교 ref, 두 ref의 미리보기 당시 tip
+- 적용한 로컬 브랜치 이름
+- 적용 전 로컬 브랜치 tip. 적용 과정에서 브랜치를 새로 만들었다면
+  값이 없다.
+- 적용 후 로컬 브랜치 tip
+- 적용 과정에서 로컬 브랜치를 만들었는지 여부
 
-Undo first verifies that the local branch still points to the applied SHA.
+원복하기 전에 로컬 브랜치가 적용 직후 SHA를 그대로 가리키는지
+확인한다.
 
-- For an existing branch, undo moves it back to its recorded previous SHA.
-- For a branch created by apply, undo deletes it with an expected-old-SHA
-  check.
-- If the branch changed after apply, undo stops without moving or deleting it.
+- 기존 브랜치라면 기록한 적용 전 SHA로 되돌린다.
+- 적용 과정에서 만든 브랜치라면 예상 SHA가 일치할 때만 삭제한다.
+- 적용 뒤 브랜치가 바뀌었다면 이동하거나 삭제하지 않고 원복을
+  중단한다.
 
-Remote-tracking refs are not part of undo because the workflow never changes
-them.
+이 흐름은 원격 추적 ref를 변경하지 않으므로 원복 대상에도 포함하지
+않는다.
 
-## Failure Handling
+## 실패 처리
 
-- If an input ref changed after preview, apply stops and asks for a new preview.
-- If an existing local destination changed after recalculation, apply stops.
-- If a destination branch is checked out in another worktree, apply reports
-  that the branch must be made available instead of forcing the ref.
-- If creating a local branch succeeds but applying fails, Yogit deletes that
-  branch only when it still points to the expected creation SHA.
-- If the current destination branch is checked out, the existing clean worktree
-  and no-other-Git-operation checks still apply.
-- A local name collision never causes a reset, forced checkout, or upstream
-  rewrite.
+- 미리보기 뒤 입력 ref가 바뀌면 적용을 중단하고 새 미리보기를
+  요청한다.
+- 미리보기를 다시 계산한 뒤 기존 로컬 변경 대상이 바뀌면 적용을
+  중단한다.
+- 변경 대상 브랜치가 다른 worktree에 체크아웃되어 있으면 ref를
+  강제로 이동하지 않고 해당 브랜치를 사용할 수 있게 정리하라고
+  안내한다.
+- 로컬 브랜치를 만든 뒤 적용에 실패하면 해당 브랜치가 생성 당시
+  SHA를 그대로 가리킬 때만 삭제한다.
+- 현재 체크아웃된 브랜치가 변경 대상이면 기존과 같이 작업 트리와
+  인덱스가 깨끗하고 다른 Git 작업이 진행 중이지 않을 때만 적용한다.
+- 로컬 이름이 겹치더라도 브랜치를 초기화하거나 강제로 체크아웃하거나
+  upstream을 바꾸지 않는다.
 
-## Git Layer Changes
+## Git 계층 변경
 
-The Git layer resolves refs by their real namespace during verification instead
-of assuming `refs/heads/*` for both inputs. It resolves a single local apply
-target separately from the preview inputs.
+적용 전 검증에서는 두 입력을 모두 `refs/heads/*`로 간주하지 않고
+실제 ref 경로에 맞춰 확인한다. 미리보기 입력과 별도로 로컬 변경 대상
+하나를 정한다.
 
-The existing compare-and-swap behavior for moving local refs remains the
-authority for safe updates. Branch creation and deletion also use expected SHA
-checks so cleanup cannot remove later user work.
+기존처럼 예상한 이전 SHA가 일치할 때만 로컬 ref를 이동한다. 브랜치를
+만들거나 삭제할 때도 예상 SHA를 확인해서 적용 뒤 생긴 사용자 작업을
+정리 과정에서 지우지 않게 한다.
 
-No new dependency or network integration is required.
+새 의존성이나 네트워크 연동은 필요하지 않다.
 
-## Tests
+## 테스트
 
-### Git tests
+### Git 테스트
 
-- Merge from a remote comparison ref into a local base.
-- Merge with a remote base creates and updates only its local form.
-- Rebase onto a remote base updates the existing local comparison branch.
-- Rebase of a remote comparison creates and updates its local form.
-- Both selected refs may be remote while only the operation destination is
-  localized.
-- A different same-named local branch is not reset and forces recalculation.
-- Undo restores an existing local destination exactly.
-- Undo removes a destination created by apply.
-- Apply failure cleans up only an unchanged newly created branch.
-- Changed local or remote-tracking tips reject stale previews.
-- Recorded Git commands contain no `push`.
+- 원격 비교 ref를 로컬 기준 브랜치에 Merge한다.
+- 원격 기준 ref로 Merge하면 대응하는 로컬 브랜치만 만들고 변경한다.
+- 원격 기준 ref 위로 Rebase하면 기존 로컬 비교 브랜치만 변경한다.
+- 원격 비교 ref를 Rebase하면 대응하는 로컬 브랜치만 만들고 변경한다.
+- 두 선택 ref가 모두 원격이어도 실제 변경 대상만 로컬 브랜치로
+  대응시킨다.
+- 같은 이름의 로컬 브랜치가 다른 SHA에 있으면 초기화하지 않고
+  미리보기를 다시 계산한다.
+- 기존 로컬 변경 대상을 정확한 SHA로 원복한다.
+- 적용 과정에서 만든 로컬 변경 대상은 원복할 때 삭제한다.
+- 적용 실패 뒤 새로 만든 브랜치가 바뀌지 않았을 때만 정리한다.
+- 로컬 tip이나 원격 추적 tip이 바뀌면 오래된 미리보기를 거부한다.
+- 실행한 Git 명령에 `push`가 없는지 확인한다.
 
-### Widget tests
+### 화면 테스트
 
-- Remote previews show an enabled apply button when a writable local target can
-  be resolved.
-- Apply labels and confirmation text name the local destination.
-- A newly created local destination is explained before confirmation.
-- Recalculation feedback appears when a same-named local branch differs.
-- Completion and undo views show local changes and remote refs as unchanged.
-- No Push action or Push setting is rendered.
+- 쓰기 가능한 로컬 변경 대상을 정할 수 있으면 원격 브랜치
+  미리보기에서도 적용 버튼이 활성화된다.
+- 적용 버튼과 확인창에 로컬 변경 대상 이름이 표시된다.
+- 새 로컬 변경 대상을 만들 예정이면 확인 전에 안내한다.
+- 같은 이름의 로컬 브랜치가 달라서 미리보기를 다시 계산한 경우
+  안내를 표시한다.
+- 완료 화면과 원복 화면에는 로컬 변경과 원격 ref가 그대로라는
+  사실을 표시한다.
+- Push 동작이나 Push 설정이 표시되지 않는다.
 
-## Out of Scope
+## 범위에서 제외하는 항목
 
-- Pushing, force-pushing, or deleting remote branches
-- Remembering Push preferences
-- Automatically fetching during apply
-- Resetting an existing local branch to match a remote branch
-- Creating temporary shadow branches when a same-named local branch exists
+- 원격 브랜치 Push, 강제 Push, 삭제
+- Push 설정 저장
+- 적용 중 자동 Fetch
+- 기존 로컬 브랜치를 원격 브랜치와 같은 SHA로 초기화
+- 같은 이름의 로컬 브랜치가 있을 때 임시 대체 브랜치 생성
