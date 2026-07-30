@@ -2855,6 +2855,10 @@ void main() {
       everyElement(lessThanOrEqualTo(1)),
     );
     expect(
+      painters.map((painter) => painter.refConnector),
+      everyElement(isFalse),
+    );
+    expect(
       painters
           .singleWhere((painter) => painter.row.commit.sha == 'root')
           .committerColor,
@@ -3197,7 +3201,7 @@ void main() {
     );
     expect(
       (unifiedButton.decoration! as BoxDecoration).color,
-      const Color(0xFF4388EE),
+      TimelineThemePalette.systemGraphite.neutralChip,
     );
     expect(
       (unifiedButton.decoration! as BoxDecoration).borderRadius,
@@ -3219,7 +3223,7 @@ void main() {
     );
     expect(
       (sideBySideButton.decoration! as BoxDecoration).color,
-      const Color(0xFF4388EE),
+      TimelineThemePalette.systemGraphite.neutralChip,
     );
 
     await tester.ensureVisible(find.text('other.txt').last);
@@ -3602,6 +3606,7 @@ void main() {
 
     expect(find.text('new SHA'), findsNWidgets(3));
     expect(find.text('VR'), findsNWidgets(3));
+    expect(find.text('feature · 가상'), findsNWidgets(3));
     expect(find.text('재작성 1/3'), findsOneWidget);
     expect(find.text('재작성 2/3'), findsOneWidget);
     expect(find.text('재작성 3/3'), findsOneWidget);
@@ -3617,6 +3622,14 @@ void main() {
         (painter) => painter.previewRailColor == const Color(0xFFC69AFF),
       ),
       isTrue,
+    );
+    final timelinePainters = tester
+        .widgetList<CustomPaint>(find.byType(CustomPaint))
+        .map((paint) => paint.painter)
+        .whereType<CommitGraphPainter>();
+    expect(
+      timelinePainters.map((painter) => painter.refConnector),
+      everyElement(isFalse),
     );
     final mappingPainter = tester
         .widgetList<CustomPaint>(find.byType(CustomPaint))
@@ -3654,6 +3667,21 @@ void main() {
     expect(find.text('feature · 원본'), findsNWidgets(3));
     final originalAvatar = find.byKey(
       const ValueKey('author-avatar-feature-one'),
+    );
+    final mappedRing = find.ancestor(
+      of: originalAvatar,
+      matching: find.byWidgetPredicate((widget) {
+        if (widget case Container(decoration: final BoxDecoration decoration)) {
+          return decoration.shape == BoxShape.circle &&
+              decoration.border != null;
+        }
+        return false;
+      }),
+    );
+    expect(mappedRing, findsOneWidget);
+    expect(
+      tester.getSize(mappedRing),
+      const Size.square(CommitGraphPainter.avatarDiameter),
     );
     final mappedContainer = tester
         .widgetList<Container>(
@@ -4110,7 +4138,8 @@ void main() {
         .firstWhere((painter) => painter.dashedLanes.isNotEmpty);
     expect(targetPainter.previewRailColor, const Color(0xFFC69AFF));
     expect(find.text('feature · 현재 충돌'), findsOneWidget);
-    expect(find.text('현재 적용 중'), findsOneWidget);
+    expect(find.text('충돌 해결 중'), findsOneWidget);
+    expect(find.text('현재 적용 중'), findsNothing);
     expect(
       tester
           .widget<Text>(find.byKey(const Key('rebase-preview-applied-count')))
@@ -5010,22 +5039,25 @@ void main() {
     );
   });
 
-  test('rebase mapping colors are dark and avoid the active palette', () {
-    final reserved = const [
-      Color(0xFF8F6478),
-      Color(0xFF5F8582),
-      Color(0xFF81754F),
-    ];
-    final colors = rebaseMappingColors(reserved);
+  test(
+    'rebase mapping colors are distinct, visible, and avoid the palette',
+    () {
+      final reserved = const [
+        Color(0xFF8F6478),
+        Color(0xFF5F8582),
+        Color(0xFF81754F),
+      ];
+      final colors = rebaseMappingColors(reserved);
 
-    expect(colors, hasLength(5));
-    expect(colors.toSet(), hasLength(5));
-    expect(colors.where(reserved.contains), isEmpty);
-    expect(
-      colors.map((color) => HSLColor.fromColor(color).lightness),
-      everyElement(lessThanOrEqualTo(0.42)),
-    );
-  });
+      expect(colors, hasLength(5));
+      expect(colors.toSet(), hasLength(5));
+      expect(colors.where(reserved.contains), isEmpty);
+      expect(
+        colors.map((color) => HSLColor.fromColor(color).lightness),
+        everyElement(inInclusiveRange(0.48, 0.52)),
+      );
+    },
+  );
 
   test('rebase mapping lines are one pixel with no outline or gaps', () async {
     final rows = [

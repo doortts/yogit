@@ -56,8 +56,8 @@ List<Color> rebaseMappingColors(Iterable<Color> reserved) {
     final color = HSLColor.fromAHSL(
       1,
       (18 + index * 67) % 360,
-      0.26,
-      0.38,
+      0.34,
+      0.50,
     ).toColor();
     if (used.add(color.toARGB32())) colors.add(color);
   }
@@ -4734,7 +4734,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         ? '재작성 ${rewrittenIndex + 1}/${rebasePreview!.total}'
         : rebasePreview?.status == RebasePreviewStatus.conflict &&
               commit.sha == rebasePreview?.currentCommit?.sha
-        ? '현재 적용 중'
+        ? '충돌 해결 중'
         : rebasePreview?.status == RebasePreviewStatus.conflict &&
               originalIndex >= 0
         ? '해결 완료'
@@ -4786,7 +4786,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       index,
       graphWidth,
       selected && !virtualPreview,
-      refs.isNotEmpty,
+      refs.isNotEmpty && _comparison == null,
       committerColor: previewColor,
       outgoingRailColor: commonBoundary ? _palette.muted : null,
     );
@@ -5144,26 +5144,31 @@ class _TimelineScreenState extends State<TimelineScreen>
               border: Border.all(color: _previewPurple, width: 1),
             ),
           )
+        : mappingColor == null
+        ? CommitAvatarStack(
+            commit: commit,
+            avatarService: widget.avatarService,
+            showRemoteAvatars: widget.showRemoteAvatars,
+            size: size,
+            stacked: stacked,
+            discColor: branchColor,
+          )
         : Container(
-            padding: mappingColor == null
-                ? EdgeInsets.zero
-                : const EdgeInsets.all(_rebaseMappingAvatarBorderWidth),
+            width: size,
+            height: size,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: mappingColor == null
-                  ? null
-                  : Border.all(
-                      color: mappingColor,
-                      width: _rebaseMappingAvatarBorderWidth,
-                    ),
+              border: Border.all(
+                color: mappingColor,
+                width: _rebaseMappingAvatarBorderWidth,
+              ),
             ),
             child: CommitAvatarStack(
               commit: commit,
               avatarService: widget.avatarService,
               showRemoteAvatars: widget.showRemoteAvatars,
-              size: mappingColor == null
-                  ? size
-                  : size - _rebaseMappingAvatarBorderWidth * 2,
+              size: size - _rebaseMappingAvatarBorderWidth * 2,
               stacked: stacked,
               discColor: branchColor,
             ),
@@ -7294,7 +7299,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
       decoration: BoxDecoration(
         color: _branchPreviewLayout == layout
-            ? _previewControlBlue
+            ? _palette.neutralChip
             : Colors.transparent,
         borderRadius: BorderRadius.circular(4),
       ),

@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rebase 미리보기 세부 조정 시안</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111214;
+      --surface: #1b1c1f;
+      --surface-2: #222328;
+      --surface-3: #303136;
+      --line: #34363c;
+      --text: #f2f2f5;
+      --muted: #aeb0b8;
+      --cyan: #13cce8;
+      --green: #58bd74;
+      --purple: #c99aff;
+      --red: #a23640;
+      --red-soft: #ffadb4;
+      --amber: #f4b95e;
+      --map-1: #d88a9f;
+      --map-2: #7fd8cf;
+      --map-3: #d5bd69;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 18px;
+      background: #0c0d0f;
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Apple SD Gothic Neo", sans-serif;
+    }
+    button { font: inherit; }
+    .scenario-bar {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .scenario-bar button {
+      border: 1px solid #454850;
+      border-radius: 7px;
+      background: #191a1d;
+      color: var(--muted);
+      padding: 7px 14px;
+      cursor: pointer;
+    }
+    .scenario-bar button.active {
+      border-color: #5aaeff;
+      background: #347fc9;
+      color: #fff;
+    }
+    .window {
+      min-width: 1040px;
+      overflow: hidden;
+      border: 1px solid #3b3d43;
+      border-radius: 12px;
+      background: var(--bg);
+      box-shadow: 0 16px 44px rgba(0, 0, 0, .35);
+    }
+    .toolbar {
+      height: 74px;
+      display: flex;
+      align-items: center;
+      gap: 44px;
+      padding: 0 22px;
+      border-bottom: 1px solid var(--line);
+      background: #1c1d20;
+    }
+    .lights { display: flex; gap: 8px; }
+    .lights i { width: 12px; height: 12px; border-radius: 50%; }
+    .lights i:nth-child(1) { background: #ff5f57; }
+    .lights i:nth-child(2) { background: #febc2e; }
+    .lights i:nth-child(3) { background: #28c840; }
+    .branch-select { min-width: 160px; }
+    .branch-select small {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .branch-select b { font-size: 18px; }
+    .preview-switch {
+      display: flex;
+      overflow: hidden;
+      border: 1px solid #454850;
+      border-radius: 10px;
+      background: #151619;
+    }
+    .preview-switch span {
+      padding: 10px 16px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .preview-switch .active {
+      margin: 3px;
+      border-radius: 7px;
+      background: #4589e8;
+      color: #fff;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 350px;
+      min-height: 650px;
+    }
+    .timeline { min-width: 640px; overflow: hidden; border-right: 1px solid var(--line); }
+    .summary {
+      height: 72px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: #202126;
+    }
+    .summary h2 { margin: 0 4px 0 0; font-size: 17px; }
+    .check {
+      display: grid;
+      place-items: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #38b75b;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 900;
+    }
+    .chip {
+      border-radius: 6px;
+      background: #303137;
+      color: #c6c7cc;
+      padding: 7px 10px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .chip.purple { background: #3b2c51; color: #ddb9ff; }
+    .summary .direction { margin-left: auto; color: var(--muted); font-size: 12px; }
+    .table-head, .commit-row {
+      display: grid;
+      grid-template-columns: 220px 170px 95px minmax(190px, 1fr);
+    }
+    .table-head {
+      height: 42px;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+      color: #b8bac1;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .05em;
+    }
+    .table-head span, .commit-row > div { padding: 0 16px; }
+    .table-head span + span { border-left: 1px solid var(--line); }
+    .rows { position: relative; }
+    .commit-row {
+      height: 56px;
+      align-items: center;
+      border-bottom: 1px solid #292b30;
+      font-size: 13px;
+    }
+    .commit-row.virtual { background: #2a243d; box-shadow: inset 3px 0 0 var(--purple); }
+    .commit-row.conflict {
+      background: var(--red);
+      box-shadow: inset 4px 0 0 var(--red-soft);
+      color: #fff;
+    }
+    .ref {
+      display: inline-flex;
+      align-items: center;
+      width: 100%;
+      height: 34px;
+      border: 1px solid currentColor;
+      border-radius: 6px;
+      padding: 0 10px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .ref.virtual { color: var(--purple); background: rgba(201, 154, 255, .09); }
+    .ref.main { color: var(--green); background: rgba(88, 189, 116, .1); }
+    .ref.feature { color: var(--cyan); background: rgba(19, 204, 232, .1); }
+    .ref.common { color: #b5b7bf; background: rgba(181, 183, 191, .1); }
+    .conflict .ref { color: #ffb5bb; background: rgba(255, 255, 255, .06); }
+    .hash { color: #ff746f; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .virtual .hash { color: #fff; }
+    .message {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      font-size: 15px;
+    }
+    .tag {
+      display: inline-block;
+      margin-right: 8px;
+      border-radius: 6px;
+      background: #594273;
+      color: #e4c7ff;
+      padding: 5px 7px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .conflict .tag {
+      background: #c65a64;
+      color: #fff;
+    }
+    .graph-layer {
+      position: absolute;
+      inset: 0 auto 0 220px;
+      width: 170px;
+      pointer-events: none;
+    }
+    .graph-layer svg { width: 100%; height: 100%; overflow: visible; }
+    .base-rail, .feature-rail, .virtual-rail, .mapping {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .base-rail { stroke: var(--green); stroke-width: 2; }
+    .feature-rail { stroke: var(--amber); stroke-width: 2; }
+    .virtual-rail { stroke: var(--purple); stroke-width: 1; stroke-dasharray: 4 5; }
+    .mapping { stroke-width: 1; }
+    .node text {
+      fill: #111214;
+      font-size: 10px;
+      font-weight: 900;
+      text-anchor: middle;
+      dominant-baseline: central;
+    }
+    .node circle.core { stroke-width: 0; }
+    .node circle.ring { fill: none; stroke-width: 3; }
+    .node.virtual circle.core { fill: var(--purple); }
+    .node.main circle.core { fill: var(--green); }
+    .node.feature circle.core { fill: var(--amber); }
+    .node.common circle.core { fill: #aeb0b7; }
+    .right-pane { min-width: 0; overflow: hidden; background: #161719; }
+    .pane-title {
+      height: 62px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .pane-title b { font-size: 15px; }
+    .pane-title small { color: var(--muted); }
+    .result-card {
+      margin: 14px;
+      padding: 14px;
+      border: 1px solid #735b92;
+      border-radius: 8px;
+      background: #2a233b;
+    }
+    .result-card strong { font-size: 14px; }
+    .progress { height: 5px; margin: 12px 0; border-radius: 4px; background: var(--purple); }
+    .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+    .metrics span {
+      padding: 9px 4px;
+      border-radius: 6px;
+      background: #202125;
+      color: #bcbec5;
+      text-align: center;
+      font-size: 11px;
+    }
+    .metrics b { display: block; color: #fff; font-size: 14px; }
+    .files { margin: 0 14px 14px; }
+    .file {
+      display: grid;
+      grid-template-columns: 26px 1fr auto;
+      align-items: center;
+      height: 38px;
+      padding: 0 10px;
+      color: #d7d8dc;
+    }
+    .file.active { border-radius: 7px; background: #2b2e33; }
+    .file i { color: #55d87c; font-style: normal; }
+    .file small { color: var(--muted); }
+    .diff-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      height: 46px;
+      padding: 0 12px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+    .diff-toolbar b { font-size: 13px; }
+    .diff-toolbar > span {
+      max-width: 130px;
+      min-width: 0;
+      overflow: hidden;
+      color: #ff9aa9;
+      font-size: 11px;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .diff-switch {
+      display: flex;
+      flex: 0 0 auto;
+      margin-left: auto;
+      padding: 3px;
+      border-radius: 7px;
+      background: #121316;
+    }
+    .diff-switch button {
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: #b8bac1;
+      padding: 6px 9px;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .diff-switch button.active {
+      background: #44464c;
+      color: #fff;
+    }
+    .diff-editor { display: grid; grid-template-columns: 1fr 1fr; }
+    .diff-editor section + section { border-left: 1px solid var(--line); }
+    .diff-head {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      height: 34px;
+      padding: 0 10px;
+      border-bottom: 1px solid var(--line);
+      color: #c7c8cd;
+      font-size: 11px;
+    }
+    .code-line {
+      height: 33px;
+      padding: 8px 10px;
+      color: #e4e5e8;
+      font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .code-line.left { border-left: 3px solid #ff6370; background: #54282e; }
+    .code-line.right { border-left: 3px solid #46db7a; background: #173f2a; }
+    .conflict-state { display: none; }
+    body.show-conflict .success-state { display: none; }
+    body.show-conflict .summary.conflict-state,
+    body.show-conflict .pane-title.conflict-state { display: flex; }
+    body.show-conflict .rows.conflict-state,
+    body.show-conflict .result-card.conflict-state { display: block; }
+    body.show-conflict .diff-toolbar .conflict-state { display: inline; }
+    body.show-conflict .result-card {
+      border-color: #7e4850;
+      background: #302227;
+    }
+    body.show-conflict .progress {
+      background: linear-gradient(90deg, var(--purple) 66%, #d2545e 66%);
+    }
+    @media (max-width: 1200px) {
+      body { padding: 10px; }
+      .window { min-width: 980px; }
+      .layout { grid-template-columns: 1fr 350px; }
+      .toolbar { gap: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="scenario-bar" aria-label="시안 상태 선택">
+    <button id="successButton" class="active" type="button">Rebase 성공</button>
+    <button id="conflictButton" type="button">Rebase 충돌</button>
+  </nav>
+
+  <main class="window">
+    <header class="toolbar">
+      <div class="lights"><i></i><i></i><i></i></div>
+      <div class="branch-select"><small>기준 브랜치</small><b>main　⌄</b></div>
+      <div class="branch-select"><small>브랜치 diff</small><b>fix/docs　⌄</b></div>
+      <div class="preview-switch"><span>Merge 미리보기</span><span class="active">Rebase 미리보기</span></div>
+    </header>
+
+    <div class="layout">
+      <section class="timeline">
+        <div class="summary success-state">
+          <h2>Rebase 미리보기</h2><span class="check">✓</span>
+          <span class="chip">가상 커밋 3개</span><span class="chip purple">점선 이동 경로</span>
+          <span class="chip">실제 브랜치 변경 없음</span><span class="direction">fix/docs → main</span>
+        </div>
+        <div class="summary conflict-state">
+          <h2>Rebase 충돌</h2>
+          <span class="chip" style="background:#673039;color:#ffc7cc">진행 2/3</span>
+          <span class="chip">1개 적용 · 1개 대기</span><span class="direction">fix/docs → main</span>
+        </div>
+        <div class="table-head"><span>BRANCH / TAG</span><span>GRAPH</span><span>HASH</span><span>COMMIT MESSAGE</span></div>
+
+        <div class="rows success-state">
+          <div class="commit-row virtual"><div><span class="ref virtual">✓ fix/docs · 가상</span></div><div></div><div class="hash">new SHA</div><div class="message"><span class="tag">재작성 3/3</span>docs: publish API guide</div></div>
+          <div class="commit-row virtual"><div><span class="ref virtual">fix/docs · 가상</span></div><div></div><div class="hash">new SHA</div><div class="message"><span class="tag">재작성 2/3</span>docs: update API examples</div></div>
+          <div class="commit-row virtual"><div><span class="ref virtual">fix/docs · 가상</span></div><div></div><div class="hash">new SHA</div><div class="message"><span class="tag">재작성 1/3</span>docs: add merge documentation</div></div>
+          <div class="commit-row"><div><span class="ref main">✓ main</span></div><div></div><div class="hash">a91c3e2</div><div class="message">fix: validate merged files</div></div>
+          <div class="commit-row"><div><span class="ref feature">fix/docs · 원본</span></div><div></div><div class="hash">c43a821</div><div class="message">docs: publish API guide</div></div>
+          <div class="commit-row"><div><span class="ref feature">fix/docs · 원본</span></div><div></div><div class="hash">f11d320</div><div class="message">docs: update API examples</div></div>
+          <div class="commit-row"><div><span class="ref feature">fix/docs · 원본</span></div><div></div><div class="hash">d02b114</div><div class="message">docs: add merge documentation</div></div>
+          <div class="commit-row"><div><span class="ref common">공통</span></div><div></div><div class="hash">b806ad1</div><div class="message">chore: update shared base</div></div>
+          <div class="graph-layer">
+            <svg viewBox="0 0 220 448" aria-label="아바타 테두리와 밝아진 동일 커밋 연결선 시안">
+              <path class="virtual-rail" d="M56 28V140"/>
+              <path class="base-rail" d="M56 196V420"/>
+              <path class="feature-rail" d="M126 252V364"/>
+              <path class="feature-rail" d="M126 364 Q126 406 72 420"/>
+              <path class="mapping" stroke="var(--map-1)" d="M126 252 H174 Q184 252 184 242 V38 Q184 28 174 28 H73"/>
+              <path class="mapping" stroke="var(--map-2)" d="M126 308 H158 Q168 308 168 298 V94 Q168 84 158 84 H73"/>
+              <path class="mapping" stroke="var(--map-3)" d="M126 364 H142 Q152 364 152 354 V150 Q152 140 142 140 H73"/>
+              <g class="node virtual" transform="translate(56 28)"><circle class="ring" r="16.5" stroke="var(--map-1)"/><circle class="core" r="15"/><text>VR</text></g>
+              <g class="node virtual" transform="translate(56 84)"><circle class="ring" r="16.5" stroke="var(--map-2)"/><circle class="core" r="15"/><text>VR</text></g>
+              <g class="node virtual" transform="translate(56 140)"><circle class="ring" r="16.5" stroke="var(--map-3)"/><circle class="core" r="15"/><text>VR</text></g>
+              <g class="node main" transform="translate(56 196)"><circle class="core" r="15"/><text>SC</text></g>
+              <g class="node feature" transform="translate(126 252)"><circle class="ring" r="16.5" stroke="var(--map-1)"/><circle class="core" r="15"/><text>SC</text></g>
+              <g class="node feature" transform="translate(126 308)"><circle class="ring" r="16.5" stroke="var(--map-2)"/><circle class="core" r="15"/><text>SC</text></g>
+              <g class="node feature" transform="translate(126 364)"><circle class="ring" r="16.5" stroke="var(--map-3)"/><circle class="core" r="15"/><text>SC</text></g>
+              <g class="node common" transform="translate(56 420)"><circle class="core" r="15"/><text>SC</text></g>
+            </svg>
+          </div>
+        </div>
+
+        <div class="rows conflict-state">
+          <div class="commit-row"><div><span class="ref main">✓ main</span></div><div></div><div class="hash">a91c3e2</div><div class="message">fix: validate merged files</div></div>
+          <div class="commit-row"><div><span class="ref feature">fix/docs · 대기</span></div><div></div><div class="hash">c43a821</div><div class="message"><span class="tag">다음</span>docs: publish API guide</div></div>
+          <div class="commit-row conflict"><div><span class="ref">fix/docs · 현재 충돌</span></div><div></div><div class="hash">f11d320</div><div class="message"><span class="tag">충돌 해결 중</span>docs: update API examples</div></div>
+          <div class="commit-row virtual"><div><span class="ref virtual">fix/docs · 적용됨</span></div><div></div><div class="hash">new SHA</div><div class="message"><span class="tag">해결 완료</span>docs: add merge documentation</div></div>
+          <div class="commit-row"><div><span class="ref common">공통</span></div><div></div><div class="hash">b806ad1</div><div class="message">chore: update shared base</div></div>
+          <div class="graph-layer">
+            <svg viewBox="0 0 220 280" aria-label="Rebase 충돌 처리 커밋 시안">
+              <path class="base-rail" d="M56 28V252"/>
+              <path class="feature-rail" d="M126 84V196"/>
+              <path class="feature-rail" d="M126 196 Q126 238 72 252"/>
+              <g class="node main" transform="translate(56 28)"><circle class="core" r="15"/><text>SC</text></g>
+              <g class="node feature" transform="translate(126 84)"><circle class="core" r="15"/><text>SC</text></g>
+              <g class="node feature" transform="translate(126 140)"><circle class="ring" r="16.5" stroke="#ff8e98"/><circle class="core" r="15" style="fill:var(--cyan)"/><text>SC</text></g>
+              <g class="node virtual" transform="translate(56 196)"><circle class="core" r="15"/><text>VR</text></g>
+              <g class="node common" transform="translate(56 252)"><circle class="core" r="15"/><text>SC</text></g>
+            </svg>
+          </div>
+        </div>
+      </section>
+
+      <aside class="right-pane">
+        <div class="pane-title success-state"><b>가상 리베이스 결과</b><small>아직 적용하지 않음</small></div>
+        <div class="pane-title conflict-state"><b>Rebase 상태 및 결정</b><small>충돌 커밋에 포커스</small></div>
+        <div class="result-card success-state">
+          <strong>Rebase 미리보기 성공</strong>
+          <div class="progress"></div>
+          <div class="metrics"><span><b>3</b>가상 커밋</span><span><b>3</b>원본 커밋</span><span><b>0</b>충돌</span></div>
+        </div>
+        <div class="result-card conflict-state">
+          <strong>리베이스 진행 2/3</strong>
+          <div class="progress"></div>
+          <div class="metrics"><span><b>1</b>적용 완료</span><span><b>1</b>현재 충돌</span><span><b>1</b>적용 대기</span></div>
+        </div>
+        <div class="files">
+          <div class="file active"><i>M</i><span>lib/api.dart</span><small>+1 -1</small></div>
+          <div class="file"><i>A</i><span>docs/merge.md</span><small>+38</small></div>
+          <div class="file"><i>M</i><span>test/api_test.dart</span><small>+7</small></div>
+        </div>
+        <div class="diff-toolbar">
+          <b>lib/api.dart</b><span class="success-state">Rebase 결과 · fix/docs → main</span><span class="conflict-state">현재 충돌 · docs: update API examples</span>
+          <div class="diff-switch"><button type="button">Unified</button><button class="active" type="button">Side-by-side</button></div>
+        </div>
+        <div class="diff-editor">
+          <section><div class="diff-head"><b>main</b><span>기준 브랜치</span></div><div class="code-line">17　Future&lt;Client&gt; createClient() {</div><div class="code-line left">18　return legacyClient;</div><div class="code-line">19　}</div></section>
+          <section><div class="diff-head"><b>fix/docs</b><span>비교 브랜치</span></div><div class="code-line">17　Future&lt;Client&gt; createClient() {</div><div class="code-line right">18　return retryingClient;</div><div class="code-line">19　}</div></section>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <script>
+    const successButton = document.getElementById('successButton');
+    const conflictButton = document.getElementById('conflictButton');
+    successButton.addEventListener('click', () => {
+      document.body.classList.remove('show-conflict');
+      successButton.classList.add('active');
+      conflictButton.classList.remove('active');
+    });
+    conflictButton.addEventListener('click', () => {
+      document.body.classList.add('show-conflict');
+      conflictButton.classList.add('active');
+      successButton.classList.remove('active');
+    });
+    document.querySelectorAll('.diff-switch button').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('.diff-switch button').forEach((item) => item.classList.remove('active'));
+        button.classList.add('active');
+      });
+    });
+  </script>
+</body>
+</html>
