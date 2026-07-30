@@ -3897,6 +3897,50 @@ void main() {
     expect(rebase.mappings.single.routeLane, 0);
   });
 
+  test('preview graphs preserve every existing comparison row', () {
+    final comparison = branchComparison();
+    final existing = layoutBranchComparison(comparison.commits);
+    final merge = layoutMergePreviewGraph(comparison);
+    void expectExistingRows(List<GraphRow> rows, int offset) {
+      for (var index = 0; index < existing.length; index++) {
+        final actual = rows[index + offset];
+        final expected = existing[index];
+        expect(actual.commit, same(expected.commit));
+        expect(actual.lane, expected.lane);
+        expect(actual.parentLanes, expected.parentLanes);
+        expect(actual.activeLanes, expected.activeLanes);
+        expect(actual.nextLanes, expected.nextLanes);
+        expect(actual.activeLaneShas, expected.activeLaneShas);
+        expect(actual.nextLaneShas, expected.nextLaneShas);
+        expect(actual.transitions, expected.transitions);
+        expect(actual.branch, expected.branch);
+        expect(actual.activeLaneBranches, expected.activeLaneBranches);
+        expect(actual.nextLaneBranches, expected.nextLaneBranches);
+      }
+    }
+
+    expectExistingRows(merge.rows, 1);
+
+    final feature = comparison.commits
+        .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
+        .commit;
+    final rebase = layoutRebasePreviewGraph(
+      comparison,
+      RebasePreviewResult(
+        status: RebasePreviewStatus.clean,
+        baseTip: comparison.baseTip,
+        compareTip: comparison.compareTip,
+        rewritten: [(original: feature, rewrittenSha: 'rewritten-feature')],
+        completed: 1,
+        total: 1,
+        virtualTip: 'rewritten-feature',
+      ),
+      rebaseMappingColors(AvatarService.defaultColors),
+    );
+
+    expectExistingRows(rebase.rows, 1);
+  });
+
   testWidgets('the app passes branch preview mode changes to settings', (
     tester,
   ) async {

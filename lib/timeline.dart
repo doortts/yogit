@@ -92,6 +92,13 @@ class BranchPreviewGraph {
 }
 
 BranchPreviewGraph layoutMergePreviewGraph(BranchComparisonResult comparison) {
+  final existing = layoutBranchComparison(comparison.commits);
+  final base = existing.firstWhere(
+    (row) => row.commit.sha == comparison.baseTip,
+  );
+  final compare = existing.firstWhere(
+    (row) => row.commit.sha == comparison.compareTip,
+  );
   final template = comparison.commits.first.commit;
   final sha = 'virtual-merge-${comparison.baseTip}-${comparison.compareTip}';
   final virtual = GitCommit(
@@ -105,17 +112,32 @@ BranchPreviewGraph layoutMergePreviewGraph(BranchComparisonResult comparison) {
     refs: const [],
     subject: 'Merge 미리보기',
   );
-  final rows = layoutGraph([
-    virtual,
-    for (final entry in comparison.commits) entry.commit,
-  ]);
+  final lanes = {base.lane, compare.lane}.toList()..sort();
+  final rows = [
+    GraphRow(
+      commit: virtual,
+      lane: base.lane,
+      parentLanes: [base.lane, compare.lane],
+      activeLanes: [base.lane],
+      nextLanes: lanes,
+      activeLaneShas: {base.lane: sha},
+      nextLaneShas: {
+        base.lane: comparison.baseTip,
+        compare.lane: comparison.compareTip,
+      },
+      transitions: base.lane == compare.lane
+          ? const []
+          : [(from: base.lane, to: compare.lane, sha: comparison.compareTip)],
+      branch: base.branch,
+      activeLaneBranches: {base.lane: base.branch},
+      nextLaneBranches: {base.lane: base.branch, compare.lane: compare.branch},
+    ),
+    ...existing,
+  ];
   return BranchPreviewGraph(
     rows: rows,
     kinds: {sha: PreviewGraphNodeKind.virtualMerge},
-    dashedLanes: _previewDashedLanes(rows, {
-      comparison.baseTip,
-      comparison.compareTip,
-    }),
+    dashedLanes: {0: lanes.toSet()},
   );
 }
 
@@ -124,9 +146,13 @@ BranchPreviewGraph layoutRebasePreviewGraph(
   RebasePreviewResult preview,
   List<Color> colors,
 ) {
+  final existing = layoutBranchComparison(comparison.commits);
   if (preview.rewritten.isEmpty) {
-    return BranchPreviewGraph(rows: layoutBranchComparison(comparison.commits));
+    return BranchPreviewGraph(rows: existing);
   }
+  final base = existing.firstWhere(
+    (row) => row.commit.sha == comparison.baseTip,
+  );
   final virtualOldestFirst = <GitCommit>[];
   var parent = comparison.baseTip;
   for (final rewrite in preview.rewritten) {
@@ -147,10 +173,22 @@ BranchPreviewGraph layoutRebasePreviewGraph(
     parent = rewrite.rewrittenSha;
   }
   final virtualNewestFirst = virtualOldestFirst.reversed.toList();
-  final rows = layoutGraph([
-    ...virtualNewestFirst,
-    for (final entry in comparison.commits) entry.commit,
-  ]);
+  final rows = [
+    for (final commit in virtualNewestFirst)
+      GraphRow(
+        commit: commit,
+        lane: base.lane,
+        parentLanes: [base.lane],
+        activeLanes: [base.lane],
+        nextLanes: [base.lane],
+        activeLaneShas: {base.lane: commit.sha},
+        nextLaneShas: {base.lane: commit.parents.single},
+        branch: base.branch,
+        activeLaneBranches: {base.lane: base.branch},
+        nextLaneBranches: {base.lane: base.branch},
+      ),
+    ...existing,
+  ];
   final rowBySha = {
     for (var index = 0; index < rows.length; index++)
       rows[index].commit.sha: index,
@@ -161,10 +199,10 @@ BranchPreviewGraph layoutRebasePreviewGraph(
       for (final commit in virtualOldestFirst)
         commit.sha: PreviewGraphNodeKind.virtualRebase,
     },
-    dashedLanes: _previewDashedLanes(rows, {
-      comparison.baseTip,
-      ...virtualOldestFirst.map((commit) => commit.sha),
-    }),
+    dashedLanes: {
+      for (var index = 0; index < virtualNewestFirst.length; index++)
+        index: {base.lane},
+    },
     mappings: [
       for (var index = 0; index < preview.rewritten.length; index++)
         (
@@ -178,23 +216,6 @@ BranchPreviewGraph layoutRebasePreviewGraph(
     ],
   );
 }
-
-Map<int, Set<int>> _previewDashedLanes(
-  List<GraphRow> rows,
-  Set<String> targets,
-) => {
-  for (var index = 0; index < rows.length; index++)
-    if ({
-          ...rows[index].activeLaneShas.entries
-              .where((entry) => targets.contains(entry.value))
-              .map((entry) => entry.key),
-          ...rows[index].nextLaneShas.entries
-              .where((entry) => targets.contains(entry.value))
-              .map((entry) => entry.key),
-        }
-        case final lanes when lanes.isNotEmpty)
-      index: lanes,
-};
 
 const _weekdayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
