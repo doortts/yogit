@@ -696,6 +696,44 @@ void main() {
     expect(result.sameFirstParent, isTrue);
   });
 
+  test('branch comparison returns a clean virtual merge tree', () async {
+    final root = await Directory.systemTemp.createTemp('yogit_merge_preview_');
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    await File('${root.path}/base.txt').writeAsString('base\n');
+    await _git(root, ['add', 'base.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+
+    await _git(root, ['switch', '-c', 'feature']);
+    await File('${root.path}/feature.txt').writeAsString('feature\n');
+    await _git(root, ['add', 'feature.txt']);
+    await _git(root, ['commit', '-m', 'feature']);
+
+    await _git(root, ['switch', 'main']);
+    await File('${root.path}/main.txt').writeAsString('main\n');
+    await _git(root, ['add', 'main.txt']);
+    await _git(root, ['commit', '-m', 'main']);
+    final originalMain = (await _git(root, ['rev-parse', 'main'])).trim();
+    final originalFeature = (await _git(root, ['rev-parse', 'feature'])).trim();
+
+    final result = await GitRepository(
+      root.path,
+    ).compareBranches('main', 'feature');
+
+    expect(result.merge.status, MergeConflictStatus.clean);
+    expect(result.merge.treeSha, isNotEmpty);
+    expect(
+      result.merge.resultFiles.map((file) => file.path),
+      contains('feature.txt'),
+    );
+    expect((await _git(root, ['rev-parse', 'main'])).trim(), originalMain);
+    expect(
+      (await _git(root, ['rev-parse', 'feature'])).trim(),
+      originalFeature,
+    );
+    expect((await _git(root, ['status', '--porcelain'])).trim(), isEmpty);
+  });
+
   test(
     'does not activate a base lane when only the compare branch is unique',
     () {

@@ -314,11 +314,15 @@ class MergeConflictCheck {
   const MergeConflictCheck({
     required this.status,
     this.files = const [],
+    this.treeSha,
+    this.resultFiles = const [],
     this.error,
   });
 
   final MergeConflictStatus status;
   final List<String> files;
+  final String? treeSha;
+  final List<GitFileChange> resultFiles;
   final String? error;
 }
 
@@ -1291,7 +1295,12 @@ class GitRepository implements FullDiffRepository {
       workingDirectory: root,
     );
     if (result.exitCode == 0) {
-      return const MergeConflictCheck(status: MergeConflictStatus.clean);
+      final treeSha = result.stdout.toString().split('\x00').first.trim();
+      return MergeConflictCheck(
+        status: MergeConflictStatus.clean,
+        treeSha: treeSha,
+        resultFiles: await _loadFilesBetween(baseTip, treeSha),
+      );
     }
     if (result.exitCode != 1) {
       return MergeConflictCheck(
