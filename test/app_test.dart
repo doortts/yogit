@@ -3400,6 +3400,13 @@ void main() {
     expect(find.text('중단'), findsOneWidget);
     expect(find.text('충돌'), findsWidgets);
     expect(find.text('lib/shared.dart'), findsWidgets);
+    final previewScroll = tester
+        .widget<NestedScrollView>(
+          find.byKey(const Key('preview-content-scroll')),
+        )
+        .controller!;
+    previewScroll.jumpTo(previewScroll.position.maxScrollExtent);
+    await tester.pumpAndSettle();
     expect(
       find.text('main · main change ← feature · feature change'),
       findsOneWidget,
@@ -3494,6 +3501,11 @@ void main() {
     expect(find.text('현재 작업 트리 변경 없음'), findsOneWidget);
     expect(find.text('종료 시 자동 삭제'), findsOneWidget);
     expect(find.text('임시 작업 공간 시작'), findsNothing);
+    await tester.drag(
+      find.byKey(const Key('preview-content-scroll')),
+      const Offset(0, -600),
+    );
+    await tester.pumpAndSettle();
     expect(find.text('main side'), findsOneWidget);
     expect(find.text('docs side'), findsOneWidget);
     expect(
@@ -4436,9 +4448,11 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    await tester.ensureVisible(
-      find.byKey(const Key('rebase-conflict-use-compare')),
+    await tester.drag(
+      find.byKey(const Key('preview-content-scroll')),
+      const Offset(0, -600),
     );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('rebase-conflict-use-compare')));
     await tester.pump();
     expect(session.resolvedChoices, [
@@ -4471,9 +4485,11 @@ void main() {
       findsOneWidget,
     );
 
-    await tester.ensureVisible(
-      find.byKey(const Key('rebase-conflict-use-compare')),
+    await tester.drag(
+      find.byKey(const Key('preview-content-scroll')),
+      const Offset(0, -600),
     );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('rebase-conflict-use-compare')));
     await tester.pump();
     await tester.ensureVisible(continueButton);
@@ -10413,11 +10429,27 @@ void main() {
       );
       await tester.pump();
 
+      final row = find.byKey(Key('sidebar-row-$name'));
+      final hover = find.byKey(Key('sidebar-ref-hover-$name'));
+      final icon = find.descendant(
+        of: row,
+        matching: find.byIcon(
+          name == 'v1.0' ? Icons.sell_outlined : Icons.call_split,
+        ),
+      );
+      final rowRect = tester.getRect(row);
+      final hoverRect = tester.getRect(hover);
+      final iconRect = tester.getRect(icon);
+      expect(hoverRect.left, greaterThan(rowRect.left + 18), reason: name);
+      expect(hoverRect.left, lessThanOrEqualTo(iconRect.left), reason: name);
+      expect(
+        iconRect.left - hoverRect.left,
+        lessThanOrEqualTo(4),
+        reason: name,
+      );
+
       final decoration =
-          tester
-                  .widget<Container>(find.byKey(Key('sidebar-ref-hover-$name')))
-                  .decoration!
-              as BoxDecoration;
+          tester.widget<Container>(hover).decoration! as BoxDecoration;
       final border = decoration.border! as Border;
       expect(decoration.borderRadius, isNull, reason: name);
       expect(
@@ -11654,7 +11686,7 @@ void main() {
   );
 
   // ------------------------------------------------------------------ C1/C2
-  testWidgets('preview file and diff panes scroll independently', (
+  testWidgets('preview info and diff move through one vertical scroll', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -11668,7 +11700,7 @@ void main() {
         FakeGitRepository(
           (_, _) async => [commit('1', 'first commit')],
           files: (_, _) async => [
-            for (var index = 0; index < 12; index++)
+            for (var index = 0; index < 3; index++)
               GitFileChange(
                 path: 'lib/file$index.dart',
                 status: 'M',
@@ -11698,63 +11730,11 @@ void main() {
     expect(filesScrollable, findsOneWidget);
     expect(diffScrollable, findsOneWidget);
 
-    final filesPosition = tester
-        .state<ScrollableState>(
-          find.descendant(
-            of: filesScrollable,
-            matching: find.byType(Scrollable),
-          ),
-        )
-        .position;
-    final diffPosition = tester
-        .state<ScrollableState>(
-          find
-              .descendant(of: diffScrollable, matching: find.byType(Scrollable))
-              .first,
-        )
-        .position;
-
-    await tester.drag(filesScrollable, const Offset(0, -120));
-    await tester.pump();
-    expect(filesPosition.pixels, greaterThan(0));
-    expect(diffPosition.pixels, 0);
-
-    await tester.drag(diffScrollable, const Offset(0, -120));
-    await tester.pump();
-    expect(filesPosition.pixels, greaterThan(0));
-    expect(diffPosition.pixels, greaterThan(0));
-
-    Future<void> pageDown() async {
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-      await tester.pumpAndSettle();
-    }
-
-    filesPosition.jumpTo(0);
-    final filesBeforeSelection = filesPosition.pixels;
-    await tester.tap(find.byKey(const Key('preview-state-lib/file0.dart')));
+    final firstFile = find.byKey(const Key('preview-state-lib/file0.dart'));
+    final before = tester.getTopLeft(firstFile).dy;
+    await tester.drag(diffScrollable, const Offset(0, -160));
     await tester.pumpAndSettle();
-    expect(filesPosition.pixels, filesBeforeSelection);
-    expect(diffPosition.pixels, 0);
-
-    await pageDown();
-    expect(
-      filesPosition.pixels,
-      moreOrLessEquals(filesPosition.viewportDimension * 0.5),
-    );
-    expect(diffPosition.pixels, 0);
-
-    filesPosition.jumpTo(0);
-    await tester.tap(find.text('line 5'));
-    await pageDown();
-    expect(filesPosition.pixels, 0);
-    expect(
-      diffPosition.pixels,
-      moreOrLessEquals(diffPosition.viewportDimension * 0.5),
-    );
+    expect(tester.getTopLeft(firstFile).dy, lessThan(before));
   });
 
   // ------------------------------------------------------------------ C3/H2
@@ -13282,32 +13262,32 @@ void main() {
     );
     expect(find.text('Committer · Cam Committer'), findsNothing);
 
-    final scrollable = tester.state<ScrollableState>(
-      find
-          .descendant(
-            of: find.byKey(const Key('preview-diff-scroll')),
-            matching: find.byType(Scrollable),
-          )
-          .first,
-    );
-    expect(scrollable.position.pixels, 0);
+    final scrollable = tester
+        .widget<NestedScrollView>(
+          find.byKey(const Key('preview-content-scroll')),
+        )
+        .controller!
+        .position;
+    expect(scrollable.pixels, 0);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
-    final beforeRepeat = scrollable.position.pixels;
+    final beforeRepeat = scrollable.pixels;
     await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowDown);
     expect(
-      scrollable.position.pixels,
+      scrollable.pixels,
       moreOrLessEquals(
-        beforeRepeat + scrollable.position.viewportDimension * 0.5,
+        (beforeRepeat + scrollable.viewportDimension * 0.5).clamp(
+          scrollable.minScrollExtent,
+          scrollable.maxScrollExtent,
+        ),
       ),
     );
     await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
-    expect(scrollable.position.pixels, greaterThan(0));
-    expect(find.byKey(const Key('preview-state-lib/one.dart')), findsOneWidget);
+    expect(scrollable.pixels, greaterThan(0));
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
@@ -13315,7 +13295,8 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
-    expect(scrollable.position.pixels, 0);
+    expect(scrollable.pixels, 0);
+    expect(find.byKey(const Key('preview-state-lib/one.dart')), findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
@@ -13390,6 +13371,15 @@ void main() {
       find.descendant(of: preview, matching: find.text('body of lib/two.dart')),
       findsOneWidget,
     );
+    expect(
+      tester
+          .widget<NestedScrollView>(
+            find.byKey(const Key('preview-content-scroll')),
+          )
+          .controller
+          ?.offset,
+      0,
+    );
     expect(find.byKey(const Key('preview-state-lib/two.dart')), findsOneWidget);
     await metaArrow(LogicalKeyboardKey.arrowDown);
     await metaArrow(LogicalKeyboardKey.arrowDown);
@@ -13458,11 +13448,10 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
-    final filesViewport = find.byKey(const Key('preview-files-scroll'));
+    final filesViewport = find.byKey(const Key('preview-content-scroll'));
     final filesPosition = tester
-        .state<ScrollableState>(
-          find.descendant(of: filesViewport, matching: find.byType(Scrollable)),
-        )
+        .widget<NestedScrollView>(filesViewport)
+        .controller!
         .position;
 
     Future<void> metaArrow(LogicalKeyboardKey key) async {
@@ -13505,6 +13494,8 @@ void main() {
     await tester.tap(find.byKey(const Key('preview-state-lib/file1.dart')));
     await tester.pumpAndSettle();
     expect(filesPosition.pixels, moreOrLessEquals(pointerOffset));
+    await tester.drag(filesViewport, const Offset(0, -600));
+    await tester.pumpAndSettle();
     expect(find.text('body of lib/file1.dart'), findsOneWidget);
   });
 

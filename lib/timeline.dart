@@ -3,7 +3,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import 'avatars.dart';
@@ -702,11 +701,10 @@ class _TimelineScreenState extends State<TimelineScreen>
   final _timelineKey = GlobalKey();
   final _scrollController = ScrollController();
   final _previewFilesScrollController = ScrollController();
-  final _previewDiffScrollController = ScrollController();
+  ScrollController? _previewDiffScrollController;
   final _selectedPreviewFileKey = GlobalKey(
     debugLabel: 'selected preview file',
   );
-  ScrollController? _activePreviewScrollController;
   final _normalCommits = <GitCommit>[];
   final _committersBySha = <String, GitIdentity>{};
   var _normalRows = <GraphRow>[];
@@ -1074,7 +1072,6 @@ class _TimelineScreenState extends State<TimelineScreen>
       ..removeListener(_maybeLoadNextPage)
       ..dispose();
     _previewFilesScrollController.dispose();
-    _previewDiffScrollController.dispose();
     for (final node in _resizerFocus.values) {
       node.dispose();
     }
@@ -1270,11 +1267,16 @@ class _TimelineScreenState extends State<TimelineScreen>
       );
       if (pageScrollIntent != null) {
         if (_previewController.previewPlacement != PreviewPlacement.closed) {
-          applyPageScroll(
-            _activePreviewScrollController ?? _previewDiffScrollController,
-            direction: pageScrollIntent.direction,
-            animate: event is KeyDownEvent,
+          final controller = _previewPageScrollController(
+            pageScrollIntent.direction,
           );
+          if (controller != null) {
+            applyPageScroll(
+              controller,
+              direction: pageScrollIntent.direction,
+              animate: event is KeyDownEvent,
+            );
+          }
         }
         return KeyEventResult.handled;
       }
@@ -2215,6 +2217,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           ? conflictIndex
           : 0;
     });
+    _showPreviewTop();
     if (result.status == RebasePreviewStatus.conflict &&
         _previewController.previewPlacement == PreviewPlacement.closed) {
       await _previewController.setPreview(widget.preferredPreviewPlacement);
@@ -2248,6 +2251,16 @@ class _TimelineScreenState extends State<TimelineScreen>
         return;
       }
       _scrollController.jumpTo(0);
+    });
+  }
+
+  void _showPreviewTop() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _previewFilesScrollController.hasClients) {
+        _previewFilesScrollController.jumpTo(
+          _previewFilesScrollController.position.minScrollExtent,
+        );
+      }
     });
   }
 
@@ -3003,164 +3016,173 @@ class _TimelineScreenState extends State<TimelineScreen>
       }
     });
 
-    Widget buildRow(bool hovered) {
-      final content = Container(
-        height: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 5),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Flexible(
-                  child: Text(
-                    node.segment,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: current || hovered
-                          ? _palette.text
-                          : _palette.muted,
-                      fontSize: 13,
+    Widget buildContent(bool hovered) => Container(
+      height: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Flexible(
+                child: Text(
+                  node.segment,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: current || hovered ? _palette.text : _palette.muted,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+              if (current) const SizedBox(width: 2),
+              if (current)
+                Tooltip(
+                  message: '현재 체크아웃된 브랜치입니다',
+                  child: Container(
+                    key: Key('sidebar-head-$name'),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 2,
+                      vertical: 1,
+                    ),
+                    decoration: BoxDecoration(
+                      color: iconColor.withValues(alpha: 0.12),
+                      border: Border.all(
+                        color: iconColor.withValues(alpha: 0.8),
+                      ),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    child: Text(
+                      'HEAD',
+                      style: TextStyle(
+                        color: iconColor,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.3,
+                        fontFamily: technicalFontFamily,
+                        fontFamilyFallback: technicalFontFallback,
+                      ),
                     ),
                   ),
                 ),
-                if (current) const SizedBox(width: 2),
-                if (current)
-                  Tooltip(
-                    message: '현재 체크아웃된 브랜치입니다',
-                    child: Container(
-                      key: Key('sidebar-head-$name'),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 2,
-                        vertical: 1,
-                      ),
-                      decoration: BoxDecoration(
-                        color: iconColor.withValues(alpha: 0.12),
-                        border: Border.all(
-                          color: iconColor.withValues(alpha: 0.8),
-                        ),
-                        borderRadius: BorderRadius.circular(3),
-                      ),
-                      child: Text(
-                        'HEAD',
-                        style: TextStyle(
-                          color: iconColor,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.3,
-                          fontFamily: technicalFontFamily,
-                          fontFamilyFallback: technicalFontFallback,
-                        ),
+              if (behind > 0) const SizedBox(width: 4),
+              if (behind > 0)
+                Tooltip(
+                  message: '원격보다 $behind개 커밋 뒤처져 있습니다',
+                  child: SizedBox(
+                    key: Key('sidebar-behind-$name'),
+                    child: Text(
+                      '$behind',
+                      style: const TextStyle(
+                        color: _remoteBehind,
+                        fontSize: 11,
                       ),
                     ),
                   ),
-                if (behind > 0) const SizedBox(width: 4),
-                if (behind > 0)
-                  Tooltip(
-                    message: '원격보다 $behind개 커밋 뒤처져 있습니다',
-                    child: SizedBox(
-                      key: Key('sidebar-behind-$name'),
-                      child: Text(
-                        '$behind',
-                        style: const TextStyle(
-                          color: _remoteBehind,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
+                ),
+            ],
+          ),
+          // When the branch was cut, in the Date column's own words.
+          if (birth != null)
+            Text(
+              socialTimeLabel(
+                DateTime.fromMillisecondsSinceEpoch(birth * 1000),
+                DateTime.now(),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: hovered
+                    ? _palette.text.withValues(alpha: 0.72)
+                    : _palette.muted,
+                fontSize: 11,
+              ),
             ),
-            // When the branch was cut, in the Date column's own words.
-            if (birth != null)
-              Text(
-                socialTimeLabel(
-                  DateTime.fromMillisecondsSinceEpoch(birth * 1000),
-                  DateTime.now(),
+        ],
+      ),
+    );
+
+    Widget buildRow() => SizedBox(
+      key: name == null ? null : Key('sidebar-row-$name'),
+      height: birth == null ? 28 : 40,
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: 4 + (inFolderTree ? 18 : 0) + depth * 16.0,
+          right: 4,
+        ),
+        child: Row(
+          children: [
+            if (hasChildren)
+              GestureDetector(
+                key: Key('sidebar-folder-${section.name}-$path'),
+                behavior: HitTestBehavior.opaque,
+                onTap: toggleFolder,
+                child: SizedBox(
+                  width: 18,
+                  height: double.infinity,
+                  child: Icon(
+                    folderCollapsed ? Icons.chevron_right : Icons.expand_more,
+                    size: 16,
+                    color: _palette.muted,
+                  ),
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: hovered
-                      ? _palette.text.withValues(alpha: 0.72)
-                      : _palette.muted,
-                  fontSize: 11,
+              )
+            else
+              const SizedBox(width: 18),
+            if (name == null) ...[
+              Icon(icon, size: 13, color: iconColor),
+              const SizedBox(width: 7),
+              Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: toggleFolder,
+                  child: buildContent(false),
+                ),
+              ),
+            ] else
+              Expanded(
+                child: _HoverBuilder(
+                  builder: (hovered) => GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () =>
+                        _selectRef(name, remote: section == _RefSection.remote),
+                    child: Container(
+                      key: Key('sidebar-ref-hover-$name'),
+                      height: double.infinity,
+                      decoration: BoxDecoration(
+                        color: hovered
+                            ? _palette.selectedRow
+                            : Colors.transparent,
+                        border: Border(
+                          left: BorderSide(
+                            color: hovered ? iconColor : Colors.transparent,
+                            width: hovered ? 2 : 0,
+                          ),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(icon, size: 13, color: iconColor),
+                          const SizedBox(width: 7),
+                          Expanded(
+                            child: KeyedSubtree(
+                              key: Key('sidebar-ref-$name'),
+                              child: buildContent(hovered),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
           ],
         ),
-      );
-      return SizedBox(
-        key: name == null ? null : Key('sidebar-row-$name'),
-        height: birth == null ? 28 : 40,
-        child: Padding(
-          padding: EdgeInsets.only(
-            left: 4 + (inFolderTree ? 18 : 0) + depth * 16.0,
-            right: 4,
-          ),
-          child: Row(
-            children: [
-              if (hasChildren)
-                GestureDetector(
-                  key: Key('sidebar-folder-${section.name}-$path'),
-                  behavior: HitTestBehavior.opaque,
-                  onTap: toggleFolder,
-                  child: SizedBox(
-                    width: 18,
-                    height: double.infinity,
-                    child: Icon(
-                      folderCollapsed ? Icons.chevron_right : Icons.expand_more,
-                      size: 16,
-                      color: _palette.muted,
-                    ),
-                  ),
-                )
-              else
-                const SizedBox(width: 18),
-              Icon(icon, size: 13, color: iconColor),
-              const SizedBox(width: 7),
-              Expanded(
-                child: name == null
-                    ? GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: toggleFolder,
-                        child: content,
-                      )
-                    : KeyedSubtree(
-                        key: Key('sidebar-ref-$name'),
-                        child: content,
-                      ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
+      ),
+    );
 
-    final row = name == null
-        ? buildRow(false)
-        : _HoverBuilder(
-            builder: (hovered) => GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () =>
-                  _selectRef(name, remote: section == _RefSection.remote),
-              child: Container(
-                key: Key('sidebar-ref-hover-$name'),
-                decoration: BoxDecoration(
-                  color: hovered ? _palette.selectedRow : Colors.transparent,
-                  border: Border(
-                    left: BorderSide(
-                      color: hovered ? iconColor : Colors.transparent,
-                      width: hovered ? 2 : 0,
-                    ),
-                  ),
-                ),
-                child: buildRow(hovered),
-              ),
-            ),
-          );
+    final row = buildRow();
     if (!current) return row;
     return DragTarget<GitCommit>(
       onWillAcceptWithDetails: (details) => _canCherryPick(details.data),
@@ -5750,10 +5772,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                             ),
                           ),
                         )
-                      : _previewBody(
-                          commit,
-                          placement == PreviewPlacement.bottom,
-                        ),
+                      : _previewBody(commit),
                 ),
               ],
             ),
@@ -6141,18 +6160,63 @@ class _TimelineScreenState extends State<TimelineScreen>
     setState(() => _previewPaths[_previewKey(commit)] = path);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (_previewDiffScrollController.hasClients) {
-        _previewDiffScrollController.jumpTo(0);
+      final outerOffset = _previewFilesScrollController.hasClients
+          ? _previewFilesScrollController.offset
+          : null;
+      final diffController = _previewDiffScrollController;
+      if (diffController?.hasClients ?? false) {
+        diffController!.jumpTo(0);
+      }
+      if (outerOffset != null && _previewFilesScrollController.hasClients) {
+        _previewFilesScrollController.jumpTo(
+          outerOffset.clamp(
+            _previewFilesScrollController.position.minScrollExtent,
+            _previewFilesScrollController.position.maxScrollExtent,
+          ),
+        );
       }
       if (revealDirection != null) {
-        _revealSelectedPreviewFile(revealDirection, animate: animateReveal);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _revealSelectedPreviewFile(revealDirection, animate: animateReveal);
+          }
+        });
       }
     });
   }
 
+  ScrollController? _previewPageScrollController(int direction) {
+    final outer = _previewFilesScrollController;
+    final inner = _previewDiffScrollController;
+    if (direction > 0) {
+      if (outer.hasClients &&
+          outer.position.pixels < outer.position.maxScrollExtent) {
+        return outer;
+      }
+      return inner?.hasClients ?? false ? inner : null;
+    }
+    if ((inner?.hasClients ?? false) &&
+        inner!.position.pixels > inner.position.minScrollExtent) {
+      return inner;
+    }
+    return outer.hasClients ? outer : null;
+  }
+
   void _revealSelectedPreviewFile(int direction, {required bool animate}) {
     final selectedContext = _selectedPreviewFileKey.currentContext;
-    if (selectedContext == null) return;
+    if (selectedContext == null) {
+      if (_previewFilesScrollController.hasClients &&
+          _previewFilesScrollController.position.pixels >
+              _previewFilesScrollController.position.minScrollExtent) {
+        _previewFilesScrollController.jumpTo(0);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _revealSelectedPreviewFile(direction, animate: animate);
+          }
+        });
+      }
+      return;
+    }
     unawaited(
       Scrollable.ensureVisible(
         selectedContext,
@@ -6165,7 +6229,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     );
   }
 
-  Widget _previewBody(GitCommit commit, bool bottom) {
+  Widget _previewBody(GitCommit commit) {
     final files = _previewFilesFor(commit);
     return FutureBuilder<List<GitFileChange>>(
       future: files,
@@ -6294,63 +6358,35 @@ class _TimelineScreenState extends State<TimelineScreen>
                 : _previewDiff(commit, selectedFile!),
           ),
         );
-        return bottom
-            ? Row(
-                children: [
-                  SizedBox(width: 240, child: _previewScrollableInfo(info)),
-                  VerticalDivider(width: 1, color: _palette.border),
-                  Expanded(child: _previewScrollableDiff(diff)),
-                ],
-              )
-            : Column(
-                children: [
-                  Expanded(child: _previewScrollableInfo(info)),
-                  Divider(height: 1, color: _palette.border),
-                  Expanded(child: _previewScrollableDiff(diff)),
-                ],
+        return NestedScrollView(
+          key: const Key('preview-content-scroll'),
+          controller: _previewFilesScrollController,
+          headerSliverBuilder: (context, innerBoxIsScrolled) => [
+            SliverToBoxAdapter(
+              child: KeyedSubtree(
+                key: const Key('preview-files-scroll'),
+                child: info,
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: Divider(height: 1, color: _palette.border),
+            ),
+          ],
+          body: Builder(
+            builder: (context) {
+              _previewDiffScrollController = PrimaryScrollController.maybeOf(
+                context,
               );
+              return KeyedSubtree(
+                key: const Key('preview-diff-scroll'),
+                child: diff,
+              );
+            },
+          ),
+        );
       },
     );
   }
-
-  Widget _previewScrollableInfo(Widget info) => _previewScrollable(
-    key: const Key('preview-files-scroll'),
-    controller: _previewFilesScrollController,
-    child: info,
-  );
-
-  Widget _previewScrollableDiff(Widget diff) => _previewScrollable(
-    key: const Key('preview-diff-scroll'),
-    controller: _previewDiffScrollController,
-    childScrolls: true,
-    child: diff,
-  );
-
-  Widget _previewScrollable({
-    required Key key,
-    required ScrollController controller,
-    required Widget child,
-    bool childScrolls = false,
-  }) => Listener(
-    behavior: HitTestBehavior.translucent,
-    onPointerDown: (_) => _activePreviewScrollController = controller,
-    child: NotificationListener<ScrollNotification>(
-      onNotification: (notification) {
-        if (notification is UserScrollNotification &&
-            notification.direction != ScrollDirection.idle) {
-          _activePreviewScrollController = controller;
-        }
-        return false;
-      },
-      child: childScrolls
-          ? KeyedSubtree(key: key, child: child)
-          : SingleChildScrollView(
-              key: key,
-              controller: controller,
-              child: child,
-            ),
-    ),
-  );
 
   Widget _previewPerson(GitCommit commit) {
     final separateCommitter =
@@ -6687,6 +6723,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         _previewFileLists.clear();
         _previewDiffs.clear();
       });
+      _showPreviewTop();
     } catch (error) {
       if (mounted) setState(() => _mergePreviewError = error);
     } finally {
@@ -7247,49 +7284,44 @@ class _TimelineScreenState extends State<TimelineScreen>
                 final activeAnchor = conflict && document.hunks.isNotEmpty
                     ? document.hunks.first.anchor
                     : null;
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _previewDiffTitles(
-                      baseRef: baseRef,
-                      baseSubject: baseSubject,
-                      compareRef: compareRef,
-                      compareSubject: compareSubject,
-                      baseRole: baseRole,
-                      compareRole: compareRole,
-                      sideBySide: _previewDiffLayout == DiffLayout.sideBySide,
-                    ),
-                    Expanded(
-                      child: _previewDiffLayout == DiffLayout.unified
-                          ? UnifiedPresentationView(
-                              document: document,
-                              activeAnchor: activeAnchor,
-                              path: path,
-                              wrapLines: false,
-                              highlighter: _previewDiffHighlighter,
-                              anchorKeys: anchors,
-                              controller: _previewDiffScrollController,
-                              showHunkHeaders: false,
-                              compactRows: true,
-                              currentMarkerColor: _previewConflict,
-                            )
-                          : SideBySidePresentationView(
-                              document: document,
-                              activeAnchor: activeAnchor,
-                              oldPath: file.oldPath ?? path,
-                              newPath: path,
-                              wrapLines: false,
-                              showOldSide: true,
-                              highlighter: _previewDiffHighlighter,
-                              anchorKeys: anchors,
-                              controller: _previewDiffScrollController,
-                              showHunkHeaders: false,
-                              compactRows: true,
-                              currentMarkerColor: _previewConflict,
-                            ),
-                    ),
-                  ],
+                final titles = _previewDiffTitles(
+                  baseRef: baseRef,
+                  baseSubject: baseSubject,
+                  compareRef: compareRef,
+                  compareSubject: compareSubject,
+                  baseRole: baseRole,
+                  compareRole: compareRole,
+                  sideBySide: _previewDiffLayout == DiffLayout.sideBySide,
                 );
+                return _previewDiffLayout == DiffLayout.unified
+                    ? UnifiedPresentationView(
+                        document: document,
+                        activeAnchor: activeAnchor,
+                        path: path,
+                        wrapLines: false,
+                        highlighter: _previewDiffHighlighter,
+                        anchorKeys: anchors,
+                        controller: _previewDiffScrollController,
+                        showHunkHeaders: false,
+                        compactRows: true,
+                        currentMarkerColor: _previewConflict,
+                        header: titles,
+                      )
+                    : SideBySidePresentationView(
+                        document: document,
+                        activeAnchor: activeAnchor,
+                        oldPath: file.oldPath ?? path,
+                        newPath: path,
+                        wrapLines: false,
+                        showOldSide: true,
+                        highlighter: _previewDiffHighlighter,
+                        anchorKeys: anchors,
+                        controller: _previewDiffScrollController,
+                        showHunkHeaders: false,
+                        compactRows: true,
+                        currentMarkerColor: _previewConflict,
+                        header: titles,
+                      );
               }
               return const Center(
                 child: SizedBox.square(

@@ -126,3 +126,36 @@ flutter build macos --debug --no-pub
 - [x] **Step 3: Restart the debug app**
 
 Start the debug app against this worktree and leave it running for manual review.
+
+---
+
+### Task 4: Confirmed hover range and unified preview scrolling
+
+**Files:**
+- Modify: `lib/timeline.dart`
+- Modify: `lib/full_diff_unified_view.dart`
+- Modify: `lib/full_diff_side_by_side_view.dart`
+- Test: `test/app_test.dart`
+
+**Interfaces:**
+- Changes: reference hover surface begins at the branch or tag icon
+- Changes: preview metadata, file list, and diff use one nested scroll flow
+- Changes: both shared diff presentations accept an optional list header
+
+- [x] **Step 1: Add failing behavior tests**
+
+Assert that the reference hover surface begins next to its icon. Drag the diff
+surface and assert that the first file row moves with the rest of the preview.
+
+- [x] **Step 2: Implement the confirmed interaction**
+
+Keep folder indentation outside the hover surface. Replace the two independent
+preview scroll areas with one `NestedScrollView`. Keep the diff lists lazy and
+place their titles inside the same list.
+
+- [x] **Step 3: Preserve keyboard and conflict workflows**
+
+Keep selected files visible during keyboard navigation. Return the preview to
+the top when Merge/Rebase conflict state changes.
+
+- [x] **Step 4: Run integrated verification and restart the debug app**

@@ -33,6 +33,7 @@ class SideBySidePresentationView extends StatelessWidget {
     this.showHunkHeaders = true,
     this.compactRows = false,
     this.currentMarkerColor = fullDiffAccent,
+    this.header,
     super.key,
   });
 
@@ -58,15 +59,26 @@ class SideBySidePresentationView extends StatelessWidget {
   final bool showHunkHeaders;
   final bool compactRows;
   final Color currentMarkerColor;
+  final Widget? header;
 
   @override
   Widget build(BuildContext context) {
     if (document.hunks.isEmpty) {
-      return const Center(
+      const empty = Center(
         child: Text(
           '현재 옵션으로 표시할 변경이 없습니다',
           style: TextStyle(color: fullDiffMuted, fontSize: 10),
         ),
+      );
+      if (header == null) return empty;
+      return ListView(
+        key: const Key('side-by-side-list'),
+        controller: controller,
+        primary: controller == null,
+        children: [
+          header!,
+          const SizedBox(height: 80, child: empty),
+        ],
       );
     }
 
@@ -77,7 +89,11 @@ class SideBySidePresentationView extends StatelessWidget {
   }
 
   Widget _buildIndexed(BuildContext context, _SideBySideDocumentIndex items) {
-    final scrollTargetIndex = items.indexForTarget(scrollTarget);
+    final headerOffset = header == null ? 0 : 1;
+    final sourceTargetIndex = items.indexForTarget(scrollTarget);
+    final scrollTargetIndex = sourceTargetIndex < 0
+        ? -1
+        : sourceTargetIndex + headerOffset;
     final list = FullDiffSelectionArea(
       allSourceTextBuilder: () {
         debugMetrics?.recordSelectionTextBuild();
@@ -87,8 +103,10 @@ class SideBySidePresentationView extends StatelessWidget {
         key: const Key('side-by-side-list'),
         controller: controller,
         primary: controller == null,
-        itemCount: items.itemCount,
+        itemCount: items.itemCount + headerOffset,
         itemBuilder: (context, itemIndex) {
+          if (itemIndex < headerOffset) return header!;
+          itemIndex -= headerOffset;
           final item = items.itemAt(itemIndex);
           debugMetrics?.recordItem(pair: item.pair != null);
           final hunk = item.hunk;
