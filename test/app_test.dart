@@ -13,7 +13,9 @@ import 'package:yogit/diff_screen.dart';
 import 'package:yogit/full_blame_view.dart';
 import 'package:yogit/full_diff_controller.dart';
 import 'package:yogit/full_diff_model.dart';
+import 'package:yogit/full_diff_side_by_side_view.dart';
 import 'package:yogit/full_diff_theme.dart';
+import 'package:yogit/full_diff_unified_view.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/main.dart';
 import 'package:yogit/monaco_editor_screen.dart';
@@ -2644,6 +2646,123 @@ void main() {
     expect(calls, hasLength(1));
   });
 
+  testWidgets('branch preview diff switches between both full diff layouts', (
+    tester,
+  ) async {
+    final comparison = BranchComparisonResult(
+      baseRef: 'main',
+      compareRef: 'feature',
+      baseTip: 'main-tip',
+      compareTip: 'feature-tip',
+      baseParent: 'root',
+      compareParent: 'root',
+      mergeBases: const ['root'],
+      commits: branchComparison().commits,
+      files: const [],
+      merge: const MergeConflictCheck(
+        status: MergeConflictStatus.clean,
+        treeSha: 'merge-tree',
+        resultFiles: [
+          GitFileChange(
+            path: 'feature.txt',
+            status: 'M',
+            additions: 1,
+            deletions: 1,
+          ),
+          GitFileChange(
+            path: 'other.txt',
+            status: 'A',
+            additions: 1,
+            deletions: 0,
+          ),
+        ],
+      ),
+    );
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            current: 'main',
+            tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async => comparison,
+          diffBetween: (_, _, _) async => const [
+            DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+            DiffLine(kind: DiffLineKind.delete, text: 'old', oldNumber: 1),
+            DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('branch-preview-file-list')), findsOneWidget);
+    expect(find.text('feature.txt'), findsWidgets);
+    expect(find.byType(UnifiedPresentationView), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const Key('branch-preview-layout-side-by-side')),
+    );
+    await tester.pump();
+    expect(find.byType(SideBySidePresentationView), findsOneWidget);
+
+    await tester.tap(find.text('other.txt').last);
+    await tester.pump();
+    expect(find.byType(SideBySidePresentationView), findsOneWidget);
+  });
+
+  testWidgets('branch preview diff names both sides of a merge conflict', (
+    tester,
+  ) async {
+    final comparison = branchComparison(
+      baseSubject: 'main change',
+      compareSubject: 'feature change',
+      merge: const MergeConflictCheck(
+        status: MergeConflictStatus.conflicts,
+        files: ['lib/shared.dart'],
+      ),
+    );
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            current: 'main',
+            tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async => comparison,
+          diffBetween: (_, _, _) async => const [
+            DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Merge 충돌'), findsOneWidget);
+    expect(find.text('lib/shared.dart'), findsWidgets);
+    expect(find.text('main · main change'), findsOneWidget);
+    expect(find.text('feature · feature change'), findsOneWidget);
+    expect(find.textContaining(RegExp(r'^[0-9a-f]{7} 사용$')), findsNothing);
+  });
+
   testWidgets('rebase preview adds rewritten commits to the timeline', (
     tester,
   ) async {
@@ -2724,19 +2843,20 @@ void main() {
           Future.value(
             const RebaseCheckResult(status: RebaseCheckStatus.conflicts),
           ),
-      openRebasePreviewCallback: ({required baseRef, required compareRef}) async =>
-          FakeRebasePreviewSession(
-            repository,
-            RebasePreviewResult(
-              status: RebasePreviewStatus.conflict,
-              baseTip: 'main-tip',
-              compareTip: 'feature-tip',
-              currentCommit: current,
-              completed: 0,
-              total: 1,
-              conflictFiles: const ['lib/shared.dart'],
-            ),
-          ),
+      openRebasePreviewCallback:
+          ({required baseRef, required compareRef}) async =>
+              FakeRebasePreviewSession(
+                repository,
+                RebasePreviewResult(
+                  status: RebasePreviewStatus.conflict,
+                  baseTip: 'main-tip',
+                  compareTip: 'feature-tip',
+                  currentCommit: current,
+                  completed: 0,
+                  total: 1,
+                  conflictFiles: const ['lib/shared.dart'],
+                ),
+              ),
       diffBetween: (_, _, _) async => const [],
     );
     await tester.pumpWidget(app(repository, controller));
@@ -11507,6 +11627,7 @@ class FakeGitRepository extends GitRepository {
     this.compareBranchesCallback,
     this.simulateRebaseCallback,
     this.openRebasePreviewCallback,
+    this.filesBetween,
     this.diffBetween,
     this.loadCherryPickStateCallback,
     this.cherryPickCallback,
@@ -11536,6 +11657,8 @@ class FakeGitRepository extends GitRepository {
     required String compareRef,
   })?
   openRebasePreviewCallback;
+  final Future<List<GitFileChange>> Function(String from, String to)?
+  filesBetween;
   final Future<List<DiffLine>> Function(
     String from,
     String to,
@@ -11699,6 +11822,11 @@ class FakeGitRepository extends GitRepository {
         ignoreWhitespace: ignoreWhitespace,
         scope: scope,
       );
+
+  @override
+  Future<List<GitFileChange>> loadFilesBetween(String fromRef, String toRef) =>
+      filesBetween?.call(fromRef, toRef) ??
+      super.loadFilesBetween(fromRef, toRef);
 
   @override
   Future<GitCommit?> loadWorkingTree() =>
@@ -11886,7 +12014,11 @@ GitCommit commit(
 BranchComparisonResult branchComparison({
   String compareRef = 'feature',
   String compareTip = 'feature-tip',
+  String baseSubject = 'main only',
   String compareSubject = 'feature only',
+  MergeConflictCheck merge = const MergeConflictCheck(
+    status: MergeConflictStatus.clean,
+  ),
 }) => BranchComparisonResult(
   baseRef: 'main',
   compareRef: compareRef,
@@ -11897,7 +12029,7 @@ BranchComparisonResult branchComparison({
   mergeBases: const ['root'],
   commits: [
     BranchComparisonCommit(
-      commit: commit('main-tip', 'main only', parents: const ['root']),
+      commit: commit('main-tip', baseSubject, parents: const ['root']),
       side: BranchCommitSide.baseOnly,
     ),
     BranchComparisonCommit(
@@ -11917,5 +12049,5 @@ BranchComparisonResult branchComparison({
       deletions: 1,
     ),
   ],
-  merge: const MergeConflictCheck(status: MergeConflictStatus.clean),
+  merge: merge,
 );

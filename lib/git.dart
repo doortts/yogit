@@ -2106,6 +2106,9 @@ class GitRepository implements FullDiffRepository {
     ];
   }
 
+  Future<List<GitFileChange>> loadFilesBetween(String fromRef, String toRef) =>
+      _loadFilesBetween(fromRef, toRef);
+
   Future<List<GitFileChange>> _withFileSizes(
     GitCommit commit,
     List<GitFileChange> files, {

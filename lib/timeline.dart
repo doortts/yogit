@@ -11,6 +11,9 @@ import 'diff_screen.dart';
 import 'external_editor.dart';
 import 'full_diff_commit_message_cache.dart';
 import 'full_diff_model.dart';
+import 'full_diff_side_by_side_view.dart';
+import 'full_diff_syntax.dart';
+import 'full_diff_unified_view.dart';
 import 'git.dart';
 import 'monaco_editor_screen.dart';
 import 'page_scroll_shortcuts.dart';
@@ -606,6 +609,8 @@ class _TimelineScreenState extends State<TimelineScreen>
   Object? _comparisonError;
   var _comparisonSerial = 0;
   late BranchPreviewMode _branchPreviewMode = widget.branchPreviewMode;
+  var _branchPreviewLayout = DiffLayout.unified;
+  final _branchPreviewHighlighter = HighlightJsSyntaxHighlighter();
 
   List<GitCommit> get _commits => _comparison == null
       ? _normalCommits
@@ -4418,16 +4423,74 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   /// The commit's changed files, remembered in resolved form as well so ⌘↑/⌘↓ can
   /// walk them without waiting on a future.
-  String _previewKey(GitCommit commit) => _comparison == null
-      ? commit.sha
-      : '${_comparison!.baseTip}..${_comparison!.compareTip}';
+  ({String from, String to})? get _branchPreviewRange {
+    final comparison = _comparison;
+    if (comparison == null) return null;
+    if (_branchPreviewMode == BranchPreviewMode.merge) {
+      return (
+        from: comparison.baseTip,
+        to: comparison.merge.treeSha ?? comparison.compareTip,
+      );
+    }
+    final preview = _rebasePreview;
+    if (preview?.status == RebasePreviewStatus.clean &&
+        preview?.virtualTip != null) {
+      return (from: comparison.baseTip, to: preview!.virtualTip!);
+    }
+    final current = preview?.currentCommit;
+    return (
+      from: current == null || current.parents.isEmpty
+          ? comparison.baseTip
+          : current.parents.first,
+      to: current?.sha ?? comparison.compareTip,
+    );
+  }
+
+  String _previewKey(GitCommit commit) {
+    final range = _branchPreviewRange;
+    return range == null
+        ? commit.sha
+        : '${_branchPreviewMode.name}:${range.from}..${range.to}';
+  }
 
   Future<List<GitFileChange>> _previewFilesFor(GitCommit commit) {
     final key = _previewKey(commit);
     return _previewFiles.putIfAbsent(key, () {
-      final request = _comparison == null
+      final comparison = _comparison;
+      final preview = _rebasePreview;
+      final request = comparison == null
           ? widget.repository.loadFiles(commit)
-          : Future.value(_comparison!.files);
+          : _branchPreviewMode == BranchPreviewMode.merge
+          ? Future.value(
+              comparison.merge.status == MergeConflictStatus.clean
+                  ? comparison.merge.treeSha == null
+                        ? comparison.files
+                        : comparison.merge.resultFiles
+                  : [
+                      for (final path in comparison.merge.files)
+                        GitFileChange(
+                          path: path,
+                          status: 'U',
+                          additions: null,
+                          deletions: null,
+                        ),
+                    ],
+            )
+          : preview?.status == RebasePreviewStatus.clean &&
+                preview?.virtualTip != null
+          ? widget.repository.loadFilesBetween(
+              comparison.baseTip,
+              preview!.virtualTip!,
+            )
+          : Future.value([
+              for (final path in preview?.conflictFiles ?? const <String>[])
+                GitFileChange(
+                  path: path,
+                  status: 'U',
+                  additions: null,
+                  deletions: null,
+                ),
+            ]);
       unawaited(
         request
             .then((files) => _previewFileLists[key] = files)
@@ -4575,6 +4638,8 @@ class _TimelineScreenState extends State<TimelineScreen>
                 snapshot.hasError,
                 selectedPath,
               ),
+              if (_comparison != null && _branchPreviewHasConflict)
+                _branchPreviewConflictChoices(),
             ],
           ),
         );
@@ -4617,11 +4682,13 @@ class _TimelineScreenState extends State<TimelineScreen>
     child: info,
   );
 
-  Widget _previewScrollableDiff(Widget diff) => _previewScrollable(
-    key: const Key('preview-diff-scroll'),
-    controller: _previewDiffScrollController,
-    child: diff,
-  );
+  Widget _previewScrollableDiff(Widget diff) => _comparison == null
+      ? _previewScrollable(
+          key: const Key('preview-diff-scroll'),
+          controller: _previewDiffScrollController,
+          child: diff,
+        )
+      : KeyedSubtree(key: const Key('preview-diff-scroll'), child: diff);
 
   Widget _previewScrollable({
     required Key key,
@@ -4791,13 +4858,64 @@ class _TimelineScreenState extends State<TimelineScreen>
     );
   }
 
+  bool get _branchPreviewHasConflict =>
+      _branchPreviewMode == BranchPreviewMode.merge
+      ? _comparison?.merge.status == MergeConflictStatus.conflicts
+      : _rebasePreview?.status == RebasePreviewStatus.conflict;
+
+  Widget _branchPreviewConflictChoices() {
+    final comparison = _comparison!;
+    final baseCommits = comparison.commits
+        .where((entry) => entry.side == BranchCommitSide.baseOnly)
+        .map((entry) => entry.commit)
+        .toList();
+    final compareCommits = comparison.commits
+        .where((entry) => entry.side == BranchCommitSide.compareOnly)
+        .map((entry) => entry.commit)
+        .toList();
+    final base = baseCommits.isEmpty ? null : baseCommits.first;
+    final compare =
+        _rebasePreview?.currentCommit ??
+        (compareCommits.isEmpty ? null : compareCommits.first);
+    Widget choice(String branch, String subject) => Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+      decoration: BoxDecoration(
+        color: _palette.raised,
+        border: Border.all(color: _palette.border),
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '$branch · $subject',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: _palette.text, fontSize: 11),
+            ),
+          ),
+          Text('사용', style: TextStyle(color: _palette.muted, fontSize: 10)),
+        ],
+      ),
+    );
+    return Column(
+      children: [
+        choice(comparison.baseRef, base?.subject ?? '현재 상태'),
+        choice(comparison.compareRef, compare?.subject ?? '적용할 변경'),
+      ],
+    );
+  }
+
   Widget _previewFileList(
     GitCommit commit,
     List<GitFileChange>? changes,
     bool failed,
     String? selectedPath,
   ) => Container(
-    key: const Key('preview-files'),
+    key: Key(
+      _comparison == null ? 'preview-files' : 'branch-preview-file-list',
+    ),
     alignment: Alignment.topLeft,
     child: failed
         ? const Center(
@@ -4893,11 +5011,95 @@ class _TimelineScreenState extends State<TimelineScreen>
       return comparison == null
           ? widget.repository.loadDiff(commit, file)
           : widget.repository.loadDiffBetween(
-              comparison.baseTip,
-              comparison.compareTip,
+              _branchPreviewRange!.from,
+              _branchPreviewRange!.to,
               file,
             );
     });
+    if (_comparison != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 5),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    path,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: _palette.text,
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+                _branchPreviewLayoutButton(
+                  key: const Key('branch-preview-layout-unified'),
+                  label: 'Unified',
+                  layout: DiffLayout.unified,
+                ),
+                const SizedBox(width: 5),
+                _branchPreviewLayoutButton(
+                  key: const Key('branch-preview-layout-side-by-side'),
+                  label: 'Side-by-side',
+                  layout: DiffLayout.sideBySide,
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: FutureBuilder<List<DiffLine>>(
+              future: future,
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return const Center(
+                    child: Text(
+                      'Could not load diff',
+                      style: TextStyle(color: Color(0xFFF29AB2), fontSize: 12),
+                    ),
+                  );
+                }
+                if (snapshot.data case final lines?) {
+                  final document = DiffDocument.fromLines(lines);
+                  final anchors = {
+                    for (final hunk in document.hunks)
+                      hunk.anchor.id: GlobalKey(),
+                  };
+                  return _branchPreviewLayout == DiffLayout.unified
+                      ? UnifiedPresentationView(
+                          document: document,
+                          activeAnchor: null,
+                          path: path,
+                          wrapLines: false,
+                          highlighter: _branchPreviewHighlighter,
+                          anchorKeys: anchors,
+                        )
+                      : SideBySidePresentationView(
+                          document: document,
+                          activeAnchor: null,
+                          oldPath: file.oldPath ?? path,
+                          newPath: path,
+                          wrapLines: false,
+                          showOldSide: true,
+                          highlighter: _branchPreviewHighlighter,
+                          anchorKeys: anchors,
+                        );
+                }
+                return const Center(
+                  child: SizedBox.square(
+                    dimension: 14,
+                    child: CircularProgressIndicator(strokeWidth: 1.5),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -4949,6 +5151,33 @@ class _TimelineScreenState extends State<TimelineScreen>
       ],
     );
   }
+
+  Widget _branchPreviewLayoutButton({
+    required Key key,
+    required String label,
+    required DiffLayout layout,
+  }) => InkWell(
+    key: key,
+    onTap: () => setState(() => _branchPreviewLayout = layout),
+    borderRadius: BorderRadius.circular(5),
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      decoration: BoxDecoration(
+        color: _branchPreviewLayout == layout
+            ? _palette.interactive
+            : _palette.raised,
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: _palette.text,
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    ),
+  );
 
   Widget _previewDiffLine(DiffLine line) {
     final prefix = switch (line.kind) {

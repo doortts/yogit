@@ -879,6 +879,13 @@ void main() {
       isTrue,
     );
     expect(result.virtualTip, result.rewritten.last.rewrittenSha);
+    expect(
+      (await GitRepository(root.path).loadFilesBetween(
+        originalMain,
+        result.virtualTip!,
+      )).map((file) => file.path),
+      containsAll(['one.txt', 'two.txt']),
+    );
     expect((await _git(root, ['rev-parse', 'main'])).trim(), originalMain);
     expect(
       (await _git(root, ['rev-parse', 'feature'])).trim(),
