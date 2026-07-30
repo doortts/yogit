@@ -40,6 +40,7 @@ const _tooltipDelay = Duration(milliseconds: 400);
 
 /// The design's `--yo-main` accent: additions, lane dots, the name tint.
 const _main = Color(0xFF8AD6A1);
+const _success = Color(0xFF34C759);
 const _behind = Color(0xFFF0A35E);
 
 List<Color> rebaseMappingColors(Iterable<Color> reserved) {
@@ -2863,6 +2864,28 @@ class _TimelineScreenState extends State<TimelineScreen>
     );
   }
 
+  Widget _branchCommitCount({
+    required Key key,
+    required String branch,
+    required int count,
+    required bool added,
+  }) => Text.rich(
+    TextSpan(
+      text: '$branch ',
+      style: TextStyle(color: _palette.muted, fontSize: 10),
+      children: [
+        TextSpan(
+          text: '${added ? '+' : '−'}$count',
+          style: TextStyle(
+            color: added ? _main : _hash,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    ),
+    key: key,
+  );
+
   Widget _legend(String label, Widget dot) => Padding(
     padding: const EdgeInsets.only(right: 12),
     child: Row(
@@ -2980,16 +3003,34 @@ class _TimelineScreenState extends State<TimelineScreen>
             RebaseCheckStatus.failed => 'Rebase 검사 실패',
             null => 'Rebase 검사 중',
           };
+    Text detail(String value) =>
+        Text(value, style: TextStyle(color: _palette.muted, fontSize: 10));
     final details = comparison == null
-        ? <String>[]
-        : [
-            comparison.sameFirstParent ? '부모 동일' : '부모 다름',
-            '공통 ${comparison.mergeBases.length}',
-            '${comparison.baseRef}만 ${comparison.commits.where((entry) => entry.side == BranchCommitSide.baseOnly).length}',
-            '${comparison.compareRef}만 ${comparison.commits.where((entry) => entry.side == BranchCommitSide.compareOnly).length}',
+        ? <Widget>[]
+        : <Widget>[
+            detail(comparison.sameFirstParent ? '부모 동일' : '부모 다름'),
+            detail('공통 ${comparison.mergeBases.length}'),
+            _branchCommitCount(
+              key: const Key('branch-preview-base-count'),
+              branch: comparison.baseRef,
+              count: comparison.commits
+                  .where((entry) => entry.side == BranchCommitSide.baseOnly)
+                  .length,
+              added: false,
+            ),
+            _branchCommitCount(
+              key: const Key('branch-preview-compare-count'),
+              branch: comparison.compareRef,
+              count: comparison.commits
+                  .where((entry) => entry.side == BranchCommitSide.compareOnly)
+                  .length,
+              added: true,
+            ),
             if (!mergeMode &&
                 _rebasePreview?.status == RebasePreviewStatus.conflict)
-              '진행 ${_rebasePreview!.completed + 1}/${_rebasePreview!.total}',
+              detail(
+                '진행 ${_rebasePreview!.completed + 1}/${_rebasePreview!.total}',
+              ),
           ];
     return Container(
       key: const Key('branch-preview-summary'),
@@ -3022,7 +3063,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                   const Icon(
                     Icons.check_circle,
                     key: Key('branch-preview-success-icon'),
-                    color: _main,
+                    color: _success,
                     size: 15,
                   ),
                   const SizedBox(width: 5),
@@ -3030,7 +3071,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                 Text(
                   resultLabel,
                   style: TextStyle(
-                    color: success ? _main : _palette.muted,
+                    color: success ? _success : _palette.muted,
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
                   ),
@@ -3038,10 +3079,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               ],
             ),
           ),
-          for (final detail in details) ...[
-            const SizedBox(width: 12),
-            Text(detail, style: TextStyle(color: _palette.muted, fontSize: 10)),
-          ],
+          for (final detail in details) ...[const SizedBox(width: 12), detail],
         ],
       ),
     );
