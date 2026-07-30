@@ -3,7 +3,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import 'avatars.dart';
@@ -47,24 +46,21 @@ const _previewPurple = Color(0xFFC69AFF);
 const _previewPurplePanel = Color(0xFF29243A);
 const _previewConflict = Color(0xFFFF7A84);
 const _previewConflictPanel = Color(0xFF4B252C);
+const _previewControlBlue = Color(0xFF4388EE);
 
-List<Color> rebaseMappingColors(Iterable<Color> reserved) {
-  final used = reserved.map((color) => color.toARGB32()).toSet();
-  final colors = <Color>[];
-  for (var index = 0; index < 360 && colors.length < 5; index++) {
-    final color = HSLColor.fromAHSL(
-      1,
-      (18 + index * 67) % 360,
-      0.26,
-      0.38,
-    ).toColor();
-    if (used.add(color.toARGB32())) colors.add(color);
-  }
-  if (colors.length < 5) {
-    throw StateError('Could not allocate rebase mapping colors.');
-  }
-  return colors;
+List<Color> rebaseMappingColors(Color branchColor) {
+  final source = HSLColor.fromColor(branchColor);
+  final startLightness = source.lightness + (1 - source.lightness) * 0.12;
+  return [
+    for (var index = 0; index < 5; index++)
+      source
+          .withSaturation(source.saturation * (0.92 - index * 0.11))
+          .withLightness(startLightness * (1 - index * 0.09))
+          .toColor(),
+  ];
 }
+
+const _rebaseMappingAvatarBorderWidth = 3.0;
 
 enum PreviewGraphNodeKind {
   actual,
@@ -144,19 +140,64 @@ BranchPreviewGraph layoutMergePreviewGraph(BranchComparisonResult comparison) {
     ),
     ...existing,
   ];
+  final dashedLanes = <int, Set<int>>{};
+  for (final parent in [base, compare]) {
+    final parentIndex = rows.indexWhere(
+      (row) => row.commit.sha == parent.commit.sha,
+    );
+    for (var index = 0; index < parentIndex; index++) {
+      (dashedLanes[index] ??= {}).add(parent.lane);
+    }
+  }
   return BranchPreviewGraph(
     rows: rows,
     kinds: {sha: PreviewGraphNodeKind.virtualMerge},
-    dashedLanes: {0: lanes.toSet()},
+    dashedLanes: dashedLanes,
   );
 }
 
 BranchPreviewGraph layoutRebasePreviewGraph(
   BranchComparisonResult comparison,
   RebasePreviewResult preview,
-  List<Color> colors,
 ) {
-  final existing = layoutBranchComparison(comparison.commits);
+  final laidOut = layoutBranchComparison(comparison.commits);
+  final compare = laidOut.firstWhere(
+    (row) => row.commit.sha == comparison.compareTip,
+  );
+  final compareLane = compare.lane;
+  final colors = rebaseMappingColors(AvatarService.branchColor(compare.branch));
+  GraphRow hideCompareRail(GraphRow row) {
+    final activeLaneShas = Map<int, String>.of(row.activeLaneShas)
+      ..remove(compareLane);
+    final nextLaneShas = Map<int, String>.of(row.nextLaneShas)
+      ..remove(compareLane);
+    final activeLaneBranches = Map<int, int>.of(row.activeLaneBranches)
+      ..remove(compareLane);
+    final nextLaneBranches = Map<int, int>.of(row.nextLaneBranches)
+      ..remove(compareLane);
+    return _copyGraphRow(
+      row,
+      activeLanes: row.activeLanes
+          .where((lane) => lane != compareLane)
+          .toList(),
+      nextLanes: row.nextLanes.where((lane) => lane != compareLane).toList(),
+      activeLaneShas: activeLaneShas,
+      nextLaneShas: nextLaneShas,
+      activeLaneBranches: activeLaneBranches,
+      nextLaneBranches: nextLaneBranches,
+    );
+  }
+
+  final firstCompareRow = comparison.commits.indexWhere(
+    (entry) => entry.side == BranchCommitSide.compareOnly,
+  );
+  final existing = [
+    for (var index = 0; index < laidOut.length; index++)
+      index < firstCompareRow &&
+              comparison.commits[index].side == BranchCommitSide.baseOnly
+          ? hideCompareRail(laidOut[index])
+          : laidOut[index],
+  ];
   if (preview.status == RebasePreviewStatus.conflict) {
     final base = existing.firstWhere(
       (row) => row.commit.sha == comparison.baseTip,
@@ -259,7 +300,7 @@ BranchPreviewGraph layoutRebasePreviewGraph(
           originalRow: rowBySha[preview.rewritten[index].original.sha]!,
           rewrittenRow: rowBySha[preview.rewritten[index].rewrittenSha]!,
           routeLane: index,
-          color: colors[index % colors.length],
+          color: colors[math.min(index, colors.length - 1)],
         ),
     ],
   );
@@ -636,6 +677,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   static const _pageSize = 500;
 
   static const _sidebarRange = (min: 150.0, max: 320.0);
+  static const _collapsedSidebarWidth = 52.0;
 
   TimelineThemePalette get _palette => context.timelineTheme;
 
@@ -651,7 +693,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     return segments.isEmpty ? root : segments.last;
   }
 
-  static const _previewWidthRange = (min: 240.0, max: 560.0);
+  static const _previewMinWidth = 240.0;
+  static const _previewMaxWidthFraction = 0.75;
   static const _previewMinHeight = 200.0;
   static const _timelineHeaderHeight = 29.0;
   static const _branchPreviewSummaryHeight = 52.0;
@@ -660,11 +703,10 @@ class _TimelineScreenState extends State<TimelineScreen>
   final _timelineKey = GlobalKey();
   final _scrollController = ScrollController();
   final _previewFilesScrollController = ScrollController();
-  final _previewDiffScrollController = ScrollController();
+  ScrollController? _previewDiffScrollController;
   final _selectedPreviewFileKey = GlobalKey(
     debugLabel: 'selected preview file',
   );
-  ScrollController? _activePreviewScrollController;
   final _normalCommits = <GitCommit>[];
   final _committersBySha = <String, GitIdentity>{};
   var _normalRows = <GraphRow>[];
@@ -701,8 +743,8 @@ class _TimelineScreenState extends State<TimelineScreen>
   Object? _comparisonError;
   var _comparisonSerial = 0;
   late BranchPreviewMode _branchPreviewMode = widget.branchPreviewMode;
-  var _branchPreviewLayout = DiffLayout.unified;
-  final _branchPreviewHighlighter = HighlightJsSyntaxHighlighter();
+  var _previewDiffLayout = DiffLayout.unified;
+  final _previewDiffHighlighter = HighlightJsSyntaxHighlighter();
 
   List<GitCommit> get _commits => _comparison == null
       ? _normalCommits
@@ -761,6 +803,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   final _collapsedRefSections = <_RefSection>{};
   final _collapsedRefFolders = <String>{};
   var _showAllTags = false;
+  var _sidebarCollapsed = false;
 
   late final Map<String, double> _widths = _widthMap(widget.columnWidths);
   late double? _commitWidth = widget.columnWidths.commit;
@@ -781,7 +824,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   var _commitAvailableWidth = 0.0;
   late double _previewWidth = widget.previewWidth;
   late double _previewHeight = widget.previewHeight;
-  var _bottomPreviewMaxHeight = double.infinity;
+  var _bottomPreviewMaxHeight = double.maxFinite;
   _FullDiffRouteSession? _fullDiffRouteSession;
   FullDiffPreferences? _pendingFullDiffPreferences;
   FullDiffColumnWidths? _pendingFullDiffColumnWidths;
@@ -1032,7 +1075,6 @@ class _TimelineScreenState extends State<TimelineScreen>
       ..removeListener(_maybeLoadNextPage)
       ..dispose();
     _previewFilesScrollController.dispose();
-    _previewDiffScrollController.dispose();
     for (final node in _resizerFocus.values) {
       node.dispose();
     }
@@ -1228,11 +1270,16 @@ class _TimelineScreenState extends State<TimelineScreen>
       );
       if (pageScrollIntent != null) {
         if (_previewController.previewPlacement != PreviewPlacement.closed) {
-          applyPageScroll(
-            _activePreviewScrollController ?? _previewDiffScrollController,
-            direction: pageScrollIntent.direction,
-            animate: event is KeyDownEvent,
+          final controller = _previewPageScrollController(
+            pageScrollIntent.direction,
           );
+          if (controller != null) {
+            applyPageScroll(
+              controller,
+              direction: pageScrollIntent.direction,
+              animate: event is KeyDownEvent,
+            );
+          }
         }
         return KeyEventResult.handled;
       }
@@ -1489,7 +1536,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               ],
             ),
           ),
-          if (_compareRef == null) _statusBar(),
+          _statusBar(),
         ],
       ),
     ),
@@ -1532,7 +1579,11 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
     final onLeft = placement == PreviewPlacement.left;
     final beside = onLeft || placement == PreviewPlacement.right;
-    final extent = beside ? math.min(_previewWidth, constraints.maxWidth) : 0.0;
+    final maxPreviewWidth = math.min(
+      constraints.maxWidth,
+      MediaQuery.sizeOf(context).width * _previewMaxWidthFraction,
+    );
+    final extent = beside ? math.min(_previewWidth, maxPreviewWidth) : 0.0;
     final preview = _animatedPreview(
       axis: Axis.horizontal,
       extent: extent,
@@ -1557,11 +1608,14 @@ class _TimelineScreenState extends State<TimelineScreen>
     duration: const Duration(milliseconds: 180),
     curve: Curves.easeOutCubic,
     tween: Tween(begin: 0, end: extent),
-    builder: (context, value, child) => SizedBox(
-      width: axis == Axis.horizontal ? value : width,
-      height: axis == Axis.vertical ? value : height,
-      child: child,
-    ),
+    builder: (context, value, child) {
+      final visibleExtent = math.min(value, extent);
+      return SizedBox(
+        width: axis == Axis.horizontal ? visibleExtent : width,
+        height: axis == Axis.vertical ? visibleExtent : height,
+        child: child,
+      );
+    },
     child: visible
         ? ClipRect(
             child: OverflowBox(
@@ -1698,7 +1752,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                 ),
                 if (_compareRef != null) ...[
                   const SizedBox(width: 8),
-                  SizedBox(width: 204, child: _branchPreviewControls()),
+                  SizedBox(width: 200, child: _branchPreviewControls()),
                 ],
                 Expanded(child: _dragAndWordmark()),
               ],
@@ -1744,58 +1798,64 @@ class _TimelineScreenState extends State<TimelineScreen>
     },
   );
 
-  Widget _branchPreviewControls() => SizedBox(
-    height: 32,
-    child: SegmentedButton<BranchPreviewMode>(
+  Widget _branchPreviewControls() {
+    Widget button(BranchPreviewMode mode, String label, Key key, Key labelKey) {
+      final selected = _branchPreviewMode == mode;
+      return Expanded(
+        child: InkWell(
+          key: key,
+          onTap: _branchApplyBusy ? null : () => _setBranchPreviewMode(mode),
+          borderRadius: BorderRadius.circular(6),
+          child: Container(
+            height: 30,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: selected ? _previewControlBlue : Colors.transparent,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              label,
+              key: labelKey,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: selected ? Colors.white : _palette.muted,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
       key: const Key('branch-preview-segmented'),
-      segments: const [
-        ButtonSegment(
-          value: BranchPreviewMode.merge,
-          label: Text(
-            'Merge 미리보기',
-            key: Key('branch-preview-merge'),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-        ButtonSegment(
-          value: BranchPreviewMode.rebase,
-          label: Text(
-            'Rebase 미리보기',
-            key: Key('branch-preview-rebase'),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ],
-      selected: {_branchPreviewMode},
-      showSelectedIcon: false,
-      onSelectionChanged: _branchApplyBusy
-          ? null
-          : (selected) => _setBranchPreviewMode(selected.single),
-      style: ButtonStyle(
-        foregroundColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.selected)
-              ? _palette.text
-              : _palette.muted,
-        ),
-        backgroundColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.selected)
-              ? _palette.selectedRow
-              : _palette.background,
-        ),
-        side: WidgetStatePropertyAll(BorderSide(color: _palette.border)),
-        padding: const WidgetStatePropertyAll(
-          EdgeInsets.symmetric(horizontal: 6),
-        ),
-        textStyle: const WidgetStatePropertyAll(
-          TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
-        ),
-        visualDensity: VisualDensity.compact,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      height: 38,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: _palette.background,
+        border: Border.all(color: _palette.border),
+        borderRadius: BorderRadius.circular(8),
       ),
-    ),
-  );
+      child: Row(
+        children: [
+          button(
+            BranchPreviewMode.merge,
+            'Merge 미리보기',
+            const Key('branch-preview-merge-button'),
+            const Key('branch-preview-merge'),
+          ),
+          button(
+            BranchPreviewMode.rebase,
+            'Rebase 미리보기',
+            const Key('branch-preview-rebase-button'),
+            const Key('branch-preview-rebase'),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _setBranchPreviewMode(BranchPreviewMode mode) {
     if (_branchPreviewMode == mode ||
@@ -2118,19 +2178,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       });
       return;
     }
-    final colors = rebaseMappingColors([
-      ...AvatarService.palette,
-      _palette.background,
-      _palette.surface,
-      _palette.panel,
-      _palette.raised,
-      _palette.border,
-      _palette.text,
-      _palette.muted,
-      _palette.selectedRow,
-      _palette.interactive,
-    ]);
-    final graph = layoutRebasePreviewGraph(comparison, result, colors);
+    final graph = layoutRebasePreviewGraph(comparison, result);
     final conflictIndex = graph.rows.indexWhere(
       (row) => row.commit.sha == result.currentCommit?.sha,
     );
@@ -2179,6 +2227,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           ? conflictIndex
           : 0;
     });
+    _showPreviewTop();
     if (result.status == RebasePreviewStatus.conflict &&
         _previewController.previewPlacement == PreviewPlacement.closed) {
       await _previewController.setPreview(widget.preferredPreviewPlacement);
@@ -2212,6 +2261,16 @@ class _TimelineScreenState extends State<TimelineScreen>
         return;
       }
       _scrollController.jumpTo(0);
+    });
+  }
+
+  void _showPreviewTop() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _previewFilesScrollController.hasClients) {
+        _previewFilesScrollController.jumpTo(
+          _previewFilesScrollController.position.minScrollExtent,
+        );
+      }
     });
   }
 
@@ -2493,12 +2552,31 @@ class _TimelineScreenState extends State<TimelineScreen>
       const SizedBox(width: 12),
       _toolbarFullDiffButton(),
       const SizedBox(width: 8),
-      IconButton(
-        key: const Key('open-settings'),
-        tooltip: 'Settings',
-        visualDensity: VisualDensity.compact,
-        onPressed: widget.onOpenSettings,
-        icon: Icon(Icons.settings_outlined, size: 22, color: _palette.muted),
+      _HoverBuilder(
+        enabled: widget.onOpenSettings != null,
+        builder: (hovered) => Container(
+          key: const Key('settings-hover-surface'),
+          decoration: BoxDecoration(
+            color: hovered ? _palette.selectedRow : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: IconButton(
+            key: const Key('open-settings'),
+            tooltip: 'Settings',
+            visualDensity: VisualDensity.compact,
+            onPressed: widget.onOpenSettings,
+            icon: AnimatedRotation(
+              key: const Key('settings-hover-turn'),
+              turns: hovered ? 0.05 : 0,
+              duration: const Duration(milliseconds: 160),
+              child: Icon(
+                Icons.settings_outlined,
+                size: 22,
+                color: hovered ? _palette.text : _palette.muted,
+              ),
+            ),
+          ),
+        ),
       ),
     ],
   );
@@ -2515,27 +2593,30 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   Widget _placementButton(String label, PreviewPlacement placement) {
     final pressed = _activePlacement == placement;
-    return GestureDetector(
-      key: Key('placement-$placement'),
-      behavior: HitTestBehavior.opaque,
-      onTap: () {
-        widget.onPreviewPlacementChanged?.call(placement);
-        unawaited(_previewController.setPreview(placement));
-        _focusNode.requestFocus();
-      },
-      child: Container(
-        height: 30,
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 11),
-        decoration: BoxDecoration(
-          color: pressed ? _palette.selectedRow : null,
-          borderRadius: BorderRadius.circular(5),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: pressed ? Colors.white : _palette.muted,
-            fontSize: 14,
+    return _HoverBuilder(
+      builder: (hovered) => GestureDetector(
+        key: Key('placement-$placement'),
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          widget.onPreviewPlacementChanged?.call(placement);
+          unawaited(_previewController.setPreview(placement));
+          _focusNode.requestFocus();
+        },
+        child: Container(
+          key: Key('placement-hover-$placement'),
+          height: 30,
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 11),
+          decoration: BoxDecoration(
+            color: pressed || hovered ? _palette.selectedRow : null,
+            borderRadius: BorderRadius.circular(5),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: pressed || hovered ? Colors.white : _palette.muted,
+              fontSize: 14,
+            ),
           ),
         ),
       ),
@@ -2562,36 +2643,40 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   /// The sidebar, with a drag handle on its right edge. The timeline sits in the
   /// leftover width, so its own flex math follows along for free.
-  Widget _sidebar() => SizedBox(
-    key: const Key('sidebar'),
-    width: _sidebarWidth,
-    child: Stack(
-      children: [
-        Positioned.fill(child: _sidebarBody()),
-        Positioned(
-          right: 0,
-          top: 0,
-          bottom: 0,
-          width: 8,
-          child: MouseRegion(
-            cursor: SystemMouseCursors.resizeColumn,
-            child: GestureDetector(
-              key: const Key('sidebar-resizer'),
-              behavior: HitTestBehavior.opaque,
-              onHorizontalDragUpdate: (details) => setState(
-                () => _sidebarWidth = (_sidebarWidth + details.delta.dx).clamp(
-                  _sidebarRange.min,
-                  _sidebarRange.max,
+  Widget _sidebar() {
+    final width = _sidebarCollapsed ? _collapsedSidebarWidth : _sidebarWidth;
+    return SizedBox(
+      key: const Key('sidebar'),
+      width: width,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: _sidebarCollapsed ? _collapsedSidebarBody() : _sidebarBody(),
+          ),
+          if (!_sidebarCollapsed)
+            Positioned(
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: 8,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.resizeColumn,
+                child: GestureDetector(
+                  key: const Key('sidebar-resizer'),
+                  behavior: HitTestBehavior.opaque,
+                  onHorizontalDragUpdate: (details) => setState(
+                    () => _sidebarWidth = (_sidebarWidth + details.delta.dx)
+                        .clamp(_sidebarRange.min, _sidebarRange.max),
+                  ),
+                  onHorizontalDragEnd: (_) => _saveColumnWidths(),
+                  onHorizontalDragCancel: _saveColumnWidths,
                 ),
               ),
-              onHorizontalDragEnd: (_) => _saveColumnWidths(),
-              onHorizontalDragCancel: _saveColumnWidths,
             ),
-          ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 
   Widget _sidebarBody() => Container(
     decoration: BoxDecoration(
@@ -2602,34 +2687,42 @@ class _TimelineScreenState extends State<TimelineScreen>
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
-          child: TextField(
-            key: const Key('ref-filter'),
-            controller: _filterController,
-            onChanged: (value) => setState(() => _filter = value),
-            style: TextStyle(color: _palette.text, fontSize: 13),
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: '브랜치와 태그 찾기',
-              hintStyle: TextStyle(color: _palette.muted, fontSize: 13),
-              filled: true,
-              fillColor: _palette.raised,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 7,
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const Key('ref-filter'),
+                  controller: _filterController,
+                  onChanged: (value) => setState(() => _filter = value),
+                  style: TextStyle(color: _palette.text, fontSize: 13),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: '브랜치와 태그 찾기',
+                    hintStyle: TextStyle(color: _palette.muted, fontSize: 13),
+                    filled: true,
+                    fillColor: _palette.raised,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 7,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(5),
+                      borderSide: BorderSide(color: _palette.border),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(5),
+                      borderSide: BorderSide(color: _palette.border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(5),
+                      borderSide: BorderSide(color: _palette.interactive),
+                    ),
+                  ),
+                ),
               ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(5),
-                borderSide: BorderSide(color: _palette.border),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(5),
-                borderSide: BorderSide(color: _palette.border),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(5),
-                borderSide: BorderSide(color: _palette.interactive),
-              ),
-            ),
+              const SizedBox(width: 4),
+              _sidebarToggleButton(opens: false),
+            ],
           ),
         ),
         Expanded(
@@ -2644,6 +2737,71 @@ class _TimelineScreenState extends State<TimelineScreen>
           ),
         ),
       ],
+    ),
+  );
+
+  Widget _collapsedSidebarBody() => Container(
+    decoration: BoxDecoration(
+      color: _palette.panel,
+      border: Border(right: BorderSide(color: _palette.border)),
+    ),
+    child: Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 10, bottom: 8),
+          child: _sidebarToggleButton(opens: true),
+        ),
+        _compactSidebarSection(_RefSection.local, _localBranches.length),
+        _compactSidebarSection(_RefSection.remote, _refs.remote.length),
+        _compactSidebarSection(_RefSection.tags, _refs.tags.length),
+      ],
+    ),
+  );
+
+  Widget _sidebarToggleButton({required bool opens}) => Tooltip(
+    message: opens ? '왼쪽 패널 열기' : '왼쪽 패널 닫기',
+    waitDuration: Duration.zero,
+    child: SizedBox(
+      width: 28,
+      height: 28,
+      child: IconButton(
+        key: Key(opens ? 'sidebar-expand-button' : 'sidebar-collapse-button'),
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+        onPressed: () => setState(() => _sidebarCollapsed = !opens),
+        icon: CustomPaint(
+          key: Key(opens ? 'sidebar-expand-icon' : 'sidebar-collapse-icon'),
+          size: const Size(14.4, 14.4),
+          painter: _PaneToggleIconPainter(opens: opens, color: _palette.muted),
+        ),
+      ),
+    ),
+  );
+
+  Widget _compactSidebarSection(_RefSection section, int count) => Semantics(
+    label: '${section.label} $count',
+    child: Container(
+      key: Key('sidebar-compact-section-${section.name}'),
+      width: double.infinity,
+      height: 52,
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: _palette.border)),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(section.icon, size: 14, color: _palette.muted),
+          const SizedBox(height: 3),
+          Text(
+            '$count',
+            style: TextStyle(
+              color: _palette.muted,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
     ),
   );
 
@@ -2868,7 +3026,94 @@ class _TimelineScreenState extends State<TimelineScreen>
       }
     });
 
-    final row = SizedBox(
+    Widget buildContent(bool hovered) => Container(
+      height: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Flexible(
+                child: Text(
+                  node.segment,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: current || hovered ? _palette.text : _palette.muted,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+              if (current) const SizedBox(width: 2),
+              if (current)
+                Tooltip(
+                  message: '현재 체크아웃된 브랜치입니다',
+                  child: Container(
+                    key: Key('sidebar-head-$name'),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 2,
+                      vertical: 1,
+                    ),
+                    decoration: BoxDecoration(
+                      color: iconColor.withValues(alpha: 0.12),
+                      border: Border.all(
+                        color: iconColor.withValues(alpha: 0.8),
+                      ),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    child: Text(
+                      'HEAD',
+                      style: TextStyle(
+                        color: iconColor,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.3,
+                        fontFamily: technicalFontFamily,
+                        fontFamilyFallback: technicalFontFallback,
+                      ),
+                    ),
+                  ),
+                ),
+              if (behind > 0) const SizedBox(width: 4),
+              if (behind > 0)
+                Tooltip(
+                  message: '원격보다 $behind개 커밋 뒤처져 있습니다',
+                  child: SizedBox(
+                    key: Key('sidebar-behind-$name'),
+                    child: Text(
+                      '$behind',
+                      style: const TextStyle(
+                        color: _remoteBehind,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          // When the branch was cut, in the Date column's own words.
+          if (birth != null)
+            Text(
+              socialTimeLabel(
+                DateTime.fromMillisecondsSinceEpoch(birth * 1000),
+                DateTime.now(),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: hovered
+                    ? _palette.text.withValues(alpha: 0.72)
+                    : _palette.muted,
+                fontSize: 11,
+              ),
+            ),
+        ],
+      ),
+    );
+
+    Widget buildRow() => SizedBox(
       key: name == null ? null : Key('sidebar-row-$name'),
       height: birth == null ? 28 : 40,
       child: Padding(
@@ -2895,105 +3140,73 @@ class _TimelineScreenState extends State<TimelineScreen>
               )
             else
               const SizedBox(width: 18),
-            Icon(icon, size: 13, color: iconColor),
-            const SizedBox(width: 7),
-            Expanded(
-              child: GestureDetector(
-                key: name == null ? null : Key('sidebar-ref-$name'),
-                behavior: HitTestBehavior.opaque,
-                onTap: name == null
-                    ? toggleFolder
-                    : () => _selectRef(
-                        name,
-                        remote: section == _RefSection.remote,
-                      ),
-                child: Container(
-                  height: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 5),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              node.segment,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: current ? _palette.text : _palette.muted,
-                                fontSize: 13,
+            if (name == null) ...[
+              Icon(icon, size: 13, color: iconColor),
+              const SizedBox(width: 7),
+              Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: toggleFolder,
+                  child: buildContent(false),
+                ),
+              ),
+            ] else
+              Expanded(
+                child: _HoverBuilder(
+                  builder: (hovered) => GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () =>
+                        _selectRef(name, remote: section == _RefSection.remote),
+                    child: Stack(
+                      key: Key('sidebar-ref-hover-$name'),
+                      clipBehavior: Clip.none,
+                      fit: StackFit.expand,
+                      children: [
+                        Positioned(
+                          left: -5,
+                          top: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: DecoratedBox(
+                            key: Key('sidebar-ref-hover-background-$name'),
+                            decoration: BoxDecoration(
+                              color: hovered
+                                  ? _palette.selectedRow
+                                  : Colors.transparent,
+                              border: Border(
+                                left: BorderSide(
+                                  color: hovered
+                                      ? iconColor
+                                      : Colors.transparent,
+                                  width: hovered ? 2 : 0,
+                                ),
                               ),
                             ),
                           ),
-                          if (current) const SizedBox(width: 2),
-                          if (current)
-                            Tooltip(
-                              message: '현재 체크아웃된 브랜치입니다',
-                              child: Container(
-                                key: Key('sidebar-head-$name'),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 2,
-                                  vertical: 1,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: iconColor.withValues(alpha: 0.12),
-                                  border: Border.all(
-                                    color: iconColor.withValues(alpha: 0.8),
-                                  ),
-                                  borderRadius: BorderRadius.circular(3),
-                                ),
-                                child: Text(
-                                  'HEAD',
-                                  style: TextStyle(
-                                    color: iconColor,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.3,
-                                    fontFamily: technicalFontFamily,
-                                    fontFamilyFallback: technicalFontFallback,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (behind > 0) const SizedBox(width: 4),
-                          if (behind > 0)
-                            Tooltip(
-                              message: '원격보다 $behind개 커밋 뒤처져 있습니다',
-                              child: SizedBox(
-                                key: Key('sidebar-behind-$name'),
-                                child: Text(
-                                  '$behind',
-                                  style: const TextStyle(
-                                    color: _remoteBehind,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      // When the branch was cut, in the Date column's own words.
-                      if (birth != null)
-                        Text(
-                          socialTimeLabel(
-                            DateTime.fromMillisecondsSinceEpoch(birth * 1000),
-                            DateTime.now(),
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: _palette.muted, fontSize: 11),
                         ),
-                    ],
+                        Row(
+                          children: [
+                            Icon(icon, size: 13, color: iconColor),
+                            const SizedBox(width: 7),
+                            Expanded(
+                              child: KeyedSubtree(
+                                key: Key('sidebar-ref-$name'),
+                                child: buildContent(hovered),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
           ],
         ),
       ),
     );
+
+    final row = buildRow();
     if (!current) return row;
     return DragTarget<GitCommit>(
       onWillAcceptWithDetails: (details) => _canCherryPick(details.data),
@@ -3013,8 +3226,7 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   // -------------------------------------------------------------- status bar
 
-  Widget _statusBar() =>
-      _compareRef == null ? _normalStatusBar() : _comparisonStatusBar();
+  Widget _statusBar() => _normalStatusBar();
 
   Widget _normalStatusBar() => Container(
     height: 29,
@@ -3125,57 +3337,6 @@ class _TimelineScreenState extends State<TimelineScreen>
     ),
   );
 
-  Widget _comparisonStatusBar() {
-    final comparison = _comparison;
-    final labels = comparison == null
-        ? [if (_comparisonError == null) '브랜치 비교 중' else '브랜치 비교 실패']
-        : [
-            comparison.sameFirstParent ? '부모 동일' : '부모 다름',
-            '공통 ${comparison.mergeBases.length}',
-            '${comparison.baseRef}만 ${comparison.commits.where((entry) => entry.side == BranchCommitSide.baseOnly).length}',
-            '${comparison.compareRef}만 ${comparison.commits.where((entry) => entry.side == BranchCommitSide.compareOnly).length}',
-            switch (comparison.merge.status) {
-              MergeConflictStatus.clean => '병합 충돌 없음',
-              MergeConflictStatus.conflicts =>
-                '병합 충돌 ${comparison.merge.files.length}',
-              MergeConflictStatus.failed => '병합 검사 실패',
-            },
-            switch (_rebaseCheck?.status) {
-              null => '리베이스 검사 중',
-              RebaseCheckStatus.clean => '리베이스 가능',
-              RebaseCheckStatus.conflicts =>
-                '리베이스 충돌 ${_rebaseCheck!.files.length}',
-              RebaseCheckStatus.failed => '리베이스 검사 실패',
-            },
-          ];
-    return Container(
-      key: const Key('comparison-status'),
-      height: 29,
-      decoration: BoxDecoration(
-        color: _palette.surface,
-        border: Border(top: BorderSide(color: _palette.border)),
-      ),
-      child: ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        scrollDirection: Axis.horizontal,
-        itemCount: labels.length,
-        separatorBuilder: (_, _) => Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Text('·', style: TextStyle(color: _palette.muted)),
-        ),
-        itemBuilder: (_, index) => Center(
-          child: Text(
-            labels[index],
-            style: TextStyle(
-              color: _comparisonError == null ? _palette.muted : _behind,
-              fontSize: 10,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _legend(String label, Widget dot) => Padding(
     padding: const EdgeInsets.only(right: 12),
     child: Row(
@@ -3216,57 +3377,66 @@ class _TimelineScreenState extends State<TimelineScreen>
           _sidebarWidth + _w('refs') + graphWidth + _w('hash') + commitWidth;
       return ColoredBox(
         color: _palette.background,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SizedBox(
-            width: fixed + commitWidth,
-            child: Column(
-              children: [
-                if (_compareRef != null) _branchPreviewSummary(),
-                SizedBox(
-                  height: _timelineHeaderHeight,
-                  child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (_compareRef != null) _branchPreviewSummary(),
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: fixed + commitWidth,
+                  child: Column(
                     children: [
-                      for (final column in timelineColumns.keys)
-                        if (_columnVisible(column))
-                          _header(column, width(column)),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Stack(
-                    children: [
-                      ListView.builder(
-                        key: const Key('timeline-list'),
-                        controller: _scrollController,
-                        itemExtent: TimelineScreen.rowHeight,
-                        itemCount: _entries.length + (_showFooter ? 1 : 0),
-                        itemBuilder: (context, index) {
-                          if (index == _entries.length) return _footer();
-                          final entry = _entries[index];
-                          return entry.label == null
-                              ? _row(index, commitWidth, graphWidth)
-                              : _dateRow(index, entry, graphWidth);
-                        },
+                      SizedBox(
+                        height: _timelineHeaderHeight,
+                        child: Row(
+                          children: [
+                            for (final column in timelineColumns.keys)
+                              if (_columnVisible(column))
+                                _header(column, width(column)),
+                          ],
+                        ),
                       ),
-                      Positioned.fill(
-                        child: LayoutBuilder(
-                          builder: (context, constraints) => ListenableBuilder(
-                            listenable: Listenable.merge([
-                              _selectedIndex,
-                              _scrollController,
-                            ]),
-                            builder: (context, _) =>
-                                _refsModal(constraints.maxHeight),
-                          ),
+                      Expanded(
+                        child: Stack(
+                          children: [
+                            ListView.builder(
+                              key: const Key('timeline-list'),
+                              controller: _scrollController,
+                              itemExtent: TimelineScreen.rowHeight,
+                              itemCount:
+                                  _entries.length + (_showFooter ? 1 : 0),
+                              itemBuilder: (context, index) {
+                                if (index == _entries.length) return _footer();
+                                final entry = _entries[index];
+                                return entry.label == null
+                                    ? _row(index, commitWidth, graphWidth)
+                                    : _dateRow(index, entry, graphWidth);
+                              },
+                            ),
+                            Positioned.fill(
+                              child: LayoutBuilder(
+                                builder: (context, constraints) =>
+                                    ListenableBuilder(
+                                      listenable: Listenable.merge([
+                                        _selectedIndex,
+                                        _scrollController,
+                                      ]),
+                                      builder: (context, _) =>
+                                          _refsModal(constraints.maxHeight),
+                                    ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
                 ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
       );
     },
@@ -3287,10 +3457,13 @@ class _TimelineScreenState extends State<TimelineScreen>
     final mergeMode = _branchPreviewMode == BranchPreviewMode.merge;
     final mergeStatus = _effectiveMergeStatus;
     final rebaseStatus = _rebasePreview?.status;
+    final comparisonFailed = _comparisonError != null;
     final success = mergeMode
         ? mergeStatus == MergeConflictStatus.clean
         : _rebaseCheck?.status == RebaseCheckStatus.clean;
-    final resultLabel = mergeMode
+    final resultLabel = comparisonFailed
+        ? '브랜치 비교 실패'
+        : mergeMode
         ? switch (mergeStatus) {
             MergeConflictStatus.clean => 'Merge 성공',
             MergeConflictStatus.conflicts => 'Merge 충돌',
@@ -3324,7 +3497,6 @@ class _TimelineScreenState extends State<TimelineScreen>
         if (mergeStatus == MergeConflictStatus.clean) {
           details.addAll([
             detail('가상 커밋 1', color: _previewPurple),
-            detail('두 부모'),
             detail('충돌 없음', color: _success),
           ]);
         } else if (mergeStatus == MergeConflictStatus.conflicts) {
@@ -3333,7 +3505,6 @@ class _TimelineScreenState extends State<TimelineScreen>
               comparison.merge.files.length;
           details.addAll([
             detail('충돌 $conflicts개', color: _previewConflict),
-            detail('두 부모'),
             detail('임시 공간 사용 중'),
           ]);
         }
@@ -3356,7 +3527,9 @@ class _TimelineScreenState extends State<TimelineScreen>
         ]);
       }
     }
-    final resultColor = success
+    final resultColor = comparisonFailed
+        ? _behind
+        : success
         ? _success
         : mergeStatus == MergeConflictStatus.conflicts ||
               rebaseStatus == RebasePreviewStatus.conflict
@@ -3604,10 +3777,11 @@ class _TimelineScreenState extends State<TimelineScreen>
         ? null
         : () => unawaited(_confirmBranchPreviewApply()),
     style: FilledButton.styleFrom(
-      foregroundColor: const Color(0xFFF1E7FF),
-      backgroundColor: const Color(0xFF46385F),
-      side: const BorderSide(color: Color(0xFF7D68A6)),
-      padding: const EdgeInsets.symmetric(horizontal: 10),
+      foregroundColor: const Color(0xFFFFF4FF),
+      backgroundColor: const Color(0xFF594576),
+      side: const BorderSide(color: Color(0xFF9D79D0)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
     ),
     child: Text(
       _branchPreviewApplyLabel,
@@ -3621,7 +3795,6 @@ class _TimelineScreenState extends State<TimelineScreen>
   Widget _branchPreviewApplyCard() {
     final merge = _branchPreviewMode == BranchPreviewMode.merge;
     final result = _branchApplyResult;
-    final comparison = _comparison!;
     final previewCommitCount = merge
         ? 1
         : _rebasePreview?.rewritten.length ?? 0;
@@ -3676,31 +3849,30 @@ class _TimelineScreenState extends State<TimelineScreen>
                   ),
                 ),
               ),
-              Flexible(
-                child: Text(
-                  result == null && _branchApplyStatus == BranchApplyStatus.idle
-                      ? '${comparison.baseRef}과 ${comparison.compareRef} 유지'
-                      : switch (_branchApplyStatus) {
-                          BranchApplyStatus.applying => '커밋 적용 중',
-                          BranchApplyStatus.applied => '로컬 브랜치 적용됨',
-                          BranchApplyStatus.reverting => '되돌리는 중',
-                          BranchApplyStatus.reverted => 'SHA 일치 확인',
-                          BranchApplyStatus.failed => '작업 실패',
-                          BranchApplyStatus.idle => '아직 적용하지 않음',
-                        },
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color:
-                        _branchApplyStatus == BranchApplyStatus.reverted ||
-                            _branchApplyStatus == BranchApplyStatus.applied
-                        ? _success
-                        : _palette.muted,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
+              if (_branchApplyStatus != BranchApplyStatus.idle)
+                Flexible(
+                  child: Text(
+                    switch (_branchApplyStatus) {
+                      BranchApplyStatus.applying => '커밋 적용 중',
+                      BranchApplyStatus.applied => '로컬 브랜치 적용됨',
+                      BranchApplyStatus.reverting => '되돌리는 중',
+                      BranchApplyStatus.reverted => 'SHA 일치 확인',
+                      BranchApplyStatus.failed => '작업 실패',
+                      BranchApplyStatus.idle => '',
+                    },
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color:
+                          _branchApplyStatus == BranchApplyStatus.reverted ||
+                              _branchApplyStatus == BranchApplyStatus.applied
+                          ? _success
+                          : _palette.muted,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
           if (result == null) ...[
@@ -4565,6 +4737,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     bool selected,
     bool refConnector, {
     Color? committerColor,
+    Color? outgoingRailColor,
   }) => CommitGraphPainter(
     row: entry.row,
     previous: index > 0 ? _entries[index - 1].row : null,
@@ -4586,6 +4759,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               _branchPreviewHasConflict
         ? _previewConflict
         : _previewPurple,
+    outgoingRailColor: outgoingRailColor,
     backgroundColor: _palette.background,
     selectedRowColor: _palette.selectedRow,
   );
@@ -4600,8 +4774,17 @@ class _TimelineScreenState extends State<TimelineScreen>
     final entry = _entries[index];
     final row = entry.row;
     final commit = row.commit;
+    final commonBoundary =
+        _comparison?.commits.any(
+          (entry) =>
+              entry.commit.sha == commit.sha &&
+              entry.side == BranchCommitSide.commonBoundary,
+        ) ??
+        false;
     // One branch line, one color: rails, chips, node ring and hash border.
-    final branchColor = AvatarService.branchColor(row.branch);
+    final branchColor = commonBoundary
+        ? _palette.muted
+        : AvatarService.branchColor(row.branch);
     final previewKind = _previewGraph?.kinds[commit.sha];
     final rebaseConflict =
         _rebasePreview?.status == RebasePreviewStatus.conflict &&
@@ -4662,7 +4845,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         ? '재작성 ${rewrittenIndex + 1}/${rebasePreview!.total}'
         : rebasePreview?.status == RebasePreviewStatus.conflict &&
               commit.sha == rebasePreview?.currentCommit?.sha
-        ? '현재 적용 중'
+        ? '충돌 해결 중'
         : rebasePreview?.status == RebasePreviewStatus.conflict &&
               originalIndex >= 0
         ? '해결 완료'
@@ -4716,6 +4899,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       selected && !virtualPreview,
       refs.isNotEmpty,
       committerColor: previewColor,
+      outgoingRailColor: commonBoundary ? _palette.muted : null,
     );
     // Nodes keep their size at every width; only the overhang clips.
     const avatarSize = CommitGraphPainter.avatarDiameter;
@@ -4809,7 +4993,6 @@ class _TimelineScreenState extends State<TimelineScreen>
                                   rowIndex: index,
                                   laneSpacing: painter.laneSpacing,
                                   compact: painter.compact,
-                                  backgroundColor: _palette.background,
                                 ),
                               ),
                             ),
@@ -4857,8 +5040,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                               vertical: 3,
                             ),
                             decoration: BoxDecoration(
-                              color:
-                                  rowAccentColor.withValues(alpha: 0.2),
+                              color: rowAccentColor.withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
@@ -5050,7 +5232,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               color: const Color(0xFF8D6BB8),
               border: Border.all(
                 color: mappingColor ?? const Color(0xFFB78BEF),
-                width: 1,
+                width: _rebaseMappingAvatarBorderWidth,
               ),
             ),
             child: const Text(
@@ -5073,21 +5255,31 @@ class _TimelineScreenState extends State<TimelineScreen>
               border: Border.all(color: _previewPurple, width: 1),
             ),
           )
+        : mappingColor == null
+        ? CommitAvatarStack(
+            commit: commit,
+            avatarService: widget.avatarService,
+            showRemoteAvatars: widget.showRemoteAvatars,
+            size: size,
+            stacked: stacked,
+            discColor: branchColor,
+          )
         : Container(
-            padding: mappingColor == null
-                ? EdgeInsets.zero
-                : const EdgeInsets.all(1),
+            width: size,
+            height: size,
+            alignment: Alignment.center,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: mappingColor == null
-                  ? null
-                  : Border.all(color: mappingColor, width: 1),
+              border: Border.all(
+                color: mappingColor,
+                width: _rebaseMappingAvatarBorderWidth,
+              ),
             ),
             child: CommitAvatarStack(
               commit: commit,
               avatarService: widget.avatarService,
               showRemoteAvatars: widget.showRemoteAvatars,
-              size: mappingColor == null ? size : size - 2,
+              size: size - _rebaseMappingAvatarBorderWidth * 2,
               stacked: stacked,
               discColor: branchColor,
             ),
@@ -5134,22 +5326,29 @@ class _TimelineScreenState extends State<TimelineScreen>
             builder: (context, constraints) {
               // Chips split the cell evenly, each keeping at least 40px, and
               // whatever no longer fits simply does not show.
-              final slots = math.max(
-                1,
-                (constraints.maxWidth / _minChipWidth).floor(),
-              );
+              const inset = 14.0;
+              final width = constraints.maxWidth - inset * 2;
+              final slots = math.max(1, (width / _minChipWidth).floor());
               final shown = refs.take(slots).toList();
-              final slot = constraints.maxWidth / shown.length;
+              final slot = width / shown.length;
               return Stack(
                 children: [
                   for (var index = 0; index < shown.length; index++)
                     Positioned(
-                      left: index * slot,
-                      top: 6,
-                      width: slot - 2,
+                      left: inset + index * slot,
+                      top: 4,
+                      width: slot,
                       height: 24,
                       child: _refChip(commit, shown[index], color),
                     ),
+                  Positioned(
+                    key: Key('ref-chip-connector-${commit.sha}'),
+                    left: constraints.maxWidth - inset,
+                    right: 0,
+                    top: 15.5,
+                    height: 1,
+                    child: ColoredBox(color: color),
+                  ),
                 ],
               );
             },
@@ -5444,19 +5643,15 @@ class _TimelineScreenState extends State<TimelineScreen>
                     ? -details.delta.dx
                     : details.delta.dx;
                 _previewWidth = (_previewWidth + delta).clamp(
-                  _previewWidthRange.min,
-                  _previewWidthRange.max,
+                  _previewMinWidth,
+                  MediaQuery.sizeOf(context).width * _previewMaxWidthFraction,
                 );
               }),
         onHorizontalDragEnd: vertical ? null : (_) => _savePreviewSize(),
         onVerticalDragUpdate: vertical
             ? (details) => setState(() {
-                final minHeight = math.min(
-                  _previewMinHeight,
-                  _bottomPreviewMaxHeight,
-                );
                 _previewHeight = (_previewHeight - details.delta.dy).clamp(
-                  minHeight,
+                  math.min(_previewMinHeight, _bottomPreviewMaxHeight),
                   _bottomPreviewMaxHeight,
                 );
               })
@@ -5542,10 +5737,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                             ),
                           ),
                         )
-                      : _previewBody(
-                          commit,
-                          placement == PreviewPlacement.bottom,
-                        ),
+                      : _previewBody(commit),
                 ),
               ],
             ),
@@ -5597,12 +5789,10 @@ class _TimelineScreenState extends State<TimelineScreen>
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: _comparison == null ? _palette.muted : _palette.text,
+                color: branchPreview ? _palette.text : _palette.muted,
                 fontSize: 12,
-                fontWeight: _comparison == null
-                    ? FontWeight.w500
-                    : FontWeight.w700,
-                letterSpacing: _comparison == null ? 0.66 : 0,
+                fontWeight: branchPreview ? FontWeight.w700 : FontWeight.w500,
+                letterSpacing: branchPreview ? 0 : 0.66,
               ),
             ),
           ),
@@ -5622,20 +5812,12 @@ class _TimelineScreenState extends State<TimelineScreen>
               labelSize: 11,
               shortcutSize: 8,
             ),
-            const SizedBox(width: 8),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 64),
-              child: Text(
-                key: const Key('preview-hash'),
-                _cherryPickState != null
-                    ? _cherryPickState!.commitSha
-                    : commit == null
-                    ? '—'
-                    : commit.isWorkingTree
-                    ? 'WIP'
-                    : commit.shortSha,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+            if (_cherryPickState == null &&
+                (commit?.isWorkingTree ?? false)) ...[
+              const SizedBox(width: 8),
+              Text(
+                'WIP',
+                key: const Key('preview-working-tree'),
                 style: TextStyle(
                   color: _palette.muted,
                   fontSize: 11,
@@ -5643,7 +5825,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                   fontFamilyFallback: technicalFontFallback,
                 ),
               ),
-            ),
+            ],
           ],
         ],
       ),
@@ -5957,18 +6139,63 @@ class _TimelineScreenState extends State<TimelineScreen>
     setState(() => _previewPaths[_previewKey(commit)] = path);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (_previewDiffScrollController.hasClients) {
-        _previewDiffScrollController.jumpTo(0);
+      final outerOffset = _previewFilesScrollController.hasClients
+          ? _previewFilesScrollController.offset
+          : null;
+      final diffController = _previewDiffScrollController;
+      if (diffController?.hasClients ?? false) {
+        diffController!.jumpTo(0);
+      }
+      if (outerOffset != null && _previewFilesScrollController.hasClients) {
+        _previewFilesScrollController.jumpTo(
+          outerOffset.clamp(
+            _previewFilesScrollController.position.minScrollExtent,
+            _previewFilesScrollController.position.maxScrollExtent,
+          ),
+        );
       }
       if (revealDirection != null) {
-        _revealSelectedPreviewFile(revealDirection, animate: animateReveal);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _revealSelectedPreviewFile(revealDirection, animate: animateReveal);
+          }
+        });
       }
     });
   }
 
+  ScrollController? _previewPageScrollController(int direction) {
+    final outer = _previewFilesScrollController;
+    final inner = _previewDiffScrollController;
+    if (direction > 0) {
+      if (outer.hasClients &&
+          outer.position.pixels < outer.position.maxScrollExtent) {
+        return outer;
+      }
+      return inner?.hasClients ?? false ? inner : null;
+    }
+    if ((inner?.hasClients ?? false) &&
+        inner!.position.pixels > inner.position.minScrollExtent) {
+      return inner;
+    }
+    return outer.hasClients ? outer : null;
+  }
+
   void _revealSelectedPreviewFile(int direction, {required bool animate}) {
     final selectedContext = _selectedPreviewFileKey.currentContext;
-    if (selectedContext == null) return;
+    if (selectedContext == null) {
+      if (_previewFilesScrollController.hasClients &&
+          _previewFilesScrollController.position.pixels >
+              _previewFilesScrollController.position.minScrollExtent) {
+        _previewFilesScrollController.jumpTo(0);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _revealSelectedPreviewFile(direction, animate: animate);
+          }
+        });
+      }
+      return;
+    }
     unawaited(
       Scrollable.ensureVisible(
         selectedContext,
@@ -5981,7 +6208,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     );
   }
 
-  Widget _previewBody(GitCommit commit, bool bottom) {
+  Widget _previewBody(GitCommit commit) {
     final branchPreview = _usesBranchPreviewResult(commit);
     final files = _previewFilesFor(commit);
     return FutureBuilder<List<GitFileChange>>(
@@ -6095,13 +6322,11 @@ class _TimelineScreenState extends State<TimelineScreen>
                   selectedPath,
                 ),
               ),
-              if (branchPreview && _branchPreviewHasConflict)
-                _branchPreviewConflictChoices(),
             ],
           ),
         );
         final diff = Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          padding: EdgeInsets.zero,
           child: Container(
             key: const Key('preview-diff'),
             child: selectedPath == null
@@ -6114,72 +6339,35 @@ class _TimelineScreenState extends State<TimelineScreen>
                 : _previewDiff(commit, selectedFile!),
           ),
         );
-        return bottom
-            ? Row(
-                children: [
-                  SizedBox(width: 240, child: _previewScrollableInfo(info)),
-                  VerticalDivider(width: 1, color: _palette.border),
-                  Expanded(
-                    child: _previewScrollableDiff(
-                      diff,
-                      branchPreview: branchPreview,
-                    ),
-                  ),
-                ],
-              )
-            : Column(
-                children: [
-                  Expanded(child: _previewScrollableInfo(info)),
-                  Divider(height: 1, color: _palette.border),
-                  Expanded(
-                    child: _previewScrollableDiff(
-                      diff,
-                      branchPreview: branchPreview,
-                    ),
-                  ),
-                ],
+        return NestedScrollView(
+          key: const Key('preview-content-scroll'),
+          controller: _previewFilesScrollController,
+          headerSliverBuilder: (context, innerBoxIsScrolled) => [
+            SliverToBoxAdapter(
+              child: KeyedSubtree(
+                key: const Key('preview-files-scroll'),
+                child: info,
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: Divider(height: 1, color: _palette.border),
+            ),
+          ],
+          body: Builder(
+            builder: (context) {
+              _previewDiffScrollController = PrimaryScrollController.maybeOf(
+                context,
               );
+              return KeyedSubtree(
+                key: const Key('preview-diff-scroll'),
+                child: diff,
+              );
+            },
+          ),
+        );
       },
     );
   }
-
-  Widget _previewScrollableInfo(Widget info) => _previewScrollable(
-    key: const Key('preview-files-scroll'),
-    controller: _previewFilesScrollController,
-    child: info,
-  );
-
-  Widget _previewScrollableDiff(Widget diff, {required bool branchPreview}) =>
-      !branchPreview
-      ? _previewScrollable(
-          key: const Key('preview-diff-scroll'),
-          controller: _previewDiffScrollController,
-          child: diff,
-        )
-      : KeyedSubtree(key: const Key('preview-diff-scroll'), child: diff);
-
-  Widget _previewScrollable({
-    required Key key,
-    required ScrollController controller,
-    required Widget child,
-  }) => Listener(
-    behavior: HitTestBehavior.translucent,
-    onPointerDown: (_) => _activePreviewScrollController = controller,
-    child: NotificationListener<ScrollNotification>(
-      onNotification: (notification) {
-        if (notification is UserScrollNotification &&
-            notification.direction != ScrollDirection.idle) {
-          _activePreviewScrollController = controller;
-        }
-        return false;
-      },
-      child: SingleChildScrollView(
-        key: key,
-        controller: controller,
-        child: child,
-      ),
-    ),
-  );
 
   Widget _previewPerson(GitCommit commit) {
     final separateCommitter =
@@ -6335,87 +6523,102 @@ class _TimelineScreenState extends State<TimelineScreen>
   Widget _branchPreviewConflictChoices() {
     final comparison = _comparison!;
     final mergeMode = _branchPreviewMode == BranchPreviewMode.merge;
-    final baseCommits = comparison.commits
-        .where((entry) => entry.side == BranchCommitSide.baseOnly)
-        .map((entry) => entry.commit)
-        .toList();
-    final compareCommits = comparison.commits
-        .where((entry) => entry.side == BranchCommitSide.compareOnly)
-        .map((entry) => entry.commit)
-        .toList();
-    final base = baseCommits.isEmpty ? null : baseCommits.first;
-    final compare =
-        _rebasePreview?.currentCommit ??
-        (compareCommits.isEmpty ? null : compareCommits.first);
     final interactive = mergeMode
         ? _mergePreviewSession != null
         : _rebasePreviewSession != null;
     Widget choice({
       required Key key,
-      required String branch,
-      required String subject,
+      required String label,
       required VoidCallback onTap,
-    }) => Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: InkWell(
-        key: key,
-        onTap:
-            !interactive ||
-                _mergePreviewBusy ||
-                _rebasePreviewBusy ||
-                _repositoryOperationInProgress
-            ? null
-            : onTap,
-        borderRadius: BorderRadius.circular(7),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
-          decoration: BoxDecoration(
-            color: _palette.raised,
-            border: Border.all(color: _palette.border),
-            borderRadius: BorderRadius.circular(7),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '$branch · $subject',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: _palette.text, fontSize: 11),
-                ),
-              ),
-              Text('사용', style: TextStyle(color: _palette.muted, fontSize: 10)),
-            ],
-          ),
+    }) => InkWell(
+      key: key,
+      onTap:
+          !interactive ||
+              _mergePreviewBusy ||
+              _rebasePreviewBusy ||
+              _repositoryOperationInProgress
+          ? null
+          : onTap,
+      borderRadius: BorderRadius.circular(5),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        decoration: BoxDecoration(
+          color: _palette.raised,
+          border: Border.all(color: _palette.muted.withValues(alpha: 0.55)),
+          borderRadius: BorderRadius.circular(5),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(color: _palette.text, fontSize: 10),
         ),
       ),
     );
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        choice(
-          key: Key(
-            mergeMode ? 'merge-conflict-use-base' : 'rebase-conflict-use-base',
+        Container(
+          key: const Key('branch-preview-conflict-actions'),
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: _previewConflictPanel.withValues(alpha: 0.72),
+            border: Border(
+              top: BorderSide(color: _previewConflict.withValues(alpha: 0.45)),
+            ),
           ),
-          branch: comparison.baseRef,
-          subject: base?.subject ?? '현재 상태',
-          onTap: () => unawaited(
-            mergeMode
-                ? _resolveMergeConflict(MergeConflictChoice.base)
-                : _resolveRebaseConflict(RebaseConflictChoice.base),
-          ),
-        ),
-        choice(
-          key: Key(
-            mergeMode
-                ? 'merge-conflict-use-compare'
-                : 'rebase-conflict-use-compare',
-          ),
-          branch: comparison.compareRef,
-          subject: compare?.subject ?? '적용할 변경',
-          onTap: () => unawaited(
-            mergeMode
-                ? _resolveMergeConflict(MergeConflictChoice.compare)
-                : _resolveRebaseConflict(RebaseConflictChoice.commit),
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              if (!mergeMode)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Text(
+                    '이 충돌 해결:',
+                    style: TextStyle(
+                      color: _previewConflict.withValues(alpha: 0.92),
+                      fontSize: 10,
+                    ),
+                  ),
+                ),
+              choice(
+                key: Key(
+                  mergeMode
+                      ? 'merge-conflict-use-base'
+                      : 'rebase-conflict-use-base',
+                ),
+                label: '${comparison.baseRef} 사용',
+                onTap: () => unawaited(
+                  mergeMode
+                      ? _resolveMergeConflict(MergeConflictChoice.base)
+                      : _resolveRebaseConflict(RebaseConflictChoice.base),
+                ),
+              ),
+              choice(
+                key: Key(
+                  mergeMode
+                      ? 'merge-conflict-use-compare'
+                      : 'rebase-conflict-use-compare',
+                ),
+                label: '${comparison.compareRef} 사용',
+                onTap: () => unawaited(
+                  mergeMode
+                      ? _resolveMergeConflict(MergeConflictChoice.compare)
+                      : _resolveRebaseConflict(RebaseConflictChoice.commit),
+                ),
+              ),
+              choice(
+                key: Key(
+                  mergeMode
+                      ? 'merge-conflict-use-both'
+                      : 'rebase-conflict-edit',
+                ),
+                label: mergeMode ? '둘 다 사용' : '직접 편집',
+                onTap: () => unawaited(
+                  _openBranchPreviewConflictEditor(mergeMode: mergeMode),
+                ),
+              ),
+            ],
           ),
         ),
         if (interactive)
@@ -6501,6 +6704,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         _previewFileLists.clear();
         _previewDiffs.clear();
       });
+      _showPreviewTop();
     } catch (error) {
       if (mounted) setState(() => _mergePreviewError = error);
     } finally {
@@ -6565,7 +6769,9 @@ class _TimelineScreenState extends State<TimelineScreen>
                       _repositoryOperationInProgress ||
                       _selectedRebaseConflictPath == null
                   ? null
-                  : () => unawaited(_openRebaseConflictEditor()),
+                  : () => unawaited(
+                      _openBranchPreviewConflictEditor(mergeMode: false),
+                    ),
               child: const Text('편집기로 열기'),
             ),
             TextButton(
@@ -6659,20 +6865,32 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
   }
 
-  Future<void> _openRebaseConflictEditor() async {
-    final session = _rebasePreviewSession;
-    final path = _selectedRebaseConflictPath;
-    final worktree = session?.worktreePath;
-    if (session == null ||
+  Future<void> _openBranchPreviewConflictEditor({
+    required bool mergeMode,
+  }) async {
+    final mergeSession = _mergePreviewSession;
+    final rebaseSession = _rebasePreviewSession;
+    final path = mergeMode
+        ? _selectedMergeConflictPath
+        : _selectedRebaseConflictPath;
+    final worktree = mergeMode
+        ? mergeSession?.worktreePath
+        : rebaseSession?.worktreePath;
+    if ((mergeMode ? mergeSession == null : rebaseSession == null) ||
         path == null ||
         worktree == null ||
-        _rebasePreviewBusy ||
+        (mergeMode ? _mergePreviewBusy : _rebasePreviewBusy) ||
         _repositoryOperationInProgress) {
       return;
     }
     setState(() {
-      _rebasePreviewBusy = true;
-      _rebasePreviewError = null;
+      if (mergeMode) {
+        _mergePreviewBusy = true;
+        _mergePreviewError = null;
+      } else {
+        _rebasePreviewBusy = true;
+        _rebasePreviewError = null;
+      }
     });
     try {
       final overlay =
@@ -6713,11 +6931,19 @@ class _TimelineScreenState extends State<TimelineScreen>
             readOnly: false,
             onSave: (text) async {
               await document.save(text);
-              await session.markResolved(path);
+              if (mergeMode) {
+                await mergeSession!.markResolved(path);
+              } else {
+                await rebaseSession!.markResolved(path);
+              }
               if (mounted) {
                 setState(() {
-                  _rebaseEditedFiles.add(path);
-                  _rebaseResolvedFiles.add(path);
+                  if (mergeMode) {
+                    _mergeResolvedFiles.add(path);
+                  } else {
+                    _rebaseEditedFiles.add(path);
+                    _rebaseResolvedFiles.add(path);
+                  }
                   _previewDiffs.removeWhere((key, _) => key.path == path);
                 });
                 Navigator.of(context).pop();
@@ -6725,16 +6951,34 @@ class _TimelineScreenState extends State<TimelineScreen>
             },
             onOpenExternal: () async {
               await externalEditor.open(relativePath: path);
-              if (mounted) setState(() => _rebaseEditedFiles.add(path));
+              if (mounted && !mergeMode) {
+                setState(() => _rebaseEditedFiles.add(path));
+              }
             },
             editorForTesting: widget.editorForTesting,
           ),
         ),
       );
     } catch (error) {
-      if (mounted) setState(() => _rebasePreviewError = error);
+      if (mounted) {
+        setState(() {
+          if (mergeMode) {
+            _mergePreviewError = error;
+          } else {
+            _rebasePreviewError = error;
+          }
+        });
+      }
     } finally {
-      if (mounted) setState(() => _rebasePreviewBusy = false);
+      if (mounted) {
+        setState(() {
+          if (mergeMode) {
+            _mergePreviewBusy = false;
+          } else {
+            _rebasePreviewBusy = false;
+          }
+        });
+      }
     }
   }
 
@@ -6780,61 +7024,63 @@ class _TimelineScreenState extends State<TimelineScreen>
           ),
   );
 
-  Widget _previewFileRow(GitCommit commit, GitFileChange file, bool selected) =>
-      SizedBox(
-        key: selected ? _selectedPreviewFileKey : null,
-        height: 28,
-        child: InkWell(
-          onTap: () => _selectPreviewFile(commit, file.path),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: selected ? _palette.neutralChip : null,
-              border: Border(top: BorderSide(color: _palette.border)),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  key: Key('preview-state-${file.path}'),
-                  width: 20,
-                  height: 20,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: fileStateChipColor(
-                      file.status,
-                      palette: _palette,
-                    ).background,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    file.status,
-                    maxLines: 1,
-                    style: TextStyle(
-                      color: fileStateChipColor(
-                        file.status,
-                        palette: _palette,
-                      ).letter,
-                      fontSize: 10,
-                    ),
-                  ),
+  Widget _previewFileRow(GitCommit commit, GitFileChange file, bool selected) {
+    final stats = [
+      if ((file.additions ?? 0) > 0) '+${file.additions}',
+      if ((file.deletions ?? 0) > 0) '-${file.deletions}',
+    ].join(' ');
+    final stateColor = switch (file.status.isEmpty ? '' : file.status[0]) {
+      'D' => _deleted,
+      'R' || 'C' => _renamed,
+      '!' => _hash,
+      _ => _main,
+    };
+    return SizedBox(
+      key: selected ? _selectedPreviewFileKey : null,
+      height: 34,
+      child: InkWell(
+        onTap: () => _selectPreviewFile(commit, file.path),
+        borderRadius: BorderRadius.circular(6),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: selected ? _palette.neutralChip : null,
+            borderRadius: selected ? BorderRadius.circular(6) : null,
+          ),
+          child: Row(
+            children: [
+              Container(
+                key: Key('preview-state-${file.path}'),
+                width: 28,
+                height: 20,
+                alignment: Alignment.center,
+                child: Text(
+                  file.status,
+                  maxLines: 1,
+                  style: TextStyle(color: stateColor, fontSize: 12),
                 ),
-                const SizedBox(width: 7),
-                Expanded(
-                  child: Text(
-                    file.path,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: selected ? _palette.text : _palette.muted,
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
+              ),
+              Expanded(
+                child: Text(
+                  file.path,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: _palette.text, fontSize: 12),
                 ),
+              ),
+              if (stats.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                Text(
+                  stats,
+                  style: TextStyle(color: _palette.muted, fontSize: 11),
+                ),
+                const SizedBox(width: 8),
               ],
-            ),
+            ],
           ),
         ),
-      );
+      ),
+    );
+  }
 
   Widget _previewDiff(GitCommit commit, GitFileChange file) {
     final path = file.path;
@@ -6861,157 +7107,320 @@ class _TimelineScreenState extends State<TimelineScreen>
         file,
       );
     });
-    if (_usesBranchPreviewResult(commit)) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 5),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    path,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: _palette.text,
-                      fontSize: 12,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ),
-                _branchPreviewLayoutButton(
-                  key: const Key('branch-preview-layout-unified'),
-                  label: 'Unified',
-                  layout: DiffLayout.unified,
-                ),
-                const SizedBox(width: 5),
-                _branchPreviewLayoutButton(
-                  key: const Key('branch-preview-layout-side-by-side'),
-                  label: 'Side-by-side',
-                  layout: DiffLayout.sideBySide,
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: FutureBuilder<List<DiffLine>>(
-              future: future,
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return const Center(
-                    child: Text(
-                      'Could not load diff',
-                      style: TextStyle(color: Color(0xFFF29AB2), fontSize: 12),
-                    ),
-                  );
-                }
-                if (snapshot.data case final lines?) {
-                  final document = DiffDocument.fromLines(lines);
-                  final anchors = {
-                    for (final hunk in document.hunks)
-                      hunk.anchor.id: GlobalKey(),
-                  };
-                  return _branchPreviewLayout == DiffLayout.unified
-                      ? UnifiedPresentationView(
-                          document: document,
-                          activeAnchor: null,
-                          path: path,
-                          wrapLines: false,
-                          highlighter: _branchPreviewHighlighter,
-                          anchorKeys: anchors,
-                        )
-                      : SideBySidePresentationView(
-                          document: document,
-                          activeAnchor: null,
-                          oldPath: file.oldPath ?? path,
-                          newPath: path,
-                          wrapLines: false,
-                          showOldSide: true,
-                          highlighter: _branchPreviewHighlighter,
-                          anchorKeys: anchors,
-                        );
-                }
-                return const Center(
-                  child: SizedBox.square(
-                    dimension: 14,
-                    child: CircularProgressIndicator(strokeWidth: 1.5),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
+    final comparison = _comparison;
+    if (comparison == null || !_usesBranchPreviewResult(commit)) {
+      final parent = commit.parents.isEmpty ? null : commit.parents.first;
+      final parentLabel = parent == null
+          ? '—'
+          : parent.substring(0, math.min(7, parent.length));
+      return _previewDiffView(
+        future: future,
+        file: file,
+        status: commit.isWorkingTree
+            ? 'WIP · diff'
+            : 'commit ${commit.shortSha}',
+        baseRef: parentLabel,
+        baseSubject: parent == null ? '빈 트리' : '이전 상태',
+        compareRef: commit.isWorkingTree ? 'WIP' : commit.shortSha,
+        compareSubject: commit.isWorkingTree ? '작업 트리' : commit.subject,
+        baseRole: '이전 상태',
+        compareRole: '선택한 커밋',
       );
     }
+
+    final baseCommits = comparison.commits
+        .where((entry) => entry.side == BranchCommitSide.baseOnly)
+        .map((entry) => entry.commit)
+        .toList();
+    final compareCommits = comparison.commits
+        .where((entry) => entry.side == BranchCommitSide.compareOnly)
+        .map((entry) => entry.commit)
+        .toList();
+    final base = baseCommits.isEmpty ? null : baseCommits.first;
+    final compare =
+        _rebasePreview?.currentCommit ??
+        (compareCommits.isEmpty ? null : compareCommits.first);
+    final mergeMode = _branchPreviewMode == BranchPreviewMode.merge;
+    final conflict = _branchPreviewHasConflict;
+    return _previewDiffView(
+      future: future,
+      file: file,
+      status: conflict
+          ? mergeMode
+                ? '병합 충돌 1개 · ${comparison.compareRef} → ${comparison.baseRef}'
+                : '현재 충돌 · ${compare?.subject ?? comparison.compareRef}'
+          : '${mergeMode ? 'Merge' : 'Rebase'} 결과 · '
+                '${comparison.compareRef} → ${comparison.baseRef}',
+      baseRef: comparison.baseRef,
+      baseSubject: base?.subject ?? '현재 상태',
+      compareRef: comparison.compareRef,
+      compareSubject: conflict
+          ? compare?.subject ?? '적용할 변경'
+          : '${mergeMode ? 'Merge' : 'Rebase'} 미리보기 결과',
+      baseRole: '기준 브랜치',
+      compareRole: conflict && _branchPreviewMode == BranchPreviewMode.rebase
+          ? '적용 중'
+          : conflict
+          ? '비교 브랜치'
+          : '가상 결과',
+      conflict: conflict,
+      showConflictChoices: conflict,
+    );
+  }
+
+  Widget _previewDiffView({
+    required Future<List<DiffLine>> future,
+    required GitFileChange file,
+    required String status,
+    required String baseRef,
+    required String baseSubject,
+    required String compareRef,
+    required String compareSubject,
+    required String baseRole,
+    required String compareRole,
+    bool conflict = false,
+    bool showConflictChoices = false,
+  }) {
+    final path = file.path;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 5),
-          child: Text(
-            path,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: _palette.text,
-              fontSize: 12,
-              fontFamily: 'monospace',
-            ),
+        Container(
+          key: const Key('branch-preview-diff-toolbar'),
+          height: 34,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: _palette.surface,
+            border: Border(bottom: BorderSide(color: _palette.border)),
+          ),
+          child: Row(
+            children: [
+              Flexible(
+                child: Text(
+                  path,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: _palette.text,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  status,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    color: conflict ? _previewConflict : _deleted,
+                    fontSize: 10,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Container(
+                key: const Key('branch-preview-layout-switch'),
+                padding: const EdgeInsets.all(2),
+                decoration: BoxDecoration(
+                  color: _palette.background,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _previewDiffLayoutButton(
+                      key: const Key('branch-preview-layout-unified'),
+                      label: 'Unified',
+                      layout: DiffLayout.unified,
+                    ),
+                    _previewDiffLayoutButton(
+                      key: const Key('branch-preview-layout-side-by-side'),
+                      label: 'Side-by-side',
+                      layout: DiffLayout.sideBySide,
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
-        FutureBuilder<List<DiffLine>>(
-          future: future,
-          builder: (context, snapshot) {
-            // The file name is already the head line, so the raw `diff --git`
-            // and `index` preamble is noise here. The full DiffScreen keeps it.
-            final lines = snapshot.data
-                ?.where((line) => line.kind != DiffLineKind.header)
-                .toList(growable: false);
-            if (snapshot.hasError) {
-              return const Center(
-                child: Text(
-                  'Could not load diff',
-                  style: TextStyle(color: Color(0xFFF29AB2), fontSize: 12),
-                ),
-              );
-            }
-            if (lines == null) {
+        Expanded(
+          flex: showConflictChoices ? 2 : 1,
+          child: FutureBuilder<List<DiffLine>>(
+            future: future,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return const Center(
+                  child: Text(
+                    'Could not load diff',
+                    style: TextStyle(color: Color(0xFFF29AB2), fontSize: 12),
+                  ),
+                );
+              }
+              if (snapshot.data case final lines?) {
+                final document = DiffDocument.fromLines(lines);
+                final anchors = {
+                  for (final hunk in document.hunks)
+                    hunk.anchor.id: GlobalKey(),
+                };
+                final activeAnchor = conflict && document.hunks.isNotEmpty
+                    ? document.hunks.first.anchor
+                    : null;
+                final titles = _previewDiffTitles(
+                  baseRef: baseRef,
+                  baseSubject: baseSubject,
+                  compareRef: compareRef,
+                  compareSubject: compareSubject,
+                  baseRole: baseRole,
+                  compareRole: compareRole,
+                  sideBySide: _previewDiffLayout == DiffLayout.sideBySide,
+                );
+                return _previewDiffLayout == DiffLayout.unified
+                    ? UnifiedPresentationView(
+                        document: document,
+                        activeAnchor: activeAnchor,
+                        path: path,
+                        wrapLines: false,
+                        highlighter: _previewDiffHighlighter,
+                        anchorKeys: anchors,
+                        controller: _previewDiffScrollController,
+                        showHunkHeaders: false,
+                        compactRows: true,
+                        currentMarkerColor: _previewConflict,
+                        header: titles,
+                      )
+                    : SideBySidePresentationView(
+                        document: document,
+                        activeAnchor: activeAnchor,
+                        oldPath: file.oldPath ?? path,
+                        newPath: path,
+                        wrapLines: false,
+                        showOldSide: true,
+                        highlighter: _previewDiffHighlighter,
+                        anchorKeys: anchors,
+                        controller: _previewDiffScrollController,
+                        showHunkHeaders: false,
+                        compactRows: true,
+                        currentMarkerColor: _previewConflict,
+                        header: titles,
+                      );
+              }
               return const Center(
                 child: SizedBox.square(
                   dimension: 14,
                   child: CircularProgressIndicator(strokeWidth: 1.5),
                 ),
               );
-            }
-            // The panel shows one file, so its lines flow with the rest of the
-            // body instead of scrolling on their own.
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [for (final line in lines) _previewDiffLine(line)],
-            );
-          },
+            },
+          ),
         ),
+        if (showConflictChoices)
+          Expanded(
+            child: SingleChildScrollView(
+              child: _branchPreviewConflictChoices(),
+            ),
+          ),
       ],
     );
   }
 
-  Widget _branchPreviewLayoutButton({
+  Widget _previewDiffTitles({
+    required String baseRef,
+    required String baseSubject,
+    required String compareRef,
+    required String compareSubject,
+    required String baseRole,
+    required String compareRole,
+    required bool sideBySide,
+  }) {
+    Widget title(String branch, String subject, String role) => Expanded(
+      child: Container(
+        height: 30,
+        padding: const EdgeInsets.symmetric(horizontal: 9),
+        decoration: BoxDecoration(
+          color: _palette.panel,
+          border: Border(right: BorderSide(color: _palette.border)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: branch,
+                      style: TextStyle(
+                        color: _palette.text,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    TextSpan(
+                      text: ' · $subject',
+                      style: TextStyle(color: _palette.muted),
+                    ),
+                  ],
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 10),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(role, style: TextStyle(color: _palette.muted, fontSize: 10)),
+          ],
+        ),
+      ),
+    );
+    if (sideBySide) {
+      return Container(
+        key: const Key('branch-preview-side-titles'),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: _palette.border)),
+        ),
+        child: Row(
+          children: [
+            title(baseRef, baseSubject, baseRole),
+            title(compareRef, compareSubject, compareRole),
+          ],
+        ),
+      );
+    }
+    return Container(
+      key: const Key('branch-preview-unified-title'),
+      height: 30,
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 9),
+      decoration: BoxDecoration(
+        color: _palette.panel,
+        border: Border(bottom: BorderSide(color: _palette.border)),
+      ),
+      child: Text(
+        '$baseRef · $baseSubject ← $compareRef · $compareSubject',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: _palette.muted, fontSize: 10),
+      ),
+    );
+  }
+
+  Widget _previewDiffLayoutButton({
     required Key key,
     required String label,
     required DiffLayout layout,
   }) => InkWell(
     key: key,
-    onTap: () => setState(() => _branchPreviewLayout = layout),
-    borderRadius: BorderRadius.circular(5),
+    onTap: () => setState(() => _previewDiffLayout = layout),
+    borderRadius: BorderRadius.circular(6),
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
       decoration: BoxDecoration(
-        color: _branchPreviewLayout == layout
-            ? _palette.interactive
-            : _palette.raised,
-        borderRadius: BorderRadius.circular(5),
+        color: _previewDiffLayout == layout
+            ? _palette.neutralChip
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(4),
       ),
       child: Text(
         label,
@@ -7023,36 +7432,6 @@ class _TimelineScreenState extends State<TimelineScreen>
       ),
     ),
   );
-
-  Widget _previewDiffLine(DiffLine line) {
-    final prefix = switch (line.kind) {
-      DiffLineKind.add => '+',
-      DiffLineKind.delete => '-',
-      // The hunk header reads as its own line, like the mockup.
-      DiffLineKind.hunk => '',
-      _ => ' ',
-    };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-      color: switch (line.kind) {
-        DiffLineKind.add => _main.withValues(alpha: 0.15),
-        DiffLineKind.delete => _hash.withValues(alpha: 0.15),
-        _ => null,
-      },
-      child: Text(
-        '$prefix${line.text}',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: line.kind == DiffLineKind.hunk
-              ? _palette.muted
-              : _palette.text,
-          fontSize: 11,
-          fontFamily: 'monospace',
-        ),
-      ),
-    );
-  }
 
   bool _acceptsFullDiffRouteEvents(_FullDiffRouteSession session) =>
       mounted &&
@@ -7294,6 +7673,28 @@ class _CloudBadgePainter extends CustomPainter {
   bool shouldRepaint(_CloudBadgePainter oldDelegate) => false;
 }
 
+class _HoverBuilder extends StatefulWidget {
+  const _HoverBuilder({required this.builder, this.enabled = true});
+
+  final Widget Function(bool hovered) builder;
+  final bool enabled;
+
+  @override
+  State<_HoverBuilder> createState() => _HoverBuilderState();
+}
+
+class _HoverBuilderState extends State<_HoverBuilder> {
+  var _hovered = false;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: widget.enabled ? SystemMouseCursors.click : MouseCursor.defer,
+    onEnter: widget.enabled ? (_) => setState(() => _hovered = true) : null,
+    onExit: widget.enabled ? (_) => setState(() => _hovered = false) : null,
+    child: widget.builder(_hovered),
+  );
+}
+
 /// A keycap that also works as a button — the Enter chip runs the same toggle the
 /// Enter key does.
 class _KeyCap extends StatefulWidget {
@@ -7391,7 +7792,7 @@ class _WindowButtonState extends State<_WindowButton> {
   );
 }
 
-/// The green 'Show Diff' affordance, name over shortcut. The toolbar and the
+/// The green 'Full Diff' affordance, name over shortcut. The toolbar and the
 /// preview header show the same button at their own scale.
 class _ShowDiffButton extends StatelessWidget {
   const _ShowDiffButton({
@@ -7403,6 +7804,7 @@ class _ShowDiffButton extends StatelessWidget {
   });
 
   static const green = Color(0xFF2EA043);
+  static const hoverGreen = Color(0xFF3FB950);
 
   final VoidCallback? onTap;
   final double height;
@@ -7413,42 +7815,82 @@ class _ShowDiffButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = context.timelineTheme;
     final ink = onTap == null ? palette.muted : AvatarService.onColor(green);
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Container(
-        height: height,
-        padding: EdgeInsets.symmetric(horizontal: height * 0.3),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: onTap == null ? palette.raised : green,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              'Show Diff',
-              style: TextStyle(
-                color: ink,
-                fontSize: labelSize,
-                fontWeight: FontWeight.w600,
-                height: 1.1,
+    return _HoverBuilder(
+      enabled: onTap != null,
+      builder: (hovered) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          height: height,
+          padding: EdgeInsets.symmetric(horizontal: height * 0.3),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: onTap == null
+                ? palette.raised
+                : hovered
+                ? hoverGreen
+                : green,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                'Full Diff',
+                style: TextStyle(
+                  color: ink,
+                  fontSize: labelSize,
+                  fontWeight: FontWeight.w600,
+                  height: 1.1,
+                ),
               ),
-            ),
-            Text(
-              '⌘D',
-              style: TextStyle(
-                color: ink.withValues(alpha: 0.75),
-                fontSize: shortcutSize,
-                height: 1.2,
+              Text(
+                '⌘D',
+                style: TextStyle(
+                  color: ink.withValues(alpha: 0.75),
+                  fontSize: shortcutSize,
+                  height: 1.2,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
+}
+
+class _PaneToggleIconPainter extends CustomPainter {
+  const _PaneToggleIconPainter({required this.opens, required this.color});
+
+  final bool opens;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..strokeCap = StrokeCap.round;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(0.75, 0.75, size.width - 1.5, size.height - 1.5),
+        const Radius.circular(3.5),
+      ),
+      paint,
+    );
+    final dividerX = size.width * (opens ? 0.36 : 0.25);
+    canvas.drawLine(
+      Offset(dividerX, 3.5),
+      Offset(dividerX, size.height - 3.5),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _PaneToggleIconPainter oldDelegate) =>
+      oldDelegate.opens != opens || oldDelegate.color != color;
 }
 
 /// Copies a ref name and answers with a check for a moment, so the click has
@@ -7585,7 +8027,6 @@ class RebaseMappingPainter extends CustomPainter {
     required this.rowIndex,
     required this.laneSpacing,
     required this.compact,
-    required this.backgroundColor,
   });
 
   final List<GraphRow> rows;
@@ -7593,7 +8034,6 @@ class RebaseMappingPainter extends CustomPainter {
   final int rowIndex;
   final double laneSpacing;
   final bool compact;
-  final Color backgroundColor;
 
   double _laneX(int lane) => compact
       ? CommitGraphPainter.laneInset
@@ -7617,7 +8057,7 @@ class RebaseMappingPainter extends CustomPainter {
       final path = Path();
       if (rowIndex == mapping.rewrittenRow) {
         path
-          ..moveTo(routeX, size.height)
+          ..moveTo(routeX, size.height + 1)
           ..lineTo(routeX, centerY + 6)
           ..quadraticBezierTo(routeX, centerY, routeX - 6, centerY)
           ..lineTo(rewrittenX + CommitGraphPainter.avatarDiameter / 2, centerY);
@@ -7626,21 +8066,12 @@ class RebaseMappingPainter extends CustomPainter {
           ..moveTo(originalX + CommitGraphPainter.avatarDiameter / 2, centerY)
           ..lineTo(routeX - 6, centerY)
           ..quadraticBezierTo(routeX, centerY, routeX, centerY - 6)
-          ..lineTo(routeX, 0);
+          ..lineTo(routeX, -1);
       } else {
         path
-          ..moveTo(routeX, 0)
-          ..lineTo(routeX, size.height);
+          ..moveTo(routeX, -1)
+          ..lineTo(routeX, size.height + 1);
       }
-      canvas.drawPath(
-        path,
-        Paint()
-          ..color = backgroundColor
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 3
-          ..strokeCap = StrokeCap.round
-          ..strokeJoin = StrokeJoin.round,
-      );
       canvas.drawPath(
         path,
         Paint()
@@ -7656,11 +8087,18 @@ class RebaseMappingPainter extends CustomPainter {
           centerY,
         );
         final arrow = Path()
-          ..moveTo(tip.dx, tip.dy)
-          ..lineTo(tip.dx + 5, tip.dy - 3)
-          ..lineTo(tip.dx + 5, tip.dy + 3)
-          ..close();
-        canvas.drawPath(arrow, Paint()..color = mapping.color);
+          ..moveTo(tip.dx + 5, tip.dy - 4)
+          ..lineTo(tip.dx, tip.dy)
+          ..lineTo(tip.dx + 5, tip.dy + 4);
+        canvas.drawPath(
+          arrow,
+          Paint()
+            ..color = mapping.color
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1
+            ..strokeCap = StrokeCap.round
+            ..strokeJoin = StrokeJoin.round,
+        );
       }
     }
   }
@@ -7671,8 +8109,7 @@ class RebaseMappingPainter extends CustomPainter {
       oldDelegate.mappings != mappings ||
       oldDelegate.rowIndex != rowIndex ||
       oldDelegate.laneSpacing != laneSpacing ||
-      oldDelegate.compact != compact ||
-      oldDelegate.backgroundColor != backgroundColor;
+      oldDelegate.compact != compact;
 }
 
 /// Draws one row of the commit graph: pass-through rails, the rounded lane
@@ -7691,6 +8128,7 @@ class CommitGraphPainter extends CustomPainter {
     this.dashedLanes = const {},
     this.previousDashedLanes = const {},
     this.previewRailColor,
+    this.outgoingRailColor,
     this.backgroundColor = const Color(0xFF1C1C1E),
     this.selectedRowColor = const Color(0xFF234D72),
   });
@@ -7733,6 +8171,10 @@ class CommitGraphPainter extends CustomPainter {
   /// Rails are opaque.
   static const railOpacity = 1.0;
   static const connectorWidth = 1.0;
+  static const avatarRadius = 11.0;
+  static const refArrowGap = 4.0;
+  static const refArrowLength = 7.0;
+  static const refArrowHalfHeight = 5.0;
   static const nodeRadius = 6.0;
   static const wipNodeRadius = 8.0;
   static const wipNodeDash = 2.5;
@@ -7771,6 +8213,7 @@ class CommitGraphPainter extends CustomPainter {
   final Set<int> dashedLanes;
   final Set<int> previousDashedLanes;
   final Color? previewRailColor;
+  final Color? outgoingRailColor;
 
   bool isDashedLane(int lane) => dashedLanes.contains(lane);
   bool isDashedAbove(int lane) =>
@@ -7778,6 +8221,22 @@ class CommitGraphPainter extends CustomPainter {
 
   double laneX(int lane) =>
       compact ? laneInset : laneInset + lane * laneSpacing;
+
+  double get refMarkerRadius {
+    if (row.commit.isWorkingTree) return wipNodeRadius;
+    if (showsMergeDot) return nodeRadius;
+    return avatarRadius;
+  }
+
+  double get refArrowTipX => laneX(row.lane) - refMarkerRadius - refArrowGap;
+
+  Path refArrowheadPath(double centerY) {
+    final tipX = refArrowTipX;
+    return Path()
+      ..moveTo(tipX - refArrowLength, centerY - refArrowHalfHeight)
+      ..lineTo(tipX, centerY)
+      ..lineTo(tipX - refArrowLength, centerY + refArrowHalfHeight);
+  }
 
   /// A line being born out of this row's node: the second-or-later parent edge of
   /// a merge. Everything else is an existing line moving — a foreign column
@@ -7821,9 +8280,12 @@ class CommitGraphPainter extends CustomPainter {
     return {
       for (final lane in row.nextLanes)
         if (lane == row.lane
-            // The node hands its first parent straight down, unless its lane
-            // joins another lane or a slide refills it.
-            ? !joining.contains(lane) && !arriving.contains(lane)
+            // Keep the first-parent rail when another branch joins it. A lane
+            // filled only by a collapsing slide remains owned by the curve.
+            ? !joining.contains(lane) &&
+                  (!arriving.contains(lane) ||
+                      (row.parentLanes.isNotEmpty &&
+                          row.parentLanes.first == lane))
             : row.activeLanes.contains(lane) && !departing.contains(lane))
           lane,
     };
@@ -7874,17 +8336,30 @@ class CommitGraphPainter extends CustomPainter {
     if (compact) {
       // Stage 3: one rail in this row's committer color, no lanes, no curves.
       final rail = compactRail(size);
-      final dashed = isDashedLane(row.lane);
-      final paint = Paint()
-        ..color = dashed ? previewRailColor ?? committerColor : committerColor
-        ..strokeWidth = dashed ? previewRailWidth : railWidth
-        ..strokeCap = StrokeCap.round;
-      _drawVerticalRail(
-        canvas,
-        Offset(laneInset, rail.top),
-        Offset(laneInset, rail.bottom),
-        paint,
-        dashed: dashed,
+      void draw(double top, double bottom, {required bool dashed}) {
+        if (bottom <= top) return;
+        final paint = Paint()
+          ..color = dashed ? previewRailColor ?? committerColor : committerColor
+          ..strokeWidth = dashed ? previewRailWidth : railWidth
+          ..strokeCap = StrokeCap.round;
+        _drawVerticalRail(
+          canvas,
+          Offset(laneInset, top),
+          Offset(laneInset, bottom),
+          paint,
+          dashed: dashed,
+        );
+      }
+
+      draw(
+        rail.top,
+        math.min(rail.bottom, centerY),
+        dashed: isDashedAbove(row.lane),
+      );
+      draw(
+        math.max(rail.top, centerY),
+        rail.bottom,
+        dashed: isDashedLane(row.lane),
       );
     } else {
       // Halves are painted apart: above the node a lane carries the rail it
@@ -7912,6 +8387,7 @@ class CommitGraphPainter extends CustomPainter {
             row.nextLaneBranches[entry.key],
             row.nextLaneShas[entry.key],
             dashed: dashed,
+            colorOverride: entry.key == row.lane ? outgoingRailColor : null,
           );
           _drawVerticalRail(
             canvas,
@@ -7975,14 +8451,18 @@ class CommitGraphPainter extends CustomPainter {
     if (passThrough) return;
     final nodeX = laneX(row.lane);
     if (refConnector) {
+      final connectorPaint = Paint()
+        ..color = committerColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = connectorWidth
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round;
       canvas.drawLine(
-        Offset.zero.translate(0, centerY),
-        Offset(nodeX, centerY),
-        Paint()
-          ..color = committerColor
-          ..strokeWidth = connectorWidth
-          ..strokeCap = StrokeCap.round,
+        Offset(0, centerY),
+        Offset(refArrowTipX, centerY),
+        connectorPaint,
       );
+      canvas.drawPath(refArrowheadPath(centerY), connectorPaint);
     }
     _drawNode(canvas, Offset(nodeX, centerY));
   }
@@ -8079,12 +8559,20 @@ class CommitGraphPainter extends CustomPainter {
   /// A rail paints in its branch line's color. Before [GraphRow] carries branch
   /// ids for a lane it falls back to the committer color, so the graph degrades
   /// to the old look instead of to one flat color.
-  Paint _railPaint(int? branch, String? sha, {bool dashed = false}) => Paint()
+  Paint _railPaint(
+    int? branch,
+    String? sha, {
+    bool dashed = false,
+    Color? colorOverride,
+  }) => Paint()
     ..color = dashed && previewRailColor != null
         ? previewRailColor!
-        : branch == null
-        ? AvatarService.color(committersBySha[sha] ?? row.commit.committer)
-        : AvatarService.branchColor(branch)
+        : colorOverride ??
+              (branch == null
+                  ? AvatarService.color(
+                      committersBySha[sha] ?? row.commit.committer,
+                    )
+                  : AvatarService.branchColor(branch))
     ..style = PaintingStyle.stroke
     ..strokeWidth = dashed ? previewRailWidth : railWidth
     ..strokeCap = StrokeCap.round
@@ -8147,6 +8635,7 @@ class CommitGraphPainter extends CustomPainter {
       !setEquals(oldDelegate.dashedLanes, dashedLanes) ||
       !setEquals(oldDelegate.previousDashedLanes, previousDashedLanes) ||
       oldDelegate.previewRailColor != previewRailColor ||
+      oldDelegate.outgoingRailColor != outgoingRailColor ||
       oldDelegate.backgroundColor != backgroundColor ||
       oldDelegate.selectedRowColor != selectedRowColor;
 }

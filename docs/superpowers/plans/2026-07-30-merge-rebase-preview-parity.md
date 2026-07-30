@@ -255,3 +255,98 @@ Expected: 출력 없음
 git add test/app_test.dart docs/superpowers/verification/merge-rebase-preview
 git commit -m "test: verify branch preview visual parity"
 ```
+
+---
+
+### Task 4: 그래프 연결과 diff 패널 시각 교정
+
+**Files:**
+- Modify: `lib/git.dart:993-1045`
+- Modify: `lib/timeline.dart:99-155`
+- Modify: `lib/timeline.dart:1728-1778`
+- Modify: `lib/timeline.dart:4561-4865`
+- Modify: `lib/timeline.dart:6710-6990`
+- Modify: `docs/superpowers/specs/assets/merge-rebase-preview/final-reference.html`
+- Test: `test/git_test.dart`
+- Test: `test/app_test.dart`
+
+**Interfaces:**
+- Consumes: `BranchCommitSide.commonBoundary`, `BranchPreviewGraph.dashedLanes`
+- Produces: 공통 부모에서 갈라지는 대상 브랜치 전환선
+- Produces: 각 부모 커밋까지 끊기지 않는 가상 Merge 점선
+- Produces: 파란 미리보기 모드 선택 상태와 시안형 파일·diff 전환 영역
+
+- [ ] **Step 1: 공통 부모 분기와 Merge 점선 실패 테스트 작성**
+
+```dart
+expect(rows[compareParentRow].parentLanes, [0]);
+expect(
+  CommitGraphPainter.transitionBranch(
+    rows[compareParentRow],
+    rows[compareParentRow].transitions.single,
+  ),
+  1,
+);
+expect(merge.dashedLanes[compareParentRow], contains(1));
+```
+
+공통 부모 바로 위의 대상 브랜치 행은 부모 레인을 `0`으로 기록해야 한다.
+가상 Merge의 각 부모선은 가상 커밋부터 해당 부모 커밋 직전 행까지 모두
+`dashedLanes`에 포함되어야 한다.
+
+- [ ] **Step 2: 색과 오른쪽 패널 실패 테스트 작성**
+
+```dart
+expect(commonPainter.committerColor, palette.muted);
+expect(selectedPreviewButtonColor, palette.interactive);
+expect(filePathStyle.fontFamily, isNull);
+expect(activeLayoutButtonSize.height, greaterThanOrEqualTo(22));
+```
+
+- [ ] **Step 3: 실패 확인**
+
+Run: `flutter test test/git_test.dart --plain-name "comparison branch splits"`
+
+Expected: 대상 브랜치의 `parentLanes`가 `[1]`이라 실패
+
+Run: `flutter test test/app_test.dart --plain-name "branch preview visual controls"`
+
+Expected: 공통 부모와 선택 버튼 색, 파일 글꼴, diff 버튼 크기가 달라 실패
+
+- [ ] **Step 4: 그래프 데이터를 최소 수정**
+
+`layoutBranchComparison()`에서 공통 부모로 합쳐지는 대상 브랜치 행의
+첫 부모 레인을 `0`으로 기록한다. `layoutMergePreviewGraph()`는 기준
+브랜치와 대상 브랜치 부모의 행 위치를 각각 찾아 그 행에 닿기 전까지
+해당 레인을 1px 점선으로 표시한다.
+
+- [ ] **Step 5: 시안 색과 오른쪽 패널 적용**
+
+공통 부모의 칩·노드·아래쪽 레일은 회색으로 표시한다. 선택한
+`Merge 미리보기`·`Rebase 미리보기` 버튼은 기존 `interactive` 파란색을
+재사용한다. 파일 행은 시안과 같은 산세리프 글꼴, 둥근 선택 배경,
+20px 상태 칩을 사용하고 Unified/Side-by-side 버튼은 최소 높이 22px와
+시안의 수평 여백을 적용한다.
+
+- [ ] **Step 6: 기준 HTML과 실제 화면 검증**
+
+기준 HTML의 선택 버튼과 공통 부모 색도 같은 값으로 갱신한다. 성공·충돌
+네 상태를 1280×720에서 확인하고 대상 브랜치의 분기선과 가상 Merge
+부모선이 끝까지 같은 색·점선인지 비교한다.
+
+- [ ] **Step 7: 전체 검사와 커밋**
+
+Run: `flutter test`
+
+Expected: 모든 테스트 PASS
+
+Run: `flutter analyze`
+
+Expected: `No issues found!`
+
+```bash
+git add lib/git.dart lib/timeline.dart test/git_test.dart test/app_test.dart \
+  docs/superpowers/specs/assets/merge-rebase-preview/final-reference.html \
+  docs/superpowers/plans/2026-07-30-merge-rebase-preview-parity.md
+git commit -m "fix: align branch preview graph and diff controls"
+```

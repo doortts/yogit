@@ -118,9 +118,17 @@ void main() {
                   )
                   .child!
               as DecoratedBox;
+      final fileRowDecoration = fileRow.decoration as BoxDecoration;
+      expect(fileRowDecoration.color, TimelineThemePalette.carbon.neutralChip);
+      expect(fileRowDecoration.border, isNull);
+      expect(fileRowDecoration.borderRadius, BorderRadius.circular(6));
       expect(
-        ((fileRow.decoration as BoxDecoration).border! as Border).top.color,
-        const Color(0xFF303033),
+        tester
+            .widget<Container>(
+              find.byKey(const Key('preview-state-lib/a.dart')),
+            )
+            .decoration,
+        isNull,
       );
     },
   );
@@ -694,7 +702,7 @@ void main() {
             path: 'lib/first.dart',
             status: 'M',
             additions: 1,
-            deletions: 0,
+            deletions: 1,
           ),
           GitFileChange(
             path: 'README.md',
@@ -707,6 +715,12 @@ void main() {
       diff: (_, _, path, _, _) async {
         diffLoads++;
         return [
+          const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+          const DiffLine(
+            kind: DiffLineKind.delete,
+            text: 'old line',
+            oldNumber: 1,
+          ),
           DiffLine(kind: DiffLineKind.add, text: '$path changed', newNumber: 1),
         ];
       },
@@ -719,13 +733,37 @@ void main() {
     // Once in the file list, once as the diff head line.
     expect(find.text('lib/first.dart'), findsNWidgets(2));
     expect(find.text('README.md'), findsOneWidget);
-    expect(find.text('+lib/first.dart changed'), findsOneWidget);
+    expect(find.text('lib/first.dart changed'), findsOneWidget);
+    expect(
+      find.byKey(const Key('branch-preview-diff-toolbar')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('branch-preview-layout-switch')),
+      findsOneWidget,
+    );
+    expect(find.byType(UnifiedPresentationView), findsOneWidget);
+    expect(find.text('+1 -1'), findsOneWidget);
+    expect(
+      tester
+          .widget<Container>(
+            find.byKey(const Key('preview-state-lib/first.dart')),
+          )
+          .decoration,
+      isNull,
+    );
     expect(
       tester.getTopLeft(find.byKey(const Key('preview-files-scroll'))).dy,
       lessThan(
         tester.getTopLeft(find.byKey(const Key('preview-diff-scroll'))).dy,
       ),
     );
+
+    await tester.tap(
+      find.byKey(const Key('branch-preview-layout-side-by-side')),
+    );
+    await tester.pump();
+    expect(find.byType(SideBySidePresentationView), findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
@@ -830,29 +868,72 @@ void main() {
     expect(scrollable.position.pixels, 360);
   });
 
-  test('ref connector is a solid one-pixel line', () {
-    const size = Size(120, TimelineScreen.rowHeight);
-    const color = Color(0xFF00E5FF);
-    final row = layoutGraph([commit('tip', 'tip')]).single;
-    final painter = CommitGraphPainter(
-      row: row,
-      selected: false,
-      committerColor: color,
-      refConnector: true,
-    );
+  test(
+    'ref connector points at an ordinary commit with a one-pixel chevron',
+    () {
+      const size = Size(120, TimelineScreen.rowHeight);
+      const color = Color(0xFF00E5FF);
+      final row = layoutGraph([commit('tip', 'tip')]).single;
+      final painter = CommitGraphPainter(
+        row: row,
+        selected: false,
+        committerColor: color,
+        refConnector: true,
+      );
+      const centerY = TimelineScreen.rowHeight / 2;
+      const tip = Offset(13, centerY);
 
-    expect(
-      (Canvas canvas) => painter.paint(canvas, size),
-      paints..line(
-        p1: const Offset(0, TimelineScreen.rowHeight / 2),
-        p2: const Offset(
-          CommitGraphPainter.laneInset,
-          TimelineScreen.rowHeight / 2,
-        ),
-        color: color,
-        strokeWidth: 1.0,
+      expect(painter.refMarkerRadius, CommitGraphPainter.avatarRadius);
+      expect(painter.refArrowTipX, tip.dx);
+      expect(
+        painter.refArrowheadPath(centerY).getBounds(),
+        const Rect.fromLTRB(6, 11, 13, 21),
+      );
+      expect(
+        (Canvas canvas) => painter.paint(canvas, size),
+        paints
+          ..line(
+            p1: const Offset(0, centerY),
+            p2: tip,
+            color: color,
+            strokeWidth: 1.0,
+          )
+          ..path(color: color, strokeWidth: 1.0, style: PaintingStyle.stroke),
+      );
+    },
+  );
+
+  test('ref arrow keeps its gap for merge, working-tree, and compact rows', () {
+    CommitGraphPainter painter(GraphRow row, {bool compact = false}) =>
+        CommitGraphPainter(
+          row: row,
+          selected: false,
+          committerColor: const Color(0xFF00E5FF),
+          refConnector: true,
+          compact: compact,
+        );
+
+    final merge = painter(
+      graphRow(
+        commit: commit('merge', 'merge', parents: const ['a', 'b']),
+        lane: 0,
       ),
     );
+    final workingTree = painter(
+      graphRow(commit: workingTreeCommit('head'), lane: 0),
+    );
+    final compact = painter(
+      graphRow(commit: commit('tip', 'tip'), lane: 3),
+      compact: true,
+    );
+
+    expect(merge.refMarkerRadius, CommitGraphPainter.nodeRadius);
+    expect(merge.refArrowTipX, 18.0);
+    expect(workingTree.refMarkerRadius, CommitGraphPainter.wipNodeRadius);
+    expect(workingTree.refArrowTipX, 16.0);
+    expect(compact.laneX(compact.row.lane), CommitGraphPainter.laneInset);
+    expect(compact.refMarkerRadius, CommitGraphPainter.avatarRadius);
+    expect(compact.refArrowTipX, 13.0);
   });
 
   test('preview rail inherits the previous row dash above its node', () {
@@ -881,6 +962,46 @@ void main() {
     expect(painter.isDashedAbove(0), isTrue);
     expect(painter.isDashedAbove(1), isFalse);
   });
+
+  test(
+    'compact preview keeps the virtual segment dashed above its real parent',
+    () async {
+      final virtual = graphRow(
+        commit: commit('virtual', 'virtual', parents: const ['base']),
+        lane: 0,
+        activeLanes: const [0],
+        nextLanes: const [0],
+        activeLaneShas: const {0: 'virtual'},
+        nextLaneShas: const {0: 'base'},
+      );
+      final base = graphRow(
+        commit: commit('base', 'base', parents: const ['root']),
+        lane: 0,
+        activeLanes: const [0],
+        nextLanes: const [0],
+        activeLaneShas: const {0: 'base'},
+        nextLaneShas: const {0: 'root'},
+      );
+      final painter = CommitGraphPainter(
+        row: base,
+        previous: virtual,
+        selected: false,
+        compact: true,
+        committerColor: const Color(0xFF34C759),
+        previousDashedLanes: const {0},
+        previewRailColor: const Color(0xFFC69AFF),
+      );
+      final recorder = ui.PictureRecorder();
+      painter.paint(Canvas(recorder), const Size(56, 36));
+      final image = await recorder.endRecording().toImage(56, 36);
+      final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      int alphaAt(int y) => bytes!.getUint8((y * 56 + 28) * 4 + 3);
+
+      expect(alphaAt(1), greaterThan(0));
+      expect(alphaAt(4), 0);
+      expect(alphaAt(20), greaterThan(0));
+    },
+  );
 
   test('lane transitions turn on one 8px corner beside their node', () {
     GraphRow rowTo(int parentLane) => graphRow(
@@ -2829,8 +2950,11 @@ void main() {
     expect(find.text('feature만'), findsOneWidget);
     expect(find.text('공통'), findsOneWidget);
     expect(find.text('가상 커밋 1'), findsOneWidget);
-    expect(find.text('두 부모'), findsOneWidget);
+    expect(find.text('두 부모'), findsNothing);
     expect(find.text('충돌 없음'), findsOneWidget);
+    expect(find.text('commit'), findsOneWidget);
+    expect(find.byKey(const Key('status-timestamp')), findsOneWidget);
+    expect(find.byKey(const Key('comparison-status')), findsNothing);
     expect(
       find.descendant(
         of: find.byKey(const Key('branch-preview-summary')),
@@ -2842,17 +2966,60 @@ void main() {
       find.byKey(const Key('branch-preview-success-icon')),
       findsOneWidget,
     );
+    final painters = tester
+        .widgetList<CustomPaint>(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is CustomPaint && widget.painter is CommitGraphPainter,
+          ),
+        )
+        .map((paint) => paint.painter! as CommitGraphPainter);
     expect(
-      tester
-          .widgetList<CustomPaint>(
-            find.byWidgetPredicate(
-              (widget) =>
-                  widget is CustomPaint && widget.painter is CommitGraphPainter,
-            ),
-          )
-          .map((paint) => (paint.painter! as CommitGraphPainter).row.maxLane),
+      painters.map((painter) => painter.row.maxLane),
       everyElement(lessThanOrEqualTo(1)),
     );
+    expect(painters.map((painter) => painter.refConnector), contains(true));
+    expect(
+      painters
+          .singleWhere((painter) => painter.row.commit.sha == 'root')
+          .committerColor,
+      TimelineThemePalette.systemGraphite.muted,
+    );
+  });
+
+  testWidgets('branch comparison failure is shown in the preview summary', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            current: 'main',
+            tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async =>
+              throw StateError('compare failed'),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('branch-preview-summary')),
+        matching: find.text('브랜치 비교 실패'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Merge 검사 중'), findsNothing);
   });
 
   testWidgets('branch preview controls switch the summary above the timeline', (
@@ -2888,11 +3055,34 @@ void main() {
     expect(tester.takeException(), isNull, reason: 'merge preview');
 
     expect(find.byKey(const Key('branch-preview-segmented')), findsOneWidget);
-    final segmented = tester.widget<SegmentedButton<BranchPreviewMode>>(
+    expect(
+      tester.getSize(find.byKey(const Key('branch-preview-segmented'))),
+      const Size(200, 38),
+    );
+    final segmented = tester.widget<Container>(
       find.byKey(const Key('branch-preview-segmented')),
     );
-    expect(segmented.selected, {BranchPreviewMode.merge});
-    expect(segmented.showSelectedIcon, isFalse);
+    expect(segmented.padding, const EdgeInsets.all(3));
+    expect(
+      (segmented.decoration! as BoxDecoration).borderRadius,
+      BorderRadius.circular(8),
+    );
+    final mergeButton = tester.widget<Container>(
+      find
+          .descendant(
+            of: find.byKey(const Key('branch-preview-merge-button')),
+            matching: find.byType(Container),
+          )
+          .first,
+    );
+    expect(
+      (mergeButton.decoration! as BoxDecoration).color,
+      const Color(0xFF4388EE),
+    );
+    expect(
+      (mergeButton.decoration! as BoxDecoration).borderRadius,
+      BorderRadius.circular(6),
+    );
     expect(find.byKey(const Key('branch-preview-merge')), findsOneWidget);
     expect(find.byKey(const Key('branch-preview-rebase')), findsOneWidget);
     expect(find.text('Merge 미리보기'), findsWidgets);
@@ -2924,18 +3114,41 @@ void main() {
       tester.getTopLeft(find.byKey(const Key('branch-preview-summary'))).dy,
       lessThan(tester.getTopLeft(find.byKey(const Key('graph-header'))).dy),
     );
+    expect(
+      find.ancestor(
+        of: find.byKey(const Key('branch-preview-summary')),
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is SingleChildScrollView &&
+              widget.scrollDirection == Axis.horizontal,
+        ),
+      ),
+      findsNothing,
+    );
+    final summaryRect = tester.getRect(
+      find.byKey(const Key('branch-preview-summary')),
+    );
+    final timelineRect = tester.getRect(
+      find.byKey(const Key('timeline-viewport')),
+    );
+    expect(summaryRect.left, timelineRect.left);
+    expect(summaryRect.right, timelineRect.right);
 
     await tester.tap(find.byKey(const Key('branch-preview-rebase')));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull, reason: 'rebase preview');
     expect(changedMode, BranchPreviewMode.rebase);
-    expect(
-      tester
-          .widget<SegmentedButton<BranchPreviewMode>>(
-            find.byKey(const Key('branch-preview-segmented')),
+    final rebaseButton = tester.widget<Container>(
+      find
+          .descendant(
+            of: find.byKey(const Key('branch-preview-rebase-button')),
+            matching: find.byType(Container),
           )
-          .selected,
-      {BranchPreviewMode.rebase},
+          .first,
+    );
+    expect(
+      (rebaseButton.decoration! as BoxDecoration).color,
+      const Color(0xFF4388EE),
     );
     expect(find.text('Rebase 미리보기'), findsWidgets);
     expect(find.text('Rebase 성공'), findsNothing);
@@ -2979,7 +3192,7 @@ void main() {
 
     expectSuccess();
     expect(find.text('가상 커밋 1'), findsOneWidget);
-    expect(find.text('두 부모'), findsOneWidget);
+    expect(find.text('두 부모'), findsNothing);
     expect(find.text('충돌 없음'), findsOneWidget);
     expect(find.text('main ← feature'), findsOneWidget);
 
@@ -3123,12 +3336,84 @@ void main() {
     expect(find.text('가상 병합 커밋'), findsOneWidget);
     expect(find.text('feature.txt'), findsWidgets);
     expect(find.byType(UnifiedPresentationView), findsOneWidget);
+    final fileList = find.byKey(const Key('branch-preview-file-list'));
+    expect(
+      find.descendant(of: fileList, matching: find.text('+1 -1')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: fileList, matching: find.text('+1')),
+      findsOneWidget,
+    );
+    final selectedFileText = find.descendant(
+      of: fileList,
+      matching: find.text('feature.txt'),
+    );
+    expect(tester.widget<Text>(selectedFileText).style?.fontFamily, isNull);
+    final selectedFileBox = tester.widget<DecoratedBox>(
+      find
+          .ancestor(
+            of: selectedFileText,
+            matching: find.byWidgetPredicate(
+              (widget) =>
+                  widget is DecoratedBox &&
+                  (widget.decoration as BoxDecoration).color != null,
+            ),
+          )
+          .first,
+    );
+    expect(
+      (selectedFileBox.decoration as BoxDecoration).borderRadius,
+      BorderRadius.circular(6),
+    );
+    expect(
+      tester
+          .getSize(find.byKey(const Key('branch-preview-layout-unified')))
+          .height,
+      22,
+    );
+    final layoutSwitch = find.byKey(const Key('branch-preview-layout-switch'));
+    expect(layoutSwitch, findsOneWidget);
+    final switchBox = tester.widget<Container>(layoutSwitch);
+    expect(switchBox.padding, const EdgeInsets.all(2));
+    expect(
+      (switchBox.decoration! as BoxDecoration).borderRadius,
+      BorderRadius.circular(6),
+    );
+    final unifiedButton = tester.widget<Container>(
+      find
+          .descendant(
+            of: find.byKey(const Key('branch-preview-layout-unified')),
+            matching: find.byType(Container),
+          )
+          .first,
+    );
+    expect(
+      (unifiedButton.decoration! as BoxDecoration).color,
+      TimelineThemePalette.systemGraphite.neutralChip,
+    );
+    expect(
+      (unifiedButton.decoration! as BoxDecoration).borderRadius,
+      BorderRadius.circular(4),
+    );
 
     await tester.tap(
       find.byKey(const Key('branch-preview-layout-side-by-side')),
     );
     await tester.pump();
     expect(find.byType(SideBySidePresentationView), findsOneWidget);
+    final sideBySideButton = tester.widget<Container>(
+      find
+          .descendant(
+            of: find.byKey(const Key('branch-preview-layout-side-by-side')),
+            matching: find.byType(Container),
+          )
+          .first,
+    );
+    expect(
+      (sideBySideButton.decoration! as BoxDecoration).color,
+      TimelineThemePalette.systemGraphite.neutralChip,
+    );
 
     await tester.ensureVisible(find.text('other.txt').last);
     await tester.tap(find.text('other.txt').last);
@@ -3181,12 +3466,27 @@ void main() {
       find.byKey(const Key('virtual-merge-conflict-node')),
       findsOneWidget,
     );
-    expect(find.text('! 병합 충돌'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('timeline-list')),
+        matching: find.text('! 병합 충돌'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('중단'), findsOneWidget);
     expect(find.text('충돌'), findsWidgets);
     expect(find.text('lib/shared.dart'), findsWidgets);
-    expect(find.text('main · main change'), findsOneWidget);
-    expect(find.text('feature · feature change'), findsOneWidget);
+    final previewScroll = tester
+        .widget<NestedScrollView>(
+          find.byKey(const Key('preview-content-scroll')),
+        )
+        .controller!;
+    previewScroll.jumpTo(previewScroll.position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    expect(
+      find.text('main · main change ← feature · feature change'),
+      findsOneWidget,
+    );
     expect(find.textContaining(RegExp(r'^[0-9a-f]{7} 사용$')), findsNothing);
   });
 
@@ -3277,8 +3577,63 @@ void main() {
     expect(find.text('현재 작업 트리 변경 없음'), findsOneWidget);
     expect(find.text('종료 시 자동 삭제'), findsOneWidget);
     expect(find.text('임시 작업 공간 시작'), findsNothing);
+    await tester.drag(
+      find.byKey(const Key('preview-content-scroll')),
+      const Offset(0, -600),
+    );
+    await tester.pumpAndSettle();
     expect(find.text('main side'), findsOneWidget);
     expect(find.text('docs side'), findsOneWidget);
+    expect(
+      find.byKey(const Key('branch-preview-diff-toolbar')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .getSize(find.byKey(const Key('branch-preview-diff-toolbar')))
+          .height,
+      34,
+    );
+    expect(find.text('병합 충돌 1개 · fix/docs → main'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const Key('branch-preview-layout-side-by-side')),
+    );
+    await tester.pump();
+    expect(find.byKey(const Key('branch-preview-side-titles')), findsOneWidget);
+    expect(find.text('main · main change'), findsOneWidget);
+    expect(find.text('fix/docs · docs change'), findsOneWidget);
+    final sideTitles = find.byKey(const Key('branch-preview-side-titles'));
+    expect(
+      find.descendant(of: sideTitles, matching: find.text('기준 브랜치')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: sideTitles, matching: find.text('비교 브랜치')),
+      findsOneWidget,
+    );
+    expect(
+      find.text('lib/shared.dart · lines 1 · change 1 of 1'),
+      findsNothing,
+    );
+    final conflictActions = find.byKey(
+      const Key('branch-preview-conflict-actions'),
+    );
+    expect(conflictActions, findsOneWidget);
+    expect(
+      find.descendant(of: conflictActions, matching: find.text('main 사용')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: conflictActions, matching: find.text('fix/docs 사용')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: conflictActions, matching: find.text('둘 다 사용')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const Key('branch-preview-layout-unified')));
+    await tester.pump();
 
     await tester.ensureVisible(
       find.byKey(const Key('merge-conflict-use-base')),
@@ -3331,10 +3686,8 @@ void main() {
     );
     expect(
       tester
-          .widget<SegmentedButton<BranchPreviewMode>>(
-            find.byKey(const Key('branch-preview-segmented')),
-          )
-          .onSelectionChanged,
+          .widget<InkWell>(find.byKey(const Key('branch-preview-merge-button')))
+          .onTap,
       isNull,
     );
     apply.completeError(StateError('stop test apply'));
@@ -3460,6 +3813,51 @@ void main() {
 
     expect(find.text('new SHA'), findsNWidgets(3));
     expect(find.text('VR'), findsNWidgets(3));
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('timeline-list')),
+        matching: find.text('feature · 가상'),
+      ),
+      findsNWidgets(3),
+    );
+    final virtualChip = find.byKey(
+      const Key(
+        'ref-chip-3333333333333333333333333333333333333333-feature · 가상',
+      ),
+    );
+    final virtualCell = find.ancestor(
+      of: virtualChip,
+      matching: find.byWidgetPredicate((widget) {
+        final key = widget.key;
+        return key is ValueKey<String> && key.value.startsWith('refs-cell-');
+      }),
+    );
+    expect(virtualChip, findsOneWidget);
+    expect(virtualCell, findsOneWidget);
+    expect(
+      tester.getTopLeft(virtualChip).dx - tester.getTopLeft(virtualCell).dx,
+      14,
+    );
+    expect(
+      find.byKey(
+        const Key(
+          'ref-chip-connector-3333333333333333333333333333333333333333',
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester.getCenter(virtualChip).dy,
+      tester
+          .getCenter(
+            find.byKey(
+              const Key(
+                'virtual-rebase-node-3333333333333333333333333333333333333333',
+              ),
+            ),
+          )
+          .dy,
+    );
     expect(find.text('재작성 1/3'), findsOneWidget);
     expect(find.text('재작성 2/3'), findsOneWidget);
     expect(find.text('재작성 3/3'), findsOneWidget);
@@ -3476,6 +3874,14 @@ void main() {
       ),
       isTrue,
     );
+    final timelinePainters = tester
+        .widgetList<CustomPaint>(find.byType(CustomPaint))
+        .map((paint) => paint.painter)
+        .whereType<CommitGraphPainter>();
+    expect(
+      timelinePainters.map((painter) => painter.refConnector),
+      contains(true),
+    );
     final mappingPainter = tester
         .widgetList<CustomPaint>(find.byType(CustomPaint))
         .map((paint) => paint.painter)
@@ -3484,6 +3890,25 @@ void main() {
     final mappings = mappingPainter.mappings;
     expect(mappings, hasLength(3));
     expect(mappings.map((mapping) => mapping.color).toSet(), hasLength(3));
+    final virtualNode = tester.widget<Container>(
+      find.byKey(
+        const Key(
+          'virtual-rebase-node-3333333333333333333333333333333333333333',
+        ),
+      ),
+    );
+    final virtualBorder = virtualNode.decoration! as BoxDecoration;
+    expect((virtualBorder.border! as Border).top.width, 3);
+    expect(
+      (virtualBorder.border! as Border).top.color,
+      mappings
+          .singleWhere(
+            (mapping) =>
+                mapping.rewrittenSha ==
+                '3333333333333333333333333333333333333333',
+          )
+          .color,
+    );
 
     await tester.drag(
       find.byKey(const Key('timeline-list')),
@@ -3491,6 +3916,42 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('feature · 원본'), findsNWidgets(3));
+    final originalAvatar = find.byKey(
+      const ValueKey('author-avatar-feature-one'),
+    );
+    final mappedRing = find.ancestor(
+      of: originalAvatar,
+      matching: find.byWidgetPredicate((widget) {
+        if (widget case Container(decoration: final BoxDecoration decoration)) {
+          return decoration.shape == BoxShape.circle &&
+              decoration.border != null;
+        }
+        return false;
+      }),
+    );
+    expect(mappedRing, findsOneWidget);
+    expect(
+      tester.getSize(mappedRing),
+      const Size.square(CommitGraphPainter.avatarDiameter),
+    );
+    final mappedContainer = tester
+        .widgetList<Container>(
+          find.ancestor(of: originalAvatar, matching: find.byType(Container)),
+        )
+        .singleWhere((container) {
+          final decoration = container.decoration;
+          return decoration is BoxDecoration &&
+              decoration.shape == BoxShape.circle &&
+              decoration.border != null;
+        });
+    final originalBorder = mappedContainer.decoration! as BoxDecoration;
+    expect((originalBorder.border! as Border).top.width, 3);
+    expect(
+      (originalBorder.border! as Border).top.color,
+      mappings
+          .singleWhere((mapping) => mapping.originalSha == 'feature-one')
+          .color,
+    );
   });
 
   testWidgets('branch preview applies merge and restores its exact tips', (
@@ -3547,6 +4008,21 @@ void main() {
     expect(find.text('부모 커밋'), findsOneWidget);
     expect(find.text('충돌'), findsOneWidget);
     expect(find.byKey(const Key('branch-preview-progress')), findsOneWidget);
+    expect(find.text('main과 fix/docs 유지'), findsNothing);
+    final applyButton = tester.widget<FilledButton>(
+      find.byKey(const Key('branch-preview-apply')),
+    );
+    final applyShape =
+        applyButton.style!.shape!.resolve({})! as RoundedRectangleBorder;
+    expect(applyShape.borderRadius, BorderRadius.circular(6));
+    expect(
+      applyButton.style!.backgroundColor!.resolve({}),
+      const Color(0xFF594576),
+    );
+    expect(
+      applyButton.style!.side!.resolve({})!.color,
+      const Color(0xFF9D79D0),
+    );
     await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
     await tester.tap(find.byKey(const Key('branch-preview-apply')));
     await tester.pumpAndSettle();
@@ -3922,8 +4398,15 @@ void main() {
         .whereType<CommitGraphPainter>()
         .firstWhere((painter) => painter.dashedLanes.isNotEmpty);
     expect(targetPainter.previewRailColor, const Color(0xFFC69AFF));
-    expect(find.text('feature · 현재 충돌'), findsOneWidget);
-    expect(find.text('현재 적용 중'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('rebase-conflict-current-row')),
+        matching: find.text('feature · 현재 충돌'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('충돌 해결 중'), findsOneWidget);
+    expect(find.text('현재 적용 중'), findsNothing);
     expect(
       tester
           .widget<Text>(find.byKey(const Key('rebase-preview-applied-count')))
@@ -4063,9 +4546,11 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    await tester.ensureVisible(
-      find.byKey(const Key('rebase-conflict-use-compare')),
+    await tester.drag(
+      find.byKey(const Key('preview-content-scroll')),
+      const Offset(0, -600),
     );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('rebase-conflict-use-compare')));
     await tester.pump();
     expect(session.resolvedChoices, [
@@ -4098,9 +4583,11 @@ void main() {
       findsOneWidget,
     );
 
-    await tester.ensureVisible(
-      find.byKey(const Key('rebase-conflict-use-compare')),
+    await tester.drag(
+      find.byKey(const Key('preview-content-scroll')),
+      const Offset(0, -600),
     );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('rebase-conflict-use-compare')));
     await tester.pump();
     await tester.ensureVisible(continueButton);
@@ -4568,14 +5055,13 @@ void main() {
     expect(find.text('+8'), findsOneWidget);
     expect(find.text('−1'), findsOneWidget);
 
-    Color? chip(String path) =>
-        (tester
-                    .widget<Container>(find.byKey(Key('preview-state-$path')))
-                    .decoration!
-                as BoxDecoration)
-            .color;
-    expect(chip('lib/a.dart'), TimelineThemePalette.systemGraphite.neutralChip);
-    expect(chip('lib/b.dart'), const Color(0xFF8AD6A1).withValues(alpha: 0.2));
+    BoxDecoration? chip(String path) =>
+        tester
+                .widget<Container>(find.byKey(Key('preview-state-$path')))
+                .decoration
+            as BoxDecoration?;
+    expect(chip('lib/a.dart'), isNull);
+    expect(chip('lib/b.dart'), isNull);
     expect(
       fileStateChipColor('D').background,
       const Color(0xFFF29AB2).withValues(alpha: 0.2),
@@ -4583,7 +5069,7 @@ void main() {
     expect(fileStateChipColor('R100').letter, const Color(0xFFB6A0EA));
   });
 
-  testWidgets('the preview diff starts at the hunk, not the git header', (
+  testWidgets('preview diff uses compact full diff rows without git headers', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -4620,16 +5106,19 @@ void main() {
     expect(find.text('1 files changed'), findsNothing);
 
     final diff = find.byKey(const Key('preview-diff'));
+    expect(find.byType(UnifiedPresentationView), findsOneWidget);
+    expect(find.byKey(const Key('unified-line-0-0')), findsOneWidget);
+    expect(find.byKey(const Key('unified-line-0-1')), findsOneWidget);
     expect(
       find.descendant(of: diff, matching: find.text('@@ -1 +1 @@')),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: diff, matching: find.text('old line')),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: diff, matching: find.text('-old line')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: diff, matching: find.text('+new line')),
+      find.descendant(of: diff, matching: find.text('new line')),
       findsOneWidget,
     );
     for (final header in [
@@ -4823,21 +5312,158 @@ void main() {
     );
   });
 
-  test('rebase mapping colors are dark and avoid the active palette', () {
-    final reserved = const [
-      Color(0xFF8F6478),
-      Color(0xFF5F8582),
-      Color(0xFF81754F),
-    ];
-    final colors = rebaseMappingColors(reserved);
+  test('rebase mapping colors keep the compare hue and step darker', () {
+    const branchColor = Color(0xFF16CBE7);
+    final colors = rebaseMappingColors(branchColor);
+    final source = HSLColor.fromColor(branchColor);
+    final hsl = colors.map(HSLColor.fromColor).toList();
 
     expect(colors, hasLength(5));
-    expect(colors.toSet(), hasLength(5));
-    expect(colors.where(reserved.contains), isEmpty);
     expect(
-      colors.map((color) => HSLColor.fromColor(color).lightness),
-      everyElement(lessThanOrEqualTo(0.42)),
+      hsl.map((color) => color.hue),
+      everyElement(closeTo(source.hue, 0.5)),
     );
+    expect(hsl.first.saturation, lessThan(source.saturation));
+    expect(hsl.first.lightness, greaterThan(source.lightness));
+    for (var index = 1; index < hsl.length; index++) {
+      expect(hsl[index].saturation, lessThan(hsl[index - 1].saturation));
+      expect(hsl[index].lightness, lessThan(hsl[index - 1].lightness));
+    }
+  });
+
+  test('rebase mapping lines are one pixel with no outline or gaps', () async {
+    final rows = [
+      for (var index = 0; index < 3; index++)
+        graphRow(
+          commit: commit('row-$index', 'row $index'),
+          lane: 0,
+          activeLanes: const [0],
+          nextLanes: const [0],
+        ),
+    ];
+    const mappingColor = Color(0xFF547C68);
+    final painter = RebaseMappingPainter(
+      rows: rows,
+      mappings: const [
+        (
+          originalSha: 'row-2',
+          rewrittenSha: 'row-0',
+          originalRow: 2,
+          rewrittenRow: 0,
+          routeLane: 0,
+          color: mappingColor,
+        ),
+      ],
+      rowIndex: 1,
+      laneSpacing: 30.5,
+      compact: false,
+    );
+    const width = 100;
+    const height = 36;
+    final recorder = ui.PictureRecorder();
+    painter.paint(Canvas(recorder), const Size(100, 36));
+    final image = await recorder.endRecording().toImage(width, height);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    int alphaAt(int x, int y) => bytes!.getUint8((y * width + x) * 4 + 3);
+
+    // routeX is 58.5: the 1px stroke occupies x=58 only.
+    expect(alphaAt(57, height ~/ 2), 0);
+    expect(alphaAt(58, 0), greaterThan(0));
+    expect(alphaAt(58, height - 1), greaterThan(0));
+  });
+
+  test('rebase mapping arrowhead is an open one-pixel chevron', () async {
+    final rows = [
+      for (var index = 0; index < 3; index++)
+        graphRow(
+          commit: commit('row-$index', 'row $index'),
+          lane: 0,
+          activeLanes: const [0],
+          nextLanes: const [0],
+        ),
+    ];
+    final painter = RebaseMappingPainter(
+      rows: rows,
+      mappings: const [
+        (
+          originalSha: 'row-2',
+          rewrittenSha: 'row-0',
+          originalRow: 2,
+          rewrittenRow: 0,
+          routeLane: 0,
+          color: Color(0xFF547C68),
+        ),
+      ],
+      rowIndex: 0,
+      laneSpacing: 30.5,
+      compact: false,
+    );
+    final recorder = ui.PictureRecorder();
+    painter.paint(Canvas(recorder), const Size(100, 36));
+    final image = await recorder.endRecording().toImage(100, 36);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    int alphaAt(int x, int y) => bytes!.getUint8((y * 100 + x) * 4 + 3);
+
+    expect(alphaAt(42, 15), greaterThan(0));
+    expect(alphaAt(43, 16), 0);
+    expect(alphaAt(42, 21), greaterThan(0));
+  });
+
+  test(
+    'comparison target branch bends at the common parent in its own color',
+    () {
+      final rows = layoutBranchComparison(branchComparison().commits);
+      final target = rows.singleWhere((row) => row.commit.sha == 'feature-tip');
+      final transition = target.transitions.single;
+
+      expect(target.parentLanes, [0]);
+      expect(CommitGraphPainter.isMergeEdge(target, transition), isFalse);
+      expect(CommitGraphPainter.transitionBranch(target, transition), 1);
+    },
+  );
+
+  test('common parent keeps the base rail when the other branch joins', () {
+    final comparison = branchComparison();
+    final olderBase = commit(
+      'older-main',
+      'older main commit',
+      parents: const ['root'],
+    );
+    final rows = layoutBranchComparison([
+      comparison.commits.first,
+      comparison.commits[1],
+      BranchComparisonCommit(
+        commit: olderBase,
+        side: BranchCommitSide.baseOnly,
+      ),
+      comparison.commits.last,
+    ]);
+    final olderBaseRow = rows.singleWhere(
+      (row) => row.commit.sha == olderBase.sha,
+    );
+    final commonRow = rows.singleWhere((row) => row.commit.sha == 'root');
+    final commonPainter = CommitGraphPainter(
+      row: commonRow,
+      previous: olderBaseRow,
+      selected: false,
+      committerColor: const Color(0xFF7AD6E8),
+    );
+
+    expect(CommitGraphPainter.railsBelow(olderBaseRow), contains(0));
+    expect(commonPainter.laneVerticals(const Size(168, 36))[0]!.top, 0);
+  });
+
+  test('merge preview keeps each parent edge dashed until its parent node', () {
+    final graph = layoutMergePreviewGraph(branchComparison());
+    final targetIndex = graph.rows.indexWhere(
+      (row) => row.commit.sha == 'feature-tip',
+    );
+    final targetLane = graph.rows[targetIndex].lane;
+
+    for (var index = 0; index < targetIndex; index++) {
+      expect(graph.dashedLanes[index], contains(targetLane));
+    }
+    expect(graph.dashedLanes[targetIndex], isNot(contains(targetLane)));
   });
 
   test('preview graph adds virtual merge and rewritten rebase commits', () {
@@ -4853,7 +5479,12 @@ void main() {
     final feature = comparison.commits
         .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
         .commit;
-    final colors = rebaseMappingColors(AvatarService.defaultColors);
+    final compareRow = layoutBranchComparison(
+      comparison.commits,
+    ).singleWhere((row) => row.commit.sha == comparison.compareTip);
+    final colors = rebaseMappingColors(
+      AvatarService.branchColor(compareRow.branch),
+    );
     final rebase = layoutRebasePreviewGraph(
       comparison,
       RebasePreviewResult(
@@ -4865,7 +5496,6 @@ void main() {
         total: 1,
         virtualTip: 'rewritten-feature',
       ),
-      colors,
     );
     expect(
       rebase.kinds['rewritten-feature'],
@@ -4875,6 +5505,64 @@ void main() {
     expect(rebase.mappings.single.rewrittenSha, 'rewritten-feature');
     expect(rebase.mappings.single.color, colors.first);
     expect(rebase.mappings.single.routeLane, 0);
+
+    final baseTipIndex = rebase.rows.indexWhere(
+      (row) => row.commit.sha == comparison.baseTip,
+    );
+    final originalIndex = rebase.rows.indexWhere(
+      (row) => row.commit.sha == feature.sha,
+    );
+    final originalLane = rebase.rows[originalIndex].lane;
+    final originalPainter = CommitGraphPainter(
+      row: rebase.rows[originalIndex],
+      previous: rebase.rows[originalIndex - 1],
+      selected: false,
+      committerColor: AvatarService.branchColor(originalLane),
+    );
+    expect(rebase.rows[baseTipIndex].nextLanes, isNot(contains(originalLane)));
+    expect(originalPainter.continuesFromAbove(originalLane), isFalse);
+
+    final olderBase = commit(
+      'older-main',
+      'older main commit',
+      parents: const ['root'],
+    );
+    final interleavedComparison = BranchComparisonResult(
+      baseRef: comparison.baseRef,
+      compareRef: comparison.compareRef,
+      baseTip: comparison.baseTip,
+      compareTip: comparison.compareTip,
+      baseParent: olderBase.sha,
+      compareParent: comparison.compareParent,
+      mergeBases: comparison.mergeBases,
+      commits: [
+        comparison.commits.first,
+        comparison.commits[1],
+        BranchComparisonCommit(
+          commit: olderBase,
+          side: BranchCommitSide.baseOnly,
+        ),
+        comparison.commits.last,
+      ],
+      files: comparison.files,
+      merge: comparison.merge,
+    );
+    final interleaved = layoutRebasePreviewGraph(
+      interleavedComparison,
+      RebasePreviewResult(
+        status: RebasePreviewStatus.clean,
+        baseTip: interleavedComparison.baseTip,
+        compareTip: interleavedComparison.compareTip,
+        rewritten: [(original: feature, rewrittenSha: 'interleaved-rewrite')],
+        completed: 1,
+        total: 1,
+        virtualTip: 'interleaved-rewrite',
+      ),
+    );
+    final olderBaseRow = interleaved.rows.singleWhere(
+      (row) => row.commit.sha == olderBase.sha,
+    );
+    expect(olderBaseRow.activeLanes, contains(originalLane));
   });
 
   test('rebase conflict keeps only a virtual target above the base tip', () {
@@ -4894,7 +5582,6 @@ void main() {
         total: 2,
         conflictFiles: const ['lib/shared.dart'],
       ),
-      rebaseMappingColors(AvatarService.defaultColors),
     );
 
     expect(graph.rows, hasLength(comparison.commits.length + 1));
@@ -4912,25 +5599,31 @@ void main() {
     expect(graph.mappings, isEmpty);
   });
 
-  test('preview graphs preserve every existing comparison row', () {
+  test('preview graphs preserve existing comparison commits', () {
     final comparison = branchComparison();
     final existing = layoutBranchComparison(comparison.commits);
     final merge = layoutMergePreviewGraph(comparison);
-    void expectExistingRows(List<GraphRow> rows, int offset) {
+    void expectExistingRows(
+      List<GraphRow> rows,
+      int offset, {
+      bool preserveRails = true,
+    }) {
       for (var index = 0; index < existing.length; index++) {
         final actual = rows[index + offset];
         final expected = existing[index];
         expect(actual.commit, same(expected.commit));
         expect(actual.lane, expected.lane);
         expect(actual.parentLanes, expected.parentLanes);
-        expect(actual.activeLanes, expected.activeLanes);
-        expect(actual.nextLanes, expected.nextLanes);
-        expect(actual.activeLaneShas, expected.activeLaneShas);
-        expect(actual.nextLaneShas, expected.nextLaneShas);
+        if (preserveRails) {
+          expect(actual.activeLanes, expected.activeLanes);
+          expect(actual.nextLanes, expected.nextLanes);
+          expect(actual.activeLaneShas, expected.activeLaneShas);
+          expect(actual.nextLaneShas, expected.nextLaneShas);
+          expect(actual.activeLaneBranches, expected.activeLaneBranches);
+          expect(actual.nextLaneBranches, expected.nextLaneBranches);
+        }
         expect(actual.transitions, expected.transitions);
         expect(actual.branch, expected.branch);
-        expect(actual.activeLaneBranches, expected.activeLaneBranches);
-        expect(actual.nextLaneBranches, expected.nextLaneBranches);
       }
     }
 
@@ -4950,10 +5643,9 @@ void main() {
         total: 1,
         virtualTip: 'rewritten-feature',
       ),
-      rebaseMappingColors(AvatarService.defaultColors),
     );
 
-    expectExistingRows(rebase.rows, 1);
+    expectExistingRows(rebase.rows, 1, preserveRails: false);
   });
 
   testWidgets('the app passes branch preview mode changes to settings', (
@@ -6162,10 +6854,11 @@ void main() {
       expect(find.byKey(Key('ref-chip-multi-${ref.name}')), findsOneWidget);
     }
     expect(find.byKey(const Key('ref-more-multi')), findsNothing);
-    expect(chip.left, greaterThanOrEqualTo(cell.left));
+    expect(chip.left - cell.left, 14);
     expect(
-      tester.getRect(find.byKey(const Key('ref-chip-multi-main'))).right,
-      lessThanOrEqualTo(cell.right),
+      cell.right -
+          tester.getRect(find.byKey(const Key('ref-chip-multi-main'))).right,
+      14,
     );
 
     // Chips carry no avatars at all any more, and the cell has no hairline.
@@ -9615,7 +10308,7 @@ void main() {
       tester.getRect(find.text('상세')).left,
       lessThan(tester.getRect(find.byKey(const Key('keycap-Enter'))).left),
     );
-    // Right cluster order: keycaps, caption, placement box, Show Diff, gear.
+    // Right cluster order: keycaps, caption, placement box, Full Diff, gear.
     final lefts = [
       tester.getRect(find.byKey(const Key('shortcut-hint'))).left,
       tester.getRect(find.text('미리보기')).left,
@@ -9723,6 +10416,231 @@ void main() {
     expect(
       TimelineColumnWidths.fromJson(<String, dynamic>{'sidebar': 900}).sidebar,
       320,
+    );
+  });
+
+  testWidgets('the sidebar collapses to group icons and restores its width', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+            refs: const RepoRefs(
+              local: ['main'],
+              remote: ['origin/main'],
+              tags: ['v1.0'],
+              current: 'main',
+            ),
+          ),
+          controller: controller,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.getSize(find.byKey(const Key('sidebar'))).width, 150);
+    expect(find.byKey(const Key('sidebar-collapse-button')), findsOneWidget);
+    expect(
+      tester.getSize(find.byKey(const Key('sidebar-collapse-icon'))),
+      const Size(14.4, 14.4),
+    );
+    expect(
+      tester
+          .widget<Tooltip>(
+            find.ancestor(
+              of: find.byKey(const Key('sidebar-collapse-button')),
+              matching: find.byType(Tooltip),
+            ),
+          )
+          .waitDuration,
+      Duration.zero,
+    );
+
+    await tester.tap(find.byKey(const Key('sidebar-collapse-button')));
+    await tester.pumpAndSettle();
+
+    expect(tester.getSize(find.byKey(const Key('sidebar'))).width, 52);
+    expect(find.byKey(const Key('ref-filter')), findsNothing);
+    for (final section in ['local', 'remote', 'tags']) {
+      expect(
+        find.byKey(Key('sidebar-compact-section-$section')),
+        findsOneWidget,
+      );
+    }
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('sidebar-compact-section-local')),
+        matching: find.text('1'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester.getSize(find.byKey(const Key('sidebar-expand-icon'))),
+      const Size(14.4, 14.4),
+    );
+    expect(
+      tester
+          .widget<Tooltip>(
+            find.ancestor(
+              of: find.byKey(const Key('sidebar-expand-button')),
+              matching: find.byType(Tooltip),
+            ),
+          )
+          .waitDuration,
+      Duration.zero,
+    );
+
+    await tester.tap(find.byKey(const Key('sidebar-expand-button')));
+    await tester.pumpAndSettle();
+
+    expect(tester.getSize(find.byKey(const Key('sidebar'))).width, 150);
+    expect(find.byKey(const Key('ref-filter')), findsOneWidget);
+  });
+
+  testWidgets('sidebar hover extends left without moving branch content', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            tags: ['v1.0'],
+            current: 'main',
+          ),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(pointer.removePointer);
+    await pointer.addPointer(location: Offset.zero);
+
+    for (final name in ['feature', 'v1.0']) {
+      final row = find.byKey(Key('sidebar-row-$name'));
+      final hover = find.byKey(Key('sidebar-ref-hover-$name'));
+      final content = find.byKey(Key('sidebar-ref-$name'));
+      final icon = find.descendant(
+        of: row,
+        matching: find.byIcon(
+          name == 'v1.0' ? Icons.sell_outlined : Icons.call_split,
+        ),
+      );
+      final iconBefore = tester.getRect(icon);
+      final contentBefore = tester.getRect(content);
+      final hoverBefore = tester.getRect(hover);
+
+      await pointer.moveTo(tester.getCenter(content));
+      await tester.pump();
+
+      expect(tester.getRect(icon), iconBefore, reason: name);
+      expect(tester.getRect(content), contentBefore, reason: name);
+      expect(tester.getRect(hover), hoverBefore, reason: name);
+
+      final background = find.byKey(Key('sidebar-ref-hover-background-$name'));
+      expect(background, findsOneWidget, reason: name);
+      final backgroundRect = tester.getRect(background);
+      expect(backgroundRect.left, hoverBefore.left - 5, reason: name);
+      expect(backgroundRect.right, hoverBefore.right, reason: name);
+
+      final decoration =
+          tester.widget<DecoratedBox>(background).decoration as BoxDecoration;
+      final border = decoration.border! as Border;
+      expect(decoration.borderRadius, isNull, reason: name);
+      expect(
+        decoration.color,
+        TimelineThemePalette.systemGraphite.selectedRow,
+        reason: name,
+      );
+      expect(border.left.width, 2, reason: name);
+      expect(border.left.color, isNot(Colors.transparent), reason: name);
+      expect(border.top.width, 0, reason: name);
+      expect(border.right.width, 0, reason: name);
+      expect(border.bottom.width, 0, reason: name);
+
+      await pointer.moveTo(Offset.zero);
+      await tester.pump();
+    }
+  });
+
+  testWidgets('toolbar controls expose their approved hover feedback', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository((_, _) async => [commit('1', 'first commit')]),
+        controller,
+        onOpenSettings: () {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(pointer.removePointer);
+    await pointer.addPointer(location: Offset.zero);
+
+    await pointer.moveTo(
+      tester.getCenter(
+        find.byKey(const Key('placement-PreviewPlacement.left')),
+      ),
+    );
+    await tester.pump();
+    expect(
+      (tester
+                  .widget<Container>(
+                    find.byKey(
+                      const Key('placement-hover-PreviewPlacement.left'),
+                    ),
+                  )
+                  .decoration!
+              as BoxDecoration)
+          .color,
+      TimelineThemePalette.systemGraphite.selectedRow,
+    );
+
+    final diffButton = find.byKey(const Key('toolbar-full-diff'));
+    await pointer.moveTo(tester.getCenter(diffButton));
+    await tester.pump();
+    expect(
+      (tester
+                  .widget<Container>(
+                    find.descendant(
+                      of: diffButton,
+                      matching: find.byType(Container),
+                    ),
+                  )
+                  .decoration!
+              as BoxDecoration)
+          .color,
+      const Color(0xFF3FB950),
+    );
+
+    await pointer.moveTo(
+      tester.getCenter(find.byKey(const Key('open-settings'))),
+    );
+    await tester.pump();
+    expect(
+      (tester
+                  .widget<Container>(
+                    find.byKey(const Key('settings-hover-surface')),
+                  )
+                  .decoration!
+              as BoxDecoration)
+          .color,
+      TimelineThemePalette.systemGraphite.selectedRow,
+    );
+    expect(
+      tester
+          .widget<AnimatedRotation>(
+            find.byKey(const Key('settings-hover-turn')),
+          )
+          .turns,
+      closeTo(0.05, 0.0001),
     );
   });
 
@@ -10139,6 +11057,7 @@ void main() {
             ),
           ],
           diff: (_, _, path, _, _) async => [
+            const DiffLine(kind: DiffLineKind.hunk, text: '@@ -0,0 +1 @@'),
             DiffLine(kind: DiffLineKind.add, text: '$path body', newNumber: 1),
           ],
         ),
@@ -10158,13 +11077,13 @@ void main() {
       ),
       findsOneWidget,
     );
-    double sizeOf(String label) => tester
-        .widgetList<Text>(
-          find.descendant(of: preview, matching: find.text(label)),
-        )
-        .first
-        .style!
-        .fontSize!;
+    double sizeOf(String label) {
+      final finder = find.descendant(of: preview, matching: find.text(label));
+      final text = tester.widgetList<Text>(finder).first;
+      return text.style?.fontSize ??
+          DefaultTextStyle.of(tester.element(finder.first)).style.fontSize!;
+    }
+
     expect(sizeOf('Commit & Diff'), 12);
     expect(sizeOf('first commit'), 14);
     expect(sizeOf('commit 1'), 12);
@@ -10173,7 +11092,7 @@ void main() {
     expect(sizeOf('Committer'), 12);
     expect(sizeOf('2 files changed'), 12);
     expect(sizeOf('lib/a.dart'), 12);
-    expect(sizeOf('+lib/a.dart body'), 11);
+    expect(sizeOf('lib/a.dart body'), 14);
 
     // A file row still switches the diff despite the selection layer.
     await tester.tap(
@@ -10181,7 +11100,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(
-      find.descendant(of: preview, matching: find.text('+lib/b.dart body')),
+      find.descendant(of: preview, matching: find.text('lib/b.dart body')),
       findsOneWidget,
     );
   });
@@ -10230,16 +11149,21 @@ void main() {
     expect(saved?.width, 348);
     expect(titleWidth(), title - 60);
 
-    // Clamps at both ends of the design range.
+    // The horizontal maximum follows 75% of the whole app window.
     await tester.drag(
       find.byKey(const Key('preview-resizer')),
-      const Offset(-400, 0),
+      const Offset(-1400, 0),
     );
     await tester.pumpAndSettle();
-    expect(previewWidth(), 560);
+    expect(previewWidth(), 1200);
+
+    tester.view.physicalSize = const Size(1200, 900);
+    await tester.pumpAndSettle();
+    expect(previewWidth(), 900);
+
     await tester.drag(
       find.byKey(const Key('preview-resizer')),
-      const Offset(600, 0),
+      const Offset(1200, 0),
     );
     await tester.pumpAndSettle();
     expect(previewWidth(), 240);
@@ -10282,6 +11206,12 @@ void main() {
         'previewHeight': 4000,
       }).previewHeight,
       4000,
+    );
+    expect(
+      AppSettings.fromJson(<String, dynamic>{
+        'previewWidth': 1400,
+      }).previewWidth,
+      1400,
     );
   });
 
@@ -10874,7 +11804,7 @@ void main() {
   );
 
   // ------------------------------------------------------------------ C1/C2
-  testWidgets('preview file and diff panes scroll independently', (
+  testWidgets('preview info and diff move through one vertical scroll', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -10888,7 +11818,7 @@ void main() {
         FakeGitRepository(
           (_, _) async => [commit('1', 'first commit')],
           files: (_, _) async => [
-            for (var index = 0; index < 12; index++)
+            for (var index = 0; index < 3; index++)
               GitFileChange(
                 path: 'lib/file$index.dart',
                 status: 'M',
@@ -10897,6 +11827,7 @@ void main() {
               ),
           ],
           diff: (_, _, _, _, _) async => [
+            const DiffLine(kind: DiffLineKind.hunk, text: '@@ -0,0 +1,80 @@'),
             for (var index = 0; index < 80; index++)
               DiffLine(
                 kind: DiffLineKind.add,
@@ -10917,68 +11848,15 @@ void main() {
     expect(filesScrollable, findsOneWidget);
     expect(diffScrollable, findsOneWidget);
 
-    final filesPosition = tester
-        .state<ScrollableState>(
-          find.descendant(
-            of: filesScrollable,
-            matching: find.byType(Scrollable),
-          ),
-        )
-        .position;
-    final diffPosition = tester
-        .state<ScrollableState>(
-          find.descendant(
-            of: diffScrollable,
-            matching: find.byType(Scrollable),
-          ),
-        )
-        .position;
-
-    await tester.drag(filesScrollable, const Offset(0, -120));
-    await tester.pump();
-    expect(filesPosition.pixels, greaterThan(0));
-    expect(diffPosition.pixels, 0);
-
-    await tester.drag(diffScrollable, const Offset(0, -120));
-    await tester.pump();
-    expect(filesPosition.pixels, greaterThan(0));
-    expect(diffPosition.pixels, greaterThan(0));
-
-    Future<void> pageDown() async {
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-      await tester.pumpAndSettle();
-    }
-
-    filesPosition.jumpTo(0);
-    final filesBeforeSelection = filesPosition.pixels;
-    await tester.tap(find.byKey(const Key('preview-state-lib/file0.dart')));
+    final firstFile = find.byKey(const Key('preview-state-lib/file0.dart'));
+    final before = tester.getTopLeft(firstFile).dy;
+    await tester.drag(diffScrollable, const Offset(0, -160));
     await tester.pumpAndSettle();
-    expect(filesPosition.pixels, filesBeforeSelection);
-    expect(diffPosition.pixels, 0);
-
-    await pageDown();
-    expect(
-      filesPosition.pixels,
-      moreOrLessEquals(filesPosition.viewportDimension * 0.5),
-    );
-    expect(diffPosition.pixels, 0);
-
-    filesPosition.jumpTo(0);
-    await tester.tap(find.text('+line 5'));
-    await pageDown();
-    expect(filesPosition.pixels, 0);
-    expect(
-      diffPosition.pixels,
-      moreOrLessEquals(diffPosition.viewportDimension * 0.5),
-    );
+    expect(tester.getTopLeft(firstFile).dy, lessThan(before));
   });
 
   // ------------------------------------------------------------------ C3/H2
-  testWidgets('the preview header carries the compact green Show Diff', (
+  testWidgets('the preview header carries the compact green Full Diff', (
     tester,
   ) async {
     final opened = <String>[];
@@ -11008,13 +11886,14 @@ void main() {
     expect(rect.height, 28);
     expect(rect.left, greaterThan(header.right));
     expect(
-      find.descendant(of: button, matching: find.text('Show Diff')),
+      find.descendant(of: button, matching: find.text('Full Diff')),
       findsOneWidget,
     );
     expect(
       find.descendant(of: button, matching: find.text('⌘D')),
       findsOneWidget,
     );
+    expect(find.byKey(const Key('preview-hash')), findsNothing);
     expect(
       (tester
                   .widget<Container>(
@@ -11031,7 +11910,7 @@ void main() {
     expect(
       tester
           .widget<Text>(
-            find.descendant(of: button, matching: find.text('Show Diff')),
+            find.descendant(of: button, matching: find.text('Full Diff')),
           )
           .style
           ?.fontSize,
@@ -11138,7 +12017,7 @@ void main() {
     expect(button, findsOneWidget);
     // The name with its shortcut underneath, on green.
     expect(
-      find.descendant(of: button, matching: find.text('Show Diff')),
+      find.descendant(of: button, matching: find.text('Full Diff')),
       findsOneWidget,
     );
     expect(
@@ -11152,7 +12031,7 @@ void main() {
       greaterThan(
         tester
             .getRect(
-              find.descendant(of: button, matching: find.text('Show Diff')),
+              find.descendant(of: button, matching: find.text('Full Diff')),
             )
             .top,
       ),
@@ -12416,6 +13295,7 @@ void main() {
               ),
           ],
           diff: (_, _, path, _, _) async => [
+            const DiffLine(kind: DiffLineKind.hunk, text: '@@ -0,0 +1,60 @@'),
             for (var index = 0; index < 60; index++)
               DiffLine(
                 kind: DiffLineKind.add,
@@ -12439,9 +13319,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    final hash = tester.widget<Text>(find.byKey(const Key('preview-hash')));
-    expect(hash.style?.fontFamily, technicalFontFamily);
-    expect(hash.style?.fontFamilyFallback, technicalFontFallback);
+    expect(find.byKey(const Key('preview-hash')), findsNothing);
     final shortcut = tester.widget<Text>(
       find.text('파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓'),
     );
@@ -12502,30 +13380,32 @@ void main() {
     );
     expect(find.text('Committer · Cam Committer'), findsNothing);
 
-    final scrollable = tester.state<ScrollableState>(
-      find.descendant(
-        of: find.byKey(const Key('preview-diff-scroll')),
-        matching: find.byType(Scrollable),
-      ),
-    );
-    expect(scrollable.position.pixels, 0);
+    final scrollable = tester
+        .widget<NestedScrollView>(
+          find.byKey(const Key('preview-content-scroll')),
+        )
+        .controller!
+        .position;
+    expect(scrollable.pixels, 0);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
-    final beforeRepeat = scrollable.position.pixels;
+    final beforeRepeat = scrollable.pixels;
     await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowDown);
     expect(
-      scrollable.position.pixels,
+      scrollable.pixels,
       moreOrLessEquals(
-        beforeRepeat + scrollable.position.viewportDimension * 0.5,
+        (beforeRepeat + scrollable.viewportDimension * 0.5).clamp(
+          scrollable.minScrollExtent,
+          scrollable.maxScrollExtent,
+        ),
       ),
     );
     await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
-    expect(scrollable.position.pixels, greaterThan(0));
-    expect(find.byKey(const Key('preview-state-lib/one.dart')), findsOneWidget);
+    expect(scrollable.pixels, greaterThan(0));
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
@@ -12533,7 +13413,8 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
-    expect(scrollable.position.pixels, 0);
+    expect(scrollable.pixels, 0);
+    expect(find.byKey(const Key('preview-state-lib/one.dart')), findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
@@ -12568,6 +13449,7 @@ void main() {
               ),
           ],
           diff: (_, _, path, _, _) async => [
+            const DiffLine(kind: DiffLineKind.hunk, text: '@@ -0,0 +1 @@'),
             DiffLine(
               kind: DiffLineKind.add,
               text: 'body of $path',
@@ -12597,21 +13479,24 @@ void main() {
     await tester.pumpAndSettle();
     final preview = find.byKey(const Key('preview-panel'));
     expect(
-      find.descendant(
-        of: preview,
-        matching: find.text('+body of lib/one.dart'),
-      ),
+      find.descendant(of: preview, matching: find.text('body of lib/one.dart')),
       findsOneWidget,
     );
 
     // Down walks the files, up walks back, and both ends clamp.
     await metaArrow(LogicalKeyboardKey.arrowDown);
     expect(
-      find.descendant(
-        of: preview,
-        matching: find.text('+body of lib/two.dart'),
-      ),
+      find.descendant(of: preview, matching: find.text('body of lib/two.dart')),
       findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<NestedScrollView>(
+            find.byKey(const Key('preview-content-scroll')),
+          )
+          .controller
+          ?.offset,
+      0,
     );
     expect(find.byKey(const Key('preview-state-lib/two.dart')), findsOneWidget);
     await metaArrow(LogicalKeyboardKey.arrowDown);
@@ -12619,25 +13504,19 @@ void main() {
     expect(
       find.descendant(
         of: preview,
-        matching: find.text('+body of lib/three.dart'),
+        matching: find.text('body of lib/three.dart'),
       ),
       findsOneWidget,
     );
     await metaArrow(LogicalKeyboardKey.arrowUp);
     expect(
-      find.descendant(
-        of: preview,
-        matching: find.text('+body of lib/two.dart'),
-      ),
+      find.descendant(of: preview, matching: find.text('body of lib/two.dart')),
       findsOneWidget,
     );
     await metaArrow(LogicalKeyboardKey.arrowUp);
     await metaArrow(LogicalKeyboardKey.arrowUp);
     expect(
-      find.descendant(
-        of: preview,
-        matching: find.text('+body of lib/one.dart'),
-      ),
+      find.descendant(of: preview, matching: find.text('body of lib/one.dart')),
       findsOneWidget,
     );
     // The commit selection never moved while walking files.
@@ -12672,6 +13551,7 @@ void main() {
               ),
           ],
           diff: (_, _, path, _, _) async => [
+            const DiffLine(kind: DiffLineKind.hunk, text: '@@ -0,0 +1 @@'),
             DiffLine(
               kind: DiffLineKind.add,
               text: 'body of $path',
@@ -12686,11 +13566,10 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
-    final filesViewport = find.byKey(const Key('preview-files-scroll'));
+    final filesViewport = find.byKey(const Key('preview-content-scroll'));
     final filesPosition = tester
-        .state<ScrollableState>(
-          find.descendant(of: filesViewport, matching: find.byType(Scrollable)),
-        )
+        .widget<NestedScrollView>(filesViewport)
+        .controller!
         .position;
 
     Future<void> metaArrow(LogicalKeyboardKey key) async {
@@ -12733,7 +13612,9 @@ void main() {
     await tester.tap(find.byKey(const Key('preview-state-lib/file1.dart')));
     await tester.pumpAndSettle();
     expect(filesPosition.pixels, moreOrLessEquals(pointerOffset));
-    expect(find.text('+body of lib/file1.dart'), findsOneWidget);
+    await tester.drag(filesViewport, const Offset(0, -600));
+    await tester.pumpAndSettle();
+    expect(find.text('body of lib/file1.dart'), findsOneWidget);
   });
 
   // ------------------------------------------------------------------ J2
@@ -13001,12 +13882,14 @@ Widget app(
   WindowFrameController controller, {
   BranchPreviewMode branchPreviewMode = BranchPreviewMode.merge,
   ValueChanged<BranchPreviewMode>? onBranchPreviewModeChanged,
+  VoidCallback? onOpenSettings,
 }) => MaterialApp(
   home: TimelineScreen(
     repository: repository,
     controller: controller,
     branchPreviewMode: branchPreviewMode,
     onBranchPreviewModeChanged: onBranchPreviewModeChanged,
+    onOpenSettings: onOpenSettings,
   ),
 );
 

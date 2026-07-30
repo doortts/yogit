@@ -30,6 +30,10 @@ class SideBySidePresentationView extends StatelessWidget {
     this.splitRatio = 0.5,
     this.onSplitRatioChanged,
     this.onSplitRatioChangeEnd,
+    this.showHunkHeaders = true,
+    this.compactRows = false,
+    this.currentMarkerColor = fullDiffAccent,
+    this.header,
     super.key,
   });
 
@@ -52,15 +56,29 @@ class SideBySidePresentationView extends StatelessWidget {
   final double splitRatio;
   final ValueChanged<double>? onSplitRatioChanged;
   final VoidCallback? onSplitRatioChangeEnd;
+  final bool showHunkHeaders;
+  final bool compactRows;
+  final Color currentMarkerColor;
+  final Widget? header;
 
   @override
   Widget build(BuildContext context) {
     if (document.hunks.isEmpty) {
-      return const Center(
+      const empty = Center(
         child: Text(
           '현재 옵션으로 표시할 변경이 없습니다',
           style: TextStyle(color: fullDiffMuted, fontSize: 10),
         ),
+      );
+      if (header == null) return empty;
+      return ListView(
+        key: const Key('side-by-side-list'),
+        controller: controller,
+        primary: controller == null,
+        children: [
+          header!,
+          const SizedBox(height: 80, child: empty),
+        ],
       );
     }
 
@@ -71,7 +89,11 @@ class SideBySidePresentationView extends StatelessWidget {
   }
 
   Widget _buildIndexed(BuildContext context, _SideBySideDocumentIndex items) {
-    final scrollTargetIndex = items.indexForTarget(scrollTarget);
+    final headerOffset = header == null ? 0 : 1;
+    final sourceTargetIndex = items.indexForTarget(scrollTarget);
+    final scrollTargetIndex = sourceTargetIndex < 0
+        ? -1
+        : sourceTargetIndex + headerOffset;
     final list = FullDiffSelectionArea(
       allSourceTextBuilder: () {
         debugMetrics?.recordSelectionTextBuild();
@@ -81,8 +103,10 @@ class SideBySidePresentationView extends StatelessWidget {
         key: const Key('side-by-side-list'),
         controller: controller,
         primary: controller == null,
-        itemCount: items.itemCount,
+        itemCount: items.itemCount + headerOffset,
         itemBuilder: (context, itemIndex) {
+          if (itemIndex < headerOffset) return header!;
+          itemIndex -= headerOffset;
           final item = items.itemAt(itemIndex);
           debugMetrics?.recordItem(pair: item.pair != null);
           final hunk = item.hunk;
@@ -102,15 +126,19 @@ class SideBySidePresentationView extends StatelessWidget {
               richRenderingEnabled: richRenderingEnabled,
               wordDiffer: wordDiffer,
               splitRatio: splitRatio.clamp(0.2, 0.8).toDouble(),
+              compactRows: compactRows,
+              currentMarkerColor: currentMarkerColor,
             );
           } else {
-            child = SelectionContainer.disabled(
-              child: FullDiffHunkHeader(
-                hunk: hunk,
-                path: newPath,
-                hunkCount: document.hunks.length,
-              ),
-            );
+            child = showHunkHeaders
+                ? SelectionContainer.disabled(
+                    child: FullDiffHunkHeader(
+                      hunk: hunk,
+                      path: newPath,
+                      hunkCount: document.hunks.length,
+                    ),
+                  )
+                : const SizedBox.shrink();
           }
           if (item.anchorTarget) {
             child = KeyedSubtree(
@@ -586,6 +614,8 @@ class _SideBySideRow extends StatelessWidget {
     required this.richRenderingEnabled,
     required this.wordDiffer,
     required this.splitRatio,
+    required this.compactRows,
+    required this.currentMarkerColor,
     super.key,
   });
 
@@ -600,6 +630,8 @@ class _SideBySideRow extends StatelessWidget {
   final bool richRenderingEnabled;
   final FullDiffWordDiffer wordDiffer;
   final double splitRatio;
+  final bool compactRows;
+  final Color currentMarkerColor;
 
   @override
   Widget build(BuildContext context) {
@@ -625,6 +657,8 @@ class _SideBySideRow extends StatelessWidget {
             wordRanges: wordChanges.newRanges,
             compactGutter: true,
             richRenderingEnabled: richRenderingEnabled,
+            compact: compactRows,
+            currentMarkerColor: currentMarkerColor,
             selectionOrder: FullDiffSelectionOrder(
               row: sourceRow,
               column: showOldSide ? 1 : 0,
@@ -644,6 +678,8 @@ class _SideBySideRow extends StatelessWidget {
             wordRanges: wordChanges.oldRanges,
             compactGutter: true,
             richRenderingEnabled: richRenderingEnabled,
+            compact: compactRows,
+            currentMarkerColor: currentMarkerColor,
             selectionOrder: FullDiffSelectionOrder(row: sourceRow),
           );
     if (wrapLines) {
@@ -660,7 +696,7 @@ class _SideBySideRow extends StatelessWidget {
       );
     }
     return SizedBox(
-      height: 27,
+      height: compactRows ? fullDiffSourceRowHeight : 27,
       child: LayoutBuilder(
         builder: (context, constraints) => Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -425,7 +425,7 @@ class AppSettings {
         value['fullDiffPreferences'],
       ),
       laneColors: valid ? laneColors : defaultLaneColors,
-      previewWidth: _clamped(value['previewWidth'], 288, 240, 560),
+      previewWidth: _clamped(value['previewWidth'], 288, 240, double.infinity),
       previewHeight: _clamped(
         value['previewHeight'],
         280,

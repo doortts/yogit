@@ -1016,7 +1016,10 @@ List<GraphRow> layoutBranchComparison(List<BranchComparisonCommit> commits) {
         return GraphRow(
           commit: entry.commit,
           lane: lane,
-          parentLanes: [for (final _ in entry.commit.parents) lane],
+          parentLanes: [
+            for (final _ in entry.commit.parents)
+              if (convergesHere && lane == 1) 0 else lane,
+          ],
           activeLanes: activeLanes,
           nextLanes: nextLanes,
           activeLaneShas: {
