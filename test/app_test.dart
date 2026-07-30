@@ -10330,7 +10330,7 @@ void main() {
     expect(find.byKey(const Key('sidebar-collapse-button')), findsOneWidget);
     expect(
       tester.getSize(find.byKey(const Key('sidebar-collapse-icon'))),
-      const Size(18, 18),
+      const Size(14.4, 14.4),
     );
     expect(
       tester
@@ -10364,7 +10364,7 @@ void main() {
     );
     expect(
       tester.getSize(find.byKey(const Key('sidebar-expand-icon'))),
-      const Size(18, 18),
+      const Size(14.4, 14.4),
     );
     expect(
       tester

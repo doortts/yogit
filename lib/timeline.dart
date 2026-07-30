@@ -2718,7 +2718,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         onPressed: () => setState(() => _sidebarCollapsed = !opens),
         icon: CustomPaint(
           key: Key(opens ? 'sidebar-expand-icon' : 'sidebar-collapse-icon'),
-          size: const Size(18, 18),
+          size: const Size(14.4, 14.4),
           painter: _PaneToggleIconPainter(opens: opens, color: _palette.muted),
         ),
       ),
