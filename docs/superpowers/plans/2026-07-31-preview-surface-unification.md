@@ -29,7 +29,7 @@
 - Consumes: `_statusBar()`, which already selects normal or comparison content
 - Produces: a visible `comparison-status` bar and 14-pixel chip margins in both modes
 
-- [ ] **Step 1: Add failing behavior assertions**
+- [x] **Step 1: Add failing behavior assertions**
 
 After selecting a comparison branch:
 
@@ -48,7 +48,7 @@ expect(
 );
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run:
 
@@ -59,7 +59,7 @@ flutter test test/app_test.dart --plain-name "a multi-ref row shares its cell be
 
 Expected: the comparison status bar is absent and the normal chip margins differ from 14 pixels.
 
-- [ ] **Step 3: Remove the two mode-specific layout conditions**
+- [x] **Step 3: Remove the two mode-specific layout conditions**
 
 Always build the existing status bar:
 
@@ -76,7 +76,7 @@ final width = constraints.maxWidth - inset * 2;
 width: slot,
 ```
 
-- [ ] **Step 4: Run both tests and verify they pass**
+- [x] **Step 4: Run both tests and verify they pass**
 
 Run the two commands from Step 2.
 
@@ -93,7 +93,7 @@ Expected: PASS.
 - Consumes: the existing diff future, `DiffDocument`, `UnifiedPresentationView`, and `SideBySidePresentationView`
 - Produces: one `_previewDiffView` path with the same toolbar, layout switch, titles, compact rows, file-row spacing, and scrolling in both modes
 
-- [ ] **Step 1: Add a failing normal-preview parity test**
+- [x] **Step 1: Add a failing normal-preview parity test**
 
 Extend the normal preview fixture with one modified file and a hunk, then assert:
 
@@ -121,7 +121,7 @@ await tester.pump();
 expect(find.byType(SideBySidePresentationView), findsOneWidget);
 ```
 
-- [ ] **Step 2: Run the test and verify it fails**
+- [x] **Step 2: Run the test and verify it fails**
 
 Run:
 
@@ -131,11 +131,11 @@ flutter test test/app_test.dart --plain-name "preview loads real files before th
 
 Expected: the normal preview still uses the legacy line renderer and has no shared layout controls.
 
-- [ ] **Step 3: Share layout state and file-row presentation**
+- [x] **Step 3: Share layout state and file-row presentation**
 
 Rename `_branchPreviewLayout` to `_previewDiffLayout`. Remove `_comparison`-based row height, status-chip, border, text-color, and stats branches from `_previewFileRow`; keep the current branch-preview values for both modes.
 
-- [ ] **Step 4: Build one diff presentation**
+- [x] **Step 4: Build one diff presentation**
 
 Make `_previewDiff` compute mode-specific labels and ranges, then pass both modes into one `_previewDiffView` method. The method owns:
 
@@ -155,17 +155,17 @@ Column(
 
 Pass `_previewDiffScrollController` to both presentation views. Keep branch conflict titles and actions conditional, but do not keep a second diff renderer.
 
-- [ ] **Step 5: Remove the normal-only diff padding and outer scroll view**
+- [x] **Step 5: Remove the normal-only diff padding and outer scroll view**
 
 Use `EdgeInsets.zero` for both modes. Keep `preview-diff-scroll` as the shared pointer/scroll notification boundary while the presentation view owns the actual list.
 
-- [ ] **Step 6: Run focused preview tests**
+- [x] **Step 6: Run focused preview tests**
 
 Run:
 
 ```bash
 flutter test test/app_test.dart --plain-name "preview loads real files before the first file diff once"
-flutter test test/app_test.dart --plain-name "the preview diff starts at the hunk, not the git header"
+flutter test test/app_test.dart --plain-name "preview diff uses compact full diff rows without git headers"
 flutter test test/app_test.dart --plain-name "preview file and diff panes scroll independently"
 flutter test test/app_test.dart --plain-name "branch preview diff switches between both full diff layouts"
 flutter test test/app_test.dart --plain-name "branch preview diff names both sides of a merge conflict"
@@ -182,7 +182,7 @@ Expected: PASS.
 - Consumes: the completed implementation
 - Produces: a formatted, analyzed, fully tested branch commit
 
-- [ ] **Step 1: Format and inspect**
+- [x] **Step 1: Format and inspect**
 
 Run:
 
@@ -191,7 +191,7 @@ dart format lib/timeline.dart test/app_test.dart
 git diff --check
 ```
 
-- [ ] **Step 2: Run full verification**
+- [x] **Step 2: Run full verification**
 
 Run:
 
@@ -202,7 +202,7 @@ flutter test
 
 Expected: no analysis issues and all tests pass.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/superpowers/plans/2026-07-31-preview-surface-unification.md lib/timeline.dart test/app_test.dart

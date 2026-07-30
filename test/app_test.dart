@@ -122,6 +122,14 @@ void main() {
       expect(fileRowDecoration.color, TimelineThemePalette.carbon.neutralChip);
       expect(fileRowDecoration.border, isNull);
       expect(fileRowDecoration.borderRadius, BorderRadius.circular(6));
+      expect(
+        tester
+            .widget<Container>(
+              find.byKey(const Key('preview-state-lib/a.dart')),
+            )
+            .decoration,
+        isNull,
+      );
     },
   );
 
@@ -694,7 +702,7 @@ void main() {
             path: 'lib/first.dart',
             status: 'M',
             additions: 1,
-            deletions: 0,
+            deletions: 1,
           ),
           GitFileChange(
             path: 'README.md',
@@ -707,6 +715,12 @@ void main() {
       diff: (_, _, path, _, _) async {
         diffLoads++;
         return [
+          const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+          const DiffLine(
+            kind: DiffLineKind.delete,
+            text: 'old line',
+            oldNumber: 1,
+          ),
           DiffLine(kind: DiffLineKind.add, text: '$path changed', newNumber: 1),
         ];
       },
@@ -719,13 +733,37 @@ void main() {
     // Once in the file list, once as the diff head line.
     expect(find.text('lib/first.dart'), findsNWidgets(2));
     expect(find.text('README.md'), findsOneWidget);
-    expect(find.text('+lib/first.dart changed'), findsOneWidget);
+    expect(find.text('lib/first.dart changed'), findsOneWidget);
+    expect(
+      find.byKey(const Key('branch-preview-diff-toolbar')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('branch-preview-layout-switch')),
+      findsOneWidget,
+    );
+    expect(find.byType(UnifiedPresentationView), findsOneWidget);
+    expect(find.text('+1 -1'), findsOneWidget);
+    expect(
+      tester
+          .widget<Container>(
+            find.byKey(const Key('preview-state-lib/first.dart')),
+          )
+          .decoration,
+      isNull,
+    );
     expect(
       tester.getTopLeft(find.byKey(const Key('preview-files-scroll'))).dy,
       lessThan(
         tester.getTopLeft(find.byKey(const Key('preview-diff-scroll'))).dy,
       ),
     );
+
+    await tester.tap(
+      find.byKey(const Key('branch-preview-layout-side-by-side')),
+    );
+    await tester.pump();
+    expect(find.byType(SideBySidePresentationView), findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
@@ -2861,6 +2899,7 @@ void main() {
     await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
     await tester.pumpAndSettle();
 
+    expect(find.byKey(const Key('comparison-status')), findsOneWidget);
     expect(find.text('normal history'), findsNothing);
     expect(find.text('main only'), findsOneWidget);
     expect(find.text('feature only'), findsOneWidget);
@@ -4842,14 +4881,13 @@ void main() {
     expect(find.text('+8'), findsOneWidget);
     expect(find.text('−1'), findsOneWidget);
 
-    Color? chip(String path) =>
-        (tester
-                    .widget<Container>(find.byKey(Key('preview-state-$path')))
-                    .decoration!
-                as BoxDecoration)
-            .color;
-    expect(chip('lib/a.dart'), TimelineThemePalette.systemGraphite.neutralChip);
-    expect(chip('lib/b.dart'), const Color(0xFF8AD6A1).withValues(alpha: 0.2));
+    BoxDecoration? chip(String path) =>
+        tester
+                .widget<Container>(find.byKey(Key('preview-state-$path')))
+                .decoration
+            as BoxDecoration?;
+    expect(chip('lib/a.dart'), isNull);
+    expect(chip('lib/b.dart'), isNull);
     expect(
       fileStateChipColor('D').background,
       const Color(0xFFF29AB2).withValues(alpha: 0.2),
@@ -4857,7 +4895,7 @@ void main() {
     expect(fileStateChipColor('R100').letter, const Color(0xFFB6A0EA));
   });
 
-  testWidgets('the preview diff starts at the hunk, not the git header', (
+  testWidgets('preview diff uses compact full diff rows without git headers', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -4894,16 +4932,19 @@ void main() {
     expect(find.text('1 files changed'), findsNothing);
 
     final diff = find.byKey(const Key('preview-diff'));
+    expect(find.byType(UnifiedPresentationView), findsOneWidget);
+    expect(find.byKey(const Key('unified-line-0-0')), findsOneWidget);
+    expect(find.byKey(const Key('unified-line-0-1')), findsOneWidget);
     expect(
       find.descendant(of: diff, matching: find.text('@@ -1 +1 @@')),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: diff, matching: find.text('old line')),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: diff, matching: find.text('-old line')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: diff, matching: find.text('+new line')),
+      find.descendant(of: diff, matching: find.text('new line')),
       findsOneWidget,
     );
     for (final header in [
@@ -6639,10 +6680,11 @@ void main() {
       expect(find.byKey(Key('ref-chip-multi-${ref.name}')), findsOneWidget);
     }
     expect(find.byKey(const Key('ref-more-multi')), findsNothing);
-    expect(chip.left, greaterThanOrEqualTo(cell.left));
+    expect(chip.left - cell.left, 14);
     expect(
-      tester.getRect(find.byKey(const Key('ref-chip-multi-main'))).right,
-      lessThanOrEqualTo(cell.right),
+      cell.right -
+          tester.getRect(find.byKey(const Key('ref-chip-multi-main'))).right,
+      14,
     );
 
     // Chips carry no avatars at all any more, and the cell has no hairline.
@@ -10616,6 +10658,7 @@ void main() {
             ),
           ],
           diff: (_, _, path, _, _) async => [
+            const DiffLine(kind: DiffLineKind.hunk, text: '@@ -0,0 +1 @@'),
             DiffLine(kind: DiffLineKind.add, text: '$path body', newNumber: 1),
           ],
         ),
@@ -10635,13 +10678,13 @@ void main() {
       ),
       findsOneWidget,
     );
-    double sizeOf(String label) => tester
-        .widgetList<Text>(
-          find.descendant(of: preview, matching: find.text(label)),
-        )
-        .first
-        .style!
-        .fontSize!;
+    double sizeOf(String label) {
+      final finder = find.descendant(of: preview, matching: find.text(label));
+      final text = tester.widgetList<Text>(finder).first;
+      return text.style?.fontSize ??
+          DefaultTextStyle.of(tester.element(finder.first)).style.fontSize!;
+    }
+
     expect(sizeOf('Commit & Diff'), 12);
     expect(sizeOf('first commit'), 14);
     expect(sizeOf('commit 1'), 12);
@@ -10650,7 +10693,7 @@ void main() {
     expect(sizeOf('Committer'), 12);
     expect(sizeOf('2 files changed'), 12);
     expect(sizeOf('lib/a.dart'), 12);
-    expect(sizeOf('+lib/a.dart body'), 11);
+    expect(sizeOf('lib/a.dart body'), 14);
 
     // A file row still switches the diff despite the selection layer.
     await tester.tap(
@@ -10658,7 +10701,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(
-      find.descendant(of: preview, matching: find.text('+lib/b.dart body')),
+      find.descendant(of: preview, matching: find.text('lib/b.dart body')),
       findsOneWidget,
     );
   });
@@ -11359,6 +11402,7 @@ void main() {
               ),
           ],
           diff: (_, _, _, _, _) async => [
+            const DiffLine(kind: DiffLineKind.hunk, text: '@@ -0,0 +1,80 @@'),
             for (var index = 0; index < 80; index++)
               DiffLine(
                 kind: DiffLineKind.add,
@@ -11389,10 +11433,9 @@ void main() {
         .position;
     final diffPosition = tester
         .state<ScrollableState>(
-          find.descendant(
-            of: diffScrollable,
-            matching: find.byType(Scrollable),
-          ),
+          find
+              .descendant(of: diffScrollable, matching: find.byType(Scrollable))
+              .first,
         )
         .position;
 
@@ -11430,7 +11473,7 @@ void main() {
     expect(diffPosition.pixels, 0);
 
     filesPosition.jumpTo(0);
-    await tester.tap(find.text('+line 5'));
+    await tester.tap(find.text('line 5'));
     await pageDown();
     expect(filesPosition.pixels, 0);
     expect(
@@ -12878,6 +12921,7 @@ void main() {
               ),
           ],
           diff: (_, _, path, _, _) async => [
+            const DiffLine(kind: DiffLineKind.hunk, text: '@@ -0,0 +1,60 @@'),
             for (var index = 0; index < 60; index++)
               DiffLine(
                 kind: DiffLineKind.add,
@@ -12965,10 +13009,12 @@ void main() {
     expect(find.text('Committer · Cam Committer'), findsNothing);
 
     final scrollable = tester.state<ScrollableState>(
-      find.descendant(
-        of: find.byKey(const Key('preview-diff-scroll')),
-        matching: find.byType(Scrollable),
-      ),
+      find
+          .descendant(
+            of: find.byKey(const Key('preview-diff-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
     );
     expect(scrollable.position.pixels, 0);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
@@ -13030,6 +13076,7 @@ void main() {
               ),
           ],
           diff: (_, _, path, _, _) async => [
+            const DiffLine(kind: DiffLineKind.hunk, text: '@@ -0,0 +1 @@'),
             DiffLine(
               kind: DiffLineKind.add,
               text: 'body of $path',
@@ -13059,20 +13106,14 @@ void main() {
     await tester.pumpAndSettle();
     final preview = find.byKey(const Key('preview-panel'));
     expect(
-      find.descendant(
-        of: preview,
-        matching: find.text('+body of lib/one.dart'),
-      ),
+      find.descendant(of: preview, matching: find.text('body of lib/one.dart')),
       findsOneWidget,
     );
 
     // Down walks the files, up walks back, and both ends clamp.
     await metaArrow(LogicalKeyboardKey.arrowDown);
     expect(
-      find.descendant(
-        of: preview,
-        matching: find.text('+body of lib/two.dart'),
-      ),
+      find.descendant(of: preview, matching: find.text('body of lib/two.dart')),
       findsOneWidget,
     );
     expect(find.byKey(const Key('preview-state-lib/two.dart')), findsOneWidget);
@@ -13081,25 +13122,19 @@ void main() {
     expect(
       find.descendant(
         of: preview,
-        matching: find.text('+body of lib/three.dart'),
+        matching: find.text('body of lib/three.dart'),
       ),
       findsOneWidget,
     );
     await metaArrow(LogicalKeyboardKey.arrowUp);
     expect(
-      find.descendant(
-        of: preview,
-        matching: find.text('+body of lib/two.dart'),
-      ),
+      find.descendant(of: preview, matching: find.text('body of lib/two.dart')),
       findsOneWidget,
     );
     await metaArrow(LogicalKeyboardKey.arrowUp);
     await metaArrow(LogicalKeyboardKey.arrowUp);
     expect(
-      find.descendant(
-        of: preview,
-        matching: find.text('+body of lib/one.dart'),
-      ),
+      find.descendant(of: preview, matching: find.text('body of lib/one.dart')),
       findsOneWidget,
     );
     // The commit selection never moved while walking files.
@@ -13134,6 +13169,7 @@ void main() {
               ),
           ],
           diff: (_, _, path, _, _) async => [
+            const DiffLine(kind: DiffLineKind.hunk, text: '@@ -0,0 +1 @@'),
             DiffLine(
               kind: DiffLineKind.add,
               text: 'body of $path',
@@ -13195,7 +13231,7 @@ void main() {
     await tester.tap(find.byKey(const Key('preview-state-lib/file1.dart')));
     await tester.pumpAndSettle();
     expect(filesPosition.pixels, moreOrLessEquals(pointerOffset));
-    expect(find.text('+body of lib/file1.dart'), findsOneWidget);
+    expect(find.text('body of lib/file1.dart'), findsOneWidget);
   });
 
   // ------------------------------------------------------------------ J2

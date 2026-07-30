@@ -741,8 +741,8 @@ class _TimelineScreenState extends State<TimelineScreen>
   Object? _comparisonError;
   var _comparisonSerial = 0;
   late BranchPreviewMode _branchPreviewMode = widget.branchPreviewMode;
-  var _branchPreviewLayout = DiffLayout.unified;
-  final _branchPreviewHighlighter = HighlightJsSyntaxHighlighter();
+  var _previewDiffLayout = DiffLayout.unified;
+  final _previewDiffHighlighter = HighlightJsSyntaxHighlighter();
 
   List<GitCommit> get _commits => _comparison == null
       ? _normalCommits
@@ -1528,7 +1528,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               ],
             ),
           ),
-          if (_compareRef == null) _statusBar(),
+          _statusBar(),
         ],
       ),
     ),
@@ -5198,7 +5198,7 @@ class _TimelineScreenState extends State<TimelineScreen>
             builder: (context, constraints) {
               // Chips split the cell evenly, each keeping at least 40px, and
               // whatever no longer fits simply does not show.
-              final inset = _comparison == null ? 0.0 : 14.0;
+              const inset = 14.0;
               final width = constraints.maxWidth - inset * 2;
               final slots = math.max(1, (width / _minChipWidth).floor());
               final shown = refs.take(slots).toList();
@@ -5209,7 +5209,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                     Positioned(
                       left: inset + index * slot,
                       top: 6,
-                      width: slot - (_comparison == null ? 2 : 0),
+                      width: slot,
                       height: 24,
                       child: _refChip(commit, shown[index], color),
                     ),
@@ -6140,9 +6140,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           ),
         );
         final diff = Padding(
-          padding: _comparison == null
-              ? const EdgeInsets.fromLTRB(14, 12, 14, 12)
-              : EdgeInsets.zero,
+          padding: EdgeInsets.zero,
           child: Container(
             key: const Key('preview-diff'),
             child: selectedPath == null
@@ -6180,18 +6178,18 @@ class _TimelineScreenState extends State<TimelineScreen>
     child: info,
   );
 
-  Widget _previewScrollableDiff(Widget diff) => _comparison == null
-      ? _previewScrollable(
-          key: const Key('preview-diff-scroll'),
-          controller: _previewDiffScrollController,
-          child: diff,
-        )
-      : KeyedSubtree(key: const Key('preview-diff-scroll'), child: diff);
+  Widget _previewScrollableDiff(Widget diff) => _previewScrollable(
+    key: const Key('preview-diff-scroll'),
+    controller: _previewDiffScrollController,
+    childScrolls: true,
+    child: diff,
+  );
 
   Widget _previewScrollable({
     required Key key,
     required ScrollController controller,
     required Widget child,
+    bool childScrolls = false,
   }) => Listener(
     behavior: HitTestBehavior.translucent,
     onPointerDown: (_) => _activePreviewScrollController = controller,
@@ -6203,11 +6201,13 @@ class _TimelineScreenState extends State<TimelineScreen>
         }
         return false;
       },
-      child: SingleChildScrollView(
-        key: key,
-        controller: controller,
-        child: child,
-      ),
+      child: childScrolls
+          ? KeyedSubtree(key: key, child: child)
+          : SingleChildScrollView(
+              key: key,
+              controller: controller,
+              child: child,
+            ),
     ),
   );
 
@@ -6864,8 +6864,6 @@ class _TimelineScreenState extends State<TimelineScreen>
   );
 
   Widget _previewFileRow(GitCommit commit, GitFileChange file, bool selected) {
-    final branchPreview = _comparison != null;
-    final state = fileStateChipColor(file.status, palette: _palette);
     final stats = [
       if ((file.additions ?? 0) > 0) '+${file.additions}',
       if ((file.deletions ?? 0) > 0) '-${file.deletions}',
@@ -6878,7 +6876,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     };
     return SizedBox(
       key: selected ? _selectedPreviewFileKey : null,
-      height: branchPreview ? 34 : 28,
+      height: 34,
       child: InkWell(
         onTap: () => _selectPreviewFile(commit, file.path),
         borderRadius: BorderRadius.circular(6),
@@ -6886,47 +6884,29 @@ class _TimelineScreenState extends State<TimelineScreen>
           decoration: BoxDecoration(
             color: selected ? _palette.neutralChip : null,
             borderRadius: selected ? BorderRadius.circular(6) : null,
-            border: branchPreview || selected
-                ? null
-                : Border(top: BorderSide(color: _palette.border)),
           ),
           child: Row(
             children: [
               Container(
                 key: Key('preview-state-${file.path}'),
-                width: branchPreview ? 28 : 20,
+                width: 28,
                 height: 20,
                 alignment: Alignment.center,
-                decoration: branchPreview
-                    ? null
-                    : BoxDecoration(
-                        color: state.background,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
                 child: Text(
                   file.status,
                   maxLines: 1,
-                  style: TextStyle(
-                    color: branchPreview ? stateColor : state.letter,
-                    fontSize: branchPreview ? 12 : 10,
-                  ),
+                  style: TextStyle(color: stateColor, fontSize: 12),
                 ),
               ),
-              if (!branchPreview) const SizedBox(width: 7),
               Expanded(
                 child: Text(
                   file.path,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: branchPreview || selected
-                        ? _palette.text
-                        : _palette.muted,
-                    fontSize: 12,
-                  ),
+                  style: TextStyle(color: _palette.text, fontSize: 12),
                 ),
               ),
-              if (branchPreview && stats.isNotEmpty) ...[
+              if (stats.isNotEmpty) ...[
                 const SizedBox(width: 8),
                 Text(
                   stats,
@@ -6964,230 +6944,238 @@ class _TimelineScreenState extends State<TimelineScreen>
         file,
       );
     });
-    if (_comparison != null) {
-      final comparison = _comparison!;
-      final baseCommits = comparison.commits
-          .where((entry) => entry.side == BranchCommitSide.baseOnly)
-          .map((entry) => entry.commit)
-          .toList();
-      final compareCommits = comparison.commits
-          .where((entry) => entry.side == BranchCommitSide.compareOnly)
-          .map((entry) => entry.commit)
-          .toList();
-      final base = baseCommits.isEmpty ? null : baseCommits.first;
-      final compare =
-          _rebasePreview?.currentCommit ??
-          (compareCommits.isEmpty ? null : compareCommits.first);
-      final mergeMode = _branchPreviewMode == BranchPreviewMode.merge;
-      final status = _branchPreviewHasConflict
+    final comparison = _comparison;
+    if (comparison == null) {
+      final parent = commit.parents.isEmpty ? null : commit.parents.first;
+      final parentLabel = parent == null
+          ? '—'
+          : parent.substring(0, math.min(7, parent.length));
+      return _previewDiffView(
+        future: future,
+        file: file,
+        status: commit.isWorkingTree
+            ? 'WIP · diff'
+            : 'commit ${commit.shortSha}',
+        baseRef: parentLabel,
+        baseSubject: parent == null ? '빈 트리' : '이전 상태',
+        compareRef: commit.isWorkingTree ? 'WIP' : commit.shortSha,
+        compareSubject: commit.isWorkingTree ? '작업 트리' : commit.subject,
+        baseRole: '이전 상태',
+        compareRole: '선택한 커밋',
+      );
+    }
+
+    final baseCommits = comparison.commits
+        .where((entry) => entry.side == BranchCommitSide.baseOnly)
+        .map((entry) => entry.commit)
+        .toList();
+    final compareCommits = comparison.commits
+        .where((entry) => entry.side == BranchCommitSide.compareOnly)
+        .map((entry) => entry.commit)
+        .toList();
+    final base = baseCommits.isEmpty ? null : baseCommits.first;
+    final compare =
+        _rebasePreview?.currentCommit ??
+        (compareCommits.isEmpty ? null : compareCommits.first);
+    final mergeMode = _branchPreviewMode == BranchPreviewMode.merge;
+    final conflict = _branchPreviewHasConflict;
+    return _previewDiffView(
+      future: future,
+      file: file,
+      status: conflict
           ? mergeMode
                 ? '병합 충돌 1개 · ${comparison.compareRef} → ${comparison.baseRef}'
                 : '현재 충돌 · ${compare?.subject ?? comparison.compareRef}'
           : '${mergeMode ? 'Merge' : 'Rebase'} 결과 · '
-                '${comparison.compareRef} → ${comparison.baseRef}';
-      final compareTitle = _branchPreviewHasConflict
+                '${comparison.compareRef} → ${comparison.baseRef}',
+      baseRef: comparison.baseRef,
+      baseSubject: base?.subject ?? '현재 상태',
+      compareRef: comparison.compareRef,
+      compareSubject: conflict
           ? compare?.subject ?? '적용할 변경'
-          : '${mergeMode ? 'Merge' : 'Rebase'} 미리보기 결과';
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            key: const Key('branch-preview-diff-toolbar'),
-            height: 34,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            decoration: BoxDecoration(
-              color: _palette.surface,
-              border: Border(bottom: BorderSide(color: _palette.border)),
-            ),
-            child: Row(
-              children: [
-                Flexible(
-                  child: Text(
-                    path,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: _palette.text,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    status,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      color: _branchPreviewHasConflict
-                          ? _previewConflict
-                          : _deleted,
-                      fontSize: 10,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Container(
-                  key: const Key('branch-preview-layout-switch'),
-                  padding: const EdgeInsets.all(2),
-                  decoration: BoxDecoration(
-                    color: _palette.background,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _branchPreviewLayoutButton(
-                        key: const Key('branch-preview-layout-unified'),
-                        label: 'Unified',
-                        layout: DiffLayout.unified,
-                      ),
-                      _branchPreviewLayoutButton(
-                        key: const Key('branch-preview-layout-side-by-side'),
-                        label: 'Side-by-side',
-                        layout: DiffLayout.sideBySide,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: FutureBuilder<List<DiffLine>>(
-              future: future,
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return const Center(
-                    child: Text(
-                      'Could not load diff',
-                      style: TextStyle(color: Color(0xFFF29AB2), fontSize: 12),
-                    ),
-                  );
-                }
-                if (snapshot.data case final lines?) {
-                  final document = DiffDocument.fromLines(lines);
-                  final anchors = {
-                    for (final hunk in document.hunks)
-                      hunk.anchor.id: GlobalKey(),
-                  };
-                  final activeAnchor =
-                      _branchPreviewHasConflict && document.hunks.isNotEmpty
-                      ? document.hunks.first.anchor
-                      : null;
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _branchPreviewDiffTitles(
-                        baseRef: comparison.baseRef,
-                        baseSubject: base?.subject ?? '현재 상태',
-                        compareRef: comparison.compareRef,
-                        compareSubject: compareTitle,
-                        sideBySide:
-                            _branchPreviewLayout == DiffLayout.sideBySide,
-                      ),
-                      Expanded(
-                        child: _branchPreviewLayout == DiffLayout.unified
-                            ? UnifiedPresentationView(
-                                document: document,
-                                activeAnchor: activeAnchor,
-                                path: path,
-                                wrapLines: false,
-                                highlighter: _branchPreviewHighlighter,
-                                anchorKeys: anchors,
-                                showHunkHeaders: false,
-                                compactRows: true,
-                                currentMarkerColor: _previewConflict,
-                              )
-                            : SideBySidePresentationView(
-                                document: document,
-                                activeAnchor: activeAnchor,
-                                oldPath: file.oldPath ?? path,
-                                newPath: path,
-                                wrapLines: false,
-                                showOldSide: true,
-                                highlighter: _branchPreviewHighlighter,
-                                anchorKeys: anchors,
-                                showHunkHeaders: false,
-                                compactRows: true,
-                                currentMarkerColor: _previewConflict,
-                              ),
-                      ),
-                    ],
-                  );
-                }
-                return const Center(
-                  child: SizedBox.square(
-                    dimension: 14,
-                    child: CircularProgressIndicator(strokeWidth: 1.5),
-                  ),
-                );
-              },
-            ),
-          ),
-          if (_branchPreviewHasConflict) _branchPreviewConflictChoices(),
-        ],
-      );
-    }
+          : '${mergeMode ? 'Merge' : 'Rebase'} 미리보기 결과',
+      baseRole: '기준 브랜치',
+      compareRole: conflict && _branchPreviewMode == BranchPreviewMode.rebase
+          ? '적용 중'
+          : conflict
+          ? '비교 브랜치'
+          : '가상 결과',
+      conflict: conflict,
+      showConflictChoices: conflict,
+    );
+  }
+
+  Widget _previewDiffView({
+    required Future<List<DiffLine>> future,
+    required GitFileChange file,
+    required String status,
+    required String baseRef,
+    required String baseSubject,
+    required String compareRef,
+    required String compareSubject,
+    required String baseRole,
+    required String compareRole,
+    bool conflict = false,
+    bool showConflictChoices = false,
+  }) {
+    final path = file.path;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 5),
-          child: Text(
-            path,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: _palette.text,
-              fontSize: 12,
-              fontFamily: 'monospace',
-            ),
+        Container(
+          key: const Key('branch-preview-diff-toolbar'),
+          height: 34,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: _palette.surface,
+            border: Border(bottom: BorderSide(color: _palette.border)),
+          ),
+          child: Row(
+            children: [
+              Flexible(
+                child: Text(
+                  path,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: _palette.text,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  status,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    color: conflict ? _previewConflict : _deleted,
+                    fontSize: 10,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Container(
+                key: const Key('branch-preview-layout-switch'),
+                padding: const EdgeInsets.all(2),
+                decoration: BoxDecoration(
+                  color: _palette.background,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _previewDiffLayoutButton(
+                      key: const Key('branch-preview-layout-unified'),
+                      label: 'Unified',
+                      layout: DiffLayout.unified,
+                    ),
+                    _previewDiffLayoutButton(
+                      key: const Key('branch-preview-layout-side-by-side'),
+                      label: 'Side-by-side',
+                      layout: DiffLayout.sideBySide,
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
-        FutureBuilder<List<DiffLine>>(
-          future: future,
-          builder: (context, snapshot) {
-            // The file name is already the head line, so the raw `diff --git`
-            // and `index` preamble is noise here. The full DiffScreen keeps it.
-            final lines = snapshot.data
-                ?.where((line) => line.kind != DiffLineKind.header)
-                .toList(growable: false);
-            if (snapshot.hasError) {
-              return const Center(
-                child: Text(
-                  'Could not load diff',
-                  style: TextStyle(color: Color(0xFFF29AB2), fontSize: 12),
-                ),
-              );
-            }
-            if (lines == null) {
+        Expanded(
+          flex: showConflictChoices ? 2 : 1,
+          child: FutureBuilder<List<DiffLine>>(
+            future: future,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return const Center(
+                  child: Text(
+                    'Could not load diff',
+                    style: TextStyle(color: Color(0xFFF29AB2), fontSize: 12),
+                  ),
+                );
+              }
+              if (snapshot.data case final lines?) {
+                final document = DiffDocument.fromLines(lines);
+                final anchors = {
+                  for (final hunk in document.hunks)
+                    hunk.anchor.id: GlobalKey(),
+                };
+                final activeAnchor = conflict && document.hunks.isNotEmpty
+                    ? document.hunks.first.anchor
+                    : null;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _previewDiffTitles(
+                      baseRef: baseRef,
+                      baseSubject: baseSubject,
+                      compareRef: compareRef,
+                      compareSubject: compareSubject,
+                      baseRole: baseRole,
+                      compareRole: compareRole,
+                      sideBySide: _previewDiffLayout == DiffLayout.sideBySide,
+                    ),
+                    Expanded(
+                      child: _previewDiffLayout == DiffLayout.unified
+                          ? UnifiedPresentationView(
+                              document: document,
+                              activeAnchor: activeAnchor,
+                              path: path,
+                              wrapLines: false,
+                              highlighter: _previewDiffHighlighter,
+                              anchorKeys: anchors,
+                              controller: _previewDiffScrollController,
+                              showHunkHeaders: false,
+                              compactRows: true,
+                              currentMarkerColor: _previewConflict,
+                            )
+                          : SideBySidePresentationView(
+                              document: document,
+                              activeAnchor: activeAnchor,
+                              oldPath: file.oldPath ?? path,
+                              newPath: path,
+                              wrapLines: false,
+                              showOldSide: true,
+                              highlighter: _previewDiffHighlighter,
+                              anchorKeys: anchors,
+                              controller: _previewDiffScrollController,
+                              showHunkHeaders: false,
+                              compactRows: true,
+                              currentMarkerColor: _previewConflict,
+                            ),
+                    ),
+                  ],
+                );
+              }
               return const Center(
                 child: SizedBox.square(
                   dimension: 14,
                   child: CircularProgressIndicator(strokeWidth: 1.5),
                 ),
               );
-            }
-            // The panel shows one file, so its lines flow with the rest of the
-            // body instead of scrolling on their own.
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [for (final line in lines) _previewDiffLine(line)],
-            );
-          },
+            },
+          ),
         ),
+        if (showConflictChoices)
+          Expanded(
+            child: SingleChildScrollView(
+              child: _branchPreviewConflictChoices(),
+            ),
+          ),
       ],
     );
   }
 
-  Widget _branchPreviewDiffTitles({
+  Widget _previewDiffTitles({
     required String baseRef,
     required String baseSubject,
     required String compareRef,
     required String compareSubject,
+    required String baseRole,
+    required String compareRole,
     required bool sideBySide,
   }) {
     Widget title(String branch, String subject, String role) => Expanded(
@@ -7236,17 +7224,8 @@ class _TimelineScreenState extends State<TimelineScreen>
         ),
         child: Row(
           children: [
-            title(baseRef, baseSubject, '기준 브랜치'),
-            title(
-              compareRef,
-              compareSubject,
-              _branchPreviewHasConflict &&
-                      _branchPreviewMode == BranchPreviewMode.rebase
-                  ? '적용 중'
-                  : _branchPreviewHasConflict
-                  ? '비교 브랜치'
-                  : '가상 결과',
-            ),
+            title(baseRef, baseSubject, baseRole),
+            title(compareRef, compareSubject, compareRole),
           ],
         ),
       );
@@ -7269,18 +7248,18 @@ class _TimelineScreenState extends State<TimelineScreen>
     );
   }
 
-  Widget _branchPreviewLayoutButton({
+  Widget _previewDiffLayoutButton({
     required Key key,
     required String label,
     required DiffLayout layout,
   }) => InkWell(
     key: key,
-    onTap: () => setState(() => _branchPreviewLayout = layout),
+    onTap: () => setState(() => _previewDiffLayout = layout),
     borderRadius: BorderRadius.circular(6),
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
       decoration: BoxDecoration(
-        color: _branchPreviewLayout == layout
+        color: _previewDiffLayout == layout
             ? _palette.neutralChip
             : Colors.transparent,
         borderRadius: BorderRadius.circular(4),
@@ -7295,36 +7274,6 @@ class _TimelineScreenState extends State<TimelineScreen>
       ),
     ),
   );
-
-  Widget _previewDiffLine(DiffLine line) {
-    final prefix = switch (line.kind) {
-      DiffLineKind.add => '+',
-      DiffLineKind.delete => '-',
-      // The hunk header reads as its own line, like the mockup.
-      DiffLineKind.hunk => '',
-      _ => ' ',
-    };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-      color: switch (line.kind) {
-        DiffLineKind.add => _main.withValues(alpha: 0.15),
-        DiffLineKind.delete => _hash.withValues(alpha: 0.15),
-        _ => null,
-      },
-      child: Text(
-        '$prefix${line.text}',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: line.kind == DiffLineKind.hunk
-              ? _palette.muted
-              : _palette.text,
-          fontSize: 11,
-          fontFamily: 'monospace',
-        ),
-      ),
-    );
-  }
 
   bool _acceptsFullDiffRouteEvents(_FullDiffRouteSession session) =>
       mounted &&
