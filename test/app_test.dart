@@ -2632,6 +2632,12 @@ void main() {
     await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
     await tester.pumpAndSettle();
 
+    expect(find.byKey(const Key('branch-preview-segmented')), findsOneWidget);
+    final segmented = tester.widget<SegmentedButton<BranchPreviewMode>>(
+      find.byKey(const Key('branch-preview-segmented')),
+    );
+    expect(segmented.selected, {BranchPreviewMode.merge});
+    expect(segmented.showSelectedIcon, isFalse);
     expect(find.byKey(const Key('branch-preview-merge')), findsOneWidget);
     expect(find.byKey(const Key('branch-preview-rebase')), findsOneWidget);
     expect(find.text('Merge 미리보기'), findsWidgets);
@@ -2649,8 +2655,82 @@ void main() {
     await tester.tap(find.byKey(const Key('branch-preview-rebase')));
     await tester.pumpAndSettle();
     expect(changedMode, BranchPreviewMode.rebase);
+    expect(
+      tester
+          .widget<SegmentedButton<BranchPreviewMode>>(
+            find.byKey(const Key('branch-preview-segmented')),
+          )
+          .selected,
+      {BranchPreviewMode.rebase},
+    );
     expect(find.text('Rebase 미리보기'), findsWidgets);
     expect(find.text('Rebase 성공'), findsOneWidget);
+  });
+
+  testWidgets('branch preview summary uses success and signed diff colors', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            current: 'main',
+            tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async => branchComparison(),
+          simulateRebaseCallback: ({required baseRef, required compareRef}) =>
+              Future.value(
+                const RebaseCheckResult(status: RebaseCheckStatus.clean),
+              ),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+
+    void expectSuccess(String label) {
+      expect(
+        tester.widget<Text>(find.text(label)).style?.color,
+        const Color(0xFF34C759),
+      );
+      expect(
+        tester
+            .widget<Icon>(find.byKey(const Key('branch-preview-success-icon')))
+            .color,
+        const Color(0xFF34C759),
+      );
+    }
+
+    void expectCount(String key, String text, Color color) {
+      final finder = find.byKey(Key(key));
+      expect(finder, findsOneWidget, reason: key);
+      final widget = tester.widget<Text>(finder);
+      final span = widget.textSpan! as TextSpan;
+      expect(span.toPlainText(), text);
+      expect((span.children!.single as TextSpan).style?.color, color);
+    }
+
+    expectSuccess('Merge 성공');
+    expectCount(
+      'branch-preview-base-count',
+      'main −1',
+      const Color(0xFFEF6C63),
+    );
+    expectCount(
+      'branch-preview-compare-count',
+      'feature +1',
+      const Color(0xFF8AD6A1),
+    );
+
+    await tester.tap(find.byKey(const Key('branch-preview-rebase')));
+    await tester.pumpAndSettle();
+    expectSuccess('Rebase 성공');
   });
 
   testWidgets('comparison preview stays on the branch tip diff', (
