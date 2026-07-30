@@ -42,6 +42,7 @@ const _tooltipDelay = Duration(milliseconds: 400);
 const _main = Color(0xFF8AD6A1);
 const _success = Color(0xFF34C759);
 const _behind = Color(0xFFF0A35E);
+const _remoteBehind = Color(0xFFFF453A);
 const _previewPurple = Color(0xFFC69AFF);
 const _previewPurplePanel = Color(0xFF29243A);
 
@@ -627,7 +628,7 @@ class TimelineScreen extends StatefulWidget {
 class _TimelineScreenState extends State<TimelineScreen>
     with WidgetsBindingObserver {
   static const _collapsedTagLimit = 10;
-  static const _fetchInterval = Duration(minutes: 5);
+  static const _fetchInterval = Duration(minutes: 3);
 
   static const _pageSize = 500;
 
@@ -800,19 +801,27 @@ class _TimelineScreenState extends State<TimelineScreen>
     // Refs load beside the first page, and neither blocks the first paint. The
     // detail pane stays hidden until Enter or Space asks for it.
     _loadNextPage();
-    unawaited(_loadRefs());
     unawaited(_restoreCherryPickThenRefresh());
     _fetchTimer = Timer.periodic(
       _fetchInterval,
-      (_) => unawaited(_refreshOrigin()),
+      (_) => unawaited(_refreshSelectedRemote()),
     );
   }
 
-  Future<void> _refreshOrigin() async {
-    if (_fetchingOrigin || _cherryPickState != null) return;
+  Future<void> _refreshSelectedRemote() async {
+    final branch = _baseBranch;
+    final remote = branch == null ? null : _refs.upstreamRemotes[branch];
+    final lifecycleState = WidgetsBinding.instance.lifecycleState;
+    if ((lifecycleState != null &&
+            lifecycleState != AppLifecycleState.resumed) ||
+        remote == null ||
+        _fetchingOrigin ||
+        _cherryPickState != null) {
+      return;
+    }
     setState(() => _fetchingOrigin = true);
     try {
-      final result = await widget.repository.fetchOrigin();
+      final result = await widget.repository.fetchRemote(remote);
       if (!mounted) return;
       if (result == FetchOriginResult.updated) await _loadRefs();
       if (mounted) setState(() => _fetchError = null);
@@ -824,8 +833,8 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   Future<void> _restoreCherryPickThenRefresh() async {
-    await _reloadCherryPickState();
-    if (_cherryPickState == null) await _refreshOrigin();
+    await Future.wait([_loadRefs(), _reloadCherryPickState()]);
+    if (_cherryPickState == null) await _refreshSelectedRemote();
   }
 
   Future<void> _reloadCherryPickState() async {
@@ -862,10 +871,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     try {
       final refs = await widget.repository.loadRefs();
       if (!mounted) return;
-      final branch = resolveBaseBranch(
-        refs,
-        widget.preferredBranchReady ? widget.preferredBranch : null,
-      );
+      final branch = resolveBaseBranch(refs, _refsLoaded ? _baseBranch : null);
       if (!widget.preferredBranchReady) {
         _pendingBaseBranch = branch;
         _pendingBaseBranchIsUserSelection = false;
@@ -976,6 +982,8 @@ class _TimelineScreenState extends State<TimelineScreen>
           _refs.local.contains(_pendingBaseBranch);
       final branch = pendingUserSelection
           ? _pendingBaseBranch
+          : preferredBranchBecameReady
+          ? _baseBranch ?? resolveBaseBranch(_refs, null)
           : resolveBaseBranch(_refs, widget.preferredBranch);
       if (preferredBranchBecameReady) {
         _pendingBaseBranch = null;
@@ -987,6 +995,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           _rebuildGraph();
         });
         _scheduleRatchetUpdate();
+        unawaited(_refreshSelectedRemote());
       }
       if (branch != null &&
           (pendingUserSelection || branch != widget.preferredBranch)) {
@@ -1838,6 +1847,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       _pendingBaseBranch = branch;
       _pendingBaseBranchIsUserSelection = true;
     }
+    unawaited(_refreshSelectedRemote());
     _focusNode.requestFocus();
   }
 
@@ -2834,9 +2844,10 @@ class _TimelineScreenState extends State<TimelineScreen>
     final iconColor = name != null && section != _RefSection.tags
         ? _refTipColor(name)
         : _palette.muted;
-    final divergence = section == _RefSection.local && name != null
-        ? _refs.aheadBehind[name]
-        : null;
+    final selectedLocal =
+        section == _RefSection.local && name != null && name == _baseBranch;
+    final behind = selectedLocal ? _refs.aheadBehind[name]?.behind ?? 0 : 0;
+    final inFolderTree = name == null || depth > 0;
 
     void toggleFolder() => setState(() {
       if (!_collapsedRefFolders.remove(folderKey)) {
@@ -2844,15 +2855,14 @@ class _TimelineScreenState extends State<TimelineScreen>
       }
     });
 
-    final row = Container(
+    final row = SizedBox(
       key: name == null ? null : Key('sidebar-row-$name'),
       height: birth == null ? 28 : 40,
-      decoration: BoxDecoration(
-        color: current ? _palette.selectedRow : null,
-        borderRadius: BorderRadius.circular(5),
-      ),
       child: Padding(
-        padding: EdgeInsets.only(left: 4 + depth * 16.0, right: 4),
+        padding: EdgeInsets.only(
+          left: 4 + (inFolderTree ? 18 : 0) + depth * 16.0,
+          right: 4,
+        ),
         child: Row(
           children: [
             if (hasChildren)
@@ -2891,14 +2901,65 @@ class _TimelineScreenState extends State<TimelineScreen>
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        node.segment,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: current ? _palette.text : _palette.muted,
-                          fontSize: 13,
-                        ),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              node.segment,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: current ? _palette.text : _palette.muted,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                          if (current) const SizedBox(width: 2),
+                          if (current)
+                            Tooltip(
+                              message: '현재 체크아웃된 브랜치입니다',
+                              child: Container(
+                                key: Key('sidebar-head-$name'),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 2,
+                                  vertical: 1,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: iconColor.withValues(alpha: 0.12),
+                                  border: Border.all(
+                                    color: iconColor.withValues(alpha: 0.8),
+                                  ),
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                child: Text(
+                                  'HEAD',
+                                  style: TextStyle(
+                                    color: iconColor,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.3,
+                                    fontFamily: technicalFontFamily,
+                                    fontFamilyFallback: technicalFontFallback,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (behind > 0) const SizedBox(width: 4),
+                          if (behind > 0)
+                            Tooltip(
+                              message: '원격보다 $behind개 커밋 뒤처져 있습니다',
+                              child: SizedBox(
+                                key: Key('sidebar-behind-$name'),
+                                child: Text(
+                                  '$behind',
+                                  style: const TextStyle(
+                                    color: _remoteBehind,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                       // When the branch was cut, in the Date column's own words.
                       if (birth != null)
@@ -2916,24 +2977,6 @@ class _TimelineScreenState extends State<TimelineScreen>
                 ),
               ),
             ),
-            if ((divergence?.ahead ?? 0) > 0)
-              SizedBox(
-                key: Key('sidebar-ahead-$name'),
-                child: Text(
-                  '↑${divergence!.ahead}',
-                  style: const TextStyle(color: _main, fontSize: 11),
-                ),
-              ),
-            if ((divergence?.ahead ?? 0) > 0 && (divergence?.behind ?? 0) > 0)
-              const SizedBox(width: 5),
-            if ((divergence?.behind ?? 0) > 0)
-              SizedBox(
-                key: Key('sidebar-behind-$name'),
-                child: Text(
-                  '↓${divergence!.behind}',
-                  style: const TextStyle(color: _behind, fontSize: 11),
-                ),
-              ),
           ],
         ),
       ),
@@ -2981,7 +3024,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               : Row(
                   children: [
                     Text(
-                      'origin 갱신 실패',
+                      '원격 갱신 실패',
                       style: TextStyle(color: _behind, fontSize: 10),
                     ),
                     const SizedBox(width: 4),
@@ -2989,7 +3032,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                       key: const Key('retry-origin-fetch'),
                       onPressed: _fetchingOrigin
                           ? null
-                          : () => unawaited(_refreshOrigin()),
+                          : () => unawaited(_refreshSelectedRemote()),
                       style: TextButton.styleFrom(
                         minimumSize: const Size(0, 24),
                         padding: const EdgeInsets.symmetric(horizontal: 6),

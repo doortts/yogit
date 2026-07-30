@@ -125,6 +125,54 @@ void main() {
     },
   );
 
+  testWidgets(
+    'checked-out branch uses a HEAD badge without a selected row fill',
+    (tester) async {
+      for (final theme in TimelineThemeKind.values) {
+        final store = MemorySettingsStore()
+          ..current = AppSettings(timelineTheme: theme);
+        await tester.pumpWidget(
+          YogitApp(
+            key: ValueKey(theme),
+            repository: FakeGitRepository(
+              (_, _) async => [commit('3', 'checked out commit')],
+              refs: const RepoRefs(
+                local: ['main', 'release'],
+                current: 'main',
+                tips: {'main': '3', 'release': '2'},
+                localTips: {'main': '3', 'release': '2'},
+              ),
+            ),
+            settingsStore: store,
+            discoverAvatars: false,
+            windowFrameController: controller,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final row = tester.widget<SizedBox>(
+          find.byKey(const Key('sidebar-row-main')),
+        );
+        expect(row.height, isNotNull);
+        final badge = find.byKey(const Key('sidebar-head-main'));
+        expect(badge, findsOneWidget);
+        expect(
+          find.descendant(of: badge, matching: find.text('HEAD')),
+          findsOneWidget,
+        );
+        expect(
+          tester
+              .widget<Tooltip>(
+                find.ancestor(of: badge, matching: find.byType(Tooltip)),
+              )
+              .message,
+          '현재 체크아웃된 브랜치입니다',
+        );
+        expect(find.byKey(const Key('sidebar-head-release')), findsNothing);
+      }
+    },
+  );
+
   final hierarchyRoleCases =
       <
         ({
@@ -133,16 +181,6 @@ void main() {
           Color Function(TimelineThemePalette palette) expected,
         })
       >[
-        (
-          label: 'checked-out branch',
-          actual: (tester) {
-            final row = tester.widget<Container>(
-              find.byKey(const Key('sidebar-row-main')),
-            );
-            return (row.decoration! as BoxDecoration).color!;
-          },
-          expected: (palette) => palette.selectedRow,
-        ),
         (
           label: 'placement control',
           actual: (tester) {
@@ -2326,6 +2364,30 @@ void main() {
         find.byKey(const Key('sidebar-folder-remote-origin')),
         findsOneWidget,
       );
+      final sectionIcon = tester.getRect(
+        find.byKey(const Key('sidebar-section-icon-local')),
+      );
+      final folderChevron = tester.getRect(
+        find.byKey(const Key('sidebar-folder-local-feature')),
+      );
+      expect(folderChevron.left, sectionIcon.left);
+
+      final topLevelBranchName = tester.getRect(
+        find.descendant(
+          of: find.byKey(const Key('sidebar-ref-main')),
+          matching: find.text('main'),
+        ),
+      );
+      final folderName = tester.getRect(find.text('feature'));
+      final childBranchName = tester.getRect(
+        find.descendant(
+          of: find.byKey(const Key('sidebar-ref-feature/login')),
+          matching: find.text('login'),
+        ),
+      );
+      expect(folderName.left - topLevelBranchName.left, 18);
+      expect(childBranchName.left - folderName.left, 16);
+
       expect(
         find.byKey(const Key('sidebar-ref-feature/payments/api')),
         findsOneWidget,
@@ -2341,13 +2403,11 @@ void main() {
         ),
       );
 
-      final current = tester.widget<Container>(
+      final current = tester.widget<SizedBox>(
         find.byKey(const Key('sidebar-row-main')),
       );
-      expect(
-        (current.decoration! as BoxDecoration).color,
-        TimelineThemePalette.systemGraphite.selectedRow,
-      );
+      expect(current.height, isNotNull);
+      expect(find.byKey(const Key('sidebar-head-main')), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('ref-filter')));
       expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
@@ -2453,51 +2513,124 @@ void main() {
     }
   });
 
-  testWidgets('local branch rows show only nonzero origin divergence', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      app(
-        FakeGitRepository(
-          (_, _) async => [commit('1', 'first commit')],
-          refs: const RepoRefs(
-            local: ['main', 'release', 'local-only'],
-            remote: ['origin/main', 'origin/release'],
-            current: 'main',
-            aheadBehind: {
-              'main': BranchAheadBehind(ahead: 2, behind: 1),
-              'release': BranchAheadBehind(ahead: 0, behind: 0),
-            },
+  testWidgets(
+    'selected local branch shows only its nonzero upstream behind count',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TimelineScreen(
+            repository: FakeGitRepository(
+              (_, _) async => [commit('1', 'first commit')],
+              refs: const RepoRefs(
+                local: ['main', 'release', 'local-only'],
+                current: 'main',
+                upstreams: {
+                  'main': 'origin/main',
+                  'release': 'company/release',
+                },
+                upstreamRemotes: {'main': 'origin', 'release': 'company'},
+                aheadBehind: {
+                  'main': BranchAheadBehind(ahead: 2, behind: 4),
+                  'release': BranchAheadBehind(ahead: 0, behind: 3),
+                },
+              ),
+            ),
+            preferredBranch: 'release',
           ),
         ),
-        controller,
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    final ahead = find.byKey(const Key('sidebar-ahead-main'));
-    final behind = find.byKey(const Key('sidebar-behind-main'));
-    expect(ahead, findsOneWidget);
-    expect(find.descendant(of: ahead, matching: find.text('↑2')), findsOne);
-    expect(behind, findsOneWidget);
-    expect(find.descendant(of: behind, matching: find.text('↓1')), findsOne);
-    expect(find.byKey(const Key('sidebar-ahead-release')), findsNothing);
-    expect(find.byKey(const Key('sidebar-behind-release')), findsNothing);
-    expect(find.byKey(const Key('sidebar-ahead-local-only')), findsNothing);
-    expect(
-      tester.widget<Text>(find.text('↑2')).style?.color,
-      isNot(tester.widget<Text>(find.text('↓1')).style?.color),
-    );
-  });
+      await tester.tap(find.byKey(const Key('base-branch-selector')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('base-branch-menu-release')));
+      await tester.pumpAndSettle();
 
-  testWidgets('origin refresh skips an overlapping request', (tester) async {
+      expect(find.byKey(const Key('sidebar-ahead-main')), findsNothing);
+      expect(find.byKey(const Key('sidebar-behind-main')), findsNothing);
+      final badge = find.byKey(const Key('sidebar-behind-release'));
+      expect(badge, findsOneWidget);
+      expect(
+        find.descendant(of: badge, matching: find.text('3')),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<Tooltip>(
+              find.ancestor(of: badge, matching: find.byType(Tooltip)),
+            )
+            .message,
+        '원격보다 3개 커밋 뒤처져 있습니다',
+      );
+      expect(find.byKey(const Key('sidebar-ahead-local-only')), findsNothing);
+      expect(find.byKey(const Key('sidebar-behind-local-only')), findsNothing);
+      expect(
+        tester
+            .widget<Text>(find.descendant(of: badge, matching: find.text('3')))
+            .style
+            ?.color,
+        const Color(0xFFFF453A),
+      );
+      final label = find.descendant(
+        of: find.byKey(const Key('sidebar-ref-release')),
+        matching: find.text('release'),
+      );
+      expect(
+        tester.getRect(badge).left - tester.getRect(label).right,
+        lessThanOrEqualTo(4),
+      );
+    },
+  );
+
+  testWidgets(
+    'selected upstream refresh runs every three minutes while active',
+    (tester) async {
+      final remotes = <String>[];
+      await tester.pumpWidget(
+        app(
+          FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+            refs: const RepoRefs(
+              local: ['main'],
+              current: 'main',
+              upstreams: {'main': 'company/main'},
+              upstreamRemotes: {'main': 'company'},
+            ),
+            fetchRemoteCallback: (remote) async {
+              remotes.add(remote);
+              return FetchOriginResult.noOrigin;
+            },
+          ),
+          controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(remotes, ['company']);
+
+      await tester.pump(const Duration(minutes: 2, seconds: 59));
+      expect(remotes, ['company']);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(remotes, ['company', 'company']);
+    },
+  );
+
+  testWidgets('selected upstream refresh skips an overlapping request', (
+    tester,
+  ) async {
     final pending = Completer<FetchOriginResult>();
     var calls = 0;
     await tester.pumpWidget(
       app(
         FakeGitRepository(
           (_, _) async => [commit('1', 'first commit')],
-          fetchOriginCallback: () {
+          refs: const RepoRefs(
+            local: ['main'],
+            current: 'main',
+            upstreams: {'main': 'origin/main'},
+            upstreamRemotes: {'main': 'origin'},
+          ),
+          fetchRemoteCallback: (_) {
             calls++;
             return pending.future;
           },
@@ -2515,7 +2648,75 @@ void main() {
     await tester.pump();
   });
 
-  testWidgets('fetch failure keeps existing refs and offers retry', (
+  testWidgets('selected upstream refresh pauses with the app', (tester) async {
+    final remotes = <String>[];
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(
+            local: ['main'],
+            current: 'main',
+            upstreams: {'main': 'origin/main'},
+            upstreamRemotes: {'main': 'origin'},
+          ),
+          fetchRemoteCallback: (remote) async {
+            remotes.add(remote);
+            return FetchOriginResult.noOrigin;
+          },
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(remotes, ['origin']);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump(const Duration(minutes: 3));
+    await tester.pump();
+    expect(remotes, ['origin']);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump(const Duration(minutes: 3));
+    await tester.pump();
+    expect(remotes, ['origin', 'origin']);
+  });
+
+  testWidgets('changing the base branch refreshes its upstream remote', (
+    tester,
+  ) async {
+    final remotes = <String>[];
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(
+            local: ['main', 'release'],
+            current: 'main',
+            upstreams: {'main': 'origin/main', 'release': 'company/release'},
+            upstreamRemotes: {'main': 'origin', 'release': 'company'},
+          ),
+          fetchRemoteCallback: (remote) async {
+            remotes.add(remote);
+            return FetchOriginResult.noOrigin;
+          },
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(remotes, ['origin']);
+
+    await tester.tap(find.byKey(const Key('base-branch-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('base-branch-menu-release')));
+    await tester.pumpAndSettle();
+    expect(remotes, ['origin', 'company']);
+  });
+
+  testWidgets('remote refresh failure keeps the selected branch count', (
     tester,
   ) async {
     var fetches = 0;
@@ -2528,12 +2729,12 @@ void main() {
           local: const ['main'],
           remote: const ['origin/main'],
           current: 'main',
-          aheadBehind: {
-            'main': BranchAheadBehind(ahead: refLoads == 1 ? 1 : 2, behind: 0),
-          },
+          upstreams: const {'main': 'origin/main'},
+          upstreamRemotes: const {'main': 'origin'},
+          aheadBehind: {'main': BranchAheadBehind(ahead: 0, behind: refLoads)},
         );
       },
-      fetchOriginCallback: () async {
+      fetchRemoteCallback: (_) async {
         fetches++;
         if (fetches == 1) throw StateError('offline');
         return FetchOriginResult.updated;
@@ -2543,14 +2744,26 @@ void main() {
     await tester.pumpWidget(app(repository, controller));
     await tester.pumpAndSettle();
 
-    expect(find.text('origin 갱신 실패'), findsOneWidget);
-    expect(find.text('↑1'), findsOneWidget);
+    expect(find.text('원격 갱신 실패'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('sidebar-behind-main')),
+        matching: find.text('1'),
+      ),
+      findsOneWidget,
+    );
     await tester.tap(find.byKey(const Key('retry-origin-fetch')));
     await tester.pumpAndSettle();
 
     expect(fetches, 2);
-    expect(find.text('origin 갱신 실패'), findsNothing);
-    expect(find.text('↑2'), findsOneWidget);
+    expect(find.text('원격 갱신 실패'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('sidebar-behind-main')),
+        matching: find.text('2'),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('branch comparison keeps only two branch lanes', (tester) async {
@@ -7404,38 +7617,103 @@ void main() {
     );
   });
 
-  testWidgets('YogitApp persists base branches independently by repository', (
+  testWidgets(
+    'YogitApp starts from checkout and persists later base selection',
+    (tester) async {
+      final store = MemorySettingsStore()
+        ..current = const AppSettings(
+          baseBranches: {'/repos/one': 'release', '/repos/two': 'main'},
+        );
+      await tester.pumpWidget(
+        YogitApp(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('tip', 'tip')],
+            root: '/repos/one',
+            refs: const RepoRefs(
+              local: ['main', 'release'],
+              current: 'main',
+              tips: {'main': 'tip', 'release': 'tip'},
+            ),
+          ),
+          settingsStore: store,
+          discoverAvatars: false,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('base-branch-selector')),
+          matching: find.text('main'),
+        ),
+        findsOneWidget,
+      );
+      expect(store.current.baseBranches, {
+        '/repos/one': 'main',
+        '/repos/two': 'main',
+      });
+
+      await tester.tap(find.byKey(const Key('base-branch-selector')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('base-branch-menu-release')));
+      await tester.pumpAndSettle();
+
+      expect(store.current.baseBranches, {
+        '/repos/one': 'release',
+        '/repos/two': 'main',
+      });
+    },
+  );
+
+  testWidgets('base branch survives ref reload during the session', (
     tester,
   ) async {
-    final store = MemorySettingsStore()
-      ..current = const AppSettings(
-        baseBranches: {'/repos/one': 'release', '/repos/two': 'main'},
-      );
+    var refLoads = 0;
+    final fetched = <String>[];
+    const refs = RepoRefs(
+      local: ['main', 'release'],
+      current: 'main',
+      tips: {'main': 'main-tip', 'release': 'release-tip'},
+      localTips: {'main': 'main-tip', 'release': 'release-tip'},
+      upstreams: {'release': 'company/release'},
+      upstreamRemotes: {'release': 'company'},
+    );
     await tester.pumpWidget(
-      YogitApp(
-        repository: FakeGitRepository(
-          (_, _) async => [commit('tip', 'tip')],
-          root: '/repos/one',
-          refs: const RepoRefs(
-            local: ['main', 'release'],
-            current: 'main',
-            tips: {'main': 'tip', 'release': 'tip'},
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [
+              commit('release-tip', 'release'),
+              commit('main-tip', 'main'),
+            ],
+            refsLoader: () async {
+              refLoads++;
+              return refs;
+            },
+            fetchRemoteCallback: (remote) async {
+              fetched.add(remote);
+              return FetchOriginResult.updated;
+            },
           ),
         ),
-        settingsStore: store,
-        discoverAvatars: false,
       ),
     );
     await tester.pumpAndSettle();
+
     await tester.tap(find.byKey(const Key('base-branch-selector')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('base-branch-menu-main')));
+    await tester.tap(find.byKey(const Key('base-branch-menu-release')));
     await tester.pumpAndSettle();
 
-    expect(store.current.baseBranches, {
-      '/repos/one': 'main',
-      '/repos/two': 'main',
-    });
+    expect(refLoads, 2);
+    expect(fetched, ['company']);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('base-branch-selector')),
+        matching: find.text('release'),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
@@ -10318,6 +10596,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      await tester.tap(find.byKey(const Key('base-branch-selector')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('base-branch-menu-release')));
+      await tester.pumpAndSettle();
+
       final rows = {
         for (final paint in tester.widgetList<CustomPaint>(
           find.byType(CustomPaint),
@@ -12479,7 +12762,7 @@ class FakeGitRepository extends GitRepository {
     this.refs = const RepoRefs(local: ['main'], current: 'main'),
     this.gitDiffAlgorithmSetting = const GitDiffAlgorithmSetting.gitDefault(),
     this.refsLoader,
-    this.fetchOriginCallback,
+    this.fetchRemoteCallback,
     this.originUrlCallback,
     this.compareBranchesCallback,
     this.simulateRebaseCallback,
@@ -12505,7 +12788,7 @@ class FakeGitRepository extends GitRepository {
   final RepoRefs refs;
   final GitDiffAlgorithmSetting gitDiffAlgorithmSetting;
   final Future<RepoRefs> Function()? refsLoader;
-  final Future<FetchOriginResult> Function()? fetchOriginCallback;
+  final Future<FetchOriginResult> Function(String remote)? fetchRemoteCallback;
   final Future<String?> Function()? originUrlCallback;
   final Future<BranchComparisonResult> Function(String base, String compare)?
   compareBranchesCallback;
@@ -12607,8 +12890,9 @@ class FakeGitRepository extends GitRepository {
       refsLoader?.call() ?? Future<RepoRefs>.value(refs);
 
   @override
-  Future<FetchOriginResult> fetchOrigin() =>
-      fetchOriginCallback?.call() ?? Future.value(FetchOriginResult.noOrigin);
+  Future<FetchOriginResult> fetchRemote(String remote) =>
+      fetchRemoteCallback?.call(remote) ??
+      Future.value(FetchOriginResult.noOrigin);
 
   @override
   Future<BranchComparisonResult> compareBranches(
