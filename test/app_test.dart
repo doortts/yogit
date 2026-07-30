@@ -10446,7 +10446,7 @@ void main() {
     expect(find.byKey(const Key('ref-filter')), findsOneWidget);
   });
 
-  testWidgets('sidebar refs use the approved rectangular hover surface', (
+  testWidgets('sidebar hover extends left without moving branch content', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -10469,32 +10469,34 @@ void main() {
     await pointer.addPointer(location: Offset.zero);
 
     for (final name in ['feature', 'v1.0']) {
-      await pointer.moveTo(
-        tester.getCenter(find.byKey(Key('sidebar-ref-$name'))),
-      );
-      await tester.pump();
-
       final row = find.byKey(Key('sidebar-row-$name'));
       final hover = find.byKey(Key('sidebar-ref-hover-$name'));
+      final content = find.byKey(Key('sidebar-ref-$name'));
       final icon = find.descendant(
         of: row,
         matching: find.byIcon(
           name == 'v1.0' ? Icons.sell_outlined : Icons.call_split,
         ),
       );
-      final rowRect = tester.getRect(row);
-      final hoverRect = tester.getRect(hover);
-      final iconRect = tester.getRect(icon);
-      expect(hoverRect.left, greaterThan(rowRect.left + 18), reason: name);
-      expect(hoverRect.left, lessThanOrEqualTo(iconRect.left), reason: name);
-      expect(
-        iconRect.left - hoverRect.left,
-        lessThanOrEqualTo(4),
-        reason: name,
-      );
+      final iconBefore = tester.getRect(icon);
+      final contentBefore = tester.getRect(content);
+      final hoverBefore = tester.getRect(hover);
+
+      await pointer.moveTo(tester.getCenter(content));
+      await tester.pump();
+
+      expect(tester.getRect(icon), iconBefore, reason: name);
+      expect(tester.getRect(content), contentBefore, reason: name);
+      expect(tester.getRect(hover), hoverBefore, reason: name);
+
+      final background = find.byKey(Key('sidebar-ref-hover-background-$name'));
+      expect(background, findsOneWidget, reason: name);
+      final backgroundRect = tester.getRect(background);
+      expect(backgroundRect.left, hoverBefore.left - 5, reason: name);
+      expect(backgroundRect.right, hoverBefore.right, reason: name);
 
       final decoration =
-          tester.widget<Container>(hover).decoration! as BoxDecoration;
+          tester.widget<DecoratedBox>(background).decoration as BoxDecoration;
       final border = decoration.border! as Border;
       expect(decoration.borderRadius, isNull, reason: name);
       expect(
@@ -10507,6 +10509,9 @@ void main() {
       expect(border.top.width, 0, reason: name);
       expect(border.right.width, 0, reason: name);
       expect(border.bottom.width, 0, reason: name);
+
+      await pointer.moveTo(Offset.zero);
+      await tester.pump();
     }
   });
 

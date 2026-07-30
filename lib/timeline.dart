@@ -3157,32 +3157,46 @@ class _TimelineScreenState extends State<TimelineScreen>
                     behavior: HitTestBehavior.opaque,
                     onTap: () =>
                         _selectRef(name, remote: section == _RefSection.remote),
-                    child: Container(
+                    child: Stack(
                       key: Key('sidebar-ref-hover-$name'),
-                      height: double.infinity,
-                      decoration: BoxDecoration(
-                        color: hovered
-                            ? _palette.selectedRow
-                            : Colors.transparent,
-                        border: Border(
-                          left: BorderSide(
-                            color: hovered ? iconColor : Colors.transparent,
-                            width: hovered ? 2 : 0,
-                          ),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(icon, size: 13, color: iconColor),
-                          const SizedBox(width: 7),
-                          Expanded(
-                            child: KeyedSubtree(
-                              key: Key('sidebar-ref-$name'),
-                              child: buildContent(hovered),
+                      clipBehavior: Clip.none,
+                      fit: StackFit.expand,
+                      children: [
+                        Positioned(
+                          left: -5,
+                          top: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: DecoratedBox(
+                            key: Key('sidebar-ref-hover-background-$name'),
+                            decoration: BoxDecoration(
+                              color: hovered
+                                  ? _palette.selectedRow
+                                  : Colors.transparent,
+                              border: Border(
+                                left: BorderSide(
+                                  color: hovered
+                                      ? iconColor
+                                      : Colors.transparent,
+                                  width: hovered ? 2 : 0,
+                                ),
+                              ),
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                        Row(
+                          children: [
+                            Icon(icon, size: 13, color: iconColor),
+                            const SizedBox(width: 7),
+                            Expanded(
+                              child: KeyedSubtree(
+                                key: Key('sidebar-ref-$name'),
+                                child: buildContent(hovered),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ),
