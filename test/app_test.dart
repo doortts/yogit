@@ -3191,8 +3191,10 @@ void main() {
     expect(find.text('중단'), findsOneWidget);
     expect(find.text('충돌'), findsWidgets);
     expect(find.text('lib/shared.dart'), findsWidgets);
-    expect(find.text('main · main change'), findsOneWidget);
-    expect(find.text('feature · feature change'), findsOneWidget);
+    expect(
+      find.text('main · main change ← feature · feature change'),
+      findsOneWidget,
+    );
     expect(find.textContaining(RegExp(r'^[0-9a-f]{7} 사용$')), findsNothing);
   });
 
@@ -3285,6 +3287,56 @@ void main() {
     expect(find.text('임시 작업 공간 시작'), findsNothing);
     expect(find.text('main side'), findsOneWidget);
     expect(find.text('docs side'), findsOneWidget);
+    expect(
+      find.byKey(const Key('branch-preview-diff-toolbar')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .getSize(find.byKey(const Key('branch-preview-diff-toolbar')))
+          .height,
+      34,
+    );
+    expect(find.text('병합 충돌 1개 · fix/docs → main'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const Key('branch-preview-layout-side-by-side')),
+    );
+    await tester.pump();
+    expect(find.byKey(const Key('branch-preview-side-titles')), findsOneWidget);
+    expect(find.text('main · main change'), findsOneWidget);
+    expect(find.text('fix/docs · docs change'), findsOneWidget);
+    final sideTitles = find.byKey(const Key('branch-preview-side-titles'));
+    expect(
+      find.descendant(of: sideTitles, matching: find.text('기준 브랜치')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: sideTitles, matching: find.text('비교 브랜치')),
+      findsOneWidget,
+    );
+    expect(
+      find.text('lib/shared.dart · lines 1 · change 1 of 1'),
+      findsNothing,
+    );
+    final conflictActions = find.byKey(
+      const Key('branch-preview-conflict-actions'),
+    );
+    expect(conflictActions, findsOneWidget);
+    expect(
+      find.descendant(of: conflictActions, matching: find.text('main 사용')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: conflictActions, matching: find.text('fix/docs 사용')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: conflictActions, matching: find.text('둘 다 사용')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const Key('branch-preview-layout-unified')));
+    await tester.pump();
 
     await tester.ensureVisible(
       find.byKey(const Key('merge-conflict-use-base')),

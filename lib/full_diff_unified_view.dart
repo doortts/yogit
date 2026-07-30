@@ -25,6 +25,9 @@ class UnifiedPresentationView extends StatelessWidget {
     this.scrollTarget,
     this.scrollTargetKey,
     this.debugMetrics,
+    this.showHunkHeaders = true,
+    this.compactRows = false,
+    this.currentMarkerColor = fullDiffAccent,
     super.key,
   });
 
@@ -42,6 +45,9 @@ class UnifiedPresentationView extends StatelessWidget {
   final DiffSourceTarget? scrollTarget;
   final GlobalKey? scrollTargetKey;
   final FullDiffLazyBuildMetrics? debugMetrics;
+  final bool showHunkHeaders;
+  final bool compactRows;
+  final Color currentMarkerColor;
 
   @override
   Widget build(BuildContext context) {
@@ -89,16 +95,20 @@ class UnifiedPresentationView extends StatelessWidget {
               wordRanges: wordRanges,
               compactGutter: true,
               richRenderingEnabled: richRenderingEnabled,
+              compact: compactRows,
+              currentMarkerColor: currentMarkerColor,
               selectionOrder: FullDiffSelectionOrder(row: item.sourceRow!),
             );
           } else {
-            child = SelectionContainer.disabled(
-              child: FullDiffHunkHeader(
-                hunk: hunk,
-                path: path,
-                hunkCount: document.hunks.length,
-              ),
-            );
+            child = showHunkHeaders
+                ? SelectionContainer.disabled(
+                    child: FullDiffHunkHeader(
+                      hunk: hunk,
+                      path: path,
+                      hunkCount: document.hunks.length,
+                    ),
+                  )
+                : const SizedBox.shrink();
           }
           if (item.anchorTarget) {
             child = KeyedSubtree(

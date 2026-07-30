@@ -6134,13 +6134,13 @@ class _TimelineScreenState extends State<TimelineScreen>
                   selectedPath,
                 ),
               ),
-              if (_comparison != null && _branchPreviewHasConflict)
-                _branchPreviewConflictChoices(),
             ],
           ),
         );
         final diff = Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          padding: _comparison == null
+              ? const EdgeInsets.fromLTRB(14, 12, 14, 12)
+              : EdgeInsets.zero,
           child: Container(
             key: const Key('preview-diff'),
             child: selectedPath == null
@@ -6363,87 +6363,102 @@ class _TimelineScreenState extends State<TimelineScreen>
   Widget _branchPreviewConflictChoices() {
     final comparison = _comparison!;
     final mergeMode = _branchPreviewMode == BranchPreviewMode.merge;
-    final baseCommits = comparison.commits
-        .where((entry) => entry.side == BranchCommitSide.baseOnly)
-        .map((entry) => entry.commit)
-        .toList();
-    final compareCommits = comparison.commits
-        .where((entry) => entry.side == BranchCommitSide.compareOnly)
-        .map((entry) => entry.commit)
-        .toList();
-    final base = baseCommits.isEmpty ? null : baseCommits.first;
-    final compare =
-        _rebasePreview?.currentCommit ??
-        (compareCommits.isEmpty ? null : compareCommits.first);
     final interactive = mergeMode
         ? _mergePreviewSession != null
         : _rebasePreviewSession != null;
     Widget choice({
       required Key key,
-      required String branch,
-      required String subject,
+      required String label,
       required VoidCallback onTap,
-    }) => Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: InkWell(
-        key: key,
-        onTap:
-            !interactive ||
-                _mergePreviewBusy ||
-                _rebasePreviewBusy ||
-                _repositoryOperationInProgress
-            ? null
-            : onTap,
-        borderRadius: BorderRadius.circular(7),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
-          decoration: BoxDecoration(
-            color: _palette.raised,
-            border: Border.all(color: _palette.border),
-            borderRadius: BorderRadius.circular(7),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '$branch · $subject',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: _palette.text, fontSize: 11),
-                ),
-              ),
-              Text('사용', style: TextStyle(color: _palette.muted, fontSize: 10)),
-            ],
-          ),
+    }) => InkWell(
+      key: key,
+      onTap:
+          !interactive ||
+              _mergePreviewBusy ||
+              _rebasePreviewBusy ||
+              _repositoryOperationInProgress
+          ? null
+          : onTap,
+      borderRadius: BorderRadius.circular(5),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        decoration: BoxDecoration(
+          color: _palette.raised,
+          border: Border.all(color: _palette.muted.withValues(alpha: 0.55)),
+          borderRadius: BorderRadius.circular(5),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(color: _palette.text, fontSize: 10),
         ),
       ),
     );
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        choice(
-          key: Key(
-            mergeMode ? 'merge-conflict-use-base' : 'rebase-conflict-use-base',
+        Container(
+          key: const Key('branch-preview-conflict-actions'),
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: _previewConflictPanel.withValues(alpha: 0.72),
+            border: Border(
+              top: BorderSide(color: _previewConflict.withValues(alpha: 0.45)),
+            ),
           ),
-          branch: comparison.baseRef,
-          subject: base?.subject ?? '현재 상태',
-          onTap: () => unawaited(
-            mergeMode
-                ? _resolveMergeConflict(MergeConflictChoice.base)
-                : _resolveRebaseConflict(RebaseConflictChoice.base),
-          ),
-        ),
-        choice(
-          key: Key(
-            mergeMode
-                ? 'merge-conflict-use-compare'
-                : 'rebase-conflict-use-compare',
-          ),
-          branch: comparison.compareRef,
-          subject: compare?.subject ?? '적용할 변경',
-          onTap: () => unawaited(
-            mergeMode
-                ? _resolveMergeConflict(MergeConflictChoice.compare)
-                : _resolveRebaseConflict(RebaseConflictChoice.commit),
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              if (!mergeMode)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Text(
+                    '이 충돌 해결:',
+                    style: TextStyle(
+                      color: _previewConflict.withValues(alpha: 0.92),
+                      fontSize: 10,
+                    ),
+                  ),
+                ),
+              choice(
+                key: Key(
+                  mergeMode
+                      ? 'merge-conflict-use-base'
+                      : 'rebase-conflict-use-base',
+                ),
+                label: '${comparison.baseRef} 사용',
+                onTap: () => unawaited(
+                  mergeMode
+                      ? _resolveMergeConflict(MergeConflictChoice.base)
+                      : _resolveRebaseConflict(RebaseConflictChoice.base),
+                ),
+              ),
+              choice(
+                key: Key(
+                  mergeMode
+                      ? 'merge-conflict-use-compare'
+                      : 'rebase-conflict-use-compare',
+                ),
+                label: '${comparison.compareRef} 사용',
+                onTap: () => unawaited(
+                  mergeMode
+                      ? _resolveMergeConflict(MergeConflictChoice.compare)
+                      : _resolveRebaseConflict(RebaseConflictChoice.commit),
+                ),
+              ),
+              choice(
+                key: Key(
+                  mergeMode
+                      ? 'merge-conflict-use-both'
+                      : 'rebase-conflict-edit',
+                ),
+                label: mergeMode ? '둘 다 사용' : '직접 편집',
+                onTap: () => unawaited(
+                  _openBranchPreviewConflictEditor(mergeMode: mergeMode),
+                ),
+              ),
+            ],
           ),
         ),
         if (interactive)
@@ -6593,7 +6608,9 @@ class _TimelineScreenState extends State<TimelineScreen>
                       _repositoryOperationInProgress ||
                       _selectedRebaseConflictPath == null
                   ? null
-                  : () => unawaited(_openRebaseConflictEditor()),
+                  : () => unawaited(
+                      _openBranchPreviewConflictEditor(mergeMode: false),
+                    ),
               child: const Text('편집기로 열기'),
             ),
             TextButton(
@@ -6687,20 +6704,32 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
   }
 
-  Future<void> _openRebaseConflictEditor() async {
-    final session = _rebasePreviewSession;
-    final path = _selectedRebaseConflictPath;
-    final worktree = session?.worktreePath;
-    if (session == null ||
+  Future<void> _openBranchPreviewConflictEditor({
+    required bool mergeMode,
+  }) async {
+    final mergeSession = _mergePreviewSession;
+    final rebaseSession = _rebasePreviewSession;
+    final path = mergeMode
+        ? _selectedMergeConflictPath
+        : _selectedRebaseConflictPath;
+    final worktree = mergeMode
+        ? mergeSession?.worktreePath
+        : rebaseSession?.worktreePath;
+    if ((mergeMode ? mergeSession == null : rebaseSession == null) ||
         path == null ||
         worktree == null ||
-        _rebasePreviewBusy ||
+        (mergeMode ? _mergePreviewBusy : _rebasePreviewBusy) ||
         _repositoryOperationInProgress) {
       return;
     }
     setState(() {
-      _rebasePreviewBusy = true;
-      _rebasePreviewError = null;
+      if (mergeMode) {
+        _mergePreviewBusy = true;
+        _mergePreviewError = null;
+      } else {
+        _rebasePreviewBusy = true;
+        _rebasePreviewError = null;
+      }
     });
     try {
       final overlay =
@@ -6741,11 +6770,19 @@ class _TimelineScreenState extends State<TimelineScreen>
             readOnly: false,
             onSave: (text) async {
               await document.save(text);
-              await session.markResolved(path);
+              if (mergeMode) {
+                await mergeSession!.markResolved(path);
+              } else {
+                await rebaseSession!.markResolved(path);
+              }
               if (mounted) {
                 setState(() {
-                  _rebaseEditedFiles.add(path);
-                  _rebaseResolvedFiles.add(path);
+                  if (mergeMode) {
+                    _mergeResolvedFiles.add(path);
+                  } else {
+                    _rebaseEditedFiles.add(path);
+                    _rebaseResolvedFiles.add(path);
+                  }
                   _previewDiffs.removeWhere((key, _) => key.path == path);
                 });
                 Navigator.of(context).pop();
@@ -6753,16 +6790,34 @@ class _TimelineScreenState extends State<TimelineScreen>
             },
             onOpenExternal: () async {
               await externalEditor.open(relativePath: path);
-              if (mounted) setState(() => _rebaseEditedFiles.add(path));
+              if (mounted && !mergeMode) {
+                setState(() => _rebaseEditedFiles.add(path));
+              }
             },
             editorForTesting: widget.editorForTesting,
           ),
         ),
       );
     } catch (error) {
-      if (mounted) setState(() => _rebasePreviewError = error);
+      if (mounted) {
+        setState(() {
+          if (mergeMode) {
+            _mergePreviewError = error;
+          } else {
+            _rebasePreviewError = error;
+          }
+        });
+      }
     } finally {
-      if (mounted) setState(() => _rebasePreviewBusy = false);
+      if (mounted) {
+        setState(() {
+          if (mergeMode) {
+            _mergePreviewBusy = false;
+          } else {
+            _rebasePreviewBusy = false;
+          }
+        });
+      }
     }
   }
 
@@ -6889,35 +6944,91 @@ class _TimelineScreenState extends State<TimelineScreen>
       );
     });
     if (_comparison != null) {
+      final comparison = _comparison!;
+      final baseCommits = comparison.commits
+          .where((entry) => entry.side == BranchCommitSide.baseOnly)
+          .map((entry) => entry.commit)
+          .toList();
+      final compareCommits = comparison.commits
+          .where((entry) => entry.side == BranchCommitSide.compareOnly)
+          .map((entry) => entry.commit)
+          .toList();
+      final base = baseCommits.isEmpty ? null : baseCommits.first;
+      final compare =
+          _rebasePreview?.currentCommit ??
+          (compareCommits.isEmpty ? null : compareCommits.first);
+      final mergeMode = _branchPreviewMode == BranchPreviewMode.merge;
+      final status = _branchPreviewHasConflict
+          ? mergeMode
+                ? '병합 충돌 1개 · ${comparison.compareRef} → ${comparison.baseRef}'
+                : '현재 충돌 · ${compare?.subject ?? comparison.compareRef}'
+          : '${mergeMode ? 'Merge' : 'Rebase'} 결과 · '
+                '${comparison.compareRef} → ${comparison.baseRef}';
+      final compareTitle = _branchPreviewHasConflict
+          ? compare?.subject ?? '적용할 변경'
+          : '${mergeMode ? 'Merge' : 'Rebase'} 미리보기 결과';
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 5),
+          Container(
+            key: const Key('branch-preview-diff-toolbar'),
+            height: 34,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: _palette.surface,
+              border: Border(bottom: BorderSide(color: _palette.border)),
+            ),
             child: Row(
               children: [
-                Expanded(
+                Flexible(
                   child: Text(
                     path,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: _palette.text,
-                      fontSize: 12,
-                      fontFamily: 'monospace',
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
-                _branchPreviewLayoutButton(
-                  key: const Key('branch-preview-layout-unified'),
-                  label: 'Unified',
-                  layout: DiffLayout.unified,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    status,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      color: _branchPreviewHasConflict
+                          ? _previewConflict
+                          : _deleted,
+                      fontSize: 10,
+                    ),
+                  ),
                 ),
-                const SizedBox(width: 5),
-                _branchPreviewLayoutButton(
-                  key: const Key('branch-preview-layout-side-by-side'),
-                  label: 'Side-by-side',
-                  layout: DiffLayout.sideBySide,
+                const SizedBox(width: 10),
+                Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    color: _palette.background,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _branchPreviewLayoutButton(
+                        key: const Key('branch-preview-layout-unified'),
+                        label: 'Unified',
+                        layout: DiffLayout.unified,
+                      ),
+                      _branchPreviewLayoutButton(
+                        key: const Key('branch-preview-layout-side-by-side'),
+                        label: 'Side-by-side',
+                        layout: DiffLayout.sideBySide,
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -6940,25 +7051,50 @@ class _TimelineScreenState extends State<TimelineScreen>
                     for (final hunk in document.hunks)
                       hunk.anchor.id: GlobalKey(),
                   };
-                  return _branchPreviewLayout == DiffLayout.unified
-                      ? UnifiedPresentationView(
-                          document: document,
-                          activeAnchor: null,
-                          path: path,
-                          wrapLines: false,
-                          highlighter: _branchPreviewHighlighter,
-                          anchorKeys: anchors,
-                        )
-                      : SideBySidePresentationView(
-                          document: document,
-                          activeAnchor: null,
-                          oldPath: file.oldPath ?? path,
-                          newPath: path,
-                          wrapLines: false,
-                          showOldSide: true,
-                          highlighter: _branchPreviewHighlighter,
-                          anchorKeys: anchors,
-                        );
+                  final activeAnchor =
+                      _branchPreviewHasConflict && document.hunks.isNotEmpty
+                      ? document.hunks.first.anchor
+                      : null;
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _branchPreviewDiffTitles(
+                        baseRef: comparison.baseRef,
+                        baseSubject: base?.subject ?? '현재 상태',
+                        compareRef: comparison.compareRef,
+                        compareSubject: compareTitle,
+                        sideBySide:
+                            _branchPreviewLayout == DiffLayout.sideBySide,
+                      ),
+                      Expanded(
+                        child: _branchPreviewLayout == DiffLayout.unified
+                            ? UnifiedPresentationView(
+                                document: document,
+                                activeAnchor: activeAnchor,
+                                path: path,
+                                wrapLines: false,
+                                highlighter: _branchPreviewHighlighter,
+                                anchorKeys: anchors,
+                                showHunkHeaders: false,
+                                compactRows: true,
+                                currentMarkerColor: _previewConflict,
+                              )
+                            : SideBySidePresentationView(
+                                document: document,
+                                activeAnchor: activeAnchor,
+                                oldPath: file.oldPath ?? path,
+                                newPath: path,
+                                wrapLines: false,
+                                showOldSide: true,
+                                highlighter: _branchPreviewHighlighter,
+                                anchorKeys: anchors,
+                                showHunkHeaders: false,
+                                compactRows: true,
+                                currentMarkerColor: _previewConflict,
+                              ),
+                      ),
+                    ],
+                  );
                 }
                 return const Center(
                   child: SizedBox.square(
@@ -6969,6 +7105,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               },
             ),
           ),
+          if (_branchPreviewHasConflict) _branchPreviewConflictChoices(),
         ],
       );
     }
@@ -7021,6 +7158,92 @@ class _TimelineScreenState extends State<TimelineScreen>
           },
         ),
       ],
+    );
+  }
+
+  Widget _branchPreviewDiffTitles({
+    required String baseRef,
+    required String baseSubject,
+    required String compareRef,
+    required String compareSubject,
+    required bool sideBySide,
+  }) {
+    Widget title(String branch, String subject, String role) => Expanded(
+      child: Container(
+        height: 30,
+        padding: const EdgeInsets.symmetric(horizontal: 9),
+        decoration: BoxDecoration(
+          color: _palette.panel,
+          border: Border(right: BorderSide(color: _palette.border)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: branch,
+                      style: TextStyle(
+                        color: _palette.text,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    TextSpan(
+                      text: ' · $subject',
+                      style: TextStyle(color: _palette.muted),
+                    ),
+                  ],
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 10),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(role, style: TextStyle(color: _palette.muted, fontSize: 10)),
+          ],
+        ),
+      ),
+    );
+    if (sideBySide) {
+      return Container(
+        key: const Key('branch-preview-side-titles'),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: _palette.border)),
+        ),
+        child: Row(
+          children: [
+            title(baseRef, baseSubject, '기준 브랜치'),
+            title(
+              compareRef,
+              compareSubject,
+              _branchPreviewHasConflict &&
+                      _branchPreviewMode == BranchPreviewMode.rebase
+                  ? '적용 중'
+                  : _branchPreviewHasConflict
+                  ? '비교 브랜치'
+                  : '가상 결과',
+            ),
+          ],
+        ),
+      );
+    }
+    return Container(
+      key: const Key('branch-preview-unified-title'),
+      height: 30,
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 9),
+      decoration: BoxDecoration(
+        color: _palette.panel,
+        border: Border(bottom: BorderSide(color: _palette.border)),
+      ),
+      child: Text(
+        '$baseRef · $baseSubject ← $compareRef · $compareSubject',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: _palette.muted, fontSize: 10),
+      ),
     );
   }
 

@@ -255,6 +255,8 @@ class FullDiffCodeRow extends StatelessWidget {
     this.leadingMetadata,
     this.horizontalScroll = true,
     this.richRenderingEnabled = true,
+    this.compact = false,
+    this.currentMarkerColor = fullDiffAccent,
     this.selectionOrder,
     super.key,
   });
@@ -270,11 +272,13 @@ class FullDiffCodeRow extends StatelessWidget {
   final Widget? leadingMetadata;
   final bool horizontalScroll;
   final bool richRenderingEnabled;
+  final bool compact;
+  final Color currentMarkerColor;
   final FullDiffSelectionOrder? selectionOrder;
 
   @override
   Widget build(BuildContext context) {
-    final compactSourceRow = leadingMetadata != null;
+    final compactSourceRow = compact || leadingMetadata != null;
     final (sourceColor, gutterColor, marker) = switch (line.kind) {
       DiffLineKind.add => (fullDiffAddedSource, fullDiffAddedGutter, '+'),
       DiffLineKind.delete => (
@@ -337,14 +341,14 @@ class FullDiffCodeRow extends StatelessWidget {
                       ),
                     ),
                     if (current)
-                      const Positioned(
-                        key: Key('code-row-current-marker'),
+                      Positioned(
+                        key: const Key('code-row-current-marker'),
                         left: 0,
                         top: 0,
                         bottom: 0,
                         child: ColoredBox(
-                          color: fullDiffAccent,
-                          child: SizedBox(width: 3),
+                          color: currentMarkerColor,
+                          child: const SizedBox(width: 3),
                         ),
                       ),
                   ],
