@@ -3466,7 +3466,13 @@ void main() {
       find.byKey(const Key('virtual-merge-conflict-node')),
       findsOneWidget,
     );
-    expect(find.text('! 병합 충돌'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('timeline-list')),
+        matching: find.text('! 병합 충돌'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('중단'), findsOneWidget);
     expect(find.text('충돌'), findsWidgets);
     expect(find.text('lib/shared.dart'), findsWidgets);
@@ -3807,7 +3813,13 @@ void main() {
 
     expect(find.text('new SHA'), findsNWidgets(3));
     expect(find.text('VR'), findsNWidgets(3));
-    expect(find.text('feature · 가상'), findsNWidgets(3));
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('timeline-list')),
+        matching: find.text('feature · 가상'),
+      ),
+      findsNWidgets(3),
+    );
     final virtualChip = find.byKey(
       const Key(
         'ref-chip-3333333333333333333333333333333333333333-feature · 가상',
@@ -4386,7 +4398,13 @@ void main() {
         .whereType<CommitGraphPainter>()
         .firstWhere((painter) => painter.dashedLanes.isNotEmpty);
     expect(targetPainter.previewRailColor, const Color(0xFFC69AFF));
-    expect(find.text('feature · 현재 충돌'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('rebase-conflict-current-row')),
+        matching: find.text('feature · 현재 충돌'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('충돌 해결 중'), findsOneWidget);
     expect(find.text('현재 적용 중'), findsNothing);
     expect(
