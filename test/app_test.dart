@@ -344,7 +344,7 @@ void main() {
     final selected = find.byKey(const Key('selected-row-2'));
     expect(selected, findsOneWidget);
     final selectedBase =
-        tester.widget<GestureDetector>(selected).child! as ColoredBox;
+        tester.widget<GestureDetector>(selected).child! as Container;
     expect(selectedBase.color, TimelineThemePalette.systemGraphite.background);
 
     final band = find.byKey(const Key('selection-band-2'));
@@ -853,6 +853,33 @@ void main() {
         strokeWidth: 1.0,
       ),
     );
+  });
+
+  test('preview rail inherits the previous row dash above its node', () {
+    final virtual = graphRow(
+      commit: commit('virtual', 'virtual preview', parents: const ['base']),
+      lane: 0,
+      activeLanes: const [0],
+      nextLanes: const [0],
+      activeLaneShas: const {0: 'virtual'},
+      nextLaneShas: const {0: 'base'},
+    );
+    final base = graphRow(
+      commit: commit('base', 'base tip'),
+      lane: 0,
+      activeLanes: const [0],
+      activeLaneShas: const {0: 'base'},
+    );
+    final painter = CommitGraphPainter(
+      row: base,
+      previous: virtual,
+      selected: false,
+      committerColor: const Color(0xFF34C759),
+      previousDashedLanes: const {0},
+    );
+
+    expect(painter.isDashedAbove(0), isTrue);
+    expect(painter.isDashedAbove(1), isFalse);
   });
 
   test('lane transitions turn on one 8px corner beside their node', () {
@@ -2801,8 +2828,20 @@ void main() {
     expect(find.text('main만'), findsOneWidget);
     expect(find.text('feature만'), findsOneWidget);
     expect(find.text('공통'), findsOneWidget);
-    expect(find.text('부모 동일'), findsOneWidget);
-    expect(find.text('Merge 성공'), findsOneWidget);
+    expect(find.text('가상 커밋 1'), findsOneWidget);
+    expect(find.text('두 부모'), findsOneWidget);
+    expect(find.text('충돌 없음'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('branch-preview-summary')),
+        matching: find.text('Merge 미리보기'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('branch-preview-success-icon')),
+      findsOneWidget,
+    );
     expect(
       tester
           .widgetList<CustomPaint>(
@@ -2840,10 +2879,13 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull, reason: 'initial timeline');
     await tester.tap(find.byKey(const Key('branch-diff-selector')));
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull, reason: 'branch selector');
     await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull, reason: 'merge preview');
 
     expect(find.byKey(const Key('branch-preview-segmented')), findsOneWidget);
     final segmented = tester.widget<SegmentedButton<BranchPreviewMode>>(
@@ -2854,8 +2896,11 @@ void main() {
     expect(find.byKey(const Key('branch-preview-merge')), findsOneWidget);
     expect(find.byKey(const Key('branch-preview-rebase')), findsOneWidget);
     expect(find.text('Merge 미리보기'), findsWidgets);
-    expect(find.text('Merge 성공'), findsOneWidget);
+    expect(find.text('Merge 성공'), findsNothing);
     expect(find.byKey(const Key('virtual-merge-node')), findsOneWidget);
+    expect(find.byKey(const Key('virtual-preview-row')), findsOneWidget);
+    expect(find.byKey(const Key('virtual-preview-chip')), findsOneWidget);
+    expect(find.text('가상'), findsOneWidget);
     expect(
       find.byKey(const Key('branch-preview-success-icon')),
       findsOneWidget,
@@ -2867,6 +2912,7 @@ void main() {
 
     await tester.tap(find.byKey(const Key('branch-preview-rebase')));
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull, reason: 'rebase preview');
     expect(changedMode, BranchPreviewMode.rebase);
     expect(
       tester
@@ -2877,10 +2923,10 @@ void main() {
       {BranchPreviewMode.rebase},
     );
     expect(find.text('Rebase 미리보기'), findsWidgets);
-    expect(find.text('Rebase 성공'), findsOneWidget);
+    expect(find.text('Rebase 성공'), findsNothing);
   });
 
-  testWidgets('branch preview summary uses success and signed diff colors', (
+  testWidgets('branch preview summary describes the selected operation', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -2907,11 +2953,7 @@ void main() {
     await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
     await tester.pumpAndSettle();
 
-    void expectSuccess(String label) {
-      expect(
-        tester.widget<Text>(find.text(label)).style?.color,
-        const Color(0xFF34C759),
-      );
+    void expectSuccess() {
       expect(
         tester
             .widget<Icon>(find.byKey(const Key('branch-preview-success-icon')))
@@ -2920,30 +2962,18 @@ void main() {
       );
     }
 
-    void expectCount(String key, String text, Color color) {
-      final finder = find.byKey(Key(key));
-      expect(finder, findsOneWidget, reason: key);
-      final widget = tester.widget<Text>(finder);
-      final span = widget.textSpan! as TextSpan;
-      expect(span.toPlainText(), text);
-      expect((span.children!.single as TextSpan).style?.color, color);
-    }
-
-    expectSuccess('Merge 성공');
-    expectCount(
-      'branch-preview-base-count',
-      'main −1',
-      const Color(0xFFEF6C63),
-    );
-    expectCount(
-      'branch-preview-compare-count',
-      'feature +1',
-      const Color(0xFF8AD6A1),
-    );
+    expectSuccess();
+    expect(find.text('가상 커밋 1'), findsOneWidget);
+    expect(find.text('두 부모'), findsOneWidget);
+    expect(find.text('충돌 없음'), findsOneWidget);
+    expect(find.text('main ← feature'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('branch-preview-rebase')));
     await tester.pumpAndSettle();
-    expectSuccess('Rebase 성공');
+    expectSuccess();
+    expect(find.text('점선 이동 경로'), findsOneWidget);
+    expect(find.text('실제 브랜치 변경 없음'), findsOneWidget);
+    expect(find.text('feature → main'), findsOneWidget);
   });
 
   testWidgets('comparison preview stays on the branch tip diff', (
@@ -3054,6 +3084,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('branch-preview-file-list')), findsOneWidget);
+    expect(find.text('브랜치 Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-shortcut-hint')), findsNothing);
+    expect(find.byKey(const Key('preview-full-diff')), findsNothing);
+    expect(find.text('가상 병합 커밋'), findsOneWidget);
     expect(find.text('feature.txt'), findsWidgets);
     expect(find.byType(UnifiedPresentationView), findsOneWidget);
 
@@ -3104,6 +3138,19 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Merge 충돌'), findsOneWidget);
+    expect(find.text('Merge 충돌 해결'), findsOneWidget);
+    expect(find.text('임시 공간에서 해결 중'), findsOneWidget);
+    expect(find.text('자동 준비됨'), findsOneWidget);
+    expect(find.text('임시 공간 사용 중'), findsOneWidget);
+    expect(find.text('가상 Merge 커밋을 만들 수 없습니다'), findsOneWidget);
+    expect(find.text('충돌 파일 1개'), findsOneWidget);
+    expect(
+      find.byKey(const Key('virtual-merge-conflict-node')),
+      findsOneWidget,
+    );
+    expect(find.text('! 병합 충돌'), findsOneWidget);
+    expect(find.text('중단'), findsOneWidget);
+    expect(find.text('충돌'), findsWidgets);
     expect(find.text('lib/shared.dart'), findsWidgets);
     expect(find.text('main · main change'), findsOneWidget);
     expect(find.text('feature · feature change'), findsOneWidget);
@@ -3217,6 +3264,12 @@ void main() {
     expect(find.text('충돌 해결을 마쳤습니다'), findsOneWidget);
     expect(find.text('Merge 가능'), findsOneWidget);
     expect(find.text('Drop'), findsOneWidget);
+    expect(
+      find.byKey(const Key('branch-preview-resolution-complete')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('branch-preview-apply-card')), findsNothing);
+    expect(find.byKey(const Key('branch-preview-apply')), findsOneWidget);
     expect(find.byType(UnifiedPresentationView), findsOneWidget);
     await tester.tap(
       find.byKey(const Key('branch-preview-layout-side-by-side')),
@@ -3266,13 +3319,28 @@ void main() {
     tester,
   ) async {
     final shortComparison = branchComparison();
+    final first = commit(
+      'feature-one',
+      'docs: add merge documentation',
+      parents: const ['shared'],
+    );
+    final second = commit(
+      'feature-two',
+      'docs: update API examples',
+      parents: const ['feature-one'],
+    );
+    final third = commit(
+      'feature-three',
+      'docs: publish API guide',
+      parents: const ['feature-two'],
+    );
     final comparison = BranchComparisonResult(
       baseRef: shortComparison.baseRef,
       compareRef: shortComparison.compareRef,
       baseTip: shortComparison.baseTip,
-      compareTip: shortComparison.compareTip,
+      compareTip: third.sha,
       baseParent: shortComparison.baseParent,
-      compareParent: shortComparison.compareParent,
+      compareParent: second.sha,
       mergeBases: shortComparison.mergeBases,
       commits: [
         shortComparison.commits.first,
@@ -3281,14 +3349,23 @@ void main() {
             commit: commit('main-$index', 'main history $index'),
             side: BranchCommitSide.baseOnly,
           ),
-        ...shortComparison.commits.skip(1),
+        BranchComparisonCommit(
+          commit: third,
+          side: BranchCommitSide.compareOnly,
+        ),
+        BranchComparisonCommit(
+          commit: second,
+          side: BranchCommitSide.compareOnly,
+        ),
+        BranchComparisonCommit(
+          commit: first,
+          side: BranchCommitSide.compareOnly,
+        ),
+        shortComparison.commits.last,
       ],
       files: shortComparison.files,
       merge: shortComparison.merge,
     );
-    final original = comparison.commits
-        .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
-        .commit;
     late FakeGitRepository repository;
     repository = FakeGitRepository(
       (_, _) async => [
@@ -3298,7 +3375,7 @@ void main() {
       refs: const RepoRefs(
         local: ['main', 'feature'],
         current: 'main',
-        tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+        tips: {'main': 'main-tip', 'feature': 'feature-three'},
       ),
       compareBranchesCallback: (_, _) async => comparison,
       simulateRebaseCallback: ({required baseRef, required compareRef}) =>
@@ -3312,16 +3389,24 @@ void main() {
                 RebasePreviewResult(
                   status: RebasePreviewStatus.clean,
                   baseTip: 'main-tip',
-                  compareTip: 'feature-tip',
+                  compareTip: 'feature-three',
                   rewritten: [
                     (
-                      original: original,
-                      rewrittenSha: '0123456789abcdef0123456789abcdef01234567',
+                      original: first,
+                      rewrittenSha: '1111111111111111111111111111111111111111',
+                    ),
+                    (
+                      original: second,
+                      rewrittenSha: '2222222222222222222222222222222222222222',
+                    ),
+                    (
+                      original: third,
+                      rewrittenSha: '3333333333333333333333333333333333333333',
                     ),
                   ],
-                  completed: 1,
-                  total: 1,
-                  virtualTip: '0123456789abcdef0123456789abcdef01234567',
+                  completed: 3,
+                  total: 3,
+                  virtualTip: '3333333333333333333333333333333333333333',
                 ),
               ),
     );
@@ -3340,16 +3425,39 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(find.text('new SHA'), findsOneWidget);
-    expect(find.text('VR'), findsOneWidget);
-    expect(find.text('Rebase 성공'), findsOneWidget);
-    final mappingPainters = tester
+    expect(find.text('new SHA'), findsNWidgets(3));
+    expect(find.text('VR'), findsNWidgets(3));
+    expect(find.text('재작성 1/3'), findsOneWidget);
+    expect(find.text('재작성 2/3'), findsOneWidget);
+    expect(find.text('재작성 3/3'), findsOneWidget);
+    expect(find.text('Rebase 성공'), findsNothing);
+    expect(find.text('가상 커밋 3개'), findsOneWidget);
+    final previewPainters = tester
+        .widgetList<CustomPaint>(find.byType(CustomPaint))
+        .map((paint) => paint.painter)
+        .whereType<CommitGraphPainter>()
+        .where((painter) => painter.dashedLanes.isNotEmpty);
+    expect(
+      previewPainters.every(
+        (painter) => painter.previewRailColor == const Color(0xFFC69AFF),
+      ),
+      isTrue,
+    );
+    final mappingPainter = tester
         .widgetList<CustomPaint>(find.byType(CustomPaint))
         .map((paint) => paint.painter)
         .whereType<RebaseMappingPainter>()
-        .toList();
-    expect(mappingPainters, isNotEmpty);
-    expect(mappingPainters.first.mappings.single.color, isNotNull);
+        .first;
+    final mappings = mappingPainter.mappings;
+    expect(mappings, hasLength(3));
+    expect(mappings.map((mapping) => mapping.color).toSet(), hasLength(3));
+
+    await tester.drag(
+      find.byKey(const Key('timeline-list')),
+      const Offset(0, -1600),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('feature · 원본'), findsNWidgets(3));
   });
 
   testWidgets('branch preview applies merge and restores its exact tips', (
@@ -3484,7 +3592,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('main 위로 fix/docs Rebase 실제 적용'), findsOneWidget);
-    expect(find.text('가상 rebase 성공'), findsOneWidget);
+    expect(find.text('Rebase 미리보기 성공'), findsOneWidget);
     expect(find.text('가상 커밋'), findsOneWidget);
     expect(find.text('원본 커밋'), findsOneWidget);
     expect(find.text('점선 결과를 실제 브랜치에 적용할 수 있습니다.'), findsOneWidget);
@@ -3640,7 +3748,17 @@ void main() {
     operation.complete(true);
     await tester.pumpAndSettle();
 
-    expect(find.text('Merge 성공'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('branch-preview-summary')),
+        matching: find.text('Merge 미리보기'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('branch-preview-success-icon')),
+      findsOneWidget,
+    );
     expect(find.text('Rebase 충돌'), findsNothing);
 
     await tester.tap(find.byKey(const Key('branch-preview-rebase')));
@@ -3750,7 +3868,37 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Rebase 충돌'), findsOneWidget);
+    expect(find.text('Rebase 상태 및 결정'), findsOneWidget);
     expect(find.text('진행 1/1'), findsOneWidget);
+    expect(find.text('리베이스 진행 1/1'), findsOneWidget);
+    expect(find.text('main · HEAD'), findsOneWidget);
+    expect(find.text('main HEAD 위 예상 위치'), findsOneWidget);
+    final targetPainter = tester
+        .widgetList<CustomPaint>(find.byType(CustomPaint))
+        .map((paint) => paint.painter)
+        .whereType<CommitGraphPainter>()
+        .firstWhere((painter) => painter.dashedLanes.isNotEmpty);
+    expect(targetPainter.previewRailColor, const Color(0xFFC69AFF));
+    expect(find.text('feature · 현재 충돌'), findsOneWidget);
+    expect(find.text('현재 적용 중'), findsOneWidget);
+    expect(
+      tester
+          .widget<Text>(find.byKey(const Key('rebase-preview-applied-count')))
+          .data,
+      '0',
+    );
+    expect(
+      tester
+          .widget<Text>(find.byKey(const Key('rebase-preview-conflict-count')))
+          .data,
+      '1',
+    );
+    expect(
+      tester
+          .widget<Text>(find.byKey(const Key('rebase-preview-pending-count')))
+          .data,
+      '0',
+    );
     expect(find.text('현재 Git 작업을 마친 뒤 해결할 수 있습니다'), findsOneWidget);
     expect(
       tester
@@ -3838,6 +3986,24 @@ void main() {
                   total: 2,
                   conflictFiles: const ['lib/guide.dart'],
                 ),
+                RebasePreviewResult(
+                  status: RebasePreviewStatus.clean,
+                  baseTip: 'main-tip',
+                  compareTip: 'feature-two',
+                  rewritten: [
+                    (
+                      original: first,
+                      rewrittenSha: '1111111111111111111111111111111111111111',
+                    ),
+                    (
+                      original: second,
+                      rewrittenSha: '2222222222222222222222222222222222222222',
+                    ),
+                  ],
+                  completed: 2,
+                  total: 2,
+                  virtualTip: '2222222222222222222222222222222222222222',
+                ),
               ],
             );
             return session;
@@ -3870,11 +4036,39 @@ void main() {
     await tester.pump(const Duration(milliseconds: 240));
 
     expect(find.text('진행 2/2'), findsOneWidget);
+    expect(find.text('리베이스 진행 2/2'), findsOneWidget);
+    expect(
+      tester
+          .widget<Text>(find.byKey(const Key('rebase-preview-applied-count')))
+          .data,
+      '1',
+    );
+    expect(
+      tester
+          .widget<Text>(find.byKey(const Key('rebase-preview-pending-count')))
+          .data,
+      '0',
+    );
     expect(find.text('docs: publish guide'), findsWidgets);
     expect(
       find.byKey(const Key('rebase-conflict-current-row')),
       findsOneWidget,
     );
+
+    await tester.ensureVisible(
+      find.byKey(const Key('rebase-conflict-use-compare')),
+    );
+    await tester.tap(find.byKey(const Key('rebase-conflict-use-compare')));
+    await tester.pump();
+    await tester.ensureVisible(continueButton);
+    await tester.tap(continueButton);
+    await tester.pumpAndSettle();
+
+    expect(find.text('충돌 해결을 마쳤습니다'), findsOneWidget);
+    expect(find.text('Rebase 가능'), findsOneWidget);
+    expect(find.byKey(const Key('branch-preview-apply-card')), findsNothing);
+    expect(find.byKey(const Key('branch-preview-apply')), findsOneWidget);
+    expect(find.byKey(const Key('branch-preview-drop')), findsOneWidget);
   });
 
   testWidgets('a stale branch comparison cannot replace a newer selection', (
@@ -4640,7 +4834,7 @@ void main() {
     expect(rebase.mappings.single.routeLane, 0);
   });
 
-  test('first rebase conflict adds a virtual target above the base tip', () {
+  test('rebase conflict keeps only a virtual target above the base tip', () {
     final comparison = branchComparison();
     final feature = comparison.commits
         .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
@@ -4652,7 +4846,9 @@ void main() {
         baseTip: comparison.baseTip,
         compareTip: comparison.compareTip,
         currentCommit: feature,
-        total: 1,
+        rewritten: [(original: feature, rewrittenSha: 'completed-rewrite')],
+        completed: 1,
+        total: 2,
         conflictFiles: const ['lib/shared.dart'],
       ),
       rebaseMappingColors(AvatarService.defaultColors),
@@ -4664,7 +4860,13 @@ void main() {
       PreviewGraphNodeKind.conflictTarget,
     );
     expect(graph.rows.first.lane, graph.rows[1].lane);
+    expect(graph.rows.first.commit.subject, 'main HEAD 위 예상 위치');
     expect(graph.dashedLanes[0], contains(graph.rows.first.lane));
+    expect(
+      graph.kinds.values,
+      isNot(contains(PreviewGraphNodeKind.virtualRebase)),
+    );
+    expect(graph.mappings, isEmpty);
   });
 
   test('preview graphs preserve every existing comparison row', () {
