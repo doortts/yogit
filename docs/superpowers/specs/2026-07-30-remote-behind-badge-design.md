@@ -44,18 +44,20 @@ state.
 Extend the existing `GitRepository.loadRefs()` query rather than adding a
 second branch-discovery path.
 
-1. `for-each-ref` also returns each local branch's upstream short name, upstream
-   remote name, and upstream tracking text.
+1. `for-each-ref` also returns each local branch's upstream short name and
+   upstream remote name.
 2. `RepoRefs` stores the selected branch data needed by the sidebar: upstream
    name, remote name, and behind count.
-3. `TimelineScreen` renders cached `RepoRefs` immediately.
-4. A background refresh fetches only the selected branch's configured upstream
+3. The existing `rev-list --left-right --count` comparison uses that configured
+   upstream instead of assuming `origin/<same-name>`.
+4. `TimelineScreen` renders cached `RepoRefs` immediately.
+5. A background refresh fetches only the selected branch's configured upstream
    remote with pruning enabled.
-5. After the fetch finishes, `TimelineScreen` calls the existing ref loader
+6. After the fetch finishes, `TimelineScreen` calls the existing ref loader
    again and replaces the cached sidebar state in one update.
 
-The tracking parser must accept Git's behind-only and diverged forms, while
-ignoring ahead-only, up-to-date, gone, and missing-upstream values.
+Only the upstream-only count is rendered. Ahead-only, up-to-date, local
+upstreams, gone upstreams, and missing-upstream values produce no badge.
 
 ## Refresh lifecycle
 
@@ -85,7 +87,8 @@ keeps Git commands inside `GitRepository`.
 
 Add focused tests for:
 
-1. Parsing no-upstream, behind-only, ahead-only, and diverged tracking values.
+1. Reading configured upstream metadata and counting behind-only, ahead-only,
+   and diverged refs in the correct direction.
 2. Rendering the red count only beside the selected local branch.
 3. Rendering the Korean tooltip with the exact count.
 4. Starting an immediate refresh and a three-minute periodic refresh.
