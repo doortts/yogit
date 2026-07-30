@@ -2895,14 +2895,33 @@ void main() {
     expect(tester.takeException(), isNull, reason: 'merge preview');
 
     expect(find.byKey(const Key('branch-preview-segmented')), findsOneWidget);
-    final segmented = tester.widget<SegmentedButton<BranchPreviewMode>>(
+    expect(
+      tester.getSize(find.byKey(const Key('branch-preview-segmented'))),
+      const Size(200, 38),
+    );
+    final segmented = tester.widget<Container>(
       find.byKey(const Key('branch-preview-segmented')),
     );
-    expect(segmented.selected, {BranchPreviewMode.merge});
-    expect(segmented.showSelectedIcon, isFalse);
+    expect(segmented.padding, const EdgeInsets.all(3));
     expect(
-      segmented.style?.backgroundColor?.resolve({WidgetState.selected}),
-      TimelineThemePalette.systemGraphite.interactive,
+      (segmented.decoration! as BoxDecoration).borderRadius,
+      BorderRadius.circular(8),
+    );
+    final mergeButton = tester.widget<Container>(
+      find
+          .descendant(
+            of: find.byKey(const Key('branch-preview-merge-button')),
+            matching: find.byType(Container),
+          )
+          .first,
+    );
+    expect(
+      (mergeButton.decoration! as BoxDecoration).color,
+      const Color(0xFF4388EE),
+    );
+    expect(
+      (mergeButton.decoration! as BoxDecoration).borderRadius,
+      BorderRadius.circular(6),
     );
     expect(find.byKey(const Key('branch-preview-merge')), findsOneWidget);
     expect(find.byKey(const Key('branch-preview-rebase')), findsOneWidget);
@@ -2925,13 +2944,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull, reason: 'rebase preview');
     expect(changedMode, BranchPreviewMode.rebase);
-    expect(
-      tester
-          .widget<SegmentedButton<BranchPreviewMode>>(
-            find.byKey(const Key('branch-preview-segmented')),
+    final rebaseButton = tester.widget<Container>(
+      find
+          .descendant(
+            of: find.byKey(const Key('branch-preview-rebase-button')),
+            matching: find.byType(Container),
           )
-          .selected,
-      {BranchPreviewMode.rebase},
+          .first,
+    );
+    expect(
+      (rebaseButton.decoration! as BoxDecoration).color,
+      const Color(0xFF4388EE),
     );
     expect(find.text('Rebase 미리보기'), findsWidgets);
     expect(find.text('Rebase 성공'), findsNothing);
@@ -3127,7 +3150,31 @@ void main() {
       tester
           .getSize(find.byKey(const Key('branch-preview-layout-unified')))
           .height,
-      greaterThanOrEqualTo(22),
+      22,
+    );
+    final layoutSwitch = find.byKey(const Key('branch-preview-layout-switch'));
+    expect(layoutSwitch, findsOneWidget);
+    final switchBox = tester.widget<Container>(layoutSwitch);
+    expect(switchBox.padding, const EdgeInsets.all(2));
+    expect(
+      (switchBox.decoration! as BoxDecoration).borderRadius,
+      BorderRadius.circular(6),
+    );
+    final unifiedButton = tester.widget<Container>(
+      find
+          .descendant(
+            of: find.byKey(const Key('branch-preview-layout-unified')),
+            matching: find.byType(Container),
+          )
+          .first,
+    );
+    expect(
+      (unifiedButton.decoration! as BoxDecoration).color,
+      const Color(0xFF4388EE),
+    );
+    expect(
+      (unifiedButton.decoration! as BoxDecoration).borderRadius,
+      BorderRadius.circular(4),
     );
 
     await tester.tap(
@@ -3135,6 +3182,18 @@ void main() {
     );
     await tester.pump();
     expect(find.byType(SideBySidePresentationView), findsOneWidget);
+    final sideBySideButton = tester.widget<Container>(
+      find
+          .descendant(
+            of: find.byKey(const Key('branch-preview-layout-side-by-side')),
+            matching: find.byType(Container),
+          )
+          .first,
+    );
+    expect(
+      (sideBySideButton.decoration! as BoxDecoration).color,
+      const Color(0xFF4388EE),
+    );
 
     await tester.ensureVisible(find.text('other.txt').last);
     await tester.tap(find.text('other.txt').last);
@@ -3389,10 +3448,8 @@ void main() {
     );
     expect(
       tester
-          .widget<SegmentedButton<BranchPreviewMode>>(
-            find.byKey(const Key('branch-preview-segmented')),
-          )
-          .onSelectionChanged,
+          .widget<InkWell>(find.byKey(const Key('branch-preview-merge-button')))
+          .onTap,
       isNull,
     );
     apply.completeError(StateError('stop test apply'));

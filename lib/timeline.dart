@@ -47,6 +47,7 @@ const _previewPurple = Color(0xFFC69AFF);
 const _previewPurplePanel = Color(0xFF29243A);
 const _previewConflict = Color(0xFFFF7A84);
 const _previewConflictPanel = Color(0xFF4B252C);
+const _previewControlBlue = Color(0xFF4388EE);
 
 List<Color> rebaseMappingColors(Iterable<Color> reserved) {
   final used = reserved.map((color) => color.toARGB32()).toSet();
@@ -1734,7 +1735,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                 ),
                 if (_compareRef != null) ...[
                   const SizedBox(width: 8),
-                  SizedBox(width: 204, child: _branchPreviewControls()),
+                  SizedBox(width: 200, child: _branchPreviewControls()),
                 ],
                 Expanded(child: _dragAndWordmark()),
               ],
@@ -1780,58 +1781,64 @@ class _TimelineScreenState extends State<TimelineScreen>
     },
   );
 
-  Widget _branchPreviewControls() => SizedBox(
-    height: 32,
-    child: SegmentedButton<BranchPreviewMode>(
+  Widget _branchPreviewControls() {
+    Widget button(BranchPreviewMode mode, String label, Key key, Key labelKey) {
+      final selected = _branchPreviewMode == mode;
+      return Expanded(
+        child: InkWell(
+          key: key,
+          onTap: _branchApplyBusy ? null : () => _setBranchPreviewMode(mode),
+          borderRadius: BorderRadius.circular(6),
+          child: Container(
+            height: 30,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: selected ? _previewControlBlue : Colors.transparent,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              label,
+              key: labelKey,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: selected ? Colors.white : _palette.muted,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
       key: const Key('branch-preview-segmented'),
-      segments: const [
-        ButtonSegment(
-          value: BranchPreviewMode.merge,
-          label: Text(
-            'Merge 미리보기',
-            key: Key('branch-preview-merge'),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-        ButtonSegment(
-          value: BranchPreviewMode.rebase,
-          label: Text(
-            'Rebase 미리보기',
-            key: Key('branch-preview-rebase'),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ],
-      selected: {_branchPreviewMode},
-      showSelectedIcon: false,
-      onSelectionChanged: _branchApplyBusy
-          ? null
-          : (selected) => _setBranchPreviewMode(selected.single),
-      style: ButtonStyle(
-        foregroundColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.selected)
-              ? _palette.text
-              : _palette.muted,
-        ),
-        backgroundColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.selected)
-              ? _palette.interactive
-              : _palette.background,
-        ),
-        side: WidgetStatePropertyAll(BorderSide(color: _palette.border)),
-        padding: const WidgetStatePropertyAll(
-          EdgeInsets.symmetric(horizontal: 6),
-        ),
-        textStyle: const WidgetStatePropertyAll(
-          TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
-        ),
-        visualDensity: VisualDensity.compact,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      height: 38,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: _palette.background,
+        border: Border.all(color: _palette.border),
+        borderRadius: BorderRadius.circular(8),
       ),
-    ),
-  );
+      child: Row(
+        children: [
+          button(
+            BranchPreviewMode.merge,
+            'Merge 미리보기',
+            const Key('branch-preview-merge-button'),
+            const Key('branch-preview-merge'),
+          ),
+          button(
+            BranchPreviewMode.rebase,
+            'Rebase 미리보기',
+            const Key('branch-preview-rebase-button'),
+            const Key('branch-preview-rebase'),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _setBranchPreviewMode(BranchPreviewMode mode) {
     if (_branchPreviewMode == mode ||
@@ -7009,6 +7016,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                 ),
                 const SizedBox(width: 10),
                 Container(
+                  key: const Key('branch-preview-layout-switch'),
                   padding: const EdgeInsets.all(2),
                   decoration: BoxDecoration(
                     color: _palette.background,
@@ -7256,12 +7264,12 @@ class _TimelineScreenState extends State<TimelineScreen>
     onTap: () => setState(() => _branchPreviewLayout = layout),
     borderRadius: BorderRadius.circular(6),
     child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
       decoration: BoxDecoration(
         color: _branchPreviewLayout == layout
-            ? _palette.interactive
-            : _palette.raised,
-        borderRadius: BorderRadius.circular(6),
+            ? _previewControlBlue
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(4),
       ),
       child: Text(
         label,
