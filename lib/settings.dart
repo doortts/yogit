@@ -430,7 +430,7 @@ class AppSettings {
         value['previewHeight'],
         280,
         200,
-        double.infinity,
+        double.maxFinite,
       ),
       baseBranches: baseBranches,
       deletedBranchNames: _parseNestedStringMap(value['deletedBranchNames']),
