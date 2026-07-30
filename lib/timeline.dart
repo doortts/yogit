@@ -635,7 +635,7 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   static const _pageSize = 500;
 
-  static const _sidebarRange = (min: 120.0, max: 320.0);
+  static const _sidebarRange = (min: 150.0, max: 320.0);
 
   TimelineThemePalette get _palette => context.timelineTheme;
 

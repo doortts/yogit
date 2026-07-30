@@ -9706,8 +9706,8 @@ void main() {
       const Offset(-400, 0),
     );
     await tester.pumpAndSettle();
-    expect(sidebarWidth(), 120);
-    expect(saved?.sidebar, 120);
+    expect(sidebarWidth(), 150);
+    expect(saved?.sidebar, 150);
 
     // Round-trips like every other width, clamped on the way in.
     expect(
@@ -9718,7 +9718,7 @@ void main() {
     );
     expect(
       TimelineColumnWidths.fromJson(<String, dynamic>{'sidebar': 40}).sidebar,
-      120,
+      150,
     );
     expect(
       TimelineColumnWidths.fromJson(<String, dynamic>{'sidebar': 900}).sidebar,
