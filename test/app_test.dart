@@ -3054,6 +3054,21 @@ void main() {
     expect(find.byKey(const Key('virtual-preview-row')), findsOneWidget);
     expect(find.byKey(const Key('virtual-preview-chip')), findsOneWidget);
     expect(find.text('가상'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('virtual-preview-row')));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('virtual-preview-row')),
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget.key is ValueKey<String> &&
+              (widget.key! as ValueKey<String>).value.startsWith(
+                'selection-band-',
+              ),
+        ),
+      ),
+      findsOneWidget,
+    );
     expect(
       find.byKey(const Key('branch-preview-success-icon')),
       findsOneWidget,
@@ -3152,10 +3167,11 @@ void main() {
     expect(find.text('feature → main'), findsOneWidget);
   });
 
-  testWidgets('comparison preview stays on the branch tip diff', (
+  testWidgets('comparison preview follows the focused real commit', (
     tester,
   ) async {
-    final calls = <({String from, String to, String path})>[];
+    final rangeCalls = <({String from, String to, String path})>[];
+    final commitCalls = <({String sha, String path})>[];
     await tester.pumpWidget(
       app(
         FakeGitRepository(
@@ -3170,8 +3186,23 @@ void main() {
               Future.value(
                 const RebaseCheckResult(status: RebaseCheckStatus.clean),
               ),
+          files: (commit, _) async => [
+            GitFileChange(
+              path: '${commit.sha}.dart',
+              status: 'M',
+              additions: 1,
+              deletions: 0,
+            ),
+          ],
+          diff: (commit, _, path, _, _) async {
+            commitCalls.add((sha: commit.sha, path: path));
+            return const [
+              DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+              DiffLine(kind: DiffLineKind.add, text: 'focused', newNumber: 1),
+            ];
+          },
           diffBetween: (from, to, file) async {
-            calls.add((from: from, to: to, path: file.path));
+            rangeCalls.add((from: from, to: to, path: file.path));
             return const [
               DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
               DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
@@ -3191,13 +3222,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('lib/shared.dart'), findsWidgets);
-    expect(calls, [
+    expect(rangeCalls, [
       (from: 'main-tip', to: 'feature-tip', path: 'lib/shared.dart'),
     ]);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
-    expect(find.text('lib/shared.dart'), findsWidgets);
-    expect(calls, hasLength(1));
+    expect(find.text('선택한 커밋의 diff'), findsOneWidget);
+    expect(find.text('main-tip.dart'), findsWidgets);
+    expect(commitCalls, [(sha: 'main-tip', path: 'main-tip.dart')]);
+    expect(rangeCalls, hasLength(1));
   });
 
   testWidgets('branch preview diff switches between both full diff layouts', (
@@ -3966,7 +3999,9 @@ void main() {
   testWidgets('branch preview applies rebase with a focused commit', (
     tester,
   ) async {
-    final comparison = branchComparison(compareRef: 'fix/docs');
+    const compareRef =
+        'codex/remote-behind-badge-with-an-extra-long-branch-name';
+    final comparison = branchComparison(compareRef: compareRef);
     final original = comparison.commits
         .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
         .commit;
@@ -3992,9 +4027,9 @@ void main() {
     repository = FakeGitRepository(
       (_, _) async => [commit('normal', 'normal history')],
       refs: const RepoRefs(
-        local: ['main', 'fix/docs'],
+        local: ['main', compareRef],
         current: 'main',
-        tips: {'main': 'main-tip', 'fix/docs': 'feature-tip'},
+        tips: {'main': 'main-tip', compareRef: 'feature-tip'},
       ),
       compareBranchesCallback: (_, _) async => comparison,
       openRebasePreviewCallback:
@@ -4013,16 +4048,24 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('branch-diff-selector')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('branch-diff-menu-fix/docs')));
+    await tester.tap(find.byKey(const Key('branch-diff-menu-$compareRef')));
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
-    expect(find.text('main 위로 fix/docs Rebase 실제 적용'), findsOneWidget);
+    expect(find.text('main 위로 $compareRef Rebase 실제 적용'), findsOneWidget);
     expect(find.text('Rebase 미리보기 성공'), findsOneWidget);
     expect(find.text('가상 커밋'), findsOneWidget);
     expect(find.text('원본 커밋'), findsOneWidget);
-    expect(find.text('점선 결과를 실제 브랜치에 적용할 수 있습니다.'), findsOneWidget);
+    expect(find.text('점선 결과를 실제 브랜치에 적용할 수 있습니다.'), findsNothing);
+    final applyLabel = tester.widget<Text>(
+      find.descendant(
+        of: find.byKey(const Key('branch-preview-apply')),
+        matching: find.byType(Text),
+      ),
+    );
+    expect(applyLabel.maxLines, 2);
+    expect(applyLabel.overflow, TextOverflow.ellipsis);
     await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
     await tester.tap(find.byKey(const Key('branch-preview-apply')));
     await tester.pumpAndSettle();
@@ -10301,8 +10344,8 @@ void main() {
       const Offset(-400, 0),
     );
     await tester.pumpAndSettle();
-    expect(sidebarWidth(), 120);
-    expect(saved?.sidebar, 120);
+    expect(sidebarWidth(), 150);
+    expect(saved?.sidebar, 150);
 
     // Round-trips like every other width, clamped on the way in.
     expect(
@@ -10313,7 +10356,7 @@ void main() {
     );
     expect(
       TimelineColumnWidths.fromJson(<String, dynamic>{'sidebar': 40}).sidebar,
-      120,
+      150,
     );
     expect(
       TimelineColumnWidths.fromJson(<String, dynamic>{'sidebar': 900}).sidebar,
@@ -11066,6 +11109,21 @@ void main() {
     expect(previewWidth(), 240);
     expect(saved?.width, 240);
 
+    // The bottom panel can grow to the column headers, regardless of the old
+    // fixed 480px ceiling.
+    await tester.tap(find.text('하단'));
+    await tester.pumpAndSettle();
+    await tester.drag(
+      find.byKey(const Key('preview-resizer')),
+      const Offset(0, -1000),
+    );
+    await tester.pumpAndSettle();
+    final previewRect = tester.getRect(find.byKey(const Key('preview-panel')));
+    final headerRect = tester.getRect(find.byKey(const Key('refs-header')));
+    expect(previewRect.height, greaterThan(480));
+    expect(previewRect.top, closeTo(headerRect.bottom, 0.01));
+    expect(saved?.height, previewRect.height);
+
     // Round-trips with the rest of the settings, clamped on the way in.
     expect(const AppSettings().previewWidth, 288);
     expect(const AppSettings().previewHeight, 280);
@@ -11087,7 +11145,7 @@ void main() {
         'previewWidth': 40,
         'previewHeight': 4000,
       }).previewHeight,
-      480,
+      4000,
     );
     expect(
       AppSettings.fromJson(<String, dynamic>{

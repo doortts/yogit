@@ -676,7 +676,7 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   static const _pageSize = 500;
 
-  static const _sidebarRange = (min: 120.0, max: 320.0);
+  static const _sidebarRange = (min: 150.0, max: 320.0);
   static const _collapsedSidebarWidth = 52.0;
 
   TimelineThemePalette get _palette => context.timelineTheme;
@@ -695,7 +695,9 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   static const _previewMinWidth = 240.0;
   static const _previewMaxWidthFraction = 0.75;
-  static const _previewHeightRange = (min: 200.0, max: 480.0);
+  static const _previewMinHeight = 200.0;
+  static const _timelineHeaderHeight = 29.0;
+  static const _branchPreviewSummaryHeight = 52.0;
 
   final _focusNode = FocusNode();
   final _timelineKey = GlobalKey();
@@ -822,6 +824,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   var _commitAvailableWidth = 0.0;
   late double _previewWidth = widget.previewWidth;
   late double _previewHeight = widget.previewHeight;
+  var _bottomPreviewMaxHeight = double.maxFinite;
   _FullDiffRouteSession? _fullDiffRouteSession;
   FullDiffPreferences? _pendingFullDiffPreferences;
   FullDiffColumnWidths? _pendingFullDiffColumnWidths;
@@ -1553,7 +1556,14 @@ class _TimelineScreenState extends State<TimelineScreen>
       child: KeyedSubtree(key: _timelineKey, child: _timeline()),
     );
     if (placement == PreviewPlacement.bottom) {
-      final extent = math.min(_previewHeight, constraints.maxHeight);
+      final timelineChromeHeight =
+          _timelineHeaderHeight +
+          (_compareRef == null ? 0 : _branchPreviewSummaryHeight);
+      _bottomPreviewMaxHeight = math.max(
+        0,
+        constraints.maxHeight - timelineChromeHeight,
+      );
+      final extent = math.min(_previewHeight, _bottomPreviewMaxHeight);
       return Column(
         key: const Key('preview-layout-bottom'),
         children: [
@@ -3417,7 +3427,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                   child: Column(
                     children: [
                       SizedBox(
-                        height: 29,
+                        height: _timelineHeaderHeight,
                         child: Row(
                           children: [
                             for (final column in timelineColumns.keys)
@@ -3567,7 +3577,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         : resultLabel;
     return Container(
       key: const Key('branch-preview-summary'),
-      height: 52,
+      height: _branchPreviewSummaryHeight,
       padding: const EdgeInsets.symmetric(horizontal: 14),
       decoration: BoxDecoration(
         color: _palette.surface,
@@ -3812,6 +3822,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       _branchPreviewApplyLabel,
       textAlign: TextAlign.center,
       softWrap: true,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
     ),
   );
 
@@ -3957,48 +3969,36 @@ class _TimelineScreenState extends State<TimelineScreen>
             ),
           ],
           const SizedBox(height: 10),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              if (result != null) {
-                return Align(
-                  alignment: Alignment.centerRight,
-                  child: OutlinedButton(
-                    key: const Key('branch-preview-rollback'),
-                    onPressed: _branchApplyStatus == BranchApplyStatus.applied
-                        ? () => unawaited(_confirmBranchPreviewRollback())
-                        : null,
-                    child: Text('${merge ? 'Merge' : 'Rebase'} 이전 시점으로 되돌리기'),
+          if (result != null)
+            Align(
+              alignment: Alignment.centerRight,
+              child: OutlinedButton(
+                key: const Key('branch-preview-rollback'),
+                onPressed: _branchApplyStatus == BranchApplyStatus.applied
+                    ? () => unawaited(_confirmBranchPreviewRollback())
+                    : null,
+                child: Text('${merge ? 'Merge' : 'Rebase'} 이전 시점으로 되돌리기'),
+              ),
+            )
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (!_branchPreviewCanApply || merge) ...[
+                  Text(
+                    !_branchPreviewCanApply
+                        ? '원격 브랜치는 바로 적용할 수 없습니다. 로컬 브랜치를 선택해 주세요.'
+                        : '가상 결과를 실제 브랜치에 적용할 수 있습니다.',
+                    style: TextStyle(color: _palette.muted, fontSize: 10),
                   ),
-                );
-              }
-              final note = Text(
-                !_branchPreviewCanApply
-                    ? '원격 브랜치는 바로 적용할 수 없습니다. 로컬 브랜치를 선택해 주세요.'
-                    : merge
-                    ? '가상 결과를 실제 브랜치에 적용할 수 있습니다.'
-                    : '점선 결과를 실제 브랜치에 적용할 수 있습니다.',
-                style: TextStyle(color: _palette.muted, fontSize: 10),
-              );
-              final apply = _branchPreviewApplyButton();
-              if (constraints.maxWidth >= 380) {
-                return Row(
-                  children: [
-                    Expanded(child: note),
-                    const SizedBox(width: 8),
-                    apply,
-                  ],
-                );
-              }
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  note,
                   const SizedBox(height: 7),
-                  SizedBox(width: double.infinity, child: apply),
                 ],
-              );
-            },
-          ),
+                SizedBox(
+                  width: double.infinity,
+                  child: _branchPreviewApplyButton(),
+                ),
+              ],
+            ),
         ],
       ),
     );
@@ -4993,7 +4993,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                   width: 3,
                   child: ColoredBox(color: previewColor),
                 ),
-              if (selected && !rebaseConflict && !virtualPreview)
+              if (selected && !rebaseConflict)
                 Positioned(
                   left: _w('refs') + painter.laneX(row.lane),
                   top: 0,
@@ -5686,8 +5686,8 @@ class _TimelineScreenState extends State<TimelineScreen>
         onVerticalDragUpdate: vertical
             ? (details) => setState(() {
                 _previewHeight = (_previewHeight - details.delta.dy).clamp(
-                  _previewHeightRange.min,
-                  _previewHeightRange.max,
+                  math.min(_previewMinHeight, _bottomPreviewMaxHeight),
+                  _bottomPreviewMaxHeight,
                 );
               })
             : null,
@@ -5739,7 +5739,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _previewHeader(commit),
-                if (_comparison == null)
+                if (!_usesBranchPreviewResult(commit))
                   Container(
                     key: const Key('preview-shortcut-hint'),
                     height: 24,
@@ -5784,6 +5784,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   Widget _previewHeader(GitCommit? commit) {
+    final branchPreview = _usesBranchPreviewResult(commit);
     final branchTitle = _branchPreviewMode == BranchPreviewMode.merge
         ? _branchPreviewHasConflict
               ? 'Merge 충돌 해결'
@@ -5815,23 +5816,23 @@ class _TimelineScreenState extends State<TimelineScreen>
             child: Text(
               _cherryPickState != null
                   ? '체리픽 충돌'
-                  : _comparison == null
-                  ? 'Commit & Diff'
-                  : branchTitle,
+                  : branchPreview
+                  ? branchTitle
+                  : _comparison != null
+                  ? '선택한 커밋의 diff'
+                  : 'Commit & Diff',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: _comparison == null ? _palette.muted : _palette.text,
+                color: branchPreview ? _palette.text : _palette.muted,
                 fontSize: 12,
-                fontWeight: _comparison == null
-                    ? FontWeight.w500
-                    : FontWeight.w700,
-                letterSpacing: _comparison == null ? 0.66 : 0,
+                fontWeight: branchPreview ? FontWeight.w700 : FontWeight.w500,
+                letterSpacing: branchPreview ? 0 : 0.66,
               ),
             ),
           ),
           const SizedBox(width: 8),
-          if (_comparison != null)
+          if (branchPreview)
             Text(
               branchStatus,
               style: TextStyle(color: _palette.muted, fontSize: 10),
@@ -6042,6 +6043,19 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   /// The commit's changed files, remembered in resolved form as well so ⌘↑/⌘↓ can
   /// walk them without waiting on a future.
+  bool _usesBranchPreviewResult(GitCommit? commit) {
+    final kind = commit == null ? null : _previewGraph?.kinds[commit.sha];
+    return kind == PreviewGraphNodeKind.virtualMerge ||
+        kind == PreviewGraphNodeKind.virtualRebase ||
+        (_comparison != null &&
+            (_branchPreviewMode == BranchPreviewMode.merge
+                ? _mergePreviewError != null
+                : _rebasePreviewError != null)) ||
+        (_branchPreviewMode == BranchPreviewMode.rebase &&
+            _rebasePreview?.status == RebasePreviewStatus.conflict &&
+            _rebasePreview?.currentCommit?.sha == commit?.sha);
+  }
+
   ({String from, String to})? get _branchPreviewRange {
     final comparison = _comparison;
     if (comparison == null) return null;
@@ -6069,7 +6083,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   String _previewKey(GitCommit commit) {
-    final range = _branchPreviewRange;
+    final range = _usesBranchPreviewResult(commit) ? _branchPreviewRange : null;
     return range == null
         ? commit.sha
         : '${_branchPreviewMode.name}:${range.from}..${range.to}';
@@ -6080,7 +6094,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     return _previewFiles.putIfAbsent(key, () {
       final comparison = _comparison;
       final preview = _rebasePreview;
-      final request = comparison == null
+      final request = comparison == null || !_usesBranchPreviewResult(commit)
           ? widget.repository.loadFiles(commit)
           : _branchPreviewMode == BranchPreviewMode.merge
           ? Future.value(
@@ -6230,8 +6244,10 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   Widget _previewBody(GitCommit commit) {
+    final branchPreview = _usesBranchPreviewResult(commit);
     final files = _previewFilesFor(commit);
     return FutureBuilder<List<GitFileChange>>(
+      key: branchPreview ? null : ValueKey(commit.sha),
       future: files,
       builder: (context, snapshot) {
         final changes = snapshot.data;
@@ -6253,7 +6269,7 @@ class _TimelineScreenState extends State<TimelineScreen>
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (_comparison == null) ...[
+              if (!branchPreview) ...[
                 Text(
                   commit.subject,
                   maxLines: 2,
@@ -6298,19 +6314,19 @@ class _TimelineScreenState extends State<TimelineScreen>
                   ),
                 ),
               ],
-              if (_comparison != null && _branchPreviewHasConflict) ...[
+              if (branchPreview && _branchPreviewHasConflict) ...[
                 _branchPreviewConflictStatusCard(),
                 _branchPreviewSafeWorkspace(),
               ],
-              if (_comparison != null && _branchPreviewResolutionComplete)
+              if (branchPreview && _branchPreviewResolutionComplete)
                 _branchPreviewResolutionCard(),
-              if (_comparison != null && _branchPreviewDropped)
+              if (branchPreview && _branchPreviewDropped)
                 _branchPreviewDroppedCard(),
-              if (_comparison != null &&
+              if (branchPreview &&
                   _branchPreviewReady &&
                   !_branchPreviewResolutionComplete)
                 _branchPreviewApplyCard(),
-              if (_comparison != null &&
+              if (branchPreview &&
                   !_branchPreviewHasConflict &&
                   (_branchPreviewMode == BranchPreviewMode.merge
                           ? _mergePreviewError
@@ -6326,7 +6342,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                     style: const TextStyle(color: _behind, fontSize: 10),
                   ),
                 ),
-              if (_comparison == null) _previewPerson(commit),
+              if (!branchPreview) _previewPerson(commit),
               _previewStats(changes),
               KeyedSubtree(
                 key:
@@ -7008,7 +7024,9 @@ class _TimelineScreenState extends State<TimelineScreen>
     String? selectedPath,
   ) => Container(
     key: Key(
-      _comparison == null ? 'preview-files' : 'branch-preview-file-list',
+      _usesBranchPreviewResult(commit)
+          ? 'branch-preview-file-list'
+          : 'preview-files',
     ),
     alignment: Alignment.topLeft,
     child: failed
@@ -7104,7 +7122,9 @@ class _TimelineScreenState extends State<TimelineScreen>
     final key = _previewKey(commit);
     final future = _previewDiffs.putIfAbsent((sha: key, path: path), () {
       final comparison = _comparison;
-      if (comparison == null) return widget.repository.loadDiff(commit, file);
+      if (comparison == null || !_usesBranchPreviewResult(commit)) {
+        return widget.repository.loadDiff(commit, file);
+      }
       if (_branchPreviewHasConflict) {
         final session = _branchPreviewMode == BranchPreviewMode.merge
             ? _mergePreviewSession
@@ -7123,7 +7143,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       );
     });
     final comparison = _comparison;
-    if (comparison == null) {
+    if (comparison == null || !_usesBranchPreviewResult(commit)) {
       final parent = commit.parents.isEmpty ? null : commit.parents.first;
       final parentLabel = parent == null
           ? '—'

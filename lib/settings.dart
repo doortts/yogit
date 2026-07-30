@@ -93,7 +93,7 @@ class TimelineColumnWidths {
           max,
         );
     return TimelineColumnWidths(
-      sidebar: width('sidebar', 150, 120, 320),
+      sidebar: width('sidebar', 150, 150, 320),
       refs: width('refs', 156, 110, 240),
       graph: json['graph'] is num ? width('graph', 142, 40, 260) : null,
       hash: width('hash', 78, 64, 120),
@@ -426,7 +426,12 @@ class AppSettings {
       ),
       laneColors: valid ? laneColors : defaultLaneColors,
       previewWidth: _clamped(value['previewWidth'], 288, 240, double.infinity),
-      previewHeight: _clamped(value['previewHeight'], 280, 200, 480),
+      previewHeight: _clamped(
+        value['previewHeight'],
+        280,
+        200,
+        double.maxFinite,
+      ),
       baseBranches: baseBranches,
       deletedBranchNames: _parseNestedStringMap(value['deletedBranchNames']),
     );
