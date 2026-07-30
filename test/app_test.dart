@@ -868,29 +868,72 @@ void main() {
     expect(scrollable.position.pixels, 360);
   });
 
-  test('ref connector is a solid one-pixel line', () {
-    const size = Size(120, TimelineScreen.rowHeight);
-    const color = Color(0xFF00E5FF);
-    final row = layoutGraph([commit('tip', 'tip')]).single;
-    final painter = CommitGraphPainter(
-      row: row,
-      selected: false,
-      committerColor: color,
-      refConnector: true,
-    );
+  test(
+    'ref connector points at an ordinary commit with a one-pixel chevron',
+    () {
+      const size = Size(120, TimelineScreen.rowHeight);
+      const color = Color(0xFF00E5FF);
+      final row = layoutGraph([commit('tip', 'tip')]).single;
+      final painter = CommitGraphPainter(
+        row: row,
+        selected: false,
+        committerColor: color,
+        refConnector: true,
+      );
+      const centerY = TimelineScreen.rowHeight / 2;
+      const tip = Offset(13, centerY);
 
-    expect(
-      (Canvas canvas) => painter.paint(canvas, size),
-      paints..line(
-        p1: const Offset(0, TimelineScreen.rowHeight / 2),
-        p2: const Offset(
-          CommitGraphPainter.laneInset,
-          TimelineScreen.rowHeight / 2,
-        ),
-        color: color,
-        strokeWidth: 1.0,
+      expect(painter.refMarkerRadius, CommitGraphPainter.avatarRadius);
+      expect(painter.refArrowTipX, tip.dx);
+      expect(
+        painter.refArrowheadPath(centerY).getBounds(),
+        const Rect.fromLTRB(6, 11, 13, 21),
+      );
+      expect(
+        (Canvas canvas) => painter.paint(canvas, size),
+        paints
+          ..line(
+            p1: const Offset(0, centerY),
+            p2: tip,
+            color: color,
+            strokeWidth: 1.0,
+          )
+          ..path(color: color, strokeWidth: 1.0, style: PaintingStyle.stroke),
+      );
+    },
+  );
+
+  test('ref arrow keeps its gap for merge, working-tree, and compact rows', () {
+    CommitGraphPainter painter(GraphRow row, {bool compact = false}) =>
+        CommitGraphPainter(
+          row: row,
+          selected: false,
+          committerColor: const Color(0xFF00E5FF),
+          refConnector: true,
+          compact: compact,
+        );
+
+    final merge = painter(
+      graphRow(
+        commit: commit('merge', 'merge', parents: const ['a', 'b']),
+        lane: 0,
       ),
     );
+    final workingTree = painter(
+      graphRow(commit: workingTreeCommit('head'), lane: 0),
+    );
+    final compact = painter(
+      graphRow(commit: commit('tip', 'tip'), lane: 3),
+      compact: true,
+    );
+
+    expect(merge.refMarkerRadius, CommitGraphPainter.nodeRadius);
+    expect(merge.refArrowTipX, 18.0);
+    expect(workingTree.refMarkerRadius, CommitGraphPainter.wipNodeRadius);
+    expect(workingTree.refArrowTipX, 16.0);
+    expect(compact.laneX(compact.row.lane), CommitGraphPainter.laneInset);
+    expect(compact.refMarkerRadius, CommitGraphPainter.avatarRadius);
+    expect(compact.refArrowTipX, 13.0);
   });
 
   test('preview rail inherits the previous row dash above its node', () {
@@ -2933,10 +2976,7 @@ void main() {
       painters.map((painter) => painter.row.maxLane),
       everyElement(lessThanOrEqualTo(1)),
     );
-    expect(
-      painters.map((painter) => painter.refConnector),
-      everyElement(isFalse),
-    );
+    expect(painters.map((painter) => painter.refConnector), contains(true));
     expect(
       painters
           .singleWhere((painter) => painter.row.commit.sha == 'root')
@@ -3704,6 +3744,26 @@ void main() {
       tester.getTopLeft(virtualChip).dx - tester.getTopLeft(virtualCell).dx,
       14,
     );
+    expect(
+      find.byKey(
+        const Key(
+          'ref-chip-connector-3333333333333333333333333333333333333333',
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester.getCenter(virtualChip).dy,
+      tester
+          .getCenter(
+            find.byKey(
+              const Key(
+                'virtual-rebase-node-3333333333333333333333333333333333333333',
+              ),
+            ),
+          )
+          .dy,
+    );
     expect(find.text('재작성 1/3'), findsOneWidget);
     expect(find.text('재작성 2/3'), findsOneWidget);
     expect(find.text('재작성 3/3'), findsOneWidget);
@@ -3726,7 +3786,7 @@ void main() {
         .whereType<CommitGraphPainter>();
     expect(
       timelinePainters.map((painter) => painter.refConnector),
-      everyElement(isFalse),
+      contains(true),
     );
     final mappingPainter = tester
         .widgetList<CustomPaint>(find.byType(CustomPaint))
@@ -10245,6 +10305,86 @@ void main() {
     );
   });
 
+  testWidgets('the sidebar collapses to group icons and restores its width', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+            refs: const RepoRefs(
+              local: ['main'],
+              remote: ['origin/main'],
+              tags: ['v1.0'],
+              current: 'main',
+            ),
+          ),
+          controller: controller,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.getSize(find.byKey(const Key('sidebar'))).width, 150);
+    expect(find.byKey(const Key('sidebar-collapse-button')), findsOneWidget);
+    expect(
+      tester.getSize(find.byKey(const Key('sidebar-collapse-icon'))),
+      const Size(18, 18),
+    );
+    expect(
+      tester
+          .widget<Tooltip>(
+            find.ancestor(
+              of: find.byKey(const Key('sidebar-collapse-button')),
+              matching: find.byType(Tooltip),
+            ),
+          )
+          .waitDuration,
+      Duration.zero,
+    );
+
+    await tester.tap(find.byKey(const Key('sidebar-collapse-button')));
+    await tester.pumpAndSettle();
+
+    expect(tester.getSize(find.byKey(const Key('sidebar'))).width, 52);
+    expect(find.byKey(const Key('ref-filter')), findsNothing);
+    for (final section in ['local', 'remote', 'tags']) {
+      expect(
+        find.byKey(Key('sidebar-compact-section-$section')),
+        findsOneWidget,
+      );
+    }
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('sidebar-compact-section-local')),
+        matching: find.text('1'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester.getSize(find.byKey(const Key('sidebar-expand-icon'))),
+      const Size(18, 18),
+    );
+    expect(
+      tester
+          .widget<Tooltip>(
+            find.ancestor(
+              of: find.byKey(const Key('sidebar-expand-button')),
+              matching: find.byType(Tooltip),
+            ),
+          )
+          .waitDuration,
+      Duration.zero,
+    );
+
+    await tester.tap(find.byKey(const Key('sidebar-expand-button')));
+    await tester.pumpAndSettle();
+
+    expect(tester.getSize(find.byKey(const Key('sidebar'))).width, 150);
+    expect(find.byKey(const Key('ref-filter')), findsOneWidget);
+  });
+
   testWidgets('the sidebar reads a size up', (tester) async {
     await tester.pumpWidget(
       app(
@@ -10753,10 +10893,10 @@ void main() {
     // Clamps at both ends of the design range.
     await tester.drag(
       find.byKey(const Key('preview-resizer')),
-      const Offset(-400, 0),
+      const Offset(-800, 0),
     );
     await tester.pumpAndSettle();
-    expect(previewWidth(), 560);
+    expect(previewWidth(), 840);
     await tester.drag(
       find.byKey(const Key('preview-resizer')),
       const Offset(600, 0),
@@ -10787,6 +10927,10 @@ void main() {
         'previewHeight': 4000,
       }).previewHeight,
       480,
+    );
+    expect(
+      AppSettings.fromJson(<String, dynamic>{'previewWidth': 900}).previewWidth,
+      840,
     );
   });
 
@@ -11520,6 +11664,7 @@ void main() {
       find.descendant(of: button, matching: find.text('⌘D')),
       findsOneWidget,
     );
+    expect(find.byKey(const Key('preview-hash')), findsNothing);
     expect(
       (tester
                   .widget<Container>(
@@ -12945,9 +13090,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    final hash = tester.widget<Text>(find.byKey(const Key('preview-hash')));
-    expect(hash.style?.fontFamily, technicalFontFamily);
-    expect(hash.style?.fontFamilyFallback, technicalFontFallback);
+    expect(find.byKey(const Key('preview-hash')), findsNothing);
     final shortcut = tester.widget<Text>(
       find.text('파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓'),
     );

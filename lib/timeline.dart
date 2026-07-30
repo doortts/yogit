@@ -678,6 +678,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   static const _pageSize = 500;
 
   static const _sidebarRange = (min: 120.0, max: 320.0);
+  static const _collapsedSidebarWidth = 52.0;
 
   TimelineThemePalette get _palette => context.timelineTheme;
 
@@ -693,7 +694,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     return segments.isEmpty ? root : segments.last;
   }
 
-  static const _previewWidthRange = (min: 240.0, max: 560.0);
+  static const _previewWidthRange = (min: 240.0, max: 840.0);
   static const _previewHeightRange = (min: 200.0, max: 480.0);
 
   final _focusNode = FocusNode();
@@ -801,6 +802,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   final _collapsedRefSections = <_RefSection>{};
   final _collapsedRefFolders = <String>{};
   var _showAllTags = false;
+  var _sidebarCollapsed = false;
 
   late final Map<String, double> _widths = _widthMap(widget.columnWidths);
   late double? _commitWidth = widget.columnWidths.commit;
@@ -2588,36 +2590,40 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   /// The sidebar, with a drag handle on its right edge. The timeline sits in the
   /// leftover width, so its own flex math follows along for free.
-  Widget _sidebar() => SizedBox(
-    key: const Key('sidebar'),
-    width: _sidebarWidth,
-    child: Stack(
-      children: [
-        Positioned.fill(child: _sidebarBody()),
-        Positioned(
-          right: 0,
-          top: 0,
-          bottom: 0,
-          width: 8,
-          child: MouseRegion(
-            cursor: SystemMouseCursors.resizeColumn,
-            child: GestureDetector(
-              key: const Key('sidebar-resizer'),
-              behavior: HitTestBehavior.opaque,
-              onHorizontalDragUpdate: (details) => setState(
-                () => _sidebarWidth = (_sidebarWidth + details.delta.dx).clamp(
-                  _sidebarRange.min,
-                  _sidebarRange.max,
+  Widget _sidebar() {
+    final width = _sidebarCollapsed ? _collapsedSidebarWidth : _sidebarWidth;
+    return SizedBox(
+      key: const Key('sidebar'),
+      width: width,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: _sidebarCollapsed ? _collapsedSidebarBody() : _sidebarBody(),
+          ),
+          if (!_sidebarCollapsed)
+            Positioned(
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: 8,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.resizeColumn,
+                child: GestureDetector(
+                  key: const Key('sidebar-resizer'),
+                  behavior: HitTestBehavior.opaque,
+                  onHorizontalDragUpdate: (details) => setState(
+                    () => _sidebarWidth = (_sidebarWidth + details.delta.dx)
+                        .clamp(_sidebarRange.min, _sidebarRange.max),
+                  ),
+                  onHorizontalDragEnd: (_) => _saveColumnWidths(),
+                  onHorizontalDragCancel: _saveColumnWidths,
                 ),
               ),
-              onHorizontalDragEnd: (_) => _saveColumnWidths(),
-              onHorizontalDragCancel: _saveColumnWidths,
             ),
-          ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 
   Widget _sidebarBody() => Container(
     decoration: BoxDecoration(
@@ -2628,34 +2634,42 @@ class _TimelineScreenState extends State<TimelineScreen>
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
-          child: TextField(
-            key: const Key('ref-filter'),
-            controller: _filterController,
-            onChanged: (value) => setState(() => _filter = value),
-            style: TextStyle(color: _palette.text, fontSize: 13),
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: '브랜치와 태그 찾기',
-              hintStyle: TextStyle(color: _palette.muted, fontSize: 13),
-              filled: true,
-              fillColor: _palette.raised,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 7,
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const Key('ref-filter'),
+                  controller: _filterController,
+                  onChanged: (value) => setState(() => _filter = value),
+                  style: TextStyle(color: _palette.text, fontSize: 13),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: '브랜치와 태그 찾기',
+                    hintStyle: TextStyle(color: _palette.muted, fontSize: 13),
+                    filled: true,
+                    fillColor: _palette.raised,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 7,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(5),
+                      borderSide: BorderSide(color: _palette.border),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(5),
+                      borderSide: BorderSide(color: _palette.border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(5),
+                      borderSide: BorderSide(color: _palette.interactive),
+                    ),
+                  ),
+                ),
               ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(5),
-                borderSide: BorderSide(color: _palette.border),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(5),
-                borderSide: BorderSide(color: _palette.border),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(5),
-                borderSide: BorderSide(color: _palette.interactive),
-              ),
-            ),
+              const SizedBox(width: 4),
+              _sidebarToggleButton(opens: false),
+            ],
           ),
         ),
         Expanded(
@@ -2670,6 +2684,71 @@ class _TimelineScreenState extends State<TimelineScreen>
           ),
         ),
       ],
+    ),
+  );
+
+  Widget _collapsedSidebarBody() => Container(
+    decoration: BoxDecoration(
+      color: _palette.panel,
+      border: Border(right: BorderSide(color: _palette.border)),
+    ),
+    child: Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 10, bottom: 8),
+          child: _sidebarToggleButton(opens: true),
+        ),
+        _compactSidebarSection(_RefSection.local, _localBranches.length),
+        _compactSidebarSection(_RefSection.remote, _refs.remote.length),
+        _compactSidebarSection(_RefSection.tags, _refs.tags.length),
+      ],
+    ),
+  );
+
+  Widget _sidebarToggleButton({required bool opens}) => Tooltip(
+    message: opens ? '왼쪽 패널 열기' : '왼쪽 패널 닫기',
+    waitDuration: Duration.zero,
+    child: SizedBox(
+      width: 28,
+      height: 28,
+      child: IconButton(
+        key: Key(opens ? 'sidebar-expand-button' : 'sidebar-collapse-button'),
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+        onPressed: () => setState(() => _sidebarCollapsed = !opens),
+        icon: CustomPaint(
+          key: Key(opens ? 'sidebar-expand-icon' : 'sidebar-collapse-icon'),
+          size: const Size(18, 18),
+          painter: _PaneToggleIconPainter(opens: opens, color: _palette.muted),
+        ),
+      ),
+    ),
+  );
+
+  Widget _compactSidebarSection(_RefSection section, int count) => Semantics(
+    label: '${section.label} $count',
+    child: Container(
+      key: Key('sidebar-compact-section-${section.name}'),
+      width: double.infinity,
+      height: 52,
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: _palette.border)),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(section.icon, size: 14, color: _palette.muted),
+          const SizedBox(height: 3),
+          Text(
+            '$count',
+            style: TextStyle(
+              color: _palette.muted,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
     ),
   );
 
@@ -4769,7 +4848,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       index,
       graphWidth,
       selected && !virtualPreview,
-      refs.isNotEmpty && _comparison == null,
+      refs.isNotEmpty,
       committerColor: previewColor,
       outgoingRailColor: commonBoundary ? _palette.muted : null,
     );
@@ -5208,11 +5287,19 @@ class _TimelineScreenState extends State<TimelineScreen>
                   for (var index = 0; index < shown.length; index++)
                     Positioned(
                       left: inset + index * slot,
-                      top: 6,
+                      top: 4,
                       width: slot,
                       height: 24,
                       child: _refChip(commit, shown[index], color),
                     ),
+                  Positioned(
+                    key: Key('ref-chip-connector-${commit.sha}'),
+                    left: constraints.maxWidth - inset,
+                    right: 0,
+                    top: 15.5,
+                    height: 1,
+                    child: ColoredBox(color: color),
+                  ),
                 ],
               );
             },
@@ -5678,20 +5765,12 @@ class _TimelineScreenState extends State<TimelineScreen>
               labelSize: 11,
               shortcutSize: 8,
             ),
-            const SizedBox(width: 8),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 64),
-              child: Text(
-                key: const Key('preview-hash'),
-                _cherryPickState != null
-                    ? _cherryPickState!.commitSha
-                    : commit == null
-                    ? '—'
-                    : commit.isWorkingTree
-                    ? 'WIP'
-                    : commit.shortSha,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+            if (_cherryPickState == null &&
+                (commit?.isWorkingTree ?? false)) ...[
+              const SizedBox(width: 8),
+              Text(
+                'WIP',
+                key: const Key('preview-working-tree'),
                 style: TextStyle(
                   color: _palette.muted,
                   fontSize: 11,
@@ -5699,7 +5778,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                   fontFamilyFallback: technicalFontFallback,
                 ),
               ),
-            ),
+            ],
           ],
         ],
       ),
@@ -7672,6 +7751,39 @@ class _ShowDiffButton extends StatelessWidget {
   }
 }
 
+class _PaneToggleIconPainter extends CustomPainter {
+  const _PaneToggleIconPainter({required this.opens, required this.color});
+
+  final bool opens;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..strokeCap = StrokeCap.round;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(0.75, 0.75, size.width - 1.5, size.height - 1.5),
+        const Radius.circular(3.5),
+      ),
+      paint,
+    );
+    final dividerX = size.width * (opens ? 0.36 : 0.25);
+    canvas.drawLine(
+      Offset(dividerX, 3.5),
+      Offset(dividerX, size.height - 3.5),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _PaneToggleIconPainter oldDelegate) =>
+      oldDelegate.opens != opens || oldDelegate.color != color;
+}
+
 /// Copies a ref name and answers with a check for a moment, so the click has
 /// feedback without a snackbar.
 class _CopyButton extends StatefulWidget {
@@ -7950,6 +8062,10 @@ class CommitGraphPainter extends CustomPainter {
   /// Rails are opaque.
   static const railOpacity = 1.0;
   static const connectorWidth = 1.0;
+  static const avatarRadius = 11.0;
+  static const refArrowGap = 4.0;
+  static const refArrowLength = 7.0;
+  static const refArrowHalfHeight = 5.0;
   static const nodeRadius = 6.0;
   static const wipNodeRadius = 8.0;
   static const wipNodeDash = 2.5;
@@ -7996,6 +8112,22 @@ class CommitGraphPainter extends CustomPainter {
 
   double laneX(int lane) =>
       compact ? laneInset : laneInset + lane * laneSpacing;
+
+  double get refMarkerRadius {
+    if (row.commit.isWorkingTree) return wipNodeRadius;
+    if (showsMergeDot) return nodeRadius;
+    return avatarRadius;
+  }
+
+  double get refArrowTipX => laneX(row.lane) - refMarkerRadius - refArrowGap;
+
+  Path refArrowheadPath(double centerY) {
+    final tipX = refArrowTipX;
+    return Path()
+      ..moveTo(tipX - refArrowLength, centerY - refArrowHalfHeight)
+      ..lineTo(tipX, centerY)
+      ..lineTo(tipX - refArrowLength, centerY + refArrowHalfHeight);
+  }
 
   /// A line being born out of this row's node: the second-or-later parent edge of
   /// a merge. Everything else is an existing line moving — a foreign column
@@ -8210,14 +8342,18 @@ class CommitGraphPainter extends CustomPainter {
     if (passThrough) return;
     final nodeX = laneX(row.lane);
     if (refConnector) {
+      final connectorPaint = Paint()
+        ..color = committerColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = connectorWidth
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round;
       canvas.drawLine(
-        Offset.zero.translate(0, centerY),
-        Offset(nodeX, centerY),
-        Paint()
-          ..color = committerColor
-          ..strokeWidth = connectorWidth
-          ..strokeCap = StrokeCap.round,
+        Offset(0, centerY),
+        Offset(refArrowTipX, centerY),
+        connectorPaint,
       );
+      canvas.drawPath(refArrowheadPath(centerY), connectorPaint);
     }
     _drawNode(canvas, Offset(nodeX, centerY));
   }
