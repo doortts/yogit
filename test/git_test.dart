@@ -1656,12 +1656,13 @@ void main() {
           return ProcessResult(
             1,
             0,
-            'refs/heads/main aaa1 1700000100\n'
-                'refs/heads/feature/x aaa2 1700000200\n'
-                'refs/remotes/origin/HEAD aaa1 1700000100\n'
-                'refs/remotes/origin/main aaa3 1700000300\n'
-                'refs/tags/undated aaa5 \n'
-                'refs/tags/v0.1.0 aaa4 1700000400\n',
+            'refs/heads/main\x00aaa1\x001700000100'
+                '\x00company/trunk\x00company\n'
+                'refs/heads/feature/x\x00aaa2\x001700000200\x00\x00\n'
+                'refs/remotes/company/HEAD\x00aaa1\x001700000100\x00\x00\n'
+                'refs/remotes/company/trunk\x00aaa3\x001700000300\x00\x00\n'
+                'refs/tags/undated\x00aaa5\x00\x00\x00\n'
+                'refs/tags/v0.1.0\x00aaa4\x001700000400\x00\x00\n',
             '',
           );
         }
@@ -1681,19 +1682,21 @@ void main() {
     final refs = await repository.loadRefs();
 
     expect(refs.local, ['main', 'feature/x']);
-    expect(refs.remote, ['origin/main']);
+    expect(refs.remote, ['company/trunk']);
     expect(refs.tags, ['undated', 'v0.1.0']);
     expect(refs.tagCreatorTimes, {'v0.1.0': 1700000400});
     expect(refs.current, 'main');
-    // origin/HEAD is an alias, so it contributes neither a name nor a tip.
+    // company/HEAD is an alias, so it contributes neither a name nor a tip.
     expect(refs.tips, {
       'main': 'aaa1',
       'feature/x': 'aaa2',
-      'origin/main': 'aaa3',
+      'company/trunk': 'aaa3',
       'undated': 'aaa5',
       'v0.1.0': 'aaa4',
     });
     expect(refs.localTips, {'main': 'aaa1', 'feature/x': 'aaa2'});
+    expect(refs.upstreams, {'main': 'company/trunk'});
+    expect(refs.upstreamRemotes, {'main': 'company'});
     expect(refs.aheadBehind['main']?.ahead, 2);
     expect(refs.aheadBehind['main']?.behind, 3);
     // Only local branches have a birth time, and an empty reflog just has none.
@@ -1701,7 +1704,8 @@ void main() {
     expect(calls, [
       [
         'for-each-ref',
-        '--format=%(refname) %(objectname) %(creatordate:unix)',
+        '--format=%(refname)%00%(objectname)%00%(creatordate:unix)'
+            '%00%(upstream:short)%00%(upstream:remotename)',
         'refs/heads',
         'refs/remotes',
         'refs/tags',
@@ -1712,12 +1716,10 @@ void main() {
         'rev-list',
         '--left-right',
         '--count',
-        'main...refs/remotes/origin/main',
+        'main...refs/remotes/company/trunk',
       ],
       ['branch', '--show-current'],
     ]);
-    // Arguments stay single tokens — only the format string carries a space, and
-    // it reaches git as one argument rather than through a shell.
     expect(
       calls
           .expand((arguments) => arguments)
@@ -1761,6 +1763,36 @@ void main() {
     expect(refs.aheadBehind['main']?.behind, 1);
   });
 
+  test(
+    'fetchRemote fetches the named remote without terminal prompts',
+    () async {
+      List<String>? call;
+      Map<String, String>? fetchEnvironment;
+      final repository = GitRepository(
+        '/repo',
+        runner: (executable, arguments, {workingDirectory, environment}) async {
+          call = arguments;
+          fetchEnvironment = environment;
+          return ProcessResult(1, 0, '', '');
+        },
+      );
+
+      expect(
+        await repository.fetchRemote('company'),
+        FetchOriginResult.updated,
+      );
+      expect(call, [
+        '-c',
+        'credential.interactive=never',
+        'fetch',
+        '--prune',
+        'company',
+      ]);
+      expect(fetchEnvironment?['GIT_TERMINAL_PROMPT'], '0');
+      expect(fetchEnvironment?['GCM_INTERACTIVE'], 'Never');
+    },
+  );
+
   test('fetchOrigin disables terminal prompts and handles no origin', () async {
     Map<String, String>? fetchEnvironment;
     final repository = GitRepository(
@@ -1794,7 +1826,12 @@ void main() {
             'branch' => ProcessResult(1, 0, '\n', ''),
             // A branch whose reflog is gone: the failure stays local to that branch.
             'reflog' => ProcessResult(1, 128, '', 'fatal: no reflog for main'),
-            _ => ProcessResult(1, 0, 'refs/heads/main aaa1\n', ''),
+            _ => ProcessResult(
+              1,
+              0,
+              'refs/heads/main\x00aaa1\x00\x00\x00\n',
+              '',
+            ),
           },
     );
 

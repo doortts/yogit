@@ -1325,6 +1325,8 @@ class RepoRefs {
     this.birthTimes = const {},
     this.tagCreatorTimes = const {},
     this.aheadBehind = const {},
+    this.upstreams = const {},
+    this.upstreamRemotes = const {},
   });
 
   final List<String> local;
@@ -1346,8 +1348,14 @@ class RepoRefs {
   /// Tag name → creator unix time. Absent when Git has no creator date.
   final Map<String, int> tagCreatorTimes;
 
-  /// Local branch name → commits unique to local and matching origin branch.
+  /// Local branch name → commits unique to local and its configured upstream.
   final Map<String, BranchAheadBehind> aheadBehind;
+
+  /// Local branch name → configured remote-tracking branch.
+  final Map<String, String> upstreams;
+
+  /// Local branch name → remote that owns its configured upstream.
+  final Map<String, String> upstreamRemotes;
 }
 
 class BranchAheadBehind {
@@ -2435,7 +2443,8 @@ class GitRepository implements FullDiffRepository {
   Future<RepoRefs> loadRefs() async {
     final lines = (await _run([
       'for-each-ref',
-      '--format=%(refname) %(objectname) %(creatordate:unix)',
+      '--format=%(refname)%00%(objectname)%00%(creatordate:unix)'
+          '%00%(upstream:short)%00%(upstream:remotename)',
       'refs/heads',
       'refs/remotes',
       'refs/tags',
@@ -2446,21 +2455,20 @@ class GitRepository implements FullDiffRepository {
     final tips = <String, String>{};
     final localTips = <String, String>{};
     final tagCreatorTimes = <String, int>{};
+    final upstreams = <String, String>{};
+    final upstreamRemotes = <String, String>{};
     final buckets = {
       'refs/heads/': local,
       'refs/remotes/': remote,
       'refs/tags/': tags,
     };
     for (final line in lines) {
-      final firstSpace = line.indexOf(' ');
-      final secondSpace = line.indexOf(' ', firstSpace + 1);
-      final name = line.substring(0, firstSpace);
-      final sha = secondSpace < 0
-          ? line.substring(firstSpace + 1)
-          : line.substring(firstSpace + 1, secondSpace);
-      final creatorTime = secondSpace < 0
-          ? null
-          : int.tryParse(line.substring(secondSpace + 1).trim());
+      final fields = line.split('\x00');
+      if (fields.length != 5) {
+        throw FormatException('Invalid ref metadata: $line');
+      }
+      final [name, sha, creatorField, upstream, upstreamRemote] = fields;
+      final creatorTime = int.tryParse(creatorField);
       for (final bucket in buckets.entries) {
         if (!name.startsWith(bucket.key)) continue;
         final short = name.substring(bucket.key.length);
@@ -2468,7 +2476,15 @@ class GitRepository implements FullDiffRepository {
         if (bucket.value == remote && short.endsWith('/HEAD')) break;
         bucket.value.add(short);
         tips[short] = sha;
-        if (bucket.value == local) localTips[short] = sha;
+        if (bucket.value == local) {
+          localTips[short] = sha;
+          if (upstream.isNotEmpty &&
+              upstreamRemote.isNotEmpty &&
+              upstreamRemote != '.') {
+            upstreams[short] = upstream;
+            upstreamRemotes[short] = upstreamRemote;
+          }
+        }
         if (bucket.value == tags && creatorTime != null) {
           tagCreatorTimes[short] = creatorTime;
         }
@@ -2477,9 +2493,9 @@ class GitRepository implements FullDiffRepository {
     }
     final births = await Future.wait(local.map(_birthTime));
     final aheadBehind = <String, BranchAheadBehind>{};
-    for (final branch in local) {
-      if (!remote.contains('origin/$branch')) continue;
-      aheadBehind[branch] = await _loadAheadBehind(branch);
+    for (final entry in upstreams.entries) {
+      if (!remote.contains(entry.value)) continue;
+      aheadBehind[entry.key] = await _loadAheadBehind(entry.key, entry.value);
     }
     final current = (await _run(['branch', '--show-current'])).trim();
     return RepoRefs(
@@ -2495,15 +2511,20 @@ class GitRepository implements FullDiffRepository {
           local[index]: ?births[index],
       },
       aheadBehind: aheadBehind,
+      upstreams: upstreams,
+      upstreamRemotes: upstreamRemotes,
     );
   }
 
-  Future<BranchAheadBehind> _loadAheadBehind(String branch) async {
+  Future<BranchAheadBehind> _loadAheadBehind(
+    String branch,
+    String upstream,
+  ) async {
     final counts = (await _run([
       'rev-list',
       '--left-right',
       '--count',
-      '$branch...refs/remotes/origin/$branch',
+      '$branch...refs/remotes/$upstream',
     ])).trim().split(RegExp(r'\s+'));
     if (counts.length != 2) {
       throw FormatException('Invalid ahead/behind counts for $branch');
@@ -2543,12 +2564,16 @@ class GitRepository implements FullDiffRepository {
 
   Future<FetchOriginResult> fetchOrigin() async {
     if (await loadOriginUrl() == null) return FetchOriginResult.noOrigin;
-    const arguments = [
+    return fetchRemote('origin');
+  }
+
+  Future<FetchOriginResult> fetchRemote(String remote) async {
+    final arguments = [
       '-c',
       'credential.interactive=never',
       'fetch',
       '--prune',
-      'origin',
+      remote,
     ];
     final result = await runner(
       gitExecutable,
