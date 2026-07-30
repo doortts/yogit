@@ -426,7 +426,12 @@ class AppSettings {
       ),
       laneColors: valid ? laneColors : defaultLaneColors,
       previewWidth: _clamped(value['previewWidth'], 288, 240, 560),
-      previewHeight: _clamped(value['previewHeight'], 280, 200, 480),
+      previewHeight: _clamped(
+        value['previewHeight'],
+        280,
+        200,
+        double.infinity,
+      ),
       baseBranches: baseBranches,
       deletedBranchNames: _parseNestedStringMap(value['deletedBranchNames']),
     );

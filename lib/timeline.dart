@@ -652,7 +652,9 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   static const _previewWidthRange = (min: 240.0, max: 560.0);
-  static const _previewHeightRange = (min: 200.0, max: 480.0);
+  static const _previewMinHeight = 200.0;
+  static const _timelineHeaderHeight = 29.0;
+  static const _branchPreviewSummaryHeight = 52.0;
 
   final _focusNode = FocusNode();
   final _timelineKey = GlobalKey();
@@ -779,6 +781,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   var _commitAvailableWidth = 0.0;
   late double _previewWidth = widget.previewWidth;
   late double _previewHeight = widget.previewHeight;
+  var _bottomPreviewMaxHeight = double.infinity;
   _FullDiffRouteSession? _fullDiffRouteSession;
   FullDiffPreferences? _pendingFullDiffPreferences;
   FullDiffColumnWidths? _pendingFullDiffColumnWidths;
@@ -1506,7 +1509,14 @@ class _TimelineScreenState extends State<TimelineScreen>
       child: KeyedSubtree(key: _timelineKey, child: _timeline()),
     );
     if (placement == PreviewPlacement.bottom) {
-      final extent = math.min(_previewHeight, constraints.maxHeight);
+      final timelineChromeHeight =
+          _timelineHeaderHeight +
+          (_compareRef == null ? 0 : _branchPreviewSummaryHeight);
+      _bottomPreviewMaxHeight = math.max(
+        0,
+        constraints.maxHeight - timelineChromeHeight,
+      );
+      final extent = math.min(_previewHeight, _bottomPreviewMaxHeight);
       return Column(
         key: const Key('preview-layout-bottom'),
         children: [
@@ -3214,7 +3224,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               children: [
                 if (_compareRef != null) _branchPreviewSummary(),
                 SizedBox(
-                  height: 29,
+                  height: _timelineHeaderHeight,
                   child: Row(
                     children: [
                       for (final column in timelineColumns.keys)
@@ -3359,7 +3369,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         : resultLabel;
     return Container(
       key: const Key('branch-preview-summary'),
-      height: 52,
+      height: _branchPreviewSummaryHeight,
       padding: const EdgeInsets.symmetric(horizontal: 14),
       decoration: BoxDecoration(
         color: _palette.surface,
@@ -5441,9 +5451,13 @@ class _TimelineScreenState extends State<TimelineScreen>
         onHorizontalDragEnd: vertical ? null : (_) => _savePreviewSize(),
         onVerticalDragUpdate: vertical
             ? (details) => setState(() {
+                final minHeight = math.min(
+                  _previewMinHeight,
+                  _bottomPreviewMaxHeight,
+                );
                 _previewHeight = (_previewHeight - details.delta.dy).clamp(
-                  _previewHeightRange.min,
-                  _previewHeightRange.max,
+                  minHeight,
+                  _bottomPreviewMaxHeight,
                 );
               })
             : null,
