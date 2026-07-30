@@ -837,6 +837,139 @@ void main() {
     },
   );
 
+  test('rebase preview reports rewritten commits and a virtual tip', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'yogit_rebase_preview_fixture_',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    await File('${root.path}/base.txt').writeAsString('base\n');
+    await _git(root, ['add', 'base.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+    await _git(root, ['switch', '-c', 'feature']);
+    await File('${root.path}/one.txt').writeAsString('one\n');
+    await _git(root, ['add', 'one.txt']);
+    await _git(root, ['commit', '-m', 'feature one']);
+    await File('${root.path}/two.txt').writeAsString('two\n');
+    await _git(root, ['add', 'two.txt']);
+    await _git(root, ['commit', '-m', 'feature two']);
+    final originalFeature = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+    await _git(root, ['switch', 'main']);
+    await File('${root.path}/main.txt').writeAsString('main\n');
+    await _git(root, ['add', 'main.txt']);
+    await _git(root, ['commit', '-m', 'main']);
+    final originalMain = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+
+    final session = await GitRepository(
+      root.path,
+    ).openRebasePreview(baseRef: 'main', compareRef: 'feature');
+    addTearDown(session.dispose);
+    final result = await session.start();
+
+    expect(result.status, RebasePreviewStatus.clean);
+    expect(result.rewritten, hasLength(2));
+    expect(result.rewritten.map((entry) => entry.original.subject), [
+      'feature one',
+      'feature two',
+    ]);
+    expect(
+      result.rewritten.every(
+        (entry) => entry.original.sha != entry.rewrittenSha,
+      ),
+      isTrue,
+    );
+    expect(result.virtualTip, result.rewritten.last.rewrittenSha);
+    expect((await _git(root, ['rev-parse', 'main'])).trim(), originalMain);
+    expect(
+      (await _git(root, ['rev-parse', 'feature'])).trim(),
+      originalFeature,
+    );
+  });
+
+  test(
+    'rebase preview does not pair a dropped commit with another rewrite',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'yogit_rebase_preview_dropped_',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      await _initRepository(root);
+      await File('${root.path}/base.txt').writeAsString('base\n');
+      await _git(root, ['add', 'base.txt']);
+      await _git(root, ['commit', '-m', 'base']);
+      await _git(root, ['switch', '-c', 'feature']);
+      await File('${root.path}/shared.txt').writeAsString('shared\n');
+      await _git(root, ['add', 'shared.txt']);
+      await _git(root, ['commit', '-m', 'already upstream']);
+      final sharedCommit = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+      await File('${root.path}/feature.txt').writeAsString('feature\n');
+      await _git(root, ['add', 'feature.txt']);
+      await _git(root, ['commit', '-m', 'feature only']);
+      await _git(root, ['switch', 'main']);
+      await File('${root.path}/main.txt').writeAsString('main\n');
+      await _git(root, ['add', 'main.txt']);
+      await _git(root, ['commit', '-m', 'main first']);
+      await _git(root, ['cherry-pick', sharedCommit]);
+
+      final session = await GitRepository(
+        root.path,
+      ).openRebasePreview(baseRef: 'main', compareRef: 'feature');
+      addTearDown(session.dispose);
+      final result = await session.start();
+
+      expect(result.status, RebasePreviewStatus.clean);
+      expect(result.rewritten.map((entry) => entry.original.subject), [
+        'feature only',
+      ]);
+    },
+  );
+
+  test(
+    'rebase preview continues after resolving its current conflict',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'yogit_rebase_preview_conflict_',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      await _initRepository(root);
+      await File('${root.path}/shared.txt').writeAsString('base\n');
+      await _git(root, ['add', 'shared.txt']);
+      await _git(root, ['commit', '-m', 'base']);
+      await _git(root, ['switch', '-c', 'feature']);
+      await File('${root.path}/one.txt').writeAsString('one\n');
+      await _git(root, ['add', 'one.txt']);
+      await _git(root, ['commit', '-m', 'feature one']);
+      await File('${root.path}/shared.txt').writeAsString('feature\n');
+      await _git(root, ['commit', '-am', 'feature conflict']);
+      final conflictingSha = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+      await _git(root, ['switch', 'main']);
+      await File('${root.path}/shared.txt').writeAsString('main\n');
+      await _git(root, ['commit', '-am', 'main']);
+
+      final session = await GitRepository(
+        root.path,
+      ).openRebasePreview(baseRef: 'main', compareRef: 'feature');
+      final conflict = await session.start();
+
+      expect(conflict.status, RebasePreviewStatus.conflict);
+      expect(conflict.currentCommit?.sha, conflictingSha);
+      expect(conflict.completed, 1);
+      expect(conflict.total, 2);
+      expect(conflict.conflictFiles, ['shared.txt']);
+      final worktree = session.worktreePath!;
+      expect(Directory(worktree).existsSync(), isTrue);
+
+      await File(session.filePath('shared.txt')).writeAsString('resolved\n');
+      await session.markResolved('shared.txt');
+      final completed = await session.continueAfterResolving();
+
+      expect(completed.status, RebasePreviewStatus.clean);
+      expect(completed.virtualTip, isNotEmpty);
+      await session.dispose();
+      expect(Directory(worktree).existsSync(), isFalse);
+    },
+  );
+
   test('cherry-pick applies one commit and rejects a dirty worktree', () async {
     final root = await Directory.systemTemp.createTemp('yogit_cherrypick_');
     addTearDown(() => root.delete(recursive: true));
@@ -869,6 +1002,23 @@ void main() {
     expect((await _git(root, ['rev-parse', 'HEAD'])).trim(), head);
     expect(await File('${root.path}/base.txt').readAsString(), 'dirty\n');
     expect(File('${root.path}/picked.txt').existsSync(), isFalse);
+  });
+
+  test('repository reports whether a Git operation is active', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'yogit_operation_state_',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    await File('${root.path}/base.txt').writeAsString('base\n');
+    await _git(root, ['add', 'base.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+    final repository = GitRepository(root.path);
+
+    expect(await repository.operationInProgress(), isFalse);
+    final head = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+    await File('${root.path}/.git/MERGE_HEAD').writeAsString('$head\n');
+    expect(await repository.operationInProgress(), isTrue);
   });
 
   test('cherry-pick conflict can be restored, staged, and continued', () async {
