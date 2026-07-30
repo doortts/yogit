@@ -39,6 +39,159 @@ const _tooltipDelay = Duration(milliseconds: 400);
 const _main = Color(0xFF8AD6A1);
 const _behind = Color(0xFFF0A35E);
 
+List<Color> rebaseMappingColors(Iterable<Color> reserved) {
+  final used = reserved.map((color) => color.toARGB32()).toSet();
+  final colors = <Color>[];
+  for (var index = 0; index < 360 && colors.length < 5; index++) {
+    final color = HSLColor.fromAHSL(
+      1,
+      (18 + index * 67) % 360,
+      0.26,
+      0.38,
+    ).toColor();
+    if (used.add(color.toARGB32())) colors.add(color);
+  }
+  if (colors.length < 5) {
+    throw StateError('Could not allocate rebase mapping colors.');
+  }
+  return colors;
+}
+
+enum PreviewGraphNodeKind {
+  actual,
+  virtualMerge,
+  virtualRebase,
+  conflictTarget,
+}
+
+typedef RebaseGraphMapping = ({
+  String originalSha,
+  String rewrittenSha,
+  int originalRow,
+  int rewrittenRow,
+  int routeLane,
+  Color color,
+});
+
+class BranchPreviewGraph {
+  const BranchPreviewGraph({
+    required this.rows,
+    this.kinds = const {},
+    this.dashedLanes = const {},
+    this.mappings = const [],
+  });
+
+  final List<GraphRow> rows;
+  final Map<String, PreviewGraphNodeKind> kinds;
+  final Map<int, Set<int>> dashedLanes;
+  final List<RebaseGraphMapping> mappings;
+}
+
+BranchPreviewGraph layoutMergePreviewGraph(BranchComparisonResult comparison) {
+  final template = comparison.commits.first.commit;
+  final sha = 'virtual-merge-${comparison.baseTip}-${comparison.compareTip}';
+  final virtual = GitCommit(
+    sha: sha,
+    shortSha: 'VM',
+    parents: [comparison.baseTip, comparison.compareTip],
+    author: template.author,
+    authorTimestamp: template.authorTimestamp,
+    committer: template.committer,
+    committerTimestamp: template.committerTimestamp + 1,
+    refs: const [],
+    subject: 'Merge 미리보기',
+  );
+  final rows = layoutGraph([
+    virtual,
+    for (final entry in comparison.commits) entry.commit,
+  ]);
+  return BranchPreviewGraph(
+    rows: rows,
+    kinds: {sha: PreviewGraphNodeKind.virtualMerge},
+    dashedLanes: _previewDashedLanes(rows, {
+      comparison.baseTip,
+      comparison.compareTip,
+    }),
+  );
+}
+
+BranchPreviewGraph layoutRebasePreviewGraph(
+  BranchComparisonResult comparison,
+  RebasePreviewResult preview,
+  List<Color> colors,
+) {
+  if (preview.rewritten.isEmpty) {
+    return BranchPreviewGraph(rows: layoutBranchComparison(comparison.commits));
+  }
+  final virtualOldestFirst = <GitCommit>[];
+  var parent = comparison.baseTip;
+  for (final rewrite in preview.rewritten) {
+    final original = rewrite.original;
+    virtualOldestFirst.add(
+      GitCommit(
+        sha: rewrite.rewrittenSha,
+        shortSha: 'new SHA',
+        parents: [parent],
+        author: original.author,
+        authorTimestamp: original.authorTimestamp,
+        committer: original.committer,
+        committerTimestamp: original.committerTimestamp,
+        refs: const [],
+        subject: original.subject,
+      ),
+    );
+    parent = rewrite.rewrittenSha;
+  }
+  final virtualNewestFirst = virtualOldestFirst.reversed.toList();
+  final rows = layoutGraph([
+    ...virtualNewestFirst,
+    for (final entry in comparison.commits) entry.commit,
+  ]);
+  final rowBySha = {
+    for (var index = 0; index < rows.length; index++)
+      rows[index].commit.sha: index,
+  };
+  return BranchPreviewGraph(
+    rows: rows,
+    kinds: {
+      for (final commit in virtualOldestFirst)
+        commit.sha: PreviewGraphNodeKind.virtualRebase,
+    },
+    dashedLanes: _previewDashedLanes(rows, {
+      comparison.baseTip,
+      ...virtualOldestFirst.map((commit) => commit.sha),
+    }),
+    mappings: [
+      for (var index = 0; index < preview.rewritten.length; index++)
+        (
+          originalSha: preview.rewritten[index].original.sha,
+          rewrittenSha: preview.rewritten[index].rewrittenSha,
+          originalRow: rowBySha[preview.rewritten[index].original.sha]!,
+          rewrittenRow: rowBySha[preview.rewritten[index].rewrittenSha]!,
+          routeLane: index,
+          color: colors[index % colors.length],
+        ),
+    ],
+  );
+}
+
+Map<int, Set<int>> _previewDashedLanes(
+  List<GraphRow> rows,
+  Set<String> targets,
+) => {
+  for (var index = 0; index < rows.length; index++)
+    if ({
+          ...rows[index].activeLaneShas.entries
+              .where((entry) => targets.contains(entry.value))
+              .map((entry) => entry.key),
+          ...rows[index].nextLaneShas.entries
+              .where((entry) => targets.contains(entry.value))
+              .map((entry) => entry.key),
+        }
+        case final lanes when lanes.isNotEmpty)
+      index: lanes,
+};
+
 const _weekdayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 String _commitMessageBody(String? message) {
@@ -445,14 +598,18 @@ class _TimelineScreenState extends State<TimelineScreen>
   BranchComparisonResult? _comparison;
   var _comparisonRows = <GraphRow>[];
   var _comparisonEntries = <TimelineEntry>[];
+  BranchPreviewGraph? _previewGraph;
   RebaseCheckResult? _rebaseCheck;
+  RebasePreviewSession? _rebasePreviewSession;
+  RebasePreviewResult? _rebasePreview;
+  var _rebasePreviewSerial = 0;
   Object? _comparisonError;
   var _comparisonSerial = 0;
   late BranchPreviewMode _branchPreviewMode = widget.branchPreviewMode;
 
   List<GitCommit> get _commits => _comparison == null
       ? _normalCommits
-      : [for (final entry in _comparison!.commits) entry.commit];
+      : [for (final row in _comparisonRows) row.commit];
   List<GraphRow> get _rows =>
       _comparison == null ? _normalRows : _comparisonRows;
   List<TimelineEntry> get _entries =>
@@ -690,6 +847,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       });
     }
     if (!identical(widget.repository, oldWidget.repository)) {
+      _dropRebasePreview();
       _clearFullDiffRouteSession();
     } else if (widget.onFullDiffPreferencesChanged !=
             oldWidget.onFullDiffPreferencesChanged ||
@@ -753,6 +911,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _fetchTimer?.cancel();
+    _dropRebasePreview();
     _clearFullDiffRouteSession();
     if (_ownsPreviewController) _previewController.dispose();
     _selectedIndex.removeListener(_selectedCommitChanged);
@@ -819,6 +978,13 @@ class _TimelineScreenState extends State<TimelineScreen>
       for (final lane in [row.lane, ...row.activeLanes, ...row.nextLanes]) {
         if (lane > deepest) deepest = lane;
       }
+    }
+    if (_previewGraph?.mappings case final mappings? when mappings.isNotEmpty) {
+      final graphDeepest = _comparisonRows.fold<int>(
+        0,
+        (value, row) => math.max(value, row.maxLane),
+      );
+      deepest = math.max(deepest, graphDeepest + mappings.length);
     }
     if (deepest != _ratchetLane) setState(() => _ratchetLane = deepest);
   }
@@ -1489,8 +1655,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         key: key,
         onPressed: () {
           if (selected) return;
-          setState(() => _branchPreviewMode = mode);
-          widget.onBranchPreviewModeChanged?.call(mode);
+          _setBranchPreviewMode(mode);
         },
         style: OutlinedButton.styleFrom(
           foregroundColor: selected ? _palette.text : _palette.muted,
@@ -1506,6 +1671,33 @@ class _TimelineScreenState extends State<TimelineScreen>
         child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
       ),
     );
+  }
+
+  void _setBranchPreviewMode(BranchPreviewMode mode) {
+    if (_branchPreviewMode == mode) return;
+    setState(() {
+      _branchPreviewMode = mode;
+      final comparison = _comparison;
+      if (comparison != null) {
+        _previewGraph = mode == BranchPreviewMode.merge
+            ? layoutMergePreviewGraph(comparison)
+            : null;
+        _comparisonRows =
+            _previewGraph?.rows ?? layoutBranchComparison(comparison.commits);
+        _comparisonEntries = [
+          for (var index = 0; index < _comparisonRows.length; index++)
+            (rowIndex: index, label: null, row: _comparisonRows[index]),
+        ];
+        _selectedIndex.value = 0;
+      }
+    });
+    widget.onBranchPreviewModeChanged?.call(mode);
+    _scheduleRatchetUpdate();
+    if (mode == BranchPreviewMode.rebase) {
+      unawaited(_startRebasePreview());
+    } else {
+      _dropRebasePreview();
+    }
   }
 
   void _selectBaseBranch(String branch) {
@@ -1536,11 +1728,13 @@ class _TimelineScreenState extends State<TimelineScreen>
     final baseRef = _baseBranch;
     if (baseRef == null || compareRef == baseRef) return;
     final serial = ++_comparisonSerial;
+    _dropRebasePreview();
     setState(() {
       _compareRef = compareRef;
       _comparison = null;
       _comparisonRows = [];
       _comparisonEntries = [];
+      _previewGraph = null;
       _rebaseCheck = null;
       _comparisonError = null;
       _selectedIndex.value = 0;
@@ -1559,14 +1753,21 @@ class _TimelineScreenState extends State<TimelineScreen>
       final rows = layoutBranchComparison(result.commits);
       setState(() {
         _comparison = result;
-        _comparisonRows = rows;
+        _previewGraph = _branchPreviewMode == BranchPreviewMode.merge
+            ? layoutMergePreviewGraph(result)
+            : null;
+        _comparisonRows = _previewGraph?.rows ?? rows;
         _comparisonEntries = [
-          for (var index = 0; index < rows.length; index++)
-            (rowIndex: index, label: null, row: rows[index]),
+          for (var index = 0; index < _comparisonRows.length; index++)
+            (rowIndex: index, label: null, row: _comparisonRows[index]),
         ];
       });
       _scheduleRatchetUpdate();
-      unawaited(_checkRebase(baseRef, compareRef, serial));
+      if (_branchPreviewMode == BranchPreviewMode.rebase) {
+        unawaited(_startRebasePreview());
+      } else {
+        unawaited(_checkRebase(baseRef, compareRef, serial));
+      }
     } catch (error) {
       if (!mounted ||
           serial != _comparisonSerial ||
@@ -1610,14 +1811,120 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
   }
 
+  Future<void> _startRebasePreview() async {
+    final comparison = _comparison;
+    if (_branchPreviewMode != BranchPreviewMode.rebase || comparison == null) {
+      return;
+    }
+    final request = ++_rebasePreviewSerial;
+    final previous = _rebasePreviewSession;
+    _rebasePreviewSession = null;
+    _rebasePreview = null;
+    if (previous != null) await previous.dispose();
+    if (!mounted ||
+        request != _rebasePreviewSerial ||
+        _branchPreviewMode != BranchPreviewMode.rebase) {
+      return;
+    }
+    setState(() => _rebaseCheck = null);
+    try {
+      final session = await widget.repository.openRebasePreview(
+        baseRef: comparison.baseRef,
+        compareRef: comparison.compareRef,
+      );
+      if (!mounted ||
+          request != _rebasePreviewSerial ||
+          _comparison != comparison ||
+          _branchPreviewMode != BranchPreviewMode.rebase) {
+        await session.dispose();
+        return;
+      }
+      _rebasePreviewSession = session;
+      final result = await session.start();
+      if (!mounted ||
+          request != _rebasePreviewSerial ||
+          _comparison != comparison ||
+          _branchPreviewMode != BranchPreviewMode.rebase) {
+        await session.dispose();
+        return;
+      }
+      final colors = rebaseMappingColors([
+        ...AvatarService.palette,
+        _palette.background,
+        _palette.surface,
+        _palette.panel,
+        _palette.raised,
+        _palette.border,
+        _palette.text,
+        _palette.muted,
+        _palette.selectedRow,
+        _palette.interactive,
+      ]);
+      final graph = layoutRebasePreviewGraph(comparison, result, colors);
+      setState(() {
+        _rebasePreview = result;
+        _rebaseCheck = switch (result.status) {
+          RebasePreviewStatus.clean => const RebaseCheckResult(
+            status: RebaseCheckStatus.clean,
+          ),
+          RebasePreviewStatus.conflict => RebaseCheckResult(
+            status: RebaseCheckStatus.conflicts,
+            stoppedCommit: result.currentCommit?.sha,
+            files: result.conflictFiles,
+          ),
+          RebasePreviewStatus.failed => RebaseCheckResult(
+            status: RebaseCheckStatus.failed,
+            error: result.error,
+          ),
+        };
+        _previewGraph = graph;
+        _comparisonRows = graph.rows;
+        _comparisonEntries = [
+          for (var index = 0; index < graph.rows.length; index++)
+            (rowIndex: index, label: null, row: graph.rows[index]),
+        ];
+        final conflictIndex = graph.rows.indexWhere(
+          (row) => row.commit.sha == result.currentCommit?.sha,
+        );
+        _selectedIndex.value =
+            result.status == RebasePreviewStatus.conflict && conflictIndex >= 0
+            ? conflictIndex
+            : 0;
+      });
+      if (result.status == RebasePreviewStatus.conflict &&
+          _previewController.previewPlacement == PreviewPlacement.closed) {
+        await _previewController.setPreview(widget.preferredPreviewPlacement);
+      }
+      _scheduleRatchetUpdate();
+    } catch (error) {
+      if (!mounted || request != _rebasePreviewSerial) return;
+      setState(
+        () => _rebaseCheck = RebaseCheckResult(
+          status: RebaseCheckStatus.failed,
+          error: error.toString(),
+        ),
+      );
+    }
+  }
+
+  void _dropRebasePreview() {
+    _rebasePreviewSerial++;
+    final session = _rebasePreviewSession;
+    _rebasePreviewSession = null;
+    _rebasePreview = null;
+    if (session != null) unawaited(session.dispose());
+  }
+
   void _clearComparison() {
     if (_compareRef == null) return;
+    _dropRebasePreview();
     _comparisonSerial++;
     setState(() {
       _compareRef = null;
       _comparison = null;
       _comparisonRows = [];
       _comparisonEntries = [];
+      _previewGraph = null;
       _rebaseCheck = null;
       _comparisonError = null;
       if (_normalEntries.isNotEmpty) {
@@ -1641,6 +1948,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
     final comparison = _comparison;
     if (comparison == null) return true;
+    if (_previewGraph?.kinds.containsKey(commit.sha) == true) return false;
     return comparison.commits
             .firstWhere((entry) => entry.commit.sha == commit.sha)
             .side ==
@@ -2615,6 +2923,9 @@ class _TimelineScreenState extends State<TimelineScreen>
             '공통 ${comparison.mergeBases.length}',
             '${comparison.baseRef}만 ${comparison.commits.where((entry) => entry.side == BranchCommitSide.baseOnly).length}',
             '${comparison.compareRef}만 ${comparison.commits.where((entry) => entry.side == BranchCommitSide.compareOnly).length}',
+            if (!mergeMode &&
+                _rebasePreview?.status == RebasePreviewStatus.conflict)
+              '진행 ${_rebasePreview!.completed + 1}/${_rebasePreview!.total}',
           ];
     return Container(
       key: const Key('branch-preview-summary'),
@@ -2938,6 +3249,20 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// unioned with the log decorations so remotes and detached HEAD still show.
   List<GitRef> _rowRefs(GitCommit commit) {
     if (_comparison case BranchComparisonResult comparison) {
+      final previewKind = _previewGraph?.kinds[commit.sha];
+      if (previewKind == PreviewGraphNodeKind.virtualMerge) {
+        return const [GitRef(name: 'Merge 미리보기', isHead: true)];
+      }
+      if (previewKind == PreviewGraphNodeKind.virtualRebase) {
+        return [
+          GitRef(
+            name: commit.sha == _rebasePreview?.virtualTip
+                ? '${comparison.compareRef} · 새 위치'
+                : 'rebase',
+            isHead: commit.sha == _rebasePreview?.virtualTip,
+          ),
+        ];
+      }
       final side = comparison.commits
           .firstWhere((entry) => entry.commit.sha == commit.sha)
           .side;
@@ -3042,6 +3367,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     CommitGraphPainter painter,
     double graphWidth, {
     Key? cellKey,
+    Widget? overlay,
     Widget? node,
   }) => SizedBox(
     key: cellKey,
@@ -3059,6 +3385,7 @@ class _TimelineScreenState extends State<TimelineScreen>
             ),
           ),
         ),
+        ?overlay,
         // Last, so a node always covers the rails behind it.
         ?node,
       ],
@@ -3083,6 +3410,10 @@ class _TimelineScreenState extends State<TimelineScreen>
     compact: graphWidth <= CommitGraphPainter.compactWidth,
     refConnector: refConnector,
     passThrough: entry.rowIndex < 0,
+    dashedLanes: _previewGraph?.dashedLanes[index] ?? const {},
+    previousDashedLanes: index > 0
+        ? _previewGraph?.dashedLanes[index - 1] ?? const {}
+        : const {},
     backgroundColor: _palette.background,
     selectedRowColor: _palette.selectedRow,
   );
@@ -3099,6 +3430,10 @@ class _TimelineScreenState extends State<TimelineScreen>
     final commit = row.commit;
     // One branch line, one color: rails, chips, node ring and hash border.
     final branchColor = AvatarService.branchColor(row.branch);
+    final previewKind = _previewGraph?.kinds[commit.sha];
+    final rebaseConflict =
+        _rebasePreview?.status == RebasePreviewStatus.conflict &&
+        _rebasePreview?.currentCommit?.sha == commit.sha;
     final refs = _rowRefs(commit);
     Widget refsCell() {
       final lineTip = selected && refs.isEmpty
@@ -3133,26 +3468,33 @@ class _TimelineScreenState extends State<TimelineScreen>
     // only shows while that stays clear of the next lane's rail.
     final stacked =
         avatarSize * 0.95 <= painter.laneSpacing - CommitGraphPainter.railWidth;
+    final mappings = _previewGraph?.mappings ?? const <RebaseGraphMapping>[];
     final content = MouseRegion(
       onEnter: (_) => _hoverIndex.value = index,
       onExit: (_) {
         if (_hoverIndex.value == index) _hoverIndex.value = -1;
       },
       child: GestureDetector(
-        key: selected ? Key('selected-row-${commit.sha}') : null,
+        key: rebaseConflict
+            ? const Key('rebase-conflict-current-row')
+            : selected
+            ? Key('selected-row-${commit.sha}')
+            : null,
         behavior: HitTestBehavior.opaque,
         onTap: () => _select(index),
         onSecondaryTapDown: (details) =>
             unawaited(_showCommitMenu(commit, details.globalPosition)),
         child: ColoredBox(
-          color: selected
+          color: rebaseConflict
+              ? const Color(0xFF8F2F3A)
+              : selected
               ? _palette.background
               : hovered
               ? _palette.neutralChip.withValues(alpha: 0.48)
               : _palette.background,
           child: Stack(
             children: [
-              if (selected)
+              if (selected && !rebaseConflict)
                 Positioned(
                   left: _w('refs') + painter.laneX(row.lane),
                   top: 0,
@@ -3176,19 +3518,32 @@ class _TimelineScreenState extends State<TimelineScreen>
                     painter,
                     graphWidth,
                     cellKey: Key('graph-cell-${entry.rowIndex}'),
+                    overlay: mappings.isEmpty
+                        ? null
+                        : Positioned.fill(
+                            child: IgnorePointer(
+                              child: CustomPaint(
+                                painter: RebaseMappingPainter(
+                                  rows: _comparisonRows,
+                                  mappings: mappings,
+                                  rowIndex: index,
+                                  laneSpacing: painter.laneSpacing,
+                                  compact: painter.compact,
+                                  backgroundColor: _palette.background,
+                                ),
+                              ),
+                            ),
+                          ),
                     node: commit.isWorkingTree || merge
                         ? null
-                        : Positioned(
-                            left: painter.laneX(row.lane) - avatarSize / 2,
-                            top: (TimelineScreen.rowHeight - avatarSize) / 2,
-                            child: CommitAvatarStack(
-                              commit: commit,
-                              avatarService: widget.avatarService,
-                              showRemoteAvatars: widget.showRemoteAvatars,
-                              size: avatarSize,
-                              stacked: stacked,
-                              discColor: branchColor,
-                            ),
+                        : _graphNode(
+                            commit: commit,
+                            kind: previewKind,
+                            painter: painter,
+                            row: row,
+                            size: avatarSize,
+                            stacked: stacked,
+                            branchColor: branchColor,
                           ),
                   ),
                   _cell(
@@ -3300,6 +3655,72 @@ class _TimelineScreenState extends State<TimelineScreen>
         ),
       ),
       child: content,
+    );
+  }
+
+  Widget _graphNode({
+    required GitCommit commit,
+    required PreviewGraphNodeKind? kind,
+    required CommitGraphPainter painter,
+    required GraphRow row,
+    required double size,
+    required bool stacked,
+    required Color branchColor,
+  }) {
+    Color? mappingColor;
+    for (final mapping in _previewGraph?.mappings ?? const []) {
+      if (mapping.originalSha == commit.sha ||
+          mapping.rewrittenSha == commit.sha) {
+        mappingColor = mapping.color;
+        break;
+      }
+    }
+    final child = kind == PreviewGraphNodeKind.virtualRebase
+        ? Container(
+            key: Key('virtual-rebase-node-${commit.sha}'),
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0xFF8D6BB8),
+              border: Border.all(
+                color: mappingColor ?? const Color(0xFFB78BEF),
+                width: 1,
+              ),
+            ),
+            child: const Text(
+              'VR',
+              style: TextStyle(
+                color: Colors.black,
+                fontSize: 8,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          )
+        : Container(
+            padding: mappingColor == null
+                ? EdgeInsets.zero
+                : const EdgeInsets.all(1),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: mappingColor == null
+                  ? null
+                  : Border.all(color: mappingColor, width: 1),
+            ),
+            child: CommitAvatarStack(
+              commit: commit,
+              avatarService: widget.avatarService,
+              showRemoteAvatars: widget.showRemoteAvatars,
+              size: mappingColor == null ? size : size - 2,
+              stacked: stacked,
+              discColor: branchColor,
+            ),
+          );
+    return Positioned(
+      left: painter.laneX(row.lane) - size / 2,
+      top: (TimelineScreen.rowHeight - size) / 2,
+      child: child,
     );
   }
 
@@ -5083,6 +5504,103 @@ class _RowStateScopeState extends State<_RowStateScope> {
   Widget build(BuildContext context) => widget.builder(_selected, _hovered);
 }
 
+class RebaseMappingPainter extends CustomPainter {
+  const RebaseMappingPainter({
+    required this.rows,
+    required this.mappings,
+    required this.rowIndex,
+    required this.laneSpacing,
+    required this.compact,
+    required this.backgroundColor,
+  });
+
+  final List<GraphRow> rows;
+  final List<RebaseGraphMapping> mappings;
+  final int rowIndex;
+  final double laneSpacing;
+  final bool compact;
+  final Color backgroundColor;
+
+  double _laneX(int lane) => compact
+      ? CommitGraphPainter.laneInset
+      : CommitGraphPainter.laneInset + lane * laneSpacing;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (compact || rowIndex < 0 || rowIndex >= rows.length) return;
+    final deepest = rows.fold<int>(
+      0,
+      (value, row) => math.max(value, row.maxLane),
+    );
+    final centerY = size.height / 2;
+    for (final mapping in mappings) {
+      final top = math.min(mapping.rewrittenRow, mapping.originalRow);
+      final bottom = math.max(mapping.rewrittenRow, mapping.originalRow);
+      if (rowIndex < top || rowIndex > bottom) continue;
+      final routeX = _laneX(deepest + 1 + mapping.routeLane);
+      final rewrittenX = _laneX(rows[mapping.rewrittenRow].lane);
+      final originalX = _laneX(rows[mapping.originalRow].lane);
+      final path = Path();
+      if (rowIndex == mapping.rewrittenRow) {
+        path
+          ..moveTo(routeX, size.height)
+          ..lineTo(routeX, centerY + 6)
+          ..quadraticBezierTo(routeX, centerY, routeX - 6, centerY)
+          ..lineTo(rewrittenX + CommitGraphPainter.avatarDiameter / 2, centerY);
+      } else if (rowIndex == mapping.originalRow) {
+        path
+          ..moveTo(originalX + CommitGraphPainter.avatarDiameter / 2, centerY)
+          ..lineTo(routeX - 6, centerY)
+          ..quadraticBezierTo(routeX, centerY, routeX, centerY - 6)
+          ..lineTo(routeX, 0);
+      } else {
+        path
+          ..moveTo(routeX, 0)
+          ..lineTo(routeX, size.height);
+      }
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = backgroundColor
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round,
+      );
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = mapping.color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round,
+      );
+      if (rowIndex == mapping.rewrittenRow) {
+        final tip = Offset(
+          rewrittenX + CommitGraphPainter.avatarDiameter / 2,
+          centerY,
+        );
+        final arrow = Path()
+          ..moveTo(tip.dx, tip.dy)
+          ..lineTo(tip.dx + 5, tip.dy - 3)
+          ..lineTo(tip.dx + 5, tip.dy + 3)
+          ..close();
+        canvas.drawPath(arrow, Paint()..color = mapping.color);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant RebaseMappingPainter oldDelegate) =>
+      oldDelegate.rows != rows ||
+      oldDelegate.mappings != mappings ||
+      oldDelegate.rowIndex != rowIndex ||
+      oldDelegate.laneSpacing != laneSpacing ||
+      oldDelegate.compact != compact ||
+      oldDelegate.backgroundColor != backgroundColor;
+}
+
 /// Draws one row of the commit graph: pass-through rails, the rounded lane
 /// curves into parent lanes, and the row's own node.
 class CommitGraphPainter extends CustomPainter {
@@ -5096,6 +5614,8 @@ class CommitGraphPainter extends CustomPainter {
     this.compact = false,
     this.refConnector = false,
     this.passThrough = false,
+    this.dashedLanes = const {},
+    this.previousDashedLanes = const {},
     this.backgroundColor = const Color(0xFF1C1C1E),
     this.selectedRowColor = const Color(0xFF234D72),
   });
@@ -5103,6 +5623,7 @@ class CommitGraphPainter extends CustomPainter {
   static const laneInset = 28.0;
   static const defaultLaneSpacing = 30.0;
   static const railWidth = 2.0;
+  static const previewRailWidth = 1.0;
   static const avatarDiameter = 22.0;
   static const hashRailClearance = 3.0;
 
@@ -5172,6 +5693,10 @@ class CommitGraphPainter extends CustomPainter {
   /// A date heading: the rails and the arriving sweeps run through it, but it
   /// owns no node, no selected band and no ref connector.
   final bool passThrough;
+  final Set<int> dashedLanes;
+  final Set<int> previousDashedLanes;
+
+  bool isDashedLane(int lane) => dashedLanes.contains(lane);
 
   double laneX(int lane) =>
       compact ? laneInset : laneInset + lane * laneSpacing;
@@ -5271,13 +5796,16 @@ class CommitGraphPainter extends CustomPainter {
     if (compact) {
       // Stage 3: one rail in this row's committer color, no lanes, no curves.
       final rail = compactRail(size);
-      canvas.drawLine(
-        Offset(laneInset, rail.top),
-        Offset(laneInset, rail.bottom),
+      _drawRailPath(
+        canvas,
+        Path()
+          ..moveTo(laneInset, rail.top)
+          ..lineTo(laneInset, rail.bottom),
         Paint()
           ..color = committerColor
-          ..strokeWidth = railWidth
+          ..strokeWidth = isDashedLane(row.lane) ? previewRailWidth : railWidth
           ..strokeCap = StrokeCap.round,
+        dashed: isDashedLane(row.lane),
       );
     } else {
       // Halves are painted apart: above the node a lane carries the rail it
@@ -5285,23 +5813,31 @@ class CommitGraphPainter extends CustomPainter {
       for (final entry in laneVerticals(size).entries) {
         final x = laneX(entry.key);
         if (entry.value.top < centerY) {
-          canvas.drawLine(
-            Offset(x, entry.value.top),
-            Offset(x, centerY),
+          _drawRailPath(
+            canvas,
+            Path()
+              ..moveTo(x, entry.value.top)
+              ..lineTo(x, centerY),
             _railPaint(
               row.activeLaneBranches[entry.key],
               row.activeLaneShas[entry.key],
+              dashed: isDashedLane(entry.key),
             ),
+            dashed: isDashedLane(entry.key),
           );
         }
         if (entry.value.bottom > centerY) {
-          canvas.drawLine(
-            Offset(x, centerY),
-            Offset(x, entry.value.bottom),
+          _drawRailPath(
+            canvas,
+            Path()
+              ..moveTo(x, centerY)
+              ..lineTo(x, entry.value.bottom),
             _railPaint(
               row.nextLaneBranches[entry.key],
               row.nextLaneShas[entry.key],
+              dashed: isDashedLane(entry.key),
             ),
+            dashed: isDashedLane(entry.key),
           );
         }
       }
@@ -5311,7 +5847,11 @@ class CommitGraphPainter extends CustomPainter {
       // are the whole story.
       if (previous case final previous?) {
         for (final transition in previous.transitions) {
-          canvas.drawPath(
+          final dashed =
+              previousDashedLanes.contains(transition.from) ||
+              previousDashedLanes.contains(transition.to);
+          _drawRailPath(
+            canvas,
             transitionPath(
               transition.from,
               transition.to,
@@ -5321,12 +5861,20 @@ class CommitGraphPainter extends CustomPainter {
               // repeats its departure half's shape and color exactly.
               bendEarly: isMergeEdge(previous, transition),
             ),
-            _railPaint(transitionBranch(previous, transition), transition.sha),
+            _railPaint(
+              transitionBranch(previous, transition),
+              transition.sha,
+              dashed: dashed,
+            ),
+            dashed: dashed,
           );
         }
       }
       for (final transition in row.transitions) {
-        canvas.drawPath(
+        final dashed =
+            isDashedLane(transition.from) || isDashedLane(transition.to);
+        _drawRailPath(
+          canvas,
           transitionPath(
             transition.from,
             transition.to,
@@ -5334,7 +5882,12 @@ class CommitGraphPainter extends CustomPainter {
             size,
             bendEarly: isMergeEdge(row, transition),
           ),
-          _railPaint(transitionBranch(row, transition), transition.sha),
+          _railPaint(
+            transitionBranch(row, transition),
+            transition.sha,
+            dashed: dashed,
+          ),
+          dashed: dashed,
         );
       }
     }
@@ -5445,16 +5998,36 @@ class CommitGraphPainter extends CustomPainter {
   /// A rail paints in its branch line's color. Before [GraphRow] carries branch
   /// ids for a lane it falls back to the committer color, so the graph degrades
   /// to the old look instead of to one flat color.
-  Paint _railPaint(int? branch, String? sha) => Paint()
+  Paint _railPaint(int? branch, String? sha, {bool dashed = false}) => Paint()
     ..color = branch == null
         ? AvatarService.color(committersBySha[sha] ?? row.commit.committer)
         : AvatarService.branchColor(branch)
     ..style = PaintingStyle.stroke
-    ..strokeWidth = railWidth
+    ..strokeWidth = dashed ? previewRailWidth : railWidth
     ..strokeCap = StrokeCap.round
     // Mitered, so a join's square corner renders as a crisp right angle. Curves
     // are unaffected.
     ..strokeJoin = StrokeJoin.miter;
+
+  void _drawRailPath(
+    Canvas canvas,
+    Path path,
+    Paint paint, {
+    required bool dashed,
+  }) {
+    if (!dashed) {
+      canvas.drawPath(path, paint);
+      return;
+    }
+    for (final metric in path.computeMetrics()) {
+      for (var start = 0.0; start < metric.length; start += 6) {
+        canvas.drawPath(
+          metric.extractPath(start, math.min(start + 3, metric.length)),
+          paint,
+        );
+      }
+    }
+  }
 
   @override
   bool shouldRepaint(covariant CommitGraphPainter oldDelegate) =>
@@ -5467,6 +6040,8 @@ class CommitGraphPainter extends CustomPainter {
       oldDelegate.compact != compact ||
       oldDelegate.refConnector != refConnector ||
       oldDelegate.passThrough != passThrough ||
+      !setEquals(oldDelegate.dashedLanes, dashedLanes) ||
+      !setEquals(oldDelegate.previousDashedLanes, previousDashedLanes) ||
       oldDelegate.backgroundColor != backgroundColor ||
       oldDelegate.selectedRowColor != selectedRowColor;
 }

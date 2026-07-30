@@ -2577,8 +2577,9 @@ void main() {
 
     expect(find.byKey(const Key('branch-preview-merge')), findsOneWidget);
     expect(find.byKey(const Key('branch-preview-rebase')), findsOneWidget);
-    expect(find.text('Merge 미리보기'), findsNWidgets(2));
+    expect(find.text('Merge 미리보기'), findsWidgets);
     expect(find.text('Merge 성공'), findsOneWidget);
+    expect(find.text('VM'), findsOneWidget);
     expect(
       find.byKey(const Key('branch-preview-success-icon')),
       findsOneWidget,
@@ -2591,7 +2592,7 @@ void main() {
     await tester.tap(find.byKey(const Key('branch-preview-rebase')));
     await tester.pumpAndSettle();
     expect(changedMode, BranchPreviewMode.rebase);
-    expect(find.text('Rebase 미리보기'), findsNWidgets(2));
+    expect(find.text('Rebase 미리보기'), findsWidgets);
     expect(find.text('Rebase 성공'), findsOneWidget);
   });
 
@@ -2641,6 +2642,120 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('lib/shared.dart'), findsWidgets);
     expect(calls, hasLength(1));
+  });
+
+  testWidgets('rebase preview adds rewritten commits to the timeline', (
+    tester,
+  ) async {
+    final comparison = branchComparison();
+    final original = comparison.commits
+        .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
+        .commit;
+    late FakeGitRepository repository;
+    repository = FakeGitRepository(
+      (_, _) async => [commit('normal', 'normal history')],
+      refs: const RepoRefs(
+        local: ['main', 'feature'],
+        current: 'main',
+        tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+      ),
+      compareBranchesCallback: (_, _) async => comparison,
+      simulateRebaseCallback: ({required baseRef, required compareRef}) =>
+          Future.value(
+            const RebaseCheckResult(status: RebaseCheckStatus.clean),
+          ),
+      openRebasePreviewCallback:
+          ({required baseRef, required compareRef}) async =>
+              FakeRebasePreviewSession(
+                repository,
+                RebasePreviewResult(
+                  status: RebasePreviewStatus.clean,
+                  baseTip: 'main-tip',
+                  compareTip: 'feature-tip',
+                  rewritten: [
+                    (
+                      original: original,
+                      rewrittenSha: '0123456789abcdef0123456789abcdef01234567',
+                    ),
+                  ],
+                  completed: 1,
+                  total: 1,
+                  virtualTip: '0123456789abcdef0123456789abcdef01234567',
+                ),
+              ),
+    );
+    await tester.pumpWidget(app(repository, controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-preview-rebase')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('new SHA'), findsOneWidget);
+    expect(find.text('VR'), findsOneWidget);
+    expect(find.text('Rebase 성공'), findsOneWidget);
+    final mappingPainters = tester
+        .widgetList<CustomPaint>(find.byType(CustomPaint))
+        .map((paint) => paint.painter)
+        .whereType<RebaseMappingPainter>()
+        .toList();
+    expect(mappingPainters, isNotEmpty);
+    expect(mappingPainters.first.mappings.single.color, isNotNull);
+  });
+
+  testWidgets('rebase conflict focuses the actual commit row', (tester) async {
+    final comparison = branchComparison();
+    final current = comparison.commits
+        .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
+        .commit;
+    late FakeGitRepository repository;
+    repository = FakeGitRepository(
+      (_, _) async => [commit('normal', 'normal history')],
+      refs: const RepoRefs(
+        local: ['main', 'feature'],
+        current: 'main',
+        tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+      ),
+      compareBranchesCallback: (_, _) async => comparison,
+      simulateRebaseCallback: ({required baseRef, required compareRef}) =>
+          Future.value(
+            const RebaseCheckResult(status: RebaseCheckStatus.conflicts),
+          ),
+      openRebasePreviewCallback: ({required baseRef, required compareRef}) async =>
+          FakeRebasePreviewSession(
+            repository,
+            RebasePreviewResult(
+              status: RebasePreviewStatus.conflict,
+              baseTip: 'main-tip',
+              compareTip: 'feature-tip',
+              currentCommit: current,
+              completed: 0,
+              total: 1,
+              conflictFiles: const ['lib/shared.dart'],
+            ),
+          ),
+      diffBetween: (_, _, _) async => const [],
+    );
+    await tester.pumpWidget(app(repository, controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-preview-rebase')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(
+      find.byKey(const Key('rebase-conflict-current-row')),
+      findsOneWidget,
+    );
+    expect(find.text('Rebase 충돌'), findsOneWidget);
+    expect(find.text('진행 1/1'), findsOneWidget);
+    expect(controller.previewPlacement, PreviewPlacement.right);
   });
 
   testWidgets('a stale branch comparison cannot replace a newer selection', (
@@ -3350,6 +3465,60 @@ void main() {
       }).branchPreviewMode,
       BranchPreviewMode.merge,
     );
+  });
+
+  test('rebase mapping colors are dark and avoid the active palette', () {
+    final reserved = const [
+      Color(0xFF8F6478),
+      Color(0xFF5F8582),
+      Color(0xFF81754F),
+    ];
+    final colors = rebaseMappingColors(reserved);
+
+    expect(colors, hasLength(5));
+    expect(colors.toSet(), hasLength(5));
+    expect(colors.where(reserved.contains), isEmpty);
+    expect(
+      colors.map((color) => HSLColor.fromColor(color).lightness),
+      everyElement(lessThanOrEqualTo(0.42)),
+    );
+  });
+
+  test('preview graph adds virtual merge and rewritten rebase commits', () {
+    final comparison = branchComparison();
+    final merge = layoutMergePreviewGraph(comparison);
+    expect(
+      merge.kinds[merge.rows.first.commit.sha],
+      PreviewGraphNodeKind.virtualMerge,
+    );
+    expect(merge.rows.first.commit.parents, ['main-tip', 'feature-tip']);
+    expect(merge.dashedLanes.values.expand((lanes) => lanes), isNotEmpty);
+
+    final feature = comparison.commits
+        .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
+        .commit;
+    final colors = rebaseMappingColors(AvatarService.defaultColors);
+    final rebase = layoutRebasePreviewGraph(
+      comparison,
+      RebasePreviewResult(
+        status: RebasePreviewStatus.clean,
+        baseTip: comparison.baseTip,
+        compareTip: comparison.compareTip,
+        rewritten: [(original: feature, rewrittenSha: 'rewritten-feature')],
+        completed: 1,
+        total: 1,
+        virtualTip: 'rewritten-feature',
+      ),
+      colors,
+    );
+    expect(
+      rebase.kinds['rewritten-feature'],
+      PreviewGraphNodeKind.virtualRebase,
+    );
+    expect(rebase.mappings.single.originalSha, feature.sha);
+    expect(rebase.mappings.single.rewrittenSha, 'rewritten-feature');
+    expect(rebase.mappings.single.color, colors.first);
+    expect(rebase.mappings.single.routeLane, 0);
   });
 
   testWidgets('the app passes branch preview mode changes to settings', (
@@ -11337,6 +11506,7 @@ class FakeGitRepository extends GitRepository {
     this.originUrlCallback,
     this.compareBranchesCallback,
     this.simulateRebaseCallback,
+    this.openRebasePreviewCallback,
     this.diffBetween,
     this.loadCherryPickStateCallback,
     this.cherryPickCallback,
@@ -11361,6 +11531,11 @@ class FakeGitRepository extends GitRepository {
     required String compareRef,
   })?
   simulateRebaseCallback;
+  final Future<RebasePreviewSession> Function({
+    required String baseRef,
+    required String compareRef,
+  })?
+  openRebasePreviewCallback;
   final Future<List<DiffLine>> Function(
     String from,
     String to,
@@ -11447,6 +11622,40 @@ class FakeGitRepository extends GitRepository {
   }) =>
       simulateRebaseCallback?.call(baseRef: baseRef, compareRef: compareRef) ??
       super.simulateRebase(baseRef: baseRef, compareRef: compareRef);
+
+  @override
+  Future<RebasePreviewSession> openRebasePreview({
+    required String baseRef,
+    required String compareRef,
+  }) async {
+    if (openRebasePreviewCallback != null) {
+      return openRebasePreviewCallback!(
+        baseRef: baseRef,
+        compareRef: compareRef,
+      );
+    }
+    if (simulateRebaseCallback != null) {
+      final check = await simulateRebaseCallback!(
+        baseRef: baseRef,
+        compareRef: compareRef,
+      );
+      return FakeRebasePreviewSession(
+        this,
+        RebasePreviewResult(
+          status: switch (check.status) {
+            RebaseCheckStatus.clean => RebasePreviewStatus.clean,
+            RebaseCheckStatus.conflicts => RebasePreviewStatus.conflict,
+            RebaseCheckStatus.failed => RebasePreviewStatus.failed,
+          },
+          baseTip: refs.localTips[baseRef] ?? baseRef,
+          compareTip: refs.localTips[compareRef] ?? compareRef,
+          conflictFiles: check.files,
+          error: check.error,
+        ),
+      );
+    }
+    return super.openRebasePreview(baseRef: baseRef, compareRef: compareRef);
+  }
 
   @override
   Future<void> cleanupStaleRebaseWorktrees() async {}
@@ -11537,6 +11746,24 @@ class FakeGitRepository extends GitRepository {
   }) =>
       blame?.call(commit, file, parent, workingTreeBytes) ??
       Future.value(const []);
+}
+
+class FakeRebasePreviewSession extends RebasePreviewSession {
+  FakeRebasePreviewSession(GitRepository repository, this.result)
+    : super(
+        repository: repository,
+        baseTip: result.baseTip,
+        compareTip: result.compareTip,
+        originalCommits: const [],
+      );
+
+  final RebasePreviewResult result;
+
+  @override
+  Future<RebasePreviewResult> start() async => result;
+
+  @override
+  Future<void> dispose() async {}
 }
 
 class DelayedSettingsStore extends SettingsStore {

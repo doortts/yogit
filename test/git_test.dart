@@ -1209,6 +1209,22 @@ void main() {
     expect(pixel, isNot(rail(AvatarService.color(branch.committer))));
   });
 
+  test('uses one-pixel dashes for preview lanes', () {
+    final row = layoutGraph([
+      _commit('virtual', ['parent']),
+      _commit('parent', const []),
+    ]).first;
+    final painter = CommitGraphPainter(
+      row: row,
+      selected: false,
+      committerColor: const Color(0xFF00AAFF),
+      dashedLanes: const {0},
+    );
+
+    expect(painter.isDashedLane(0), isTrue);
+    expect(CommitGraphPainter.previewRailWidth, 1);
+  });
+
   test('a converged lane leaves no phantom rail above the next bend', () async {
     final rows = layoutGraph([
       _commit('T', ['C', 'B']),
