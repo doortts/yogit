@@ -403,6 +403,9 @@ class MergePreviewSession {
   String filePath(String relativePath) =>
       _previewFilePath(_worktreePath, relativePath);
 
+  Future<List<DiffLine>> loadConflictDiff(String relativePath) =>
+      _repository._loadPreviewConflictDiff(_worktreePath!, relativePath);
+
   Future<MergePreviewResult> start() async {
     if (_disposed) {
       throw StateError('Merge preview session has been disposed.');
@@ -601,6 +604,9 @@ class RebasePreviewSession {
   String filePath(String relativePath) =>
       _previewFilePath(_worktreePath, relativePath);
 
+  Future<List<DiffLine>> loadConflictDiff(String relativePath) =>
+      _repository._loadPreviewConflictDiff(_worktreePath!, relativePath);
+
   Future<RebasePreviewResult> start() async {
     if (_disposed) {
       throw StateError('Rebase preview session has been disposed.');
@@ -751,6 +757,9 @@ class RebasePreviewSession {
 
   Future<List<RewrittenCommit>> _rewrittenCommits() async {
     if (_originalCommits.isEmpty) return const [];
+    if ((await _run(const ['rev-parse', 'HEAD'])).trim() == baseTip) {
+      return const [];
+    }
     final parents = _originalCommits.first.parents;
     if (parents.isEmpty) return const [];
     final originalBase = parents.first;
@@ -2642,6 +2651,121 @@ class GitRepository implements FullDiffRepository {
         ? await _run(arguments)
         : await _runDiff(arguments);
     return parseUnifiedDiff(output);
+  }
+
+  Future<List<DiffLine>> _loadPreviewConflictDiff(
+    String worktreePath,
+    String relativePath,
+  ) async {
+    _previewFilePath(worktreePath, relativePath);
+    final pathspec = ':(literal)$relativePath';
+    final unmerged = await runner(gitExecutable, [
+      'ls-files',
+      '-u',
+      '-z',
+      '--',
+      pathspec,
+    ], workingDirectory: worktreePath);
+    if (unmerged.exitCode != 0) {
+      throw ProcessException(
+        gitExecutable,
+        ['ls-files', '-u', '-z', '--', pathspec],
+        unmerged.stderr.toString(),
+        unmerged.exitCode,
+      );
+    }
+    final stages = <int, String>{};
+    final record = RegExp(r'^[^ ]+ ([0-9a-f]+) ([123])\t');
+    for (final line in unmerged.stdout.toString().split('\x00')) {
+      final match = record.firstMatch(line);
+      if (match != null) {
+        stages[int.parse(match.group(2)!)] = match.group(1)!;
+      }
+    }
+    if (stages.isEmpty) {
+      return _runPreviewDiff(worktreePath, [
+        'diff',
+        ...safeDiffArguments,
+        '--unified=3',
+        '--cached',
+        'HEAD',
+        '--',
+        pathspec,
+      ]);
+    }
+    final before = stages[2];
+    final after = stages[3];
+    if (before != null && after != null) {
+      return _runPreviewDiff(worktreePath, [
+        'diff',
+        ...safeDiffArguments,
+        '--unified=3',
+        before,
+        after,
+        '--',
+      ]);
+    }
+    final blob = before ?? after!;
+    final show = await runner(gitExecutable, [
+      'show',
+      blob,
+    ], workingDirectory: worktreePath);
+    if (show.exitCode != 0) {
+      throw ProcessException(
+        gitExecutable,
+        ['show', blob],
+        show.stderr.toString(),
+        show.exitCode,
+      );
+    }
+    final text = show.stdout.toString();
+    final content = text.endsWith('\n')
+        ? text.substring(0, text.length - 1)
+        : text;
+    final lines = content.isEmpty ? const <String>[] : content.split('\n');
+    return [
+      DiffLine(
+        kind: DiffLineKind.header,
+        text: before == null ? '--- /dev/null' : '--- a/$relativePath',
+      ),
+      DiffLine(
+        kind: DiffLineKind.header,
+        text: after == null ? '+++ /dev/null' : '+++ b/$relativePath',
+      ),
+      DiffLine(
+        kind: DiffLineKind.hunk,
+        text: before == null
+            ? '@@ -0,0 +1,${lines.length} @@'
+            : '@@ -1,${lines.length} +0,0 @@',
+      ),
+      for (var index = 0; index < lines.length; index++)
+        DiffLine(
+          kind: before == null ? DiffLineKind.add : DiffLineKind.delete,
+          text: lines[index],
+          oldNumber: before == null ? null : index + 1,
+          newNumber: before == null ? index + 1 : null,
+        ),
+    ];
+  }
+
+  Future<List<DiffLine>> _runPreviewDiff(
+    String worktreePath,
+    List<String> arguments,
+  ) async {
+    final result = await runner(
+      gitExecutable,
+      arguments,
+      workingDirectory: worktreePath,
+    );
+    if (result.exitCode > 1) {
+      throw ProcessException(
+        gitExecutable,
+        arguments,
+        result.stderr.toString(),
+        result.exitCode,
+      );
+    }
+    return parseUnifiedDiff(result.stdout.toString());
   }
 
   @override

@@ -2900,6 +2900,7 @@ void main() {
   testWidgets('temporary preview resolves merge conflicts and can be dropped', (
     tester,
   ) async {
+    final apply = Completer<BranchApplyResult>();
     final comparison = branchComparison(
       compareRef: 'fix/docs',
       baseSubject: 'main change',
@@ -2921,6 +2922,8 @@ void main() {
       compareBranchesCallback: (_, _) async => comparison,
       openMergePreviewCallback:
           ({required baseRef, required compareRef}) async => session,
+      applyMergePreviewCallback: ({required comparison, required treeSha}) =>
+          apply.future,
       filesBetween: (_, _) async => const [
         GitFileChange(
           path: 'lib/shared.dart',
@@ -2957,6 +2960,11 @@ void main() {
           ),
         ],
       ),
+      conflictDiff: const [
+        DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+        DiffLine(kind: DiffLineKind.delete, text: 'main side', oldNumber: 1),
+        DiffLine(kind: DiffLineKind.add, text: 'docs side', newNumber: 1),
+      ],
     );
     await tester.pumpWidget(app(repository, controller));
     await tester.pumpAndSettle();
@@ -2976,6 +2984,8 @@ void main() {
     expect(find.text('현재 작업 트리 변경 없음'), findsOneWidget);
     expect(find.text('종료 시 자동 삭제'), findsOneWidget);
     expect(find.text('임시 작업 공간 시작'), findsNothing);
+    expect(find.text('main side'), findsOneWidget);
+    expect(find.text('docs side'), findsOneWidget);
 
     await tester.ensureVisible(
       find.byKey(const Key('merge-conflict-use-base')),
@@ -2991,7 +3001,7 @@ void main() {
     await tester.tap(find.byKey(const Key('merge-conflict-continue')));
     await tester.pumpAndSettle();
 
-    expect(find.text('충돌 해결과 테스트를 마쳤습니다'), findsOneWidget);
+    expect(find.text('충돌 해결을 마쳤습니다'), findsOneWidget);
     expect(find.text('Merge 가능'), findsOneWidget);
     expect(find.text('Drop'), findsOneWidget);
     expect(find.byType(UnifiedPresentationView), findsOneWidget);
@@ -3000,6 +3010,36 @@ void main() {
     );
     await tester.pump();
     expect(find.byType(SideBySidePresentationView), findsOneWidget);
+
+    await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
+    await tester.tap(find.byKey(const Key('branch-preview-apply')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Merge 실제 적용'));
+    await tester.pump();
+    expect(
+      tester
+          .widget<TextButton>(find.byKey(const Key('branch-preview-drop')))
+          .onPressed,
+      isNull,
+    );
+    expect(
+      tester
+          .widget<AbsorbPointer>(
+            find.byKey(const Key('branch-preview-toolbar-lock')),
+          )
+          .absorbing,
+      isTrue,
+    );
+    expect(
+      tester
+          .widget<SegmentedButton<BranchPreviewMode>>(
+            find.byKey(const Key('branch-preview-segmented')),
+          )
+          .onSelectionChanged,
+      isNull,
+    );
+    apply.completeError(StateError('stop test apply'));
+    await tester.pumpAndSettle();
 
     await tester.ensureVisible(find.byKey(const Key('branch-preview-drop')));
     await tester.tap(find.byKey(const Key('branch-preview-drop')));
@@ -3245,6 +3285,206 @@ void main() {
     await tester.pump(const Duration(milliseconds: 220));
     await tester.pumpAndSettle();
     expect(find.text('Rebase 이전 시점으로 되돌리기'), findsOneWidget);
+  });
+
+  testWidgets('stale merge preview tips are discarded', (tester) async {
+    final comparison = branchComparison(
+      merge: const MergeConflictCheck(
+        status: MergeConflictStatus.conflicts,
+        files: ['lib/shared.dart'],
+      ),
+    );
+    late FakeGitRepository repository;
+    late FakeMergePreviewSession session;
+    repository = FakeGitRepository(
+      (_, _) async => [commit('normal', 'normal history')],
+      refs: const RepoRefs(
+        local: ['main', 'feature'],
+        current: 'main',
+        tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+      ),
+      compareBranchesCallback: (_, _) async => comparison,
+      openMergePreviewCallback:
+          ({required baseRef, required compareRef}) async => session,
+    );
+    session = FakeMergePreviewSession(
+      repository,
+      const MergePreviewResult(
+        status: MergePreviewStatus.conflict,
+        baseTip: 'old-main',
+        compareTip: 'feature-tip',
+        conflictFiles: ['lib/shared.dart'],
+      ),
+      finishResult: const MergePreviewResult(
+        status: MergePreviewStatus.failed,
+        baseTip: 'old-main',
+        compareTip: 'feature-tip',
+      ),
+    );
+
+    await tester.pumpWidget(app(repository, controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(session.disposed, isTrue);
+    expect(find.text('Merge 검사 실패'), findsOneWidget);
+    expect(find.text('브랜치가 변경되었습니다. 미리보기를 다시 선택해 주세요.'), findsWidgets);
+  });
+
+  testWidgets('stale rebase preview tips are discarded', (tester) async {
+    final comparison = branchComparison();
+    late FakeGitRepository repository;
+    late FakeRebasePreviewSession session;
+    repository = FakeGitRepository(
+      (_, _) async => [commit('normal', 'normal history')],
+      refs: const RepoRefs(
+        local: ['main', 'feature'],
+        current: 'main',
+        tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+      ),
+      compareBranchesCallback: (_, _) async => comparison,
+      openRebasePreviewCallback:
+          ({required baseRef, required compareRef}) async => session,
+    );
+    session = FakeRebasePreviewSession(
+      repository,
+      const RebasePreviewResult(
+        status: RebasePreviewStatus.clean,
+        baseTip: 'old-main',
+        compareTip: 'feature-tip',
+        virtualTip: 'rewritten-feature',
+      ),
+    );
+
+    await tester.pumpWidget(
+      app(repository, controller, branchPreviewMode: BranchPreviewMode.rebase),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(session.disposed, isTrue);
+    expect(find.text('Rebase 검사 실패'), findsOneWidget);
+    expect(find.text('브랜치가 변경되었습니다. 미리보기를 다시 선택해 주세요.'), findsWidgets);
+  });
+
+  testWidgets('late rebase conflict state cannot replace merge mode', (
+    tester,
+  ) async {
+    final comparison = branchComparison();
+    final current = comparison.commits
+        .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
+        .commit;
+    final operation = Completer<bool>();
+    var operationChecks = 0;
+    late FakeGitRepository repository;
+    repository = FakeGitRepository(
+      (_, _) async => [commit('normal', 'normal history')],
+      refs: const RepoRefs(
+        local: ['main', 'feature'],
+        current: 'main',
+        tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+      ),
+      compareBranchesCallback: (_, _) async => comparison,
+      openRebasePreviewCallback:
+          ({required baseRef, required compareRef}) async =>
+              FakeRebasePreviewSession(
+                repository,
+                RebasePreviewResult(
+                  status: RebasePreviewStatus.conflict,
+                  baseTip: comparison.baseTip,
+                  compareTip: comparison.compareTip,
+                  currentCommit: current,
+                  total: 1,
+                  conflictFiles: const ['lib/shared.dart'],
+                ),
+              ),
+      operationInProgressCallback: () =>
+          operationChecks++ == 0 ? operation.future : Future.value(false),
+    );
+
+    await tester.pumpWidget(
+      app(repository, controller, branchPreviewMode: BranchPreviewMode.rebase),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('branch-preview-merge')));
+    await tester.pump();
+    operation.complete(true);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Merge 성공'), findsOneWidget);
+    expect(find.text('Rebase 충돌'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('branch-preview-rebase')));
+    await tester.pumpAndSettle();
+    expect(find.text('Rebase 충돌'), findsOneWidget);
+    expect(
+      tester
+          .widget<InkWell>(find.byKey(const Key('rebase-conflict-use-base')))
+          .onTap,
+      isNotNull,
+    );
+  });
+
+  testWidgets('remote branch preview cannot be applied directly', (
+    tester,
+  ) async {
+    final comparison = branchComparison(
+      compareRef: 'origin/feature',
+      merge: const MergeConflictCheck(
+        status: MergeConflictStatus.clean,
+        treeSha: 'merge-tree',
+      ),
+    );
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main'],
+            remote: ['origin/feature'],
+            current: 'main',
+            tips: {'main': 'main-tip', 'origin/feature': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async => comparison,
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-origin/feature')));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('branch-preview-apply-card')), findsOneWidget);
+    expect(
+      find.text('원격 브랜치는 바로 적용할 수 없습니다. 로컬 브랜치를 선택해 주세요.'),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('branch-preview-apply')))
+          .onPressed,
+      isNull,
+    );
   });
 
   testWidgets('rebase conflict focuses the actual commit row', (tester) async {
@@ -4185,6 +4425,33 @@ void main() {
     expect(rebase.mappings.single.rewrittenSha, 'rewritten-feature');
     expect(rebase.mappings.single.color, colors.first);
     expect(rebase.mappings.single.routeLane, 0);
+  });
+
+  test('first rebase conflict adds a virtual target above the base tip', () {
+    final comparison = branchComparison();
+    final feature = comparison.commits
+        .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
+        .commit;
+    final graph = layoutRebasePreviewGraph(
+      comparison,
+      RebasePreviewResult(
+        status: RebasePreviewStatus.conflict,
+        baseTip: comparison.baseTip,
+        compareTip: comparison.compareTip,
+        currentCommit: feature,
+        total: 1,
+        conflictFiles: const ['lib/shared.dart'],
+      ),
+      rebaseMappingColors(AvatarService.defaultColors),
+    );
+
+    expect(graph.rows, hasLength(comparison.commits.length + 1));
+    expect(
+      graph.kinds[graph.rows.first.commit.sha],
+      PreviewGraphNodeKind.conflictTarget,
+    );
+    expect(graph.rows.first.lane, graph.rows[1].lane);
+    expect(graph.dashedLanes[0], contains(graph.rows.first.lane));
   });
 
   test('preview graphs preserve every existing comparison row', () {
@@ -12383,8 +12650,9 @@ class FakeGitRepository extends GitRepository {
             RebaseCheckStatus.conflicts => RebasePreviewStatus.conflict,
             RebaseCheckStatus.failed => RebasePreviewStatus.failed,
           },
-          baseTip: refs.localTips[baseRef] ?? baseRef,
-          compareTip: refs.localTips[compareRef] ?? compareRef,
+          baseTip: refs.localTips[baseRef] ?? refs.tips[baseRef] ?? baseRef,
+          compareTip:
+              refs.localTips[compareRef] ?? refs.tips[compareRef] ?? compareRef,
           conflictFiles: check.files,
           error: check.error,
         ),
@@ -12553,6 +12821,7 @@ class FakeMergePreviewSession extends MergePreviewSession {
     GitRepository repository,
     this.result, {
     required this.finishResult,
+    this.conflictDiff = const [],
   }) : super(
          repository: repository,
          baseTip: result.baseTip,
@@ -12561,6 +12830,7 @@ class FakeMergePreviewSession extends MergePreviewSession {
 
   final MergePreviewResult result;
   final MergePreviewResult finishResult;
+  final List<DiffLine> conflictDiff;
   final resolvedChoices = <(String, MergeConflictChoice)>[];
   var disposed = false;
 
@@ -12579,6 +12849,10 @@ class FakeMergePreviewSession extends MergePreviewSession {
   Future<void> markResolved(String relativePath) async {}
 
   @override
+  Future<List<DiffLine>> loadConflictDiff(String relativePath) async =>
+      conflictDiff;
+
+  @override
   Future<MergePreviewResult> finish() async => finishResult;
 
   @override
@@ -12590,6 +12864,7 @@ class FakeRebasePreviewSession extends RebasePreviewSession {
     GitRepository repository,
     this.result, {
     List<RebasePreviewResult> continuations = const [],
+    this.conflictDiff = const [],
   }) : _continuations = List.of(continuations),
        super(
          repository: repository,
@@ -12600,7 +12875,9 @@ class FakeRebasePreviewSession extends RebasePreviewSession {
 
   final RebasePreviewResult result;
   final List<RebasePreviewResult> _continuations;
+  final List<DiffLine> conflictDiff;
   final resolvedChoices = <(String, RebaseConflictChoice)>[];
+  var disposed = false;
 
   @override
   Future<RebasePreviewResult> start() async => result;
@@ -12617,11 +12894,15 @@ class FakeRebasePreviewSession extends RebasePreviewSession {
   Future<void> markResolved(String relativePath) async {}
 
   @override
+  Future<List<DiffLine>> loadConflictDiff(String relativePath) async =>
+      conflictDiff;
+
+  @override
   Future<RebasePreviewResult> continueAfterResolving() async =>
       _continuations.removeAt(0);
 
   @override
-  Future<void> dispose() async {}
+  Future<void> dispose() async => disposed = true;
 }
 
 class DelayedSettingsStore extends SettingsStore {

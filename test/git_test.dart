@@ -806,8 +806,28 @@ void main() {
       expect(conflict.status, MergePreviewStatus.conflict);
       expect(conflict.conflictFiles, ['shared.txt']);
       expect(Directory(session.worktreePath!).existsSync(), isTrue);
+      final conflictDiff = await session.loadConflictDiff('shared.txt');
+      expect(
+        conflictDiff
+            .where((line) => line.kind == DiffLineKind.delete)
+            .map((line) => line.text),
+        contains('main'),
+      );
+      expect(
+        conflictDiff
+            .where((line) => line.kind == DiffLineKind.add)
+            .map((line) => line.text),
+        contains('feature'),
+      );
 
       await session.resolveFile('shared.txt', MergeConflictChoice.compare);
+      final resolvedDiff = await session.loadConflictDiff('shared.txt');
+      expect(
+        resolvedDiff
+            .where((line) => line.kind == DiffLineKind.add)
+            .map((line) => line.text),
+        contains('feature'),
+      );
       final completed = await session.finish();
 
       expect(completed.status, MergePreviewStatus.clean);
@@ -1039,6 +1059,19 @@ void main() {
       expect(conflict.conflictFiles, ['shared.txt']);
       final worktree = session.worktreePath!;
       expect(Directory(worktree).existsSync(), isTrue);
+      final conflictDiff = await session.loadConflictDiff('shared.txt');
+      expect(
+        conflictDiff
+            .where((line) => line.kind == DiffLineKind.delete)
+            .map((line) => line.text),
+        contains('main'),
+      );
+      expect(
+        conflictDiff
+            .where((line) => line.kind == DiffLineKind.add)
+            .map((line) => line.text),
+        contains('feature'),
+      );
 
       await session.resolveFile('shared.txt', RebaseConflictChoice.commit);
       expect(
@@ -1053,6 +1086,43 @@ void main() {
       expect(Directory(worktree).existsSync(), isFalse);
     },
   );
+
+  test('first rebase conflict has no rewritten commits', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'yogit_first_rebase_conflict_',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    await File('${root.path}/shared.txt').writeAsString('base\n');
+    await _git(root, ['add', 'shared.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+    await _git(root, ['switch', '-c', 'feature']);
+    await File('${root.path}/shared.txt').writeAsString('feature\n');
+    await _git(root, ['commit', '-am', 'feature conflict']);
+    await _git(root, ['switch', 'main']);
+    await File('${root.path}/shared.txt').writeAsString('main\n');
+    await _git(root, ['commit', '-am', 'main']);
+
+    final repository = GitRepository(root.path);
+    final comparison = await repository.compareBranches('main', 'feature');
+    final session = await repository.openRebasePreview(
+      baseRef: 'main',
+      compareRef: 'feature',
+    );
+    addTearDown(session.dispose);
+    final conflict = await session.start();
+
+    expect(conflict.status, RebasePreviewStatus.conflict);
+    expect(conflict.rewritten, isEmpty);
+    expect(
+      layoutRebasePreviewGraph(
+        comparison,
+        conflict,
+        rebaseMappingColors(AvatarService.defaultColors),
+      ).kinds.values,
+      contains(PreviewGraphNodeKind.conflictTarget),
+    );
+  });
 
   test('merge preview applies locally and restores both exact tips', () async {
     final fixture = await _branchPreviewFixture();

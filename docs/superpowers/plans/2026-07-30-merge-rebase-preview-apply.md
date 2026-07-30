@@ -18,7 +18,7 @@
 - Merge·Rebase 미리보기 때문에 새로 생긴 가상 레일과 대응선만 기준 HTML과 엄격히 맞춘다.
 - 기존 타임라인 레일은 `GraphRow`와 `CommitGraphPainter`의 선, 곡률, 연결 규칙을 그대로 유지한다.
 - 성공과 충돌 화면 모두 Unified와 Side-by-side를 지원한다.
-- 기준 화면은 `docs/superpowers/specs/assets/merge-rebase-preview/final-reference.html`이며 1440×900, 100% 배율로 비교한다.
+- 기준 화면은 `docs/superpowers/specs/assets/merge-rebase-preview/final-reference.html`이며 1280×720, 100% 배율로 비교한다.
 
 ---
 
@@ -676,7 +676,7 @@ expect(find.text('임시 작업 공간 시작'), findsNothing);
 Merge와 Rebase 각각 마지막 충돌을 해결한 뒤 다음 요소를 검증한다.
 
 ```dart
-expect(find.text('충돌 해결과 테스트를 마쳤습니다'), findsOneWidget);
+expect(find.text('충돌 해결을 마쳤습니다'), findsOneWidget);
 expect(find.text('Drop'), findsOneWidget);
 expect(find.byType(UnifiedPresentationView), findsOneWidget);
 await tester.tap(
@@ -721,7 +721,7 @@ Merge 충돌 선택 버튼은 `MergePreviewSession.resolveFile()`을 호출한�
 Rebase는 기존 `continueAfterResolving()`이 clean을 반환한 시점부터 같은
 최종 검토 상태를 사용한다.
 
-최종 카드에는 `충돌 해결과 테스트를 마쳤습니다`, `Merge 가능` 또는
+최종 카드에는 `충돌 해결을 마쳤습니다`, `Merge 가능` 또는
 `Rebase 가능`, `Drop`, Task 4의 실제 적용 버튼을 표시한다. `Drop`은
 소유한 임시 세션을 정리하고 `임시 결과를 Drop했습니다`, `변경 없음`을
 표시한다.
@@ -775,7 +775,7 @@ Expected: 모든 테스트 PASS
 - [ ] **Step 2: 기준 페이지 네 상태 캡처**
 
 `docs/superpowers/specs/assets/merge-rebase-preview/final-reference.html`을
-1440×900, 100% 배율로 열고 Merge 성공, Rebase 성공, Merge 충돌,
+1280×720, 100% 배율로 열고 Merge 성공, Rebase 성공, Merge 충돌,
 Rebase 충돌을 `reference/`의 네 파일로 저장한다.
 
 - [ ] **Step 3: 구현 앱 네 상태 캡처**
