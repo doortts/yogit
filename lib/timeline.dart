@@ -4557,12 +4557,11 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (_comparison case BranchComparisonResult comparison) {
       final previewKind = _previewGraph?.kinds[commit.sha];
       if (previewKind == PreviewGraphNodeKind.virtualMerge) {
+        final conflict = _effectiveMergeStatus == MergeConflictStatus.conflicts;
         return [
           GitRef(
-            name: _effectiveMergeStatus == MergeConflictStatus.conflicts
-                ? '! 병합 충돌'
-                : '가상 병합',
-            isHead: _effectiveMergeStatus != MergeConflictStatus.conflicts,
+            name: conflict ? '! 병합 충돌' : '${comparison.baseRef} · 가상',
+            isHead: !conflict,
           ),
         ];
       }
@@ -4580,7 +4579,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       final side = comparison.commits
           .firstWhere((entry) => entry.commit.sha == commit.sha)
           .side;
-      var compareLabel = '${comparison.compareRef}만';
+      var compareLabel = '${comparison.compareRef} · 원본';
       if (side == BranchCommitSide.compareOnly &&
           _branchPreviewMode == BranchPreviewMode.rebase) {
         final preview = _rebasePreview;
@@ -4600,12 +4599,11 @@ class _TimelineScreenState extends State<TimelineScreen>
         GitRef(
           name: switch (side) {
             BranchCommitSide.baseOnly =>
-              _branchPreviewMode == BranchPreviewMode.rebase
-                  ? _rebasePreview?.status == RebasePreviewStatus.conflict &&
-                            commit.sha == comparison.baseTip
-                        ? '${comparison.baseRef} · HEAD'
-                        : comparison.baseRef
-                  : '${comparison.baseRef}만',
+              _branchPreviewMode == BranchPreviewMode.rebase &&
+                      _rebasePreview?.status == RebasePreviewStatus.conflict &&
+                      commit.sha == comparison.baseTip
+                  ? '${comparison.baseRef} · HEAD'
+                  : comparison.baseRef,
             BranchCommitSide.compareOnly => compareLabel,
             BranchCommitSide.commonBoundary => '공통',
           },
@@ -4862,6 +4860,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         commit,
         refs,
         rowAccentColor,
+        showConnector: _comparison == null,
         deletedBranchName: lineTip == null
             ? null
             : _deletedBranchNames[lineTip],
@@ -4897,7 +4896,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       index,
       graphWidth,
       selected && !virtualPreview,
-      refs.isNotEmpty,
+      refs.isNotEmpty && _comparison == null,
       committerColor: previewColor,
       outgoingRailColor: commonBoundary ? _palette.muted : null,
     );
@@ -5299,6 +5298,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     GitCommit commit,
     List<GitRef> refs,
     Color color, {
+    bool showConnector = true,
     String? deletedBranchName,
     bool deletedBranchLoading = false,
   }) => SizedBox(
@@ -5341,14 +5341,15 @@ class _TimelineScreenState extends State<TimelineScreen>
                       height: 24,
                       child: _refChip(commit, shown[index], color),
                     ),
-                  Positioned(
-                    key: Key('ref-chip-connector-${commit.sha}'),
-                    left: constraints.maxWidth - inset,
-                    right: 0,
-                    top: 15.5,
-                    height: 1,
-                    child: ColoredBox(color: color),
-                  ),
+                  if (showConnector)
+                    Positioned(
+                      key: Key('ref-chip-connector-${commit.sha}'),
+                      left: constraints.maxWidth - inset,
+                      right: 0,
+                      top: 15.5,
+                      height: 1,
+                      child: ColoredBox(color: color),
+                    ),
                 ],
               );
             },

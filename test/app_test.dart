@@ -2946,8 +2946,18 @@ void main() {
     expect(find.text('main only'), findsOneWidget);
     expect(find.text('feature only'), findsOneWidget);
     expect(find.text('shared commit'), findsOneWidget);
-    expect(find.text('main만'), findsOneWidget);
-    expect(find.text('feature만'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('virtual-preview-chip')),
+        matching: find.text('main · 가상'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('ref-chip-main-tip-main')), findsOneWidget);
+    expect(
+      find.byKey(const Key('ref-chip-feature-tip-feature · 원본')),
+      findsOneWidget,
+    );
     expect(find.text('공통'), findsOneWidget);
     expect(find.text('가상 커밋 1'), findsOneWidget);
     expect(find.text('두 부모'), findsNothing);
@@ -2978,7 +2988,18 @@ void main() {
       painters.map((painter) => painter.row.maxLane),
       everyElement(lessThanOrEqualTo(1)),
     );
-    expect(painters.map((painter) => painter.refConnector), contains(true));
+    expect(
+      painters.map((painter) => painter.refConnector),
+      everyElement(isFalse),
+    );
+    expect(
+      find.byWidgetPredicate((widget) {
+        final key = widget.key;
+        return key is ValueKey<String> &&
+            key.value.startsWith('ref-chip-connector-');
+      }),
+      findsNothing,
+    );
     expect(
       painters
           .singleWhere((painter) => painter.row.commit.sha == 'root')
@@ -3844,7 +3865,7 @@ void main() {
           'ref-chip-connector-3333333333333333333333333333333333333333',
         ),
       ),
-      findsOneWidget,
+      findsNothing,
     );
     expect(
       tester.getCenter(virtualChip).dy,
@@ -3880,7 +3901,7 @@ void main() {
         .whereType<CommitGraphPainter>();
     expect(
       timelinePainters.map((painter) => painter.refConnector),
-      contains(true),
+      everyElement(isFalse),
     );
     final mappingPainter = tester
         .widgetList<CustomPaint>(find.byType(CustomPaint))
