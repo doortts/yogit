@@ -3603,6 +3603,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       _branchPreviewApplyLabel,
       textAlign: TextAlign.center,
       softWrap: true,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
     ),
   );
 
@@ -3750,48 +3752,36 @@ class _TimelineScreenState extends State<TimelineScreen>
             ),
           ],
           const SizedBox(height: 10),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              if (result != null) {
-                return Align(
-                  alignment: Alignment.centerRight,
-                  child: OutlinedButton(
-                    key: const Key('branch-preview-rollback'),
-                    onPressed: _branchApplyStatus == BranchApplyStatus.applied
-                        ? () => unawaited(_confirmBranchPreviewRollback())
-                        : null,
-                    child: Text('${merge ? 'Merge' : 'Rebase'} 이전 시점으로 되돌리기'),
+          if (result != null)
+            Align(
+              alignment: Alignment.centerRight,
+              child: OutlinedButton(
+                key: const Key('branch-preview-rollback'),
+                onPressed: _branchApplyStatus == BranchApplyStatus.applied
+                    ? () => unawaited(_confirmBranchPreviewRollback())
+                    : null,
+                child: Text('${merge ? 'Merge' : 'Rebase'} 이전 시점으로 되돌리기'),
+              ),
+            )
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (!_branchPreviewCanApply || merge) ...[
+                  Text(
+                    !_branchPreviewCanApply
+                        ? '원격 브랜치는 바로 적용할 수 없습니다. 로컬 브랜치를 선택해 주세요.'
+                        : '가상 결과를 실제 브랜치에 적용할 수 있습니다.',
+                    style: TextStyle(color: _palette.muted, fontSize: 10),
                   ),
-                );
-              }
-              final note = Text(
-                !_branchPreviewCanApply
-                    ? '원격 브랜치는 바로 적용할 수 없습니다. 로컬 브랜치를 선택해 주세요.'
-                    : merge
-                    ? '가상 결과를 실제 브랜치에 적용할 수 있습니다.'
-                    : '점선 결과를 실제 브랜치에 적용할 수 있습니다.',
-                style: TextStyle(color: _palette.muted, fontSize: 10),
-              );
-              final apply = _branchPreviewApplyButton();
-              if (constraints.maxWidth >= 380) {
-                return Row(
-                  children: [
-                    Expanded(child: note),
-                    const SizedBox(width: 8),
-                    apply,
-                  ],
-                );
-              }
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  note,
                   const SizedBox(height: 7),
-                  SizedBox(width: double.infinity, child: apply),
                 ],
-              );
-            },
-          ),
+                SizedBox(
+                  width: double.infinity,
+                  child: _branchPreviewApplyButton(),
+                ),
+              ],
+            ),
         ],
       ),
     );

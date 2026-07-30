@@ -3572,7 +3572,9 @@ void main() {
   testWidgets('branch preview applies rebase with a focused commit', (
     tester,
   ) async {
-    final comparison = branchComparison(compareRef: 'fix/docs');
+    const compareRef =
+        'codex/remote-behind-badge-with-an-extra-long-branch-name';
+    final comparison = branchComparison(compareRef: compareRef);
     final original = comparison.commits
         .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
         .commit;
@@ -3598,9 +3600,9 @@ void main() {
     repository = FakeGitRepository(
       (_, _) async => [commit('normal', 'normal history')],
       refs: const RepoRefs(
-        local: ['main', 'fix/docs'],
+        local: ['main', compareRef],
         current: 'main',
-        tips: {'main': 'main-tip', 'fix/docs': 'feature-tip'},
+        tips: {'main': 'main-tip', compareRef: 'feature-tip'},
       ),
       compareBranchesCallback: (_, _) async => comparison,
       openRebasePreviewCallback:
@@ -3619,16 +3621,24 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('branch-diff-selector')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('branch-diff-menu-fix/docs')));
+    await tester.tap(find.byKey(const Key('branch-diff-menu-$compareRef')));
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
-    expect(find.text('main 위로 fix/docs Rebase 실제 적용'), findsOneWidget);
+    expect(find.text('main 위로 $compareRef Rebase 실제 적용'), findsOneWidget);
     expect(find.text('Rebase 미리보기 성공'), findsOneWidget);
     expect(find.text('가상 커밋'), findsOneWidget);
     expect(find.text('원본 커밋'), findsOneWidget);
-    expect(find.text('점선 결과를 실제 브랜치에 적용할 수 있습니다.'), findsOneWidget);
+    expect(find.text('점선 결과를 실제 브랜치에 적용할 수 있습니다.'), findsNothing);
+    final applyLabel = tester.widget<Text>(
+      find.descendant(
+        of: find.byKey(const Key('branch-preview-apply')),
+        matching: find.byType(Text),
+      ),
+    );
+    expect(applyLabel.maxLines, 2);
+    expect(applyLabel.overflow, TextOverflow.ellipsis);
     await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
     await tester.tap(find.byKey(const Key('branch-preview-apply')));
     await tester.pumpAndSettle();
