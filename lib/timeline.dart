@@ -791,10 +791,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     try {
       final refs = await widget.repository.loadRefs();
       if (!mounted) return;
-      final branch = resolveBaseBranch(
-        refs,
-        widget.preferredBranchReady ? widget.preferredBranch : null,
-      );
+      final branch = resolveBaseBranch(refs, _refsLoaded ? _baseBranch : null);
       if (!widget.preferredBranchReady) {
         _pendingBaseBranch = branch;
         _pendingBaseBranchIsUserSelection = false;
@@ -903,6 +900,8 @@ class _TimelineScreenState extends State<TimelineScreen>
           _refs.local.contains(_pendingBaseBranch);
       final branch = pendingUserSelection
           ? _pendingBaseBranch
+          : preferredBranchBecameReady
+          ? _baseBranch ?? resolveBaseBranch(_refs, null)
           : resolveBaseBranch(_refs, widget.preferredBranch);
       if (preferredBranchBecameReady) {
         _pendingBaseBranch = null;
@@ -2598,13 +2597,9 @@ class _TimelineScreenState extends State<TimelineScreen>
       }
     });
 
-    final row = Container(
+    final row = SizedBox(
       key: name == null ? null : Key('sidebar-row-$name'),
       height: birth == null ? 28 : 40,
-      decoration: BoxDecoration(
-        color: current ? _palette.selectedRow : null,
-        borderRadius: BorderRadius.circular(5),
-      ),
       child: Padding(
         padding: EdgeInsets.only(left: 4 + depth * 16.0, right: 4),
         child: Row(
@@ -2658,6 +2653,36 @@ class _TimelineScreenState extends State<TimelineScreen>
                               ),
                             ),
                           ),
+                          if (current) const SizedBox(width: 2),
+                          if (current)
+                            Tooltip(
+                              message: '현재 체크아웃된 브랜치입니다',
+                              child: Container(
+                                key: Key('sidebar-head-$name'),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 2,
+                                  vertical: 1,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: iconColor.withValues(alpha: 0.12),
+                                  border: Border.all(
+                                    color: iconColor.withValues(alpha: 0.8),
+                                  ),
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                child: Text(
+                                  'HEAD',
+                                  style: TextStyle(
+                                    color: iconColor,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.3,
+                                    fontFamily: technicalFontFamily,
+                                    fontFamilyFallback: technicalFontFallback,
+                                  ),
+                                ),
+                              ),
+                            ),
                           if (behind > 0) const SizedBox(width: 4),
                           if (behind > 0)
                             Tooltip(

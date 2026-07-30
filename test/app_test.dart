@@ -125,6 +125,54 @@ void main() {
     },
   );
 
+  testWidgets(
+    'checked-out branch uses a HEAD badge without a selected row fill',
+    (tester) async {
+      for (final theme in TimelineThemeKind.values) {
+        final store = MemorySettingsStore()
+          ..current = AppSettings(timelineTheme: theme);
+        await tester.pumpWidget(
+          YogitApp(
+            key: ValueKey(theme),
+            repository: FakeGitRepository(
+              (_, _) async => [commit('3', 'checked out commit')],
+              refs: const RepoRefs(
+                local: ['main', 'release'],
+                current: 'main',
+                tips: {'main': '3', 'release': '2'},
+                localTips: {'main': '3', 'release': '2'},
+              ),
+            ),
+            settingsStore: store,
+            discoverAvatars: false,
+            windowFrameController: controller,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final row = tester.widget<SizedBox>(
+          find.byKey(const Key('sidebar-row-main')),
+        );
+        expect(row.height, isNotNull);
+        final badge = find.byKey(const Key('sidebar-head-main'));
+        expect(badge, findsOneWidget);
+        expect(
+          find.descendant(of: badge, matching: find.text('HEAD')),
+          findsOneWidget,
+        );
+        expect(
+          tester
+              .widget<Tooltip>(
+                find.ancestor(of: badge, matching: find.byType(Tooltip)),
+              )
+              .message,
+          '현재 체크아웃된 브랜치입니다',
+        );
+        expect(find.byKey(const Key('sidebar-head-release')), findsNothing);
+      }
+    },
+  );
+
   final hierarchyRoleCases =
       <
         ({
@@ -133,16 +181,6 @@ void main() {
           Color Function(TimelineThemePalette palette) expected,
         })
       >[
-        (
-          label: 'checked-out branch',
-          actual: (tester) {
-            final row = tester.widget<Container>(
-              find.byKey(const Key('sidebar-row-main')),
-            );
-            return (row.decoration! as BoxDecoration).color!;
-          },
-          expected: (palette) => palette.selectedRow,
-        ),
         (
           label: 'placement control',
           actual: (tester) {
@@ -2341,13 +2379,11 @@ void main() {
         ),
       );
 
-      final current = tester.widget<Container>(
+      final current = tester.widget<SizedBox>(
         find.byKey(const Key('sidebar-row-main')),
       );
-      expect(
-        (current.decoration! as BoxDecoration).color,
-        TimelineThemePalette.systemGraphite.selectedRow,
-      );
+      expect(current.height, isNotNull);
+      expect(find.byKey(const Key('sidebar-head-main')), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('ref-filter')));
       expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
@@ -2479,6 +2515,11 @@ void main() {
           ),
         ),
       );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('base-branch-selector')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('base-branch-menu-release')));
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('sidebar-ahead-main')), findsNothing);
@@ -6951,38 +6992,103 @@ void main() {
     );
   });
 
-  testWidgets('YogitApp persists base branches independently by repository', (
+  testWidgets(
+    'YogitApp starts from checkout and persists later base selection',
+    (tester) async {
+      final store = MemorySettingsStore()
+        ..current = const AppSettings(
+          baseBranches: {'/repos/one': 'release', '/repos/two': 'main'},
+        );
+      await tester.pumpWidget(
+        YogitApp(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('tip', 'tip')],
+            root: '/repos/one',
+            refs: const RepoRefs(
+              local: ['main', 'release'],
+              current: 'main',
+              tips: {'main': 'tip', 'release': 'tip'},
+            ),
+          ),
+          settingsStore: store,
+          discoverAvatars: false,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('base-branch-selector')),
+          matching: find.text('main'),
+        ),
+        findsOneWidget,
+      );
+      expect(store.current.baseBranches, {
+        '/repos/one': 'main',
+        '/repos/two': 'main',
+      });
+
+      await tester.tap(find.byKey(const Key('base-branch-selector')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('base-branch-menu-release')));
+      await tester.pumpAndSettle();
+
+      expect(store.current.baseBranches, {
+        '/repos/one': 'release',
+        '/repos/two': 'main',
+      });
+    },
+  );
+
+  testWidgets('base branch survives ref reload during the session', (
     tester,
   ) async {
-    final store = MemorySettingsStore()
-      ..current = const AppSettings(
-        baseBranches: {'/repos/one': 'release', '/repos/two': 'main'},
-      );
+    var refLoads = 0;
+    final fetched = <String>[];
+    const refs = RepoRefs(
+      local: ['main', 'release'],
+      current: 'main',
+      tips: {'main': 'main-tip', 'release': 'release-tip'},
+      localTips: {'main': 'main-tip', 'release': 'release-tip'},
+      upstreams: {'release': 'company/release'},
+      upstreamRemotes: {'release': 'company'},
+    );
     await tester.pumpWidget(
-      YogitApp(
-        repository: FakeGitRepository(
-          (_, _) async => [commit('tip', 'tip')],
-          root: '/repos/one',
-          refs: const RepoRefs(
-            local: ['main', 'release'],
-            current: 'main',
-            tips: {'main': 'tip', 'release': 'tip'},
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [
+              commit('release-tip', 'release'),
+              commit('main-tip', 'main'),
+            ],
+            refsLoader: () async {
+              refLoads++;
+              return refs;
+            },
+            fetchRemoteCallback: (remote) async {
+              fetched.add(remote);
+              return FetchOriginResult.updated;
+            },
           ),
         ),
-        settingsStore: store,
-        discoverAvatars: false,
       ),
     );
     await tester.pumpAndSettle();
+
     await tester.tap(find.byKey(const Key('base-branch-selector')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('base-branch-menu-main')));
+    await tester.tap(find.byKey(const Key('base-branch-menu-release')));
     await tester.pumpAndSettle();
 
-    expect(store.current.baseBranches, {
-      '/repos/one': 'main',
-      '/repos/two': 'main',
-    });
+    expect(refLoads, 2);
+    expect(fetched, ['company']);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('base-branch-selector')),
+        matching: find.text('release'),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
@@ -9863,6 +9969,11 @@ void main() {
           ),
         ),
       );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('base-branch-selector')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('base-branch-menu-release')));
       await tester.pumpAndSettle();
 
       final rows = {
