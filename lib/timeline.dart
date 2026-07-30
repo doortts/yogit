@@ -3457,10 +3457,13 @@ class _TimelineScreenState extends State<TimelineScreen>
     final mergeMode = _branchPreviewMode == BranchPreviewMode.merge;
     final mergeStatus = _effectiveMergeStatus;
     final rebaseStatus = _rebasePreview?.status;
+    final comparisonFailed = _comparisonError != null;
     final success = mergeMode
         ? mergeStatus == MergeConflictStatus.clean
         : _rebaseCheck?.status == RebaseCheckStatus.clean;
-    final resultLabel = mergeMode
+    final resultLabel = comparisonFailed
+        ? '브랜치 비교 실패'
+        : mergeMode
         ? switch (mergeStatus) {
             MergeConflictStatus.clean => 'Merge 성공',
             MergeConflictStatus.conflicts => 'Merge 충돌',
@@ -3524,7 +3527,9 @@ class _TimelineScreenState extends State<TimelineScreen>
         ]);
       }
     }
-    final resultColor = success
+    final resultColor = comparisonFailed
+        ? _behind
+        : success
         ? _success
         : mergeStatus == MergeConflictStatus.conflicts ||
               rebaseStatus == RebasePreviewStatus.conflict

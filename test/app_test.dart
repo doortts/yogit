@@ -2987,6 +2987,41 @@ void main() {
     );
   });
 
+  testWidgets('branch comparison failure is shown in the preview summary', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            current: 'main',
+            tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async =>
+              throw StateError('compare failed'),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('branch-preview-summary')),
+        matching: find.text('브랜치 비교 실패'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Merge 검사 중'), findsNothing);
+  });
+
   testWidgets('branch preview controls switch the summary above the timeline', (
     tester,
   ) async {
