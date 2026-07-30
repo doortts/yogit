@@ -1115,11 +1115,7 @@ void main() {
     expect(conflict.status, RebasePreviewStatus.conflict);
     expect(conflict.rewritten, isEmpty);
     expect(
-      layoutRebasePreviewGraph(
-        comparison,
-        conflict,
-        rebaseMappingColors(AvatarService.defaultColors),
-      ).kinds.values,
+      layoutRebasePreviewGraph(comparison, conflict).kinds.values,
       contains(PreviewGraphNodeKind.conflictTarget),
     );
   });

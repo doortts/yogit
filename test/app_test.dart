@@ -3607,6 +3607,24 @@ void main() {
     expect(find.text('new SHA'), findsNWidgets(3));
     expect(find.text('VR'), findsNWidgets(3));
     expect(find.text('feature · 가상'), findsNWidgets(3));
+    final virtualChip = find.byKey(
+      const Key(
+        'ref-chip-3333333333333333333333333333333333333333-feature · 가상',
+      ),
+    );
+    final virtualCell = find.ancestor(
+      of: virtualChip,
+      matching: find.byWidgetPredicate((widget) {
+        final key = widget.key;
+        return key is ValueKey<String> && key.value.startsWith('refs-cell-');
+      }),
+    );
+    expect(virtualChip, findsOneWidget);
+    expect(virtualCell, findsOneWidget);
+    expect(
+      tester.getTopLeft(virtualChip).dx - tester.getTopLeft(virtualCell).dx,
+      16,
+    );
     expect(find.text('재작성 1/3'), findsOneWidget);
     expect(find.text('재작성 2/3'), findsOneWidget);
     expect(find.text('재작성 3/3'), findsOneWidget);
@@ -5039,25 +5057,24 @@ void main() {
     );
   });
 
-  test(
-    'rebase mapping colors are distinct, visible, and avoid the palette',
-    () {
-      final reserved = const [
-        Color(0xFF8F6478),
-        Color(0xFF5F8582),
-        Color(0xFF81754F),
-      ];
-      final colors = rebaseMappingColors(reserved);
+  test('rebase mapping colors keep the compare hue and step darker', () {
+    const branchColor = Color(0xFF16CBE7);
+    final colors = rebaseMappingColors(branchColor);
+    final source = HSLColor.fromColor(branchColor);
+    final hsl = colors.map(HSLColor.fromColor).toList();
 
-      expect(colors, hasLength(5));
-      expect(colors.toSet(), hasLength(5));
-      expect(colors.where(reserved.contains), isEmpty);
-      expect(
-        colors.map((color) => HSLColor.fromColor(color).lightness),
-        everyElement(inInclusiveRange(0.48, 0.52)),
-      );
-    },
-  );
+    expect(colors, hasLength(5));
+    expect(
+      hsl.map((color) => color.hue),
+      everyElement(closeTo(source.hue, 0.5)),
+    );
+    expect(hsl.first.saturation, lessThan(source.saturation));
+    expect(hsl.first.lightness, greaterThan(source.lightness));
+    for (var index = 1; index < hsl.length; index++) {
+      expect(hsl[index].saturation, lessThan(hsl[index - 1].saturation));
+      expect(hsl[index].lightness, lessThan(hsl[index - 1].lightness));
+    }
+  });
 
   test('rebase mapping lines are one pixel with no outline or gaps', () async {
     final rows = [
@@ -5170,7 +5187,12 @@ void main() {
     final feature = comparison.commits
         .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
         .commit;
-    final colors = rebaseMappingColors(AvatarService.defaultColors);
+    final compareRow = layoutBranchComparison(
+      comparison.commits,
+    ).singleWhere((row) => row.commit.sha == comparison.compareTip);
+    final colors = rebaseMappingColors(
+      AvatarService.branchColor(compareRow.branch),
+    );
     final rebase = layoutRebasePreviewGraph(
       comparison,
       RebasePreviewResult(
@@ -5182,7 +5204,6 @@ void main() {
         total: 1,
         virtualTip: 'rewritten-feature',
       ),
-      colors,
     );
     expect(
       rebase.kinds['rewritten-feature'],
@@ -5245,7 +5266,6 @@ void main() {
         total: 1,
         virtualTip: 'interleaved-rewrite',
       ),
-      colors,
     );
     final olderBaseRow = interleaved.rows.singleWhere(
       (row) => row.commit.sha == olderBase.sha,
@@ -5270,7 +5290,6 @@ void main() {
         total: 2,
         conflictFiles: const ['lib/shared.dart'],
       ),
-      rebaseMappingColors(AvatarService.defaultColors),
     );
 
     expect(graph.rows, hasLength(comparison.commits.length + 1));
@@ -5332,7 +5351,6 @@ void main() {
         total: 1,
         virtualTip: 'rewritten-feature',
       ),
-      rebaseMappingColors(AvatarService.defaultColors),
     );
 
     expectExistingRows(rebase.rows, 1, preserveRails: false);

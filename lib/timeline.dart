@@ -49,22 +49,16 @@ const _previewConflict = Color(0xFFFF7A84);
 const _previewConflictPanel = Color(0xFF4B252C);
 const _previewControlBlue = Color(0xFF4388EE);
 
-List<Color> rebaseMappingColors(Iterable<Color> reserved) {
-  final used = reserved.map((color) => color.toARGB32()).toSet();
-  final colors = <Color>[];
-  for (var index = 0; index < 360 && colors.length < 5; index++) {
-    final color = HSLColor.fromAHSL(
-      1,
-      (18 + index * 67) % 360,
-      0.34,
-      0.50,
-    ).toColor();
-    if (used.add(color.toARGB32())) colors.add(color);
-  }
-  if (colors.length < 5) {
-    throw StateError('Could not allocate rebase mapping colors.');
-  }
-  return colors;
+List<Color> rebaseMappingColors(Color branchColor) {
+  final source = HSLColor.fromColor(branchColor);
+  final startLightness = source.lightness + (1 - source.lightness) * 0.12;
+  return [
+    for (var index = 0; index < 5; index++)
+      source
+          .withSaturation(source.saturation * (0.92 - index * 0.11))
+          .withLightness(startLightness * (1 - index * 0.09))
+          .toColor(),
+  ];
 }
 
 const _rebaseMappingAvatarBorderWidth = 3.0;
@@ -166,12 +160,13 @@ BranchPreviewGraph layoutMergePreviewGraph(BranchComparisonResult comparison) {
 BranchPreviewGraph layoutRebasePreviewGraph(
   BranchComparisonResult comparison,
   RebasePreviewResult preview,
-  List<Color> colors,
 ) {
   final laidOut = layoutBranchComparison(comparison.commits);
-  final compareLane = laidOut
-      .firstWhere((row) => row.commit.sha == comparison.compareTip)
-      .lane;
+  final compare = laidOut.firstWhere(
+    (row) => row.commit.sha == comparison.compareTip,
+  );
+  final compareLane = compare.lane;
+  final colors = rebaseMappingColors(AvatarService.branchColor(compare.branch));
   GraphRow hideCompareRail(GraphRow row) {
     final activeLaneShas = Map<int, String>.of(row.activeLaneShas)
       ..remove(compareLane);
@@ -306,7 +301,7 @@ BranchPreviewGraph layoutRebasePreviewGraph(
           originalRow: rowBySha[preview.rewritten[index].original.sha]!,
           rewrittenRow: rowBySha[preview.rewritten[index].rewrittenSha]!,
           routeLane: index,
-          color: colors[index % colors.length],
+          color: colors[math.min(index, colors.length - 1)],
         ),
     ],
   );
@@ -2161,19 +2156,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       });
       return;
     }
-    final colors = rebaseMappingColors([
-      ...AvatarService.palette,
-      _palette.background,
-      _palette.surface,
-      _palette.panel,
-      _palette.raised,
-      _palette.border,
-      _palette.text,
-      _palette.muted,
-      _palette.selectedRow,
-      _palette.interactive,
-    ]);
-    final graph = layoutRebasePreviewGraph(comparison, result, colors);
+    final graph = layoutRebasePreviewGraph(comparison, result);
     final conflictIndex = graph.rows.indexWhere(
       (row) => row.commit.sha == result.currentCommit?.sha,
     );
@@ -5215,19 +5198,18 @@ class _TimelineScreenState extends State<TimelineScreen>
             builder: (context, constraints) {
               // Chips split the cell evenly, each keeping at least 40px, and
               // whatever no longer fits simply does not show.
-              final slots = math.max(
-                1,
-                (constraints.maxWidth / _minChipWidth).floor(),
-              );
+              final inset = _comparison == null ? 0.0 : 16.0;
+              final width = constraints.maxWidth - inset * 2;
+              final slots = math.max(1, (width / _minChipWidth).floor());
               final shown = refs.take(slots).toList();
-              final slot = constraints.maxWidth / shown.length;
+              final slot = width / shown.length;
               return Stack(
                 children: [
                   for (var index = 0; index < shown.length; index++)
                     Positioned(
-                      left: index * slot,
+                      left: inset + index * slot,
                       top: 6,
-                      width: slot - 2,
+                      width: slot - (_comparison == null ? 2 : 0),
                       height: 24,
                       child: _refChip(commit, shown[index], color),
                     ),

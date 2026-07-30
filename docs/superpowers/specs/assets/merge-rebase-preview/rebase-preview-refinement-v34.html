@@ -20,9 +20,9 @@
       --red: #a23640;
       --red-soft: #ffadb4;
       --amber: #f4b95e;
-      --map-1: #d88a9f;
-      --map-2: #7fd8cf;
-      --map-3: #d5bd69;
+      --map-1: #31a6b8;
+      --map-2: #2dbfd5;
+      --map-3: #38cde4;
     }
     * { box-sizing: border-box; }
     body {
@@ -218,7 +218,7 @@
       stroke-linejoin: round;
     }
     .base-rail { stroke: var(--green); stroke-width: 2; }
-    .feature-rail { stroke: var(--amber); stroke-width: 2; }
+    .feature-rail { stroke: var(--cyan); stroke-width: 2; }
     .virtual-rail { stroke: var(--purple); stroke-width: 1; stroke-dasharray: 4 5; }
     .mapping { stroke-width: 1; }
     .node text {
@@ -232,7 +232,7 @@
     .node circle.ring { fill: none; stroke-width: 3; }
     .node.virtual circle.core { fill: var(--purple); }
     .node.main circle.core { fill: var(--green); }
-    .node.feature circle.core { fill: var(--amber); }
+    .node.feature circle.core { fill: var(--cyan); }
     .node.common circle.core { fill: #aeb0b7; }
     .right-pane { min-width: 0; overflow: hidden; background: #161719; }
     .pane-title {
@@ -398,7 +398,7 @@
           <div class="commit-row"><div><span class="ref feature">fix/docs · 원본</span></div><div></div><div class="hash">d02b114</div><div class="message">docs: add merge documentation</div></div>
           <div class="commit-row"><div><span class="ref common">공통</span></div><div></div><div class="hash">b806ad1</div><div class="message">chore: update shared base</div></div>
           <div class="graph-layer">
-            <svg viewBox="0 0 220 448" aria-label="아바타 테두리와 밝아진 동일 커밋 연결선 시안">
+            <svg viewBox="0 0 220 448" aria-label="비교 브랜치 색에서 단계적으로 어두워지는 동일 커밋 연결선 시안">
               <path class="virtual-rail" d="M56 28V140"/>
               <path class="base-rail" d="M56 196V420"/>
               <path class="feature-rail" d="M126 252V364"/>
