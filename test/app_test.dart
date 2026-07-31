@@ -10353,18 +10353,21 @@ void main() {
     );
   });
 
-  test('assigned branch colors win over the fallback palette', () {
+  test('the live base color wins while other assignments stay fixed', () {
     addTearDown(() {
+      AvatarService.baseBranchColor = AvatarService.defaultBaseBranchColor;
       AvatarService.branchAssignments = const {};
       AvatarService.palette = AvatarService.defaultColors;
     });
 
-    AvatarService.branchAssignments = const {0: Color(0xFF010203)};
-    expect(AvatarService.branchColor(0), const Color(0xFF010203));
-    // An id the map does not carry keeps the palette fallback; main stays green.
-    AvatarService.branchAssignments = const {};
-    expect(AvatarService.branchColor(0), const Color(0xFF5CB270));
-    expect(AvatarService.branchColor(1), AvatarService.defaultColors.first);
+    AvatarService.branchAssignments = const {
+      0: Color(0xFF010203),
+      1: Color(0xFF040506),
+    };
+    AvatarService.baseBranchColor = const Color(0xFFAABBCC);
+
+    expect(AvatarService.branchColor(0), const Color(0xFFAABBCC));
+    expect(AvatarService.branchColor(1), const Color(0xFF040506));
   });
 
   testWidgets('the timeline colors the graph with its assigned lines', (
