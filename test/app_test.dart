@@ -13015,6 +13015,106 @@ void main() {
     expect(tester.getTopLeft(firstFile).dy, closeTo(before, 0.1));
   });
 
+  testWidgets('preview page shortcut prioritizes a scrollable adjacent diff', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 600);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'scroll targets')],
+          files: (_, _) async => [
+            for (var index = 0; index < 20; index++)
+              GitFileChange(
+                path: 'lib/file$index.dart',
+                status: 'M',
+                additions: 1,
+                deletions: 0,
+              ),
+          ],
+          diff: (_, _, path, _, _) async => [
+            const DiffLine(kind: DiffLineKind.hunk, text: '@@ -0,0 +1,80 @@'),
+            for (var index = 0; index < 80; index++)
+              DiffLine(
+                kind: DiffLineKind.add,
+                text: '$path line $index',
+                newNumber: index + 1,
+              ),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('preview-state-lib/file0.dart')));
+    await tester.pumpAndSettle();
+
+    final previewPosition = tester
+        .widget<NestedScrollView>(
+          find.byKey(const Key('preview-content-scroll')),
+        )
+        .controller!
+        .position;
+    final diffPosition = tester
+        .widget<ListView>(find.byKey(const Key('unified-list')))
+        .controller!
+        .position;
+
+    Future<void> page(LogicalKeyboardKey arrow) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(arrow);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+    }
+
+    expect(previewPosition.maxScrollExtent, greaterThan(0));
+    expect(diffPosition.maxScrollExtent, greaterThan(0));
+    await page(LogicalKeyboardKey.arrowDown);
+    expect(diffPosition.pixels, greaterThan(0));
+    expect(previewPosition.pixels, 0);
+
+    for (
+      var attempt = 0;
+      attempt < 10 && diffPosition.extentAfter > 0;
+      attempt++
+    ) {
+      diffPosition.jumpTo(diffPosition.maxScrollExtent);
+      await tester.pumpAndSettle();
+    }
+    expect(diffPosition.extentAfter, 0);
+    await page(LogicalKeyboardKey.arrowDown);
+    expect(
+      previewPosition.pixels,
+      greaterThan(0),
+      reason:
+          'diff=${diffPosition.pixels}/${diffPosition.maxScrollExtent} '
+          'after=${diffPosition.extentAfter} '
+          'previewAfter=${previewPosition.extentAfter}',
+    );
+
+    previewPosition.jumpTo(previewPosition.maxScrollExtent);
+    await tester.pump();
+    final previewEnd = previewPosition.pixels;
+    final diffEnd = diffPosition.pixels;
+    await page(LogicalKeyboardKey.arrowDown);
+    expect(previewPosition.pixels, previewEnd);
+    expect(diffPosition.pixels, diffEnd);
+    expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
+
+    await page(LogicalKeyboardKey.arrowUp);
+    expect(diffPosition.pixels, lessThan(diffEnd));
+    expect(previewPosition.pixels, previewEnd);
+  });
+
   // ------------------------------------------------------------------ C3/H2
   testWidgets('the preview header carries the compact green Full Diff', (
     tester,

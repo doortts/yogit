@@ -6455,20 +6455,21 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   ScrollController? _previewPageScrollController(int direction) {
-    final outer = _previewFilesScrollController;
-    final inner = _previewDiffScrollController;
-    if (direction > 0) {
-      if (outer.hasClients &&
-          outer.position.pixels < outer.position.maxScrollExtent) {
-        return outer;
-      }
-      return inner.hasClients ? inner : null;
+    bool canScroll(ScrollController controller) {
+      if (!controller.hasClients) return false;
+      final position = controller.position;
+      return direction > 0
+          ? position.extentAfter > 0
+          : position.extentBefore > 0;
     }
-    if (inner.hasClients &&
-        inner.position.pixels > inner.position.minScrollExtent) {
-      return inner;
+
+    if (_previewDiffOpen && canScroll(_previewDiffScrollController)) {
+      return _previewDiffScrollController;
     }
-    return outer.hasClients ? outer : null;
+    if (canScroll(_previewFilesScrollController)) {
+      return _previewFilesScrollController;
+    }
+    return null;
   }
 
   void _revealSelectedPreviewFile(int direction, {required bool animate}) {
