@@ -1673,7 +1673,7 @@ class BranchAheadBehind {
   return null;
 }
 
-enum FetchOriginResult { updated, noOrigin }
+enum FetchOriginResult { updated, unchanged, noOrigin }
 
 String? resolveBaseBranch(RepoRefs refs, String? savedBranch) {
   if (savedBranch != null && refs.local.contains(savedBranch)) {
@@ -3274,6 +3274,7 @@ class GitRepository implements FullDiffRepository {
       '-c',
       'credential.interactive=never',
       'fetch',
+      '--porcelain',
       '--prune',
       remote,
     ];
@@ -3295,7 +3296,9 @@ class GitRepository implements FullDiffRepository {
         result.exitCode,
       );
     }
-    return FetchOriginResult.updated;
+    return result.stdout.toString().trim().isEmpty
+        ? FetchOriginResult.unchanged
+        : FetchOriginResult.updated;
   }
 
   /// The working tree row compares its base against the checkout, so it passes

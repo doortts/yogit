@@ -2493,35 +2493,49 @@ void main() {
     },
   );
 
-  test(
-    'fetchRemote fetches the named remote without terminal prompts',
-    () async {
-      List<String>? call;
-      Map<String, String>? fetchEnvironment;
-      final repository = GitRepository(
-        '/repo',
-        runner: (executable, arguments, {workingDirectory, environment}) async {
-          call = arguments;
-          fetchEnvironment = environment;
-          return ProcessResult(1, 0, '', '');
-        },
-      );
+  test('fetchRemote distinguishes unchanged and updated refs', () async {
+    final calls = <List<String>>[];
+    Map<String, String>? fetchEnvironment;
+    var output = '';
+    final repository = GitRepository(
+      '/repo',
+      runner: (executable, arguments, {workingDirectory, environment}) async {
+        calls.add(arguments);
+        fetchEnvironment = environment;
+        return ProcessResult(1, 0, output, '');
+      },
+    );
 
-      expect(
-        await repository.fetchRemote('company'),
-        FetchOriginResult.updated,
-      );
-      expect(call, [
+    expect(
+      await repository.fetchRemote('company'),
+      FetchOriginResult.unchanged,
+    );
+    output = '* refs/heads/main:refs/remotes/company/main\t[new branch]\n';
+    expect(
+      await repository.fetchRemote('company'),
+      FetchOriginResult.updated,
+    );
+    expect(calls, [
+      [
         '-c',
         'credential.interactive=never',
         'fetch',
+        '--porcelain',
         '--prune',
         'company',
-      ]);
-      expect(fetchEnvironment?['GIT_TERMINAL_PROMPT'], '0');
-      expect(fetchEnvironment?['GCM_INTERACTIVE'], 'Never');
-    },
-  );
+      ],
+      [
+        '-c',
+        'credential.interactive=never',
+        'fetch',
+        '--porcelain',
+        '--prune',
+        'company',
+      ],
+    ]);
+    expect(fetchEnvironment?['GIT_TERMINAL_PROMPT'], '0');
+    expect(fetchEnvironment?['GCM_INTERACTIVE'], 'Never');
+  });
 
   test('fetchOrigin disables terminal prompts and handles no origin', () async {
     Map<String, String>? fetchEnvironment;
@@ -2536,7 +2550,7 @@ void main() {
       },
     );
 
-    expect(await repository.fetchOrigin(), FetchOriginResult.updated);
+    expect(await repository.fetchOrigin(), FetchOriginResult.unchanged);
     expect(fetchEnvironment?['GIT_TERMINAL_PROMPT'], '0');
     expect(fetchEnvironment?['GCM_INTERACTIVE'], 'Never');
 
