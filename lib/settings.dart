@@ -219,6 +219,11 @@ Color? parseHexColor(String value) {
 double _clamped(Object? value, double fallback, double min, double max) =>
     (value is num ? value.toDouble() : fallback).clamp(min, max);
 
+double? _optionalExtent(Object? value) {
+  if (value is! num || !value.toDouble().isFinite) return null;
+  return value.toDouble().clamp(0, double.infinity).toDouble();
+}
+
 String formatHexColor(String value) =>
     '#${value.trim().replaceFirst('#', '').toUpperCase()}';
 
@@ -274,6 +279,9 @@ class AppSettings {
     this.refPalette = defaultRefPalette,
     this.previewWidth = 288,
     this.previewHeight = 280,
+    this.previewDiffLeftWidth,
+    this.previewDiffRightWidth,
+    this.previewDiffBottomHeight,
     this.baseBranches = const {},
     this.deletedBranchNames = const {},
   });
@@ -332,6 +340,9 @@ class AppSettings {
   /// The detail panel's size, per placement axis.
   final double previewWidth;
   final double previewHeight;
+  final double? previewDiffLeftWidth;
+  final double? previewDiffRightWidth;
+  final double? previewDiffBottomHeight;
 
   /// The palette to hand [AvatarService]; a damaged entry drops the whole list
   /// back to the default rather than painting one rail wrong.
@@ -405,6 +416,9 @@ class AppSettings {
     List<RefPaletteEntry>? refPalette,
     double? previewWidth,
     double? previewHeight,
+    double? previewDiffLeftWidth,
+    double? previewDiffRightWidth,
+    double? previewDiffBottomHeight,
     Map<String, String>? baseBranches,
     Map<String, Map<String, String>>? deletedBranchNames,
   }) => AppSettings(
@@ -421,6 +435,10 @@ class AppSettings {
     refPalette: refPalette ?? this.refPalette,
     previewWidth: previewWidth ?? this.previewWidth,
     previewHeight: previewHeight ?? this.previewHeight,
+    previewDiffLeftWidth: previewDiffLeftWidth ?? this.previewDiffLeftWidth,
+    previewDiffRightWidth: previewDiffRightWidth ?? this.previewDiffRightWidth,
+    previewDiffBottomHeight:
+        previewDiffBottomHeight ?? this.previewDiffBottomHeight,
     baseBranches: baseBranches ?? this.baseBranches,
     deletedBranchNames: deletedBranchNames ?? this.deletedBranchNames,
   );
@@ -494,6 +512,11 @@ class AppSettings {
         200,
         double.maxFinite,
       ),
+      previewDiffLeftWidth: _optionalExtent(value['previewDiffLeftWidth']),
+      previewDiffRightWidth: _optionalExtent(value['previewDiffRightWidth']),
+      previewDiffBottomHeight: _optionalExtent(
+        value['previewDiffBottomHeight'],
+      ),
       baseBranches: baseBranches,
       deletedBranchNames: _parseNestedStringMap(value['deletedBranchNames']),
     );
@@ -515,6 +538,9 @@ class AppSettings {
     ],
     'previewWidth': previewWidth,
     'previewHeight': previewHeight,
+    'previewDiffLeftWidth': ?previewDiffLeftWidth,
+    'previewDiffRightWidth': ?previewDiffRightWidth,
+    'previewDiffBottomHeight': ?previewDiffBottomHeight,
     'baseBranches': baseBranches,
     'deletedBranchNames': deletedBranchNames,
   };
@@ -535,6 +561,9 @@ class AppSettings {
       listEquals(refPalette, other.refPalette) &&
       previewWidth == other.previewWidth &&
       previewHeight == other.previewHeight &&
+      previewDiffLeftWidth == other.previewDiffLeftWidth &&
+      previewDiffRightWidth == other.previewDiffRightWidth &&
+      previewDiffBottomHeight == other.previewDiffBottomHeight &&
       mapEquals(baseBranches, other.baseBranches) &&
       _nestedStringMapEquals(deletedBranchNames, other.deletedBranchNames);
 
@@ -557,6 +586,9 @@ class AppSettings {
     Object.hashAll(refPalette),
     previewWidth,
     previewHeight,
+    previewDiffLeftWidth,
+    previewDiffRightWidth,
+    previewDiffBottomHeight,
     Object.hashAllUnordered(
       baseBranches.entries.map((entry) => Object.hash(entry.key, entry.value)),
     ),

@@ -691,6 +691,287 @@ void main() {
     );
   });
 
+  testWidgets(
+    'a file click opens an adjacent diff without resizing the preview',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1200, 700);
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+      await tester.pumpWidget(
+        app(
+          FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+            files: (_, _) async => const [
+              GitFileChange(
+                path: 'lib/a.dart',
+                status: 'M',
+                additions: 1,
+                deletions: 1,
+              ),
+            ],
+            diff: (_, _, _, _, _) async => const [
+              DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+              DiffLine(kind: DiffLineKind.delete, text: 'old', oldNumber: 1),
+              DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
+            ],
+          ),
+          controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('preview-diff')), findsNothing);
+      final previewWidth = tester
+          .getSize(find.byKey(const Key('preview-panel')))
+          .width;
+
+      await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('preview-diff')), findsOneWidget);
+      expect(
+        tester.getSize(find.byKey(const Key('preview-panel'))).width,
+        previewWidth,
+      );
+      expect(
+        tester.getRect(find.byKey(const Key('preview-diff'))).right,
+        tester.getRect(find.byKey(const Key('preview-panel'))).left,
+      );
+
+      await tester.tap(find.text('좌측'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getRect(find.byKey(const Key('preview-panel'))).right,
+        tester.getRect(find.byKey(const Key('preview-diff'))).left,
+      );
+
+      await tester.tap(find.text('하단'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getRect(find.byKey(const Key('preview-diff'))).bottom,
+        tester.getRect(find.byKey(const Key('preview-panel'))).top,
+      );
+    },
+  );
+
+  testWidgets('preview diff resizer shows blue line only on hover', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 700);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          files: (_, _) async => const [
+            GitFileChange(
+              path: 'lib/a.dart',
+              status: 'M',
+              additions: 1,
+              deletions: 1,
+            ),
+          ],
+          diff: (_, _, _, _, _) async => const [
+            DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+            DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
+    await tester.pumpAndSettle();
+
+    Color lineColor() => tester
+        .widget<ColoredBox>(find.byKey(const Key('preview-diff-hover-line')))
+        .color;
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: const Offset(1190, 690));
+    expect(lineColor(), Colors.transparent);
+    expect(
+      tester.getRect(find.byKey(const Key('preview-diff-hover-line'))).left,
+      tester.getRect(find.byKey(const Key('preview-diff'))).left,
+    );
+
+    await mouse.moveTo(
+      tester.getCenter(find.byKey(const Key('preview-diff-resizer'))),
+    );
+    await tester.pump();
+    expect(lineColor(), const Color(0xFF5AB0FF));
+
+    await mouse.moveTo(const Offset(1190, 690));
+    await tester.pump();
+    expect(lineColor(), Colors.transparent);
+  });
+
+  testWidgets(
+    'adjacent diff size defaults, persists, and reaches both endpoints',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1200, 700);
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+      final store = MemorySettingsStore();
+      final repository = FakeGitRepository(
+        (_, _) async => [commit('1', 'first commit')],
+        files: (_, _) async => const [
+          GitFileChange(
+            path: 'lib/a.dart',
+            status: 'M',
+            additions: 1,
+            deletions: 1,
+          ),
+        ],
+        diff: (_, _, _, _, _) async => const [
+          DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+          DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
+        ],
+      );
+
+      Future<void> mountAndOpen() async {
+        await tester.pumpWidget(
+          YogitApp(
+            repository: repository,
+            settingsStore: store,
+            discoverAvatars: false,
+            windowFrameController: controller,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
+        await tester.pumpAndSettle();
+      }
+
+      await mountAndOpen();
+      final previewWidth = tester
+          .getSize(find.byKey(const Key('preview-panel')))
+          .width;
+      expect(
+        tester.getSize(find.byKey(const Key('timeline-viewport'))).width,
+        closeTo(100, 0.1),
+      );
+
+      final initialDiffWidth = tester
+          .getSize(find.byKey(const Key('preview-diff')))
+          .width;
+      await tester.drag(
+        find.byKey(const Key('preview-diff-resizer')),
+        Offset(initialDiffWidth - 400, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSize(find.byKey(const Key('preview-diff'))).width,
+        closeTo(400, 0.1),
+      );
+      expect(
+        store.current.toJson()['previewDiffRightWidth'],
+        closeTo(400, 0.1),
+      );
+      expect(
+        tester.getSize(find.byKey(const Key('preview-panel'))).width,
+        previewWidth,
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await controller.setPreview(PreviewPlacement.closed);
+      await mountAndOpen();
+      expect(
+        tester.getSize(find.byKey(const Key('preview-diff'))).width,
+        closeTo(400, 0.1),
+      );
+
+      await tester.drag(
+        find.byKey(const Key('preview-diff-resizer')),
+        const Offset(-5000, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSize(find.byKey(const Key('timeline-viewport'))).width,
+        closeTo(0, 0.1),
+      );
+      await tester.drag(
+        find.byKey(const Key('preview-diff-resizer')),
+        const Offset(5000, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSize(find.byKey(const Key('preview-diff'))).width,
+        closeTo(0, 0.1),
+      );
+    },
+  );
+
+  testWidgets('escape closes the adjacent diff before the preview', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [
+            commit('1', 'first commit'),
+            commit('2', 'second commit'),
+          ],
+          files: (_, _) async => const [
+            GitFileChange(
+              path: 'lib/a.dart',
+              status: 'M',
+              additions: 1,
+              deletions: 1,
+            ),
+          ],
+          diff: (_, _, _, _, _) async => const [
+            DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+            DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('timeline-viewport')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('preview-diff')), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('preview-diff')), findsNothing);
+    expect(find.byKey(const Key('preview-panel')), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.text('Commit & Diff'), findsNothing);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('preview-diff-close')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('preview-diff')), findsNothing);
+    expect(find.byKey(const Key('preview-panel')), findsOneWidget);
+  });
+
   testWidgets('preview loads real files before the first file diff once', (
     tester,
   ) async {
@@ -733,7 +1014,12 @@ void main() {
 
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    // Once in the file list, once as the diff head line.
+    expect(find.text('lib/first.dart'), findsOneWidget);
+    expect(find.byKey(const Key('preview-diff')), findsNothing);
+    expect(diffLoads, 0);
+
+    await tester.tap(find.byKey(const Key('preview-state-lib/first.dart')));
+    await tester.pumpAndSettle();
     expect(find.text('lib/first.dart'), findsNWidgets(2));
     expect(find.text('README.md'), findsOneWidget);
     expect(find.text('lib/first.dart changed'), findsOneWidget);
@@ -756,10 +1042,8 @@ void main() {
       isNull,
     );
     expect(
-      tester.getTopLeft(find.byKey(const Key('preview-files-scroll'))).dy,
-      lessThan(
-        tester.getTopLeft(find.byKey(const Key('preview-diff-scroll'))).dy,
-      ),
+      tester.getRect(find.byKey(const Key('preview-diff'))).right,
+      tester.getRect(find.byKey(const Key('preview-panel'))).left,
     );
 
     await tester.tap(
@@ -770,7 +1054,8 @@ void main() {
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(find.byKey(const Key('preview-diff')), findsNothing);
+    await tester.tap(find.byKey(const Key('preview-state-lib/first.dart')));
     await tester.pumpAndSettle();
     expect(fileLoads, 1);
     expect(diffLoads, 1);
@@ -2734,6 +3019,88 @@ void main() {
   );
 
   testWidgets(
+    'remote branches show divergence from same-named local branches',
+    (tester) async {
+      await tester.pumpWidget(
+        app(
+          FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+            refs: const RepoRefs(
+              local: ['main', 'release'],
+              remote: ['origin/main', 'company/release', 'origin/remote-only'],
+              current: 'main',
+              remoteAheadBehind: {
+                'origin/main': BranchAheadBehind(ahead: 2, behind: 1),
+                'company/release': BranchAheadBehind(ahead: 0, behind: 0),
+              },
+            ),
+          ),
+          controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('+2 −1', findRichText: true), findsOneWidget);
+      expect(
+        find.byKey(const Key('sidebar-remote-divergence-origin/main')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('sidebar-remote-divergence-company/release')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('sidebar-remote-divergence-origin/remote-only')),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
+    'matching remotes refresh once every three minutes while active',
+    (tester) async {
+      final remotes = <String>[];
+      await tester.pumpWidget(
+        app(
+          FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+            refs: const RepoRefs(
+              local: ['main', 'release'],
+              remote: [
+                'origin/main',
+                'origin/release',
+                'company/release',
+                'company/remote-only',
+                'foo/bar/main',
+              ],
+              remoteNames: ['origin', 'company', 'foo', 'foo/bar'],
+              current: 'main',
+            ),
+            fetchRemoteCallback: (remote) async {
+              remotes.add(remote);
+              return FetchOriginResult.noOrigin;
+            },
+          ),
+          controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(remotes, ['company', 'foo/bar', 'origin']);
+
+      await tester.pump(const Duration(minutes: 3));
+      await tester.pump();
+      expect(remotes, [
+        'company',
+        'foo/bar',
+        'origin',
+        'company',
+        'foo/bar',
+        'origin',
+      ]);
+    },
+  );
+
+  testWidgets(
     'selected upstream refresh runs every three minutes while active',
     (tester) async {
       final remotes = <String>[];
@@ -2917,6 +3284,187 @@ void main() {
     );
   });
 
+  testWidgets('unchanged remote refresh does not reload refs', (tester) async {
+    var fetches = 0;
+    var refLoads = 0;
+    const refs = RepoRefs(
+      local: ['main'],
+      remote: ['origin/main'],
+      remoteNames: ['origin'],
+      current: 'main',
+      tips: {'main': 'main-tip', 'origin/main': 'remote-tip'},
+      localTips: {'main': 'main-tip'},
+      upstreams: {'main': 'origin/main'},
+      upstreamRemotes: {'main': 'origin'},
+    );
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refsLoader: () async {
+            refLoads++;
+            return refs;
+          },
+          fetchRemoteCallback: (_) async {
+            fetches++;
+            return FetchOriginResult.unchanged;
+          },
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(refLoads, 1);
+    expect(fetches, 1);
+
+    await tester.pump(const Duration(minutes: 3));
+    await tester.pump();
+
+    expect(refLoads, 1);
+    expect(fetches, 2);
+  });
+
+  testWidgets('unchanged comparison tips do not recompute branch preview', (
+    tester,
+  ) async {
+    var remoteChanged = false;
+    var compareCalls = 0;
+    const refs = RepoRefs(
+      local: ['main', 'feature'],
+      remote: ['origin/main'],
+      remoteNames: ['origin'],
+      current: 'main',
+      tips: {
+        'main': 'main-tip',
+        'feature': 'feature-tip',
+        'origin/main': 'remote-tip',
+      },
+      localTips: {'main': 'main-tip', 'feature': 'feature-tip'},
+      upstreams: {'main': 'origin/main'},
+      upstreamRemotes: {'main': 'origin'},
+    );
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refsLoader: () async => refs,
+          fetchRemoteCallback: (_) async => remoteChanged
+              ? FetchOriginResult.updated
+              : FetchOriginResult.unchanged,
+          compareBranchesCallback: (_, _) async {
+            compareCalls++;
+            return branchComparison();
+          },
+          simulateRebaseCallback:
+              ({required baseRef, required compareRef}) async =>
+                  const RebaseCheckResult(status: RebaseCheckStatus.clean),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+
+    expect(compareCalls, 1);
+    expect(find.text('feature only'), findsOneWidget);
+
+    remoteChanged = true;
+    await tester.pump(const Duration(minutes: 3));
+    await tester.pumpAndSettle();
+
+    expect(compareCalls, 1);
+    expect(find.text('feature only'), findsOneWidget);
+  });
+
+  testWidgets('changed comparison tips replace branch preview atomically', (
+    tester,
+  ) async {
+    var remoteChanged = false;
+    var refs = const RepoRefs(
+      local: ['main', 'feature'],
+      remote: ['origin/main'],
+      remoteNames: ['origin'],
+      current: 'main',
+      tips: {
+        'main': 'main-tip',
+        'feature': 'feature-tip',
+        'origin/main': 'remote-tip',
+      },
+      localTips: {'main': 'main-tip', 'feature': 'feature-tip'},
+      upstreams: {'main': 'origin/main'},
+      upstreamRemotes: {'main': 'origin'},
+    );
+    final replacement = Completer<BranchComparisonResult>();
+    var compareCalls = 0;
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refsLoader: () async => refs,
+          fetchRemoteCallback: (_) async => remoteChanged
+              ? FetchOriginResult.updated
+              : FetchOriginResult.unchanged,
+          compareBranchesCallback: (_, _) {
+            compareCalls++;
+            if (compareCalls == 1) {
+              return Future.value(
+                branchComparison(compareSubject: 'old feature'),
+              );
+            }
+            return replacement.future;
+          },
+          simulateRebaseCallback:
+              ({required baseRef, required compareRef}) async =>
+                  const RebaseCheckResult(status: RebaseCheckStatus.clean),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+    expect(find.text('old feature'), findsOneWidget);
+
+    refs = const RepoRefs(
+      local: ['main', 'feature'],
+      remote: ['origin/main'],
+      remoteNames: ['origin'],
+      current: 'main',
+      tips: {
+        'main': 'main-tip',
+        'feature': 'feature-next',
+        'origin/main': 'remote-tip',
+      },
+      localTips: {'main': 'main-tip', 'feature': 'feature-next'},
+      upstreams: {'main': 'origin/main'},
+      upstreamRemotes: {'main': 'origin'},
+    );
+    remoteChanged = true;
+    await tester.pump(const Duration(minutes: 3));
+    await tester.pump();
+
+    expect(compareCalls, 2);
+    expect(find.text('old feature'), findsOneWidget);
+    expect(find.text('normal history'), findsNothing);
+
+    replacement.complete(
+      branchComparison(
+        compareTip: 'feature-next',
+        compareSubject: 'new feature',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('new feature'), findsOneWidget);
+    expect(find.text('old feature'), findsNothing);
+  });
+
   testWidgets('remote ref reload keeps a selected tag comparison', (
     tester,
   ) async {
@@ -3061,6 +3609,71 @@ void main() {
           .committerColor,
       TimelineThemePalette.systemGraphite.muted,
     );
+  });
+
+  testWidgets('merge preview spacing ignores deeper normal history lanes', (
+    tester,
+  ) async {
+    final repository = FakeGitRepository(
+      (_, _) async => [
+        commit(
+          'octopus',
+          'deep normal history',
+          parents: const ['a', 'b', 'c', 'd', 'e', 'f'],
+        ),
+        for (final sha in const ['a', 'b', 'c', 'd', 'e', 'f'])
+          commit(sha, sha),
+      ],
+      refs: const RepoRefs(
+        local: ['main', 'feature'],
+        current: 'main',
+        tips: {'main': 'octopus', 'feature': 'feature-tip'},
+      ),
+      compareBranchesCallback: (_, _) async => branchComparison(),
+      simulateRebaseCallback: ({required baseRef, required compareRef}) =>
+          Future.value(
+            const RebaseCheckResult(status: RebaseCheckStatus.clean),
+          ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: repository,
+          controller: controller,
+          columnWidths: const TimelineColumnWidths(graph: 96),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    CommitGraphPainter painterFor(String sha) => tester
+        .widgetList<CustomPaint>(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is CustomPaint && widget.painter is CommitGraphPainter,
+          ),
+        )
+        .map((paint) => paint.painter! as CommitGraphPainter)
+        .firstWhere((painter) => painter.row.commit.sha == sha);
+
+    final normalPainter = painterFor('octopus');
+    expect(normalPainter.laneSpacing, CommitGraphPainter.minLaneSpacing);
+
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+
+    final previewPainter = tester
+        .widgetList<CustomPaint>(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is CustomPaint && widget.painter is CommitGraphPainter,
+          ),
+        )
+        .map((paint) => paint.painter! as CommitGraphPainter)
+        .firstWhere((painter) => painter.row.commit.shortSha == 'VM');
+    expect(previewPainter.laneX(1) - previewPainter.laneX(0), 49);
   });
 
   testWidgets('virtual merge row hides borrowed date and author', (
@@ -3370,6 +3983,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('lib/shared.dart'), findsWidgets);
+    await tester.tap(find.byKey(const Key('preview-state-lib/shared.dart')));
+    await tester.pumpAndSettle();
     expect(rangeCalls, [
       (from: 'main-tip', to: 'feature-tip', path: 'lib/shared.dart'),
     ]);
@@ -3446,6 +4061,8 @@ void main() {
     expect(find.byKey(const Key('preview-full-diff')), findsNothing);
     expect(find.text('가상 병합 커밋'), findsOneWidget);
     expect(find.text('feature.txt'), findsWidgets);
+    await tester.tap(find.byKey(const Key('preview-state-feature.txt')));
+    await tester.pumpAndSettle();
     expect(find.byType(UnifiedPresentationView), findsOneWidget);
     final fileList = find.byKey(const Key('branch-preview-file-list'));
     expect(
@@ -3587,12 +4204,7 @@ void main() {
     expect(find.text('중단'), findsOneWidget);
     expect(find.text('충돌'), findsWidgets);
     expect(find.text('lib/shared.dart'), findsWidgets);
-    final previewScroll = tester
-        .widget<NestedScrollView>(
-          find.byKey(const Key('preview-content-scroll')),
-        )
-        .controller!;
-    previewScroll.jumpTo(previewScroll.position.maxScrollExtent);
+    await tester.tap(find.byKey(const Key('preview-state-lib/shared.dart')));
     await tester.pumpAndSettle();
     expect(
       find.text('main · main change ← feature · feature change'),
@@ -3688,10 +4300,17 @@ void main() {
     expect(find.text('현재 작업 트리 변경 없음'), findsOneWidget);
     expect(find.text('종료 시 자동 삭제'), findsOneWidget);
     expect(find.text('임시 작업 공간 시작'), findsNothing);
-    await tester.drag(
-      find.byKey(const Key('preview-content-scroll')),
-      const Offset(0, -600),
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('preview-state-lib/shared.dart')),
+      100,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const Key('preview-content-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
     );
+    await tester.tap(find.byKey(const Key('preview-state-lib/shared.dart')));
     await tester.pumpAndSettle();
     expect(find.text('main side'), findsOneWidget);
     expect(find.text('docs side'), findsOneWidget);
@@ -4402,6 +5021,11 @@ void main() {
     await tester.tap(find.byKey(const Key('branch-preview-rebase')));
     await tester.pumpAndSettle();
     expect(find.text('Rebase 충돌'), findsOneWidget);
+    await tester.ensureVisible(
+      find.byKey(const Key('preview-state-lib/shared.dart')),
+    );
+    await tester.tap(find.byKey(const Key('preview-state-lib/shared.dart')));
+    await tester.pumpAndSettle();
     expect(
       tester
           .widget<InkWell>(find.byKey(const Key('rebase-conflict-use-base')))
@@ -4743,6 +5367,11 @@ void main() {
           .data,
       '0',
     );
+    await tester.ensureVisible(
+      find.byKey(const Key('preview-state-lib/shared.dart')),
+    );
+    await tester.tap(find.byKey(const Key('preview-state-lib/shared.dart')));
+    await tester.pumpAndSettle();
     expect(find.text('현재 Git 작업을 마친 뒤 해결할 수 있습니다'), findsOneWidget);
     expect(
       tester
@@ -4864,10 +5493,17 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    await tester.drag(
-      find.byKey(const Key('preview-content-scroll')),
-      const Offset(0, -600),
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('preview-state-lib/shared.dart')),
+      100,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const Key('preview-content-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
     );
+    await tester.tap(find.byKey(const Key('preview-state-lib/shared.dart')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('rebase-conflict-use-compare')));
     await tester.pump();
@@ -5462,6 +6098,8 @@ void main() {
     expect(find.text('1 file changed'), findsOneWidget);
     expect(find.text('1 files changed'), findsNothing);
 
+    await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
+    await tester.pumpAndSettle();
     final diff = find.byKey(const Key('preview-diff'));
     expect(find.byType(UnifiedPresentationView), findsOneWidget);
     expect(find.byKey(const Key('unified-line-0-0')), findsOneWidget);
@@ -12080,7 +12718,22 @@ void main() {
     expect(sizeOf('Committer · cam@example.com'), 12);
     expect(sizeOf('2 files changed'), 12);
     expect(sizeOf('lib/a.dart'), 12);
-    expect(sizeOf('lib/a.dart body'), 14);
+
+    expect(find.text('lib/a.dart body'), findsNothing);
+    await tester.tap(
+      find.descendant(of: preview, matching: find.text('lib/a.dart')),
+    );
+    await tester.pumpAndSettle();
+    final firstBody = find.descendant(
+      of: find.byKey(const Key('preview-diff')),
+      matching: find.text('lib/a.dart body'),
+    );
+    final firstBodyText = tester.widget<Text>(firstBody);
+    expect(
+      firstBodyText.style?.fontSize ??
+          DefaultTextStyle.of(tester.element(firstBody)).style.fontSize,
+      14,
+    );
 
     // A file row still switches the diff despite the selection layer.
     await tester.tap(
@@ -12088,7 +12741,10 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(
-      find.descendant(of: preview, matching: find.text('lib/b.dart body')),
+      find.descendant(
+        of: find.byKey(const Key('preview-diff')),
+        matching: find.text('lib/b.dart body'),
+      ),
       findsOneWidget,
     );
   });
@@ -12200,6 +12856,18 @@ void main() {
         'previewWidth': 1400,
       }).previewWidth,
       1400,
+    );
+    const diffSizes = AppSettings(
+      previewDiffLeftWidth: 240,
+      previewDiffRightWidth: 360,
+      previewDiffBottomHeight: 420,
+    );
+    expect(AppSettings.fromJson(diffSizes.toJson()), diffSizes);
+    expect(
+      AppSettings.fromJson(<String, dynamic>{
+        'previewDiffLeftWidth': -1,
+      }).previewDiffLeftWidth,
+      0,
     );
   });
 
@@ -12792,7 +13460,7 @@ void main() {
   );
 
   // ------------------------------------------------------------------ C1/C2
-  testWidgets('preview info and diff move through one vertical scroll', (
+  testWidgets('preview file list and diff scroll independently', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -12832,6 +13500,8 @@ void main() {
     await tester.pumpAndSettle();
 
     final filesScrollable = find.byKey(const Key('preview-files-scroll'));
+    await tester.tap(find.byKey(const Key('preview-state-lib/file0.dart')));
+    await tester.pumpAndSettle();
     final diffScrollable = find.byKey(const Key('preview-diff-scroll'));
     expect(filesScrollable, findsOneWidget);
     expect(diffScrollable, findsOneWidget);
@@ -12840,7 +13510,107 @@ void main() {
     final before = tester.getTopLeft(firstFile).dy;
     await tester.drag(diffScrollable, const Offset(0, -160));
     await tester.pumpAndSettle();
-    expect(tester.getTopLeft(firstFile).dy, lessThan(before));
+    expect(tester.getTopLeft(firstFile).dy, closeTo(before, 0.1));
+  });
+
+  testWidgets('preview page shortcut prioritizes a scrollable adjacent diff', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 600);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'scroll targets')],
+          files: (_, _) async => [
+            for (var index = 0; index < 20; index++)
+              GitFileChange(
+                path: 'lib/file$index.dart',
+                status: 'M',
+                additions: 1,
+                deletions: 0,
+              ),
+          ],
+          diff: (_, _, path, _, _) async => [
+            const DiffLine(kind: DiffLineKind.hunk, text: '@@ -0,0 +1,80 @@'),
+            for (var index = 0; index < 80; index++)
+              DiffLine(
+                kind: DiffLineKind.add,
+                text: '$path line $index',
+                newNumber: index + 1,
+              ),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('preview-state-lib/file0.dart')));
+    await tester.pumpAndSettle();
+
+    final previewPosition = tester
+        .widget<NestedScrollView>(
+          find.byKey(const Key('preview-content-scroll')),
+        )
+        .controller!
+        .position;
+    final diffPosition = tester
+        .widget<ListView>(find.byKey(const Key('unified-list')))
+        .controller!
+        .position;
+
+    Future<void> page(LogicalKeyboardKey arrow) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(arrow);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+    }
+
+    expect(previewPosition.maxScrollExtent, greaterThan(0));
+    expect(diffPosition.maxScrollExtent, greaterThan(0));
+    await page(LogicalKeyboardKey.arrowDown);
+    expect(diffPosition.pixels, greaterThan(0));
+    expect(previewPosition.pixels, 0);
+
+    for (
+      var attempt = 0;
+      attempt < 10 && diffPosition.extentAfter > 0;
+      attempt++
+    ) {
+      diffPosition.jumpTo(diffPosition.maxScrollExtent);
+      await tester.pumpAndSettle();
+    }
+    expect(diffPosition.extentAfter, 0);
+    await page(LogicalKeyboardKey.arrowDown);
+    expect(
+      previewPosition.pixels,
+      greaterThan(0),
+      reason:
+          'diff=${diffPosition.pixels}/${diffPosition.maxScrollExtent} '
+          'after=${diffPosition.extentAfter} '
+          'previewAfter=${previewPosition.extentAfter}',
+    );
+
+    previewPosition.jumpTo(previewPosition.maxScrollExtent);
+    await tester.pump();
+    final previewEnd = previewPosition.pixels;
+    final diffEnd = diffPosition.pixels;
+    await page(LogicalKeyboardKey.arrowDown);
+    expect(previewPosition.pixels, previewEnd);
+    expect(diffPosition.pixels, diffEnd);
+    expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
+
+    await page(LogicalKeyboardKey.arrowUp);
+    expect(diffPosition.pixels, lessThan(diffEnd));
+    expect(previewPosition.pixels, previewEnd);
   });
 
   // ------------------------------------------------------------------ C3/H2
@@ -14509,16 +15279,13 @@ void main() {
 
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    final preview = find.byKey(const Key('preview-panel'));
-    expect(
-      find.descendant(of: preview, matching: find.text('body of lib/one.dart')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('preview-diff')), findsNothing);
 
     // Down walks the files, up walks back, and both ends clamp.
     await metaArrow(LogicalKeyboardKey.arrowDown);
+    final diff = find.byKey(const Key('preview-diff'));
     expect(
-      find.descendant(of: preview, matching: find.text('body of lib/two.dart')),
+      find.descendant(of: diff, matching: find.text('body of lib/two.dart')),
       findsOneWidget,
     );
     expect(
@@ -14534,21 +15301,18 @@ void main() {
     await metaArrow(LogicalKeyboardKey.arrowDown);
     await metaArrow(LogicalKeyboardKey.arrowDown);
     expect(
-      find.descendant(
-        of: preview,
-        matching: find.text('body of lib/three.dart'),
-      ),
+      find.descendant(of: diff, matching: find.text('body of lib/three.dart')),
       findsOneWidget,
     );
     await metaArrow(LogicalKeyboardKey.arrowUp);
     expect(
-      find.descendant(of: preview, matching: find.text('body of lib/two.dart')),
+      find.descendant(of: diff, matching: find.text('body of lib/two.dart')),
       findsOneWidget,
     );
     await metaArrow(LogicalKeyboardKey.arrowUp);
     await metaArrow(LogicalKeyboardKey.arrowUp);
     expect(
-      find.descendant(of: preview, matching: find.text('body of lib/one.dart')),
+      find.descendant(of: diff, matching: find.text('body of lib/one.dart')),
       findsOneWidget,
     );
     // The commit selection never moved while walking files.

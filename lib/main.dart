@@ -316,6 +316,9 @@ class _YogitAppState extends State<YogitApp> {
           branchPreviewMode: _settings.branchPreviewMode,
           previewWidth: _settings.previewWidth,
           previewHeight: _settings.previewHeight,
+          previewDiffLeftWidth: _settings.previewDiffLeftWidth,
+          previewDiffRightWidth: _settings.previewDiffRightWidth,
+          previewDiffBottomHeight: _settings.previewDiffBottomHeight,
           onOpenSettings: _settingsLoaded ? () => _openSettings(context) : null,
           onPreviewPlacementChanged: _settingsLoaded
               ? (placement) => _changeSettings(
@@ -361,6 +364,20 @@ class _YogitAppState extends State<YogitApp> {
                     previewHeight: size.height,
                   ),
                 )
+              : null,
+          onPreviewDiffSizeChanged: _settingsLoaded
+              ? (size) => _changeSettings(switch (size.placement) {
+                  PreviewPlacement.left => _settings.copyWith(
+                    previewDiffLeftWidth: size.extent,
+                  ),
+                  PreviewPlacement.right => _settings.copyWith(
+                    previewDiffRightWidth: size.extent,
+                  ),
+                  PreviewPlacement.bottom => _settings.copyWith(
+                    previewDiffBottomHeight: size.extent,
+                  ),
+                  PreviewPlacement.closed => _settings,
+                })
               : null,
         ),
       ),

@@ -710,12 +710,16 @@ class TimelineScreen extends StatefulWidget {
     this.branchPreviewMode = BranchPreviewMode.merge,
     this.previewWidth = 288,
     this.previewHeight = 280,
+    this.previewDiffLeftWidth,
+    this.previewDiffRightWidth,
+    this.previewDiffBottomHeight,
     this.onPreviewPlacementChanged,
     this.onColumnWidthsChanged,
     this.onFullDiffColumnWidthsChanged,
     this.onFullDiffPreferencesChanged,
     this.onBranchPreviewModeChanged,
     this.onPreviewSizeChanged,
+    this.onPreviewDiffSizeChanged,
     this.editorForTesting,
     this.documentLoaderForTesting,
     super.key,
@@ -749,12 +753,17 @@ class TimelineScreen extends StatefulWidget {
   final BranchPreviewMode branchPreviewMode;
   final double previewWidth;
   final double previewHeight;
+  final double? previewDiffLeftWidth;
+  final double? previewDiffRightWidth;
+  final double? previewDiffBottomHeight;
   final ValueChanged<PreviewPlacement>? onPreviewPlacementChanged;
   final ValueChanged<TimelineColumnWidths>? onColumnWidthsChanged;
   final ValueChanged<FullDiffColumnWidths>? onFullDiffColumnWidthsChanged;
   final ValueChanged<FullDiffPreferences>? onFullDiffPreferencesChanged;
   final ValueChanged<BranchPreviewMode>? onBranchPreviewModeChanged;
   final ValueChanged<({double width, double height})>? onPreviewSizeChanged;
+  final ValueChanged<({PreviewPlacement placement, double extent})>?
+  onPreviewDiffSizeChanged;
 
   @visibleForTesting
   final Widget? editorForTesting;
@@ -801,7 +810,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   final _timelineKey = GlobalKey();
   final _scrollController = ScrollController();
   final _previewFilesScrollController = ScrollController();
-  ScrollController? _previewDiffScrollController;
+  final _previewDiffScrollController = ScrollController();
   final _selectedPreviewFileKey = GlobalKey(
     debugLabel: 'selected preview file',
   );
@@ -868,6 +877,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   final _previewFileLists = <String, List<GitFileChange>>{};
   final _previewDiffs = <({String sha, String path}), Future<List<DiffLine>>>{};
   final _previewPaths = <String, String>{};
+  var _previewDiffOpen = false;
   late final Map<String, String> _deletedBranchNames;
   final _deletedBranchLookupAttempts = <String>{};
   final _deletedBranchRevision = ValueNotifier(0);
@@ -879,8 +889,8 @@ class _TimelineScreenState extends State<TimelineScreen>
   var _refsLoadFailed = false;
   var _refsLoaded = false;
   Timer? _fetchTimer;
-  var _fetchingOrigin = false;
-  Object? _fetchError;
+  final _fetchingRemotes = ValueNotifier(false);
+  final _fetchError = ValueNotifier<Object?>(null);
   CherryPickState? _cherryPickState;
   Object? _cherryPickError;
   var _cherryPickBusy = false;
@@ -892,6 +902,9 @@ class _TimelineScreenState extends State<TimelineScreen>
   String? get _preferredTip => _baseBranch == null
       ? null
       : _refs.localTips[_baseBranch!] ?? _refs.tips[_baseBranch!];
+
+  String? _refTip(RepoRefs refs, String ref) =>
+      refs.localTips[ref] ?? refs.tips[ref];
 
   /// Which way the cursor last travelled, so the ref modal opens on the side the
   /// cursor came from. Null after a click or a jump, which have no direction.
@@ -922,6 +935,12 @@ class _TimelineScreenState extends State<TimelineScreen>
   var _commitAvailableWidth = 0.0;
   late double _previewWidth = widget.previewWidth;
   late double _previewHeight = widget.previewHeight;
+  late double? _previewDiffLeftWidth = widget.previewDiffLeftWidth;
+  late double? _previewDiffRightWidth = widget.previewDiffRightWidth;
+  late double? _previewDiffBottomHeight = widget.previewDiffBottomHeight;
+  var _previewDiffResizerHovered = false;
+  var _visiblePreviewDiffExtent = 0.0;
+  var _maxPreviewDiffExtent = 0.0;
   var _bottomPreviewMaxHeight = double.maxFinite;
   _FullDiffRouteSession? _fullDiffRouteSession;
   FullDiffPreferences? _pendingFullDiffPreferences;
@@ -951,37 +970,60 @@ class _TimelineScreenState extends State<TimelineScreen>
     unawaited(_restoreCherryPickThenRefresh());
     _fetchTimer = Timer.periodic(
       _fetchInterval,
-      (_) => unawaited(_refreshSelectedRemote()),
+      (_) => unawaited(_refreshRemotes()),
     );
   }
 
-  Future<void> _refreshSelectedRemote() async {
+  List<String> get _remotesToRefresh {
+    final remotes = <String>{};
     final branch = _baseBranch;
-    final remote = branch == null ? null : _refs.upstreamRemotes[branch];
+    final upstreamRemote = branch == null
+        ? null
+        : _refs.upstreamRemotes[branch];
+    if (upstreamRemote != null) remotes.add(upstreamRemote);
+    for (final remoteBranch in _refs.remote) {
+      final split = splitRemoteBranchName(remoteBranch, _refs.remoteNames);
+      if (split == null || !_refs.local.contains(split.branch)) {
+        continue;
+      }
+      remotes.add(split.remote);
+    }
+    return remotes.toList()..sort();
+  }
+
+  Future<void> _refreshRemotes() async {
+    final remotes = _remotesToRefresh;
     final lifecycleState = WidgetsBinding.instance.lifecycleState;
     if ((lifecycleState != null &&
             lifecycleState != AppLifecycleState.resumed) ||
-        remote == null ||
-        _fetchingOrigin ||
+        remotes.isEmpty ||
+        _fetchingRemotes.value ||
         _cherryPickState != null) {
       return;
     }
-    setState(() => _fetchingOrigin = true);
+    _fetchingRemotes.value = true;
     try {
-      final result = await widget.repository.fetchRemote(remote);
+      var updated = false;
+      Object? fetchError;
+      for (final remote in remotes) {
+        try {
+          final result = await widget.repository.fetchRemote(remote);
+          updated |= result == FetchOriginResult.updated;
+        } catch (error) {
+          fetchError ??= error;
+        }
+      }
       if (!mounted) return;
-      if (result == FetchOriginResult.updated) await _loadRefs();
-      if (mounted) setState(() => _fetchError = null);
-    } catch (error) {
-      if (mounted) setState(() => _fetchError = error);
+      if (updated) await _loadRefs();
+      if (mounted) _fetchError.value = fetchError;
     } finally {
-      if (mounted) setState(() => _fetchingOrigin = false);
+      if (mounted) _fetchingRemotes.value = false;
     }
   }
 
   Future<void> _restoreCherryPickThenRefresh() async {
     await Future.wait([_loadRefs(), _reloadCherryPickState()]);
-    if (_cherryPickState == null) await _refreshSelectedRemote();
+    if (_cherryPickState == null) await _refreshRemotes();
   }
 
   Future<void> _reloadCherryPickState() async {
@@ -1029,6 +1071,24 @@ class _TimelineScreenState extends State<TimelineScreen>
           (refs.local.contains(compared) ||
               refs.remote.contains(compared) ||
               refs.tags.contains(compared));
+      final comparison = _comparison;
+      final baseTip = comparison == null
+          ? null
+          : _refTip(refs, comparison.baseRef);
+      final compareTip = comparison == null
+          ? null
+          : _refTip(refs, comparison.compareRef);
+      final comparisonTipsChanged =
+          comparisonStillExists &&
+          comparison != null &&
+          baseTip != null &&
+          compareTip != null &&
+          (baseTip != comparison.baseTip ||
+              compareTip != comparison.compareTip);
+      final retryComparison =
+          comparisonStillExists &&
+          comparison == null &&
+          _comparisonError != null;
       setState(() {
         _refs = refs;
         _refsLoading = false;
@@ -1048,7 +1108,11 @@ class _TimelineScreenState extends State<TimelineScreen>
       });
       _scheduleRatchetUpdate();
       unawaited(_resolveSelectedDeletedBranchName());
-      if (comparisonStillExists) unawaited(_selectComparison(compared));
+      if (comparisonTipsChanged || retryComparison) {
+        unawaited(
+          _selectComparison(compared, preserveCurrent: comparison != null),
+        );
+      }
       if (widget.preferredBranchReady &&
           branch != null &&
           branch != widget.preferredBranch) {
@@ -1116,6 +1180,13 @@ class _TimelineScreenState extends State<TimelineScreen>
       _previewWidth = widget.previewWidth;
       _previewHeight = widget.previewHeight;
     }
+    if (widget.previewDiffLeftWidth != oldWidget.previewDiffLeftWidth ||
+        widget.previewDiffRightWidth != oldWidget.previewDiffRightWidth ||
+        widget.previewDiffBottomHeight != oldWidget.previewDiffBottomHeight) {
+      _previewDiffLeftWidth = widget.previewDiffLeftWidth;
+      _previewDiffRightWidth = widget.previewDiffRightWidth;
+      _previewDiffBottomHeight = widget.previewDiffBottomHeight;
+    }
     if (widget.branchPreviewMode != oldWidget.branchPreviewMode) {
       _branchPreviewMode = widget.branchPreviewMode;
     }
@@ -1147,7 +1218,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           _rebuildGraph();
         });
         _scheduleRatchetUpdate();
-        unawaited(_refreshSelectedRemote());
+        unawaited(_refreshRemotes());
       }
       if (branch != null &&
           (pendingUserSelection || branch != widget.preferredBranch)) {
@@ -1171,6 +1242,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (_ownsPreviewController) _previewController.dispose();
     _selectedIndex.removeListener(_selectedCommitChanged);
     _selectedIndex.dispose();
+    _fetchingRemotes.dispose();
+    _fetchError.dispose();
     _deletedBranchRevision.dispose();
     _hoverIndex.dispose();
     _hoveredHeader.dispose();
@@ -1178,6 +1251,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       ..removeListener(_maybeLoadNextPage)
       ..dispose();
     _previewFilesScrollController.dispose();
+    _previewDiffScrollController.dispose();
     for (final node in _resizerFocus.values) {
       node.dispose();
     }
@@ -1203,19 +1277,39 @@ class _TimelineScreenState extends State<TimelineScreen>
     _ => true,
   };
 
+  int get _graphLayoutDepth {
+    if (_comparison == null || _comparisonRows.isEmpty) return _ratchetLane;
+    final deepest = _comparisonRows.fold<int>(
+      0,
+      (value, row) => math.max(value, row.maxLane),
+    );
+    final mappings = _previewGraph?.mappings.length ?? 0;
+    return mappings == 0 ? deepest : deepest + ((mappings + 2) ~/ 2);
+  }
+
+  double get _graphLayoutSpacing => _comparison == null
+      ? CommitGraphPainter.defaultLaneSpacing
+      : CommitGraphPainter.previewLaneSpacing;
+
   /// Auto-fit: the snuggest width that still shows every loaded lane's node, so
   /// the first launch shows the whole graph and no more. The resizer reaches
   /// further down than this range; auto-fit never does.
   double get _graphColumnWidth =>
       _graphWidth ??
       CommitGraphPainter.contentWidth(
-        _ratchetLane,
+        _graphLayoutDepth,
+        laneSpacing: _graphLayoutSpacing,
       ).clamp(96.0, timelineColumns['graph']!.max);
 
   /// Widens the ratchet when deeper lanes scroll into view. Rows off screen do
   /// not count, so a shallow head of history opens at its snuggest width.
   void _updateRatchet() {
-    if (!mounted || _entries.isEmpty || !_scrollController.hasClients) return;
+    if (!mounted ||
+        _comparison != null ||
+        _entries.isEmpty ||
+        !_scrollController.hasClients) {
+      return;
+    }
     final position = _scrollController.position;
     final first = (position.pixels / TimelineScreen.rowHeight).floor().clamp(
       0,
@@ -1232,13 +1326,6 @@ class _TimelineScreenState extends State<TimelineScreen>
       for (final lane in [row.lane, ...row.activeLanes, ...row.nextLanes]) {
         if (lane > deepest) deepest = lane;
       }
-    }
-    if (_previewGraph?.mappings case final mappings? when mappings.isNotEmpty) {
-      final graphDeepest = _comparisonRows.fold<int>(
-        0,
-        (value, row) => math.max(value, row.maxLane),
-      );
-      deepest = math.max(deepest, graphDeepest + ((mappings.length + 2) ~/ 2));
     }
     if (deepest != _ratchetLane) setState(() => _ratchetLane = deepest);
   }
@@ -1433,7 +1520,11 @@ class _TimelineScreenState extends State<TimelineScreen>
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.escape) {
-      unawaited(_previewController.setPreview(PreviewPlacement.closed));
+      if (_previewDiffOpen) {
+        _closePreviewDiff();
+      } else {
+        unawaited(_previewController.setPreview(PreviewPlacement.closed));
+      }
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -1591,13 +1682,16 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   /// Enter and Space toggle the panel; Esc always closes.
-  void _togglePreview() => unawaited(
-    _previewController.setPreview(
-      _previewController.previewPlacement == PreviewPlacement.closed
-          ? widget.preferredPreviewPlacement
-          : PreviewPlacement.closed,
-    ),
-  );
+  void _togglePreview() {
+    final closing =
+        _previewController.previewPlacement != PreviewPlacement.closed;
+    if (closing && _previewDiffOpen) _closePreviewDiff();
+    unawaited(
+      _previewController.setPreview(
+        closing ? PreviewPlacement.closed : widget.preferredPreviewPlacement,
+      ),
+    );
+  }
 
   /// Sidebar click: jump to the newest commit decorated with [name]. Remote
   /// entries also match the branch name without their remote prefix.
@@ -1669,10 +1763,20 @@ class _TimelineScreenState extends State<TimelineScreen>
         constraints.maxHeight - timelineChromeHeight,
       );
       final extent = math.min(_previewHeight, _bottomPreviewMaxHeight);
+      final diffExtent = _previewDiffExtent(
+        placement,
+        math.max(0.0, constraints.maxHeight - extent),
+      );
       return Column(
         key: const Key('preview-layout-bottom'),
         children: [
           timeline,
+          if (_previewDiffOpen)
+            SizedBox(
+              height: diffExtent,
+              width: constraints.maxWidth,
+              child: _adjacentPreviewDiff(placement),
+            ),
           _animatedPreview(
             axis: Axis.vertical,
             extent: extent,
@@ -1696,10 +1800,35 @@ class _TimelineScreenState extends State<TimelineScreen>
       height: constraints.maxHeight,
       visible: beside,
     );
+    final diffExtent = _previewDiffExtent(
+      placement,
+      beside ? math.max(0.0, constraints.maxWidth - extent) : 0.0,
+    );
+    final diff = SizedBox(
+      width: diffExtent,
+      height: constraints.maxHeight,
+      child: _adjacentPreviewDiff(placement),
+    );
     return Row(
       key: Key(onLeft ? 'preview-layout-left' : 'preview-layout-right'),
-      children: onLeft ? [preview, timeline] : [timeline, preview],
+      children: onLeft
+          ? [preview, if (_previewDiffOpen) diff, timeline]
+          : [timeline, if (_previewDiffOpen) diff, preview],
     );
+  }
+
+  double _previewDiffExtent(PreviewPlacement placement, double available) {
+    _maxPreviewDiffExtent = available;
+    final saved = switch (placement) {
+      PreviewPlacement.left => _previewDiffLeftWidth,
+      PreviewPlacement.right => _previewDiffRightWidth,
+      PreviewPlacement.bottom => _previewDiffBottomHeight,
+      PreviewPlacement.closed => null,
+    };
+    _visiblePreviewDiffExtent = _previewDiffOpen
+        ? (saved ?? math.max(0.0, available - 100)).clamp(0.0, available)
+        : 0.0;
+    return _visiblePreviewDiffExtent;
   }
 
   Widget _animatedPreview({
@@ -2042,27 +2171,32 @@ class _TimelineScreenState extends State<TimelineScreen>
       _pendingBaseBranch = branch;
       _pendingBaseBranchIsUserSelection = true;
     }
-    unawaited(_refreshSelectedRemote());
+    unawaited(_refreshRemotes());
     _focusNode.requestFocus();
   }
 
-  Future<void> _selectComparison(String compareRef) async {
+  Future<void> _selectComparison(
+    String compareRef, {
+    bool preserveCurrent = false,
+  }) async {
     final baseRef = _baseBranch;
     if (_branchApplyBusy || baseRef == null || compareRef == baseRef) return;
     final serial = ++_comparisonSerial;
-    _dropMergePreview();
-    _dropRebasePreview();
-    setState(() {
-      _compareRef = compareRef;
-      _resetBranchApply();
-      _comparison = null;
-      _comparisonRows = [];
-      _comparisonEntries = [];
-      _previewGraph = null;
-      _rebaseCheck = null;
-      _comparisonError = null;
-      _selectedIndex.value = 0;
-    });
+    if (!preserveCurrent) {
+      _dropMergePreview();
+      _dropRebasePreview();
+      setState(() {
+        _compareRef = compareRef;
+        _resetBranchApply();
+        _comparison = null;
+        _comparisonRows = [];
+        _comparisonEntries = [];
+        _previewGraph = null;
+        _rebaseCheck = null;
+        _comparisonError = null;
+        _selectedIndex.value = 0;
+      });
+    }
     try {
       final result = await widget.repository.compareBranches(
         baseRef,
@@ -2075,7 +2209,13 @@ class _TimelineScreenState extends State<TimelineScreen>
         return;
       }
       final rows = layoutBranchComparison(result.commits);
+      if (preserveCurrent) {
+        _dropMergePreview();
+        _dropRebasePreview();
+      }
       setState(() {
+        _compareRef = compareRef;
+        _resetBranchApply();
         _comparison = result;
         _previewGraph = _branchPreviewMode == BranchPreviewMode.merge
             ? layoutMergePreviewGraph(result)
@@ -2085,6 +2225,9 @@ class _TimelineScreenState extends State<TimelineScreen>
           for (var index = 0; index < _comparisonRows.length; index++)
             (rowIndex: index, label: null, row: _comparisonRows[index]),
         ];
+        _rebaseCheck = null;
+        _comparisonError = null;
+        _selectedIndex.value = 0;
       });
       _scheduleRatchetUpdate();
       _showFirstComparisonRow();
@@ -3140,6 +3283,11 @@ class _TimelineScreenState extends State<TimelineScreen>
     final selectedLocal =
         section == _RefSection.local && name != null && name == _baseBranch;
     final behind = selectedLocal ? _refs.aheadBehind[name]?.behind ?? 0 : 0;
+    final remoteDifference = section == _RefSection.remote && name != null
+        ? _refs.remoteAheadBehind[name]
+        : null;
+    final remoteAhead = remoteDifference?.ahead ?? 0;
+    final remoteBehind = remoteDifference?.behind ?? 0;
     final inFolderTree = name == null || depth > 0;
 
     void toggleFolder() => setState(() {
@@ -3213,6 +3361,43 @@ class _TimelineScreenState extends State<TimelineScreen>
                     ),
                   ),
                 ),
+              if (remoteAhead > 0 || remoteBehind > 0) ...[
+                const SizedBox(width: 4),
+                Tooltip(
+                  message: [
+                    if (remoteAhead > 0) '로컬보다 $remoteAhead개 커밋 앞서 있습니다',
+                    if (remoteBehind > 0) '로컬보다 $remoteBehind개 커밋 뒤처져 있습니다',
+                  ].join(' · '),
+                  child: SizedBox(
+                    width: 36,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text.rich(
+                        key: Key('sidebar-remote-divergence-$name'),
+                        TextSpan(
+                          children: [
+                            if (remoteAhead > 0)
+                              TextSpan(
+                                text: '+$remoteAhead',
+                                style: const TextStyle(color: _success),
+                              ),
+                            if (remoteAhead > 0 && remoteBehind > 0)
+                              const TextSpan(text: ' '),
+                            if (remoteBehind > 0)
+                              TextSpan(
+                                text: '−$remoteBehind',
+                                style: const TextStyle(color: _remoteBehind),
+                              ),
+                          ],
+                        ),
+                        maxLines: 1,
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
           // When the branch was cut, in the Date column's own words.
@@ -3360,35 +3545,41 @@ class _TimelineScreenState extends State<TimelineScreen>
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: _fetchError == null
-              ? Row(
-                  children: [
-                    _legend('commit', const _LegendDot()),
-                    _legend('merge', const _LegendDot(filled: true)),
-                    _legend('WIP', const _LegendDot(dashed: true)),
-                  ],
-                )
-              : Row(
-                  children: [
-                    Text(
-                      '원격 갱신 실패',
-                      style: TextStyle(color: _behind, fontSize: 10),
-                    ),
-                    const SizedBox(width: 4),
-                    TextButton(
-                      key: const Key('retry-origin-fetch'),
-                      onPressed: _fetchingOrigin
-                          ? null
-                          : () => unawaited(_refreshSelectedRemote()),
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(0, 24),
-                        padding: const EdgeInsets.symmetric(horizontal: 6),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          child: ValueListenableBuilder<Object?>(
+            valueListenable: _fetchError,
+            builder: (context, error, _) => error == null
+                ? Row(
+                    children: [
+                      _legend('commit', const _LegendDot()),
+                      _legend('merge', const _LegendDot(filled: true)),
+                      _legend('WIP', const _LegendDot(dashed: true)),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      Text(
+                        '원격 갱신 실패',
+                        style: TextStyle(color: _behind, fontSize: 10),
                       ),
-                      child: const Text('다시 시도'),
-                    ),
-                  ],
-                ),
+                      const SizedBox(width: 4),
+                      ValueListenableBuilder<bool>(
+                        valueListenable: _fetchingRemotes,
+                        builder: (context, fetching, _) => TextButton(
+                          key: const Key('retry-origin-fetch'),
+                          onPressed: fetching
+                              ? null
+                              : () => unawaited(_refreshRemotes()),
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(0, 24),
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: const Text('다시 시도'),
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
         ),
         // The branch the focused commit's line belongs to, under the column that
         // line's chip sits in.
@@ -4922,7 +5113,11 @@ class _TimelineScreenState extends State<TimelineScreen>
     committerColor:
         committerColor ?? AvatarService.branchColor(entry.row.branch),
     committersBySha: _committersBySha,
-    laneSpacing: CommitGraphPainter.spacingFor(graphWidth, _ratchetLane),
+    laneSpacing: CommitGraphPainter.spacingFor(
+      graphWidth,
+      _graphLayoutDepth,
+      maxLaneSpacing: _graphLayoutSpacing,
+    ),
     compact: graphWidth <= CommitGraphPainter.compactWidth,
     refConnector: refConnector,
     passThrough: entry.rowIndex < 0,
@@ -6343,15 +6538,18 @@ class _TimelineScreenState extends State<TimelineScreen>
     int? revealDirection,
     bool animateReveal = true,
   }) {
-    setState(() => _previewPaths[_previewKey(commit)] = path);
+    setState(() {
+      _previewPaths[_previewKey(commit)] = path;
+      _previewDiffOpen = true;
+    });
+    _focusNode.requestFocus();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final outerOffset = _previewFilesScrollController.hasClients
           ? _previewFilesScrollController.offset
           : null;
-      final diffController = _previewDiffScrollController;
-      if (diffController?.hasClients ?? false) {
-        diffController!.jumpTo(0);
+      if (_previewDiffScrollController.hasClients) {
+        _previewDiffScrollController.jumpTo(0);
       }
       if (outerOffset != null && _previewFilesScrollController.hasClients) {
         _previewFilesScrollController.jumpTo(
@@ -6372,20 +6570,21 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   ScrollController? _previewPageScrollController(int direction) {
-    final outer = _previewFilesScrollController;
-    final inner = _previewDiffScrollController;
-    if (direction > 0) {
-      if (outer.hasClients &&
-          outer.position.pixels < outer.position.maxScrollExtent) {
-        return outer;
-      }
-      return inner?.hasClients ?? false ? inner : null;
+    bool canScroll(ScrollController controller) {
+      if (!controller.hasClients) return false;
+      final position = controller.position;
+      return direction > 0
+          ? position.extentAfter > 0
+          : position.extentBefore > 0;
     }
-    if ((inner?.hasClients ?? false) &&
-        inner!.position.pixels > inner.position.minScrollExtent) {
-      return inner;
+
+    if (_previewDiffOpen && canScroll(_previewDiffScrollController)) {
+      return _previewDiffScrollController;
     }
-    return outer.hasClients ? outer : null;
+    if (canScroll(_previewFilesScrollController)) {
+      return _previewFilesScrollController;
+    }
+    return null;
   }
 
   void _revealSelectedPreviewFile(int direction, {required bool animate}) {
@@ -6424,9 +6623,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       builder: (context, snapshot) {
         final changes = snapshot.data;
         final key = _previewKey(commit);
-        final requestedPath =
-            _previewPaths[key] ??
-            (changes == null || changes.isEmpty ? null : changes.first.path);
+        final requestedPath = _previewDiffOpen ? _previewPaths[key] : null;
         GitFileChange? selectedFile;
         if (changes != null && changes.isNotEmpty) {
           selectedFile = changes.firstWhere(
@@ -6532,20 +6729,6 @@ class _TimelineScreenState extends State<TimelineScreen>
             ],
           ),
         );
-        final diff = Padding(
-          padding: EdgeInsets.zero,
-          child: Container(
-            key: const Key('preview-diff'),
-            child: selectedPath == null
-                ? Center(
-                    child: Text(
-                      'Select a file to load its diff.',
-                      style: TextStyle(color: _palette.muted, fontSize: 12),
-                    ),
-                  )
-                : _previewDiff(commit, selectedFile!),
-          ),
-        );
         return NestedScrollView(
           key: const Key('preview-content-scroll'),
           controller: _previewFilesScrollController,
@@ -6556,24 +6739,164 @@ class _TimelineScreenState extends State<TimelineScreen>
                 child: info,
               ),
             ),
-            SliverToBoxAdapter(
-              child: Divider(height: 1, color: _palette.border),
-            ),
           ],
-          body: Builder(
-            builder: (context) {
-              _previewDiffScrollController = PrimaryScrollController.maybeOf(
-                context,
-              );
-              return KeyedSubtree(
-                key: const Key('preview-diff-scroll'),
-                child: diff,
-              );
-            },
-          ),
+          body: const SizedBox.shrink(),
         );
       },
     );
+  }
+
+  Widget _adjacentPreviewDiff(PreviewPlacement placement) => Stack(
+    children: [
+      Positioned.fill(
+        child: ValueListenableBuilder<int>(
+          valueListenable: _selectedIndex,
+          builder: (context, _, _) {
+            final commit = _selectedCommit;
+            if (commit == null) return const SizedBox.shrink();
+            return FutureBuilder<List<GitFileChange>>(
+              key: ValueKey(_previewKey(commit)),
+              future: _previewFilesFor(commit),
+              builder: (context, snapshot) {
+                final changes = snapshot.data;
+                if (changes == null || changes.isEmpty) {
+                  return const SizedBox.shrink();
+                }
+                final requestedPath = _previewPaths[_previewKey(commit)];
+                final file = changes.firstWhere(
+                  (file) => file.path == requestedPath,
+                  orElse: () => changes.first,
+                );
+                return Container(
+                  key: const Key('preview-diff'),
+                  decoration: BoxDecoration(
+                    color: _palette.background,
+                    border: Border.all(color: _palette.border),
+                  ),
+                  child: SelectionArea(
+                    child: KeyedSubtree(
+                      key: const Key('preview-diff-scroll'),
+                      child: _previewDiff(commit, file),
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        ),
+      ),
+      _previewDiffResizer(placement),
+    ],
+  );
+
+  Widget _previewDiffResizer(PreviewPlacement placement) {
+    final vertical = placement == PreviewPlacement.bottom;
+    final handle = MouseRegion(
+      cursor: vertical
+          ? SystemMouseCursors.resizeRow
+          : SystemMouseCursors.resizeColumn,
+      onEnter: vertical
+          ? null
+          : (_) => setState(() => _previewDiffResizerHovered = true),
+      onExit: vertical
+          ? null
+          : (_) => setState(() => _previewDiffResizerHovered = false),
+      child: GestureDetector(
+        key: const Key('preview-diff-resizer'),
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragUpdate: vertical
+            ? null
+            : (details) => setState(() {
+                final delta = placement == PreviewPlacement.right
+                    ? -details.delta.dx
+                    : details.delta.dx;
+                _setPreviewDiffExtent(
+                  placement,
+                  ((_storedPreviewDiffExtent(placement) ??
+                              _visiblePreviewDiffExtent) +
+                          delta)
+                      .clamp(0.0, _maxPreviewDiffExtent),
+                );
+              }),
+        onHorizontalDragEnd: vertical
+            ? null
+            : (_) => _savePreviewDiffExtent(placement),
+        onVerticalDragUpdate: vertical
+            ? (details) => setState(
+                () => _setPreviewDiffExtent(
+                  placement,
+                  ((_storedPreviewDiffExtent(placement) ??
+                              _visiblePreviewDiffExtent) -
+                          details.delta.dy)
+                      .clamp(0.0, _maxPreviewDiffExtent),
+                ),
+              )
+            : null,
+        onVerticalDragEnd: vertical
+            ? (_) => _savePreviewDiffExtent(placement)
+            : null,
+        child: vertical
+            ? const SizedBox.expand()
+            : Align(
+                alignment: placement == PreviewPlacement.right
+                    ? Alignment.centerLeft
+                    : Alignment.centerRight,
+                child: ColoredBox(
+                  key: const Key('preview-diff-hover-line'),
+                  color: _previewDiffResizerHovered
+                      ? const Color(0xFF5AB0FF)
+                      : Colors.transparent,
+                  child: const SizedBox(width: 2, height: double.infinity),
+                ),
+              ),
+      ),
+    );
+    return vertical
+        ? Positioned(left: 0, right: 0, top: 0, height: 8, child: handle)
+        : Positioned(
+            left: placement == PreviewPlacement.right ? 0 : null,
+            right: placement == PreviewPlacement.left ? 0 : null,
+            top: 0,
+            bottom: 0,
+            width: 12,
+            child: handle,
+          );
+  }
+
+  void _setPreviewDiffExtent(PreviewPlacement placement, double extent) {
+    switch (placement) {
+      case PreviewPlacement.left:
+        _previewDiffLeftWidth = extent;
+        return;
+      case PreviewPlacement.right:
+        _previewDiffRightWidth = extent;
+        return;
+      case PreviewPlacement.bottom:
+        _previewDiffBottomHeight = extent;
+        return;
+      case PreviewPlacement.closed:
+        return;
+    }
+  }
+
+  double? _storedPreviewDiffExtent(PreviewPlacement placement) =>
+      switch (placement) {
+        PreviewPlacement.left => _previewDiffLeftWidth,
+        PreviewPlacement.right => _previewDiffRightWidth,
+        PreviewPlacement.bottom => _previewDiffBottomHeight,
+        PreviewPlacement.closed => null,
+      };
+
+  void _savePreviewDiffExtent(PreviewPlacement placement) =>
+      widget.onPreviewDiffSizeChanged?.call((
+        placement: placement,
+        extent:
+            _storedPreviewDiffExtent(placement) ?? _visiblePreviewDiffExtent,
+      ));
+
+  void _closePreviewDiff() {
+    setState(() => _previewDiffOpen = false);
+    _focusNode.requestFocus();
   }
 
   Widget _previewPerson(GitCommit commit) {
@@ -7401,58 +7724,86 @@ class _TimelineScreenState extends State<TimelineScreen>
             color: _palette.surface,
             border: Border(bottom: BorderSide(color: _palette.border)),
           ),
-          child: Row(
-            children: [
-              Flexible(
-                child: Text(
-                  path,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _palette.text,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+          child: LayoutBuilder(
+            builder: (context, constraints) => constraints.maxWidth < 80
+                ? const SizedBox.shrink()
+                : Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          path,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: _palette.text,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          status,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.right,
+                          style: TextStyle(
+                            color: conflict ? _previewConflict : _deleted,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Flexible(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Container(
+                            key: const Key('branch-preview-layout-switch'),
+                            padding: const EdgeInsets.all(2),
+                            decoration: BoxDecoration(
+                              color: _palette.background,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _previewDiffLayoutButton(
+                                  key: const Key(
+                                    'branch-preview-layout-unified',
+                                  ),
+                                  label: 'Unified',
+                                  layout: DiffLayout.unified,
+                                ),
+                                _previewDiffLayoutButton(
+                                  key: const Key(
+                                    'branch-preview-layout-side-by-side',
+                                  ),
+                                  label: 'Side-by-side',
+                                  layout: DiffLayout.sideBySide,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      SizedBox.square(
+                        dimension: 24,
+                        child: IconButton(
+                          key: const Key('preview-diff-close'),
+                          tooltip: 'diff 닫기',
+                          padding: EdgeInsets.zero,
+                          onPressed: _closePreviewDiff,
+                          icon: Icon(
+                            Icons.close,
+                            size: 16,
+                            color: _palette.muted,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  status,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                    color: conflict ? _previewConflict : _deleted,
-                    fontSize: 10,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Container(
-                key: const Key('branch-preview-layout-switch'),
-                padding: const EdgeInsets.all(2),
-                decoration: BoxDecoration(
-                  color: _palette.background,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _previewDiffLayoutButton(
-                      key: const Key('branch-preview-layout-unified'),
-                      label: 'Unified',
-                      layout: DiffLayout.unified,
-                    ),
-                    _previewDiffLayoutButton(
-                      key: const Key('branch-preview-layout-side-by-side'),
-                      label: 'Side-by-side',
-                      layout: DiffLayout.sideBySide,
-                    ),
-                  ],
-                ),
-              ),
-            ],
           ),
         ),
         Expanded(
@@ -8378,6 +8729,7 @@ class CommitGraphPainter extends CustomPainter {
 
   static const laneInset = 28.0;
   static const defaultLaneSpacing = 30.0;
+  static const previewLaneSpacing = 49.0;
   static const railWidth = 2.0;
   static const previewRailWidth = 1.0;
   static const avatarDiameter = 22.0;
@@ -8397,17 +8749,25 @@ class CommitGraphPainter extends CustomPainter {
 
   /// The narrowest cell that still shows every node whole. Empty space right of
   /// it clips away before any lane moves.
-  static double contentWidth(int deepestLane) =>
-      laneInset + deepestLane * defaultLaneSpacing + nodeExtent;
+  static double contentWidth(
+    int deepestLane, {
+    double laneSpacing = defaultLaneSpacing,
+  }) => laneInset + deepestLane * laneSpacing + nodeExtent;
 
   /// Stage 1 (the cell still holds the rightmost node) keeps
   /// [defaultLaneSpacing]; stage 2 squeezes the lanes so that node stays just
   /// inside the cell.
-  static double spacingFor(double width, int deepestLane) {
-    if (width >= contentWidth(deepestLane)) return defaultLaneSpacing;
+  static double spacingFor(
+    double width,
+    int deepestLane, {
+    double maxLaneSpacing = defaultLaneSpacing,
+  }) {
+    if (width >= contentWidth(deepestLane, laneSpacing: maxLaneSpacing)) {
+      return maxLaneSpacing;
+    }
     return ((width - laneInset - nodeExtent) / math.max(deepestLane, 1)).clamp(
       minLaneSpacing,
-      defaultLaneSpacing,
+      maxLaneSpacing,
     );
   }
 

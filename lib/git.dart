@@ -1603,6 +1603,7 @@ class RepoRefs {
   const RepoRefs({
     this.local = const [],
     this.remote = const [],
+    this.remoteNames = const [],
     this.tags = const [],
     this.current,
     this.tips = const {},
@@ -1611,12 +1612,14 @@ class RepoRefs {
     this.branchActivityTimes = const {},
     this.tagCreatorTimes = const {},
     this.aheadBehind = const {},
+    this.remoteAheadBehind = const {},
     this.upstreams = const {},
     this.upstreamRemotes = const {},
   });
 
   final List<String> local;
   final List<String> remote;
+  final List<String> remoteNames;
   final List<String> tags;
   final String? current;
 
@@ -1640,6 +1643,9 @@ class RepoRefs {
   /// Local branch name → commits unique to local and its configured upstream.
   final Map<String, BranchAheadBehind> aheadBehind;
 
+  /// Remote branch name → commits unique to remote and its same-named local.
+  final Map<String, BranchAheadBehind> remoteAheadBehind;
+
   /// Local branch name → configured remote-tracking branch.
   final Map<String, String> upstreams;
 
@@ -1654,7 +1660,22 @@ class BranchAheadBehind {
   final int behind;
 }
 
-enum FetchOriginResult { updated, noOrigin }
+({String remote, String branch})? splitRemoteBranchName(
+  String name,
+  Iterable<String> remoteNames,
+) {
+  final longestFirst = remoteNames.toList()
+    ..sort((left, right) => right.length.compareTo(left.length));
+  for (final remote in longestFirst) {
+    final prefix = '$remote/';
+    if (name.startsWith(prefix)) {
+      return (remote: remote, branch: name.substring(prefix.length));
+    }
+  }
+  return null;
+}
+
+enum FetchOriginResult { updated, unchanged, noOrigin }
 
 String? resolveBaseBranch(RepoRefs refs, String? savedBranch) {
   if (savedBranch != null && refs.local.contains(savedBranch)) {
@@ -3099,6 +3120,9 @@ class GitRepository implements FullDiffRepository {
   /// currently checked-out branch (null when detached) and each ref's tip sha,
   /// which is what decides the row a branch or tag chip belongs on.
   Future<RepoRefs> loadRefs() async {
+    final remoteNames = (await _run([
+      'remote',
+    ])).split('\n').where((name) => name.isNotEmpty).toList();
     final lines = (await _run([
       'for-each-ref',
       '--format=%(refname)%00%(objectname)%00%(creatordate:unix)'
@@ -3160,10 +3184,25 @@ class GitRepository implements FullDiffRepository {
       if (!remote.contains(entry.value)) continue;
       aheadBehind[entry.key] = await _loadAheadBehind(entry.key, entry.value);
     }
+    final remoteAheadBehind = <String, BranchAheadBehind>{};
+    for (final remoteBranch in remote) {
+      final split = splitRemoteBranchName(remoteBranch, remoteNames);
+      if (split == null) continue;
+      final localBranch = split.branch;
+      if (!local.contains(localBranch)) continue;
+      final localDifference = upstreams[localBranch] == remoteBranch
+          ? aheadBehind[localBranch]!
+          : await _loadAheadBehind(localBranch, remoteBranch);
+      remoteAheadBehind[remoteBranch] = BranchAheadBehind(
+        ahead: localDifference.behind,
+        behind: localDifference.ahead,
+      );
+    }
     final current = (await _run(['branch', '--show-current'])).trim();
     return RepoRefs(
       local: local,
       remote: remote,
+      remoteNames: remoteNames,
       tags: tags,
       current: current.isEmpty ? null : current,
       tips: tips,
@@ -3175,6 +3214,7 @@ class GitRepository implements FullDiffRepository {
           local[index]: ?births[index],
       },
       aheadBehind: aheadBehind,
+      remoteAheadBehind: remoteAheadBehind,
       upstreams: upstreams,
       upstreamRemotes: upstreamRemotes,
     );
@@ -3188,7 +3228,7 @@ class GitRepository implements FullDiffRepository {
       'rev-list',
       '--left-right',
       '--count',
-      '$branch...refs/remotes/$upstream',
+      'refs/heads/$branch...refs/remotes/$upstream',
     ])).trim().split(RegExp(r'\s+'));
     if (counts.length != 2) {
       throw FormatException('Invalid ahead/behind counts for $branch');
@@ -3236,6 +3276,7 @@ class GitRepository implements FullDiffRepository {
       '-c',
       'credential.interactive=never',
       'fetch',
+      '--porcelain',
       '--prune',
       remote,
     ];
@@ -3257,7 +3298,9 @@ class GitRepository implements FullDiffRepository {
         result.exitCode,
       );
     }
-    return FetchOriginResult.updated;
+    return result.stdout.toString().trim().isEmpty
+        ? FetchOriginResult.unchanged
+        : FetchOriginResult.updated;
   }
 
   /// The working tree row compares its base against the checkout, so it passes
