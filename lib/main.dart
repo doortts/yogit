@@ -312,6 +312,7 @@ class _YogitAppState extends State<YogitApp> {
           columnWidths: _settings.columnWidthsForRepository(_repository.root),
           fullDiffColumnWidths: _settings.fullDiffColumnWidths,
           fullDiffPreferences: _settings.fullDiffPreferences,
+          refPalette: _settings.refPalette,
           branchPreviewMode: _settings.branchPreviewMode,
           previewWidth: _settings.previewWidth,
           previewHeight: _settings.previewHeight,

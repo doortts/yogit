@@ -18,6 +18,9 @@ enum BranchPreviewMode {
       value == 'rebase' ? rebase : merge;
 }
 
+typedef RefPaletteEntry = ({String base, String text});
+typedef RefPaletteColors = ({Color base, Color text});
+
 class TimelineColumnWidths {
   const TimelineColumnWidths({
     this.sidebar = 150,
@@ -268,6 +271,7 @@ class AppSettings {
     this.fullDiffPreferences = const FullDiffPreferences(),
     this.baseBranchColor = defaultBaseBranchColor,
     this.laneColors = defaultLaneColors,
+    this.refPalette = defaultRefPalette,
     this.previewWidth = 288,
     this.previewHeight = 280,
     this.baseBranches = const {},
@@ -287,6 +291,14 @@ class AppSettings {
     '#B026FF',
     '#04D9FF',
     '#FF3131',
+  ];
+
+  static const defaultRefPalette = <RefPaletteEntry>[
+    (base: '#1D76DB', text: '#68A7EA'),
+    (base: '#E99695', text: '#E89292'),
+    (base: '#C5DEF5', text: '#C2DDF4'),
+    (base: '#0E8A16', text: '#18E022'),
+    (base: '#5319E7', text: '#DACFFA'),
   ];
 
   /// The palette that used to be the default. A settings file still carrying it
@@ -313,6 +325,7 @@ class AppSettings {
   final FullDiffPreferences fullDiffPreferences;
   final String baseBranchColor;
   final List<String> laneColors;
+  final List<RefPaletteEntry> refPalette;
   final Map<String, String> baseBranches;
   final Map<String, Map<String, String>> deletedBranchNames;
 
@@ -327,6 +340,21 @@ class AppSettings {
     return colors.isEmpty || colors.contains(null)
         ? AvatarService.defaultColors
         : colors.cast<Color>();
+  }
+
+  List<RefPaletteColors> get refPaletteColorValues {
+    final values = [
+      for (final entry in refPalette)
+        (base: parseHexColor(entry.base), text: parseHexColor(entry.text)),
+    ];
+    if (values.length != defaultRefPalette.length ||
+        values.any((entry) => entry.base == null || entry.text == null)) {
+      return const AppSettings().refPaletteColorValues;
+    }
+    return [
+      for (final entry in values)
+        (base: entry.base!, text: entry.text!),
+    ];
   }
 
   Color get baseBranchColorValue =>
@@ -374,6 +402,7 @@ class AppSettings {
     FullDiffPreferences? fullDiffPreferences,
     String? baseBranchColor,
     List<String>? laneColors,
+    List<RefPaletteEntry>? refPalette,
     double? previewWidth,
     double? previewHeight,
     Map<String, String>? baseBranches,
@@ -389,6 +418,7 @@ class AppSettings {
     fullDiffPreferences: fullDiffPreferences ?? this.fullDiffPreferences,
     baseBranchColor: baseBranchColor ?? this.baseBranchColor,
     laneColors: laneColors ?? this.laneColors,
+    refPalette: refPalette ?? this.refPalette,
     previewWidth: previewWidth ?? this.previewWidth,
     previewHeight: previewHeight ?? this.previewHeight,
     baseBranches: baseBranches ?? this.baseBranches,
@@ -414,6 +444,23 @@ class AppSettings {
         laneColors.isNotEmpty &&
         laneColors.every((entry) => parseHexColor(entry) != null) &&
         !listEquals(laneColors, _replacedLaneColors);
+    final storedRefPalette = value['refPalette'];
+    final refPalette = <RefPaletteEntry>[
+      if (storedRefPalette is List)
+        for (final entry in storedRefPalette)
+          if (entry is Map)
+            (
+              base: formatHexColor('${entry['base'] ?? ''}'),
+              text: formatHexColor('${entry['text'] ?? ''}'),
+            ),
+    ];
+    final validRefPalette =
+        refPalette.length == defaultRefPalette.length &&
+        refPalette.every(
+          (entry) =>
+              parseHexColor(entry.base) != null &&
+              parseHexColor(entry.text) != null,
+        );
     return AppSettings(
       showAvatars: value['showAvatars'] is bool
           ? value['showAvatars'] as bool
@@ -439,6 +486,7 @@ class AppSettings {
           ? defaultBaseBranchColor
           : formatHexColor(storedBaseBranchColor),
       laneColors: valid ? laneColors : defaultLaneColors,
+      refPalette: validRefPalette ? refPalette : defaultRefPalette,
       previewWidth: _clamped(value['previewWidth'], 288, 240, double.infinity),
       previewHeight: _clamped(
         value['previewHeight'],
@@ -462,6 +510,9 @@ class AppSettings {
     'fullDiffPreferences': fullDiffPreferences.toJson(),
     'baseBranchColor': baseBranchColor,
     'laneColors': laneColors,
+    'refPalette': [
+      for (final entry in refPalette) {'base': entry.base, 'text': entry.text},
+    ],
     'previewWidth': previewWidth,
     'previewHeight': previewHeight,
     'baseBranches': baseBranches,
@@ -481,6 +532,7 @@ class AppSettings {
       fullDiffPreferences == other.fullDiffPreferences &&
       baseBranchColor == other.baseBranchColor &&
       listEquals(laneColors, other.laneColors) &&
+      listEquals(refPalette, other.refPalette) &&
       previewWidth == other.previewWidth &&
       previewHeight == other.previewHeight &&
       mapEquals(baseBranches, other.baseBranches) &&
@@ -502,6 +554,7 @@ class AppSettings {
     fullDiffPreferences,
     baseBranchColor,
     Object.hashAll(laneColors),
+    Object.hashAll(refPalette),
     previewWidth,
     previewHeight,
     Object.hashAllUnordered(
@@ -569,11 +622,29 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  static const _colorFieldStyle = TextStyle(
+    color: Color(0xFFE8EAF2),
+    fontSize: 11,
+    fontFamily: 'monospace',
+  );
+  static const _colorFieldDecoration = InputDecoration(
+    isDense: true,
+    contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+    border: OutlineInputBorder(),
+  );
+
   late AppSettings _settings = widget.settings;
   var _section = _SettingsSection.gitIntegrations;
   late final _baseBranchColorField = TextEditingController(
     text: _settings.baseBranchColor,
   );
+  late final _refPaletteFields = [
+    for (final entry in _settings.refPalette)
+      (
+        base: TextEditingController(text: entry.base),
+        text: TextEditingController(text: entry.text),
+      ),
+  ];
   late final _laneFields = [
     for (final hex in _settings.laneColors) TextEditingController(text: hex),
   ];
@@ -581,6 +652,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     _baseBranchColorField.dispose();
+    for (final fields in _refPaletteFields) {
+      fields.base.dispose();
+      fields.text.dispose();
+    }
     for (final field in _laneFields) {
       field.dispose();
     }
@@ -603,6 +678,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _changeBaseBranchColor(String value) {
     if (parseHexColor(value) == null) return;
     _change(_settings.copyWith(baseBranchColor: formatHexColor(value)));
+  }
+
+  void _changeRefPalette(int index, {String? base, String? text}) {
+    final current = _settings.refPalette[index];
+    final next = (
+      base: formatHexColor(base ?? current.base),
+      text: formatHexColor(text ?? current.text),
+    );
+    if (parseHexColor(next.base) == null || parseHexColor(next.text) == null) {
+      return;
+    }
+    final palette = [..._settings.refPalette]..[index] = next;
+    _change(_settings.copyWith(refPalette: palette));
+  }
+
+  void _resetRefPalette() {
+    _change(_settings.copyWith(refPalette: AppSettings.defaultRefPalette));
+    for (var index = 0; index < _refPaletteFields.length; index++) {
+      _refPaletteFields[index].base.text =
+          AppSettings.defaultRefPalette[index].base;
+      _refPaletteFields[index].text.text =
+          AppSettings.defaultRefPalette[index].text;
+    }
   }
 
   void _resetLaneColors() {
@@ -851,17 +949,94 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _laneColors() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
+      const Text(
+        'Timeline colors',
+        style: TextStyle(
+          color: Color(0xFFE8EAF2),
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      const SizedBox(height: 6),
       Row(
         children: [
           const Text(
-            'Timeline colors',
+            'Branch / Tag palette',
             style: TextStyle(
               color: Color(0xFFE8EAF2),
-              fontSize: 12,
+              fontSize: 11,
               fontWeight: FontWeight.w600,
             ),
           ),
           const Spacer(),
+          TextButton(
+            key: const Key('reset-ref-palette'),
+            onPressed: _resetRefPalette,
+            child: const Text('Reset to defaults'),
+          ),
+        ],
+      ),
+      const SizedBox(height: 6),
+      for (var index = 0; index < _refPaletteFields.length; index++)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            children: [
+              Container(
+                key: Key('ref-palette-chip-$index'),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                decoration: BoxDecoration(
+                  color: _settings.refPaletteColorValues[index].base.withValues(
+                    alpha: .18,
+                  ),
+                  border: Border.all(
+                    color: _settings.refPaletteColorValues[index].text
+                        .withValues(alpha: .30),
+                  ),
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: Text(
+                  'Color ${index + 1}',
+                  style: TextStyle(
+                    color: _settings.refPaletteColorValues[index].text,
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 100,
+                child: TextField(
+                  key: Key('ref-palette-base-$index'),
+                  controller: _refPaletteFields[index].base,
+                  onChanged: (value) => _changeRefPalette(index, base: value),
+                  style: _colorFieldStyle,
+                  decoration: _colorFieldDecoration,
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 100,
+                child: TextField(
+                  key: Key('ref-palette-text-$index'),
+                  controller: _refPaletteFields[index].text,
+                  onChanged: (value) => _changeRefPalette(index, text: value),
+                  style: _colorFieldStyle,
+                  decoration: _colorFieldDecoration,
+                ),
+              ),
+            ],
+          ),
+        ),
+      Row(
+        children: [
+          const Expanded(
+            child: Text(
+              'Base branch and lane fallback',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: Color(0xFF8D94A8), fontSize: 11),
+            ),
+          ),
           TextButton(
             key: const Key('reset-lane-colors'),
             onPressed: _resetLaneColors,
@@ -892,19 +1067,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 key: const Key('base-branch-color'),
                 controller: _baseBranchColorField,
                 onChanged: _changeBaseBranchColor,
-                style: const TextStyle(
-                  color: Color(0xFFE8EAF2),
-                  fontSize: 11,
-                  fontFamily: 'monospace',
-                ),
-                decoration: const InputDecoration(
-                  isDense: true,
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 7,
-                  ),
-                  border: OutlineInputBorder(),
-                ),
+                style: _colorFieldStyle,
+                decoration: _colorFieldDecoration,
               ),
             ),
             const SizedBox(width: 10),
@@ -938,19 +1102,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   key: Key('lane-color-$index'),
                   controller: _laneFields[index],
                   onChanged: (value) => _changeLaneColor(index, value),
-                  style: const TextStyle(
-                    color: Color(0xFFE8EAF2),
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                  ),
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 7,
-                    ),
-                    border: OutlineInputBorder(),
-                  ),
+                  style: _colorFieldStyle,
+                  decoration: _colorFieldDecoration,
                 ),
               ),
             ],

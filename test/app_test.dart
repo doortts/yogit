@@ -5328,6 +5328,45 @@ void main() {
     },
   );
 
+  testWidgets('ref chip and graph use the same palette text color', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('tip', 'tip')],
+            refs: const RepoRefs(
+              local: ['d'],
+              current: 'd',
+              tips: {'d': 'tip'},
+            ),
+          ),
+          controller: controller,
+          refPalette: AppSettings.defaultRefPalette,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final decoration =
+        tester
+                .widget<Container>(find.byKey(const Key('ref-chip-tip-d')))
+                .decoration!
+            as BoxDecoration;
+    expect(decoration.color, const Color(0xFF1D76DB).withValues(alpha: .18));
+    expect(
+      decoration.border!.top.color,
+      const Color(0xFF68A7EA).withValues(alpha: .30),
+    );
+    final painter =
+        tester
+                .widget<CustomPaint>(find.byKey(const Key('graph-painter-0')))
+                .painter!
+            as CommitGraphPainter;
+    expect(painter.committerColor, const Color(0xFF68A7EA));
+  });
+
   testWidgets('preview describes the working tree row and counts files', (
     tester,
   ) async {
@@ -5569,6 +5608,47 @@ void main() {
       AppSettings.fromJson(<String, dynamic>{}).laneColors,
       AppSettings.defaultLaneColors,
     );
+  });
+
+  test('branch tag palette round-trips and rejects damaged records', () {
+    expect(AppSettings.defaultRefPalette, const [
+      (base: '#1D76DB', text: '#68A7EA'),
+      (base: '#E99695', text: '#E89292'),
+      (base: '#C5DEF5', text: '#C2DDF4'),
+      (base: '#0E8A16', text: '#18E022'),
+      (base: '#5319E7', text: '#DACFFA'),
+    ]);
+
+    const custom = AppSettings(
+      refPalette: [
+        (base: '#010203', text: '#A0B0C0'),
+        (base: '#111213', text: '#D0E0F0'),
+        (base: '#212223', text: '#102030'),
+        (base: '#313233', text: '#405060'),
+        (base: '#414243', text: '#708090'),
+      ],
+    );
+    expect(AppSettings.fromJson(custom.toJson()), custom);
+    expect(custom.refPaletteColorValues.first, (
+      base: const Color(0xFF010203),
+      text: const Color(0xFFA0B0C0),
+    ));
+
+    for (final stored in [
+      <Object>[],
+      [const {'base': '#112233', 'text': 'bad'}],
+      [
+        const {'base': '#112233', 'text': '#445566'},
+        const {'base': '#112233', 'text': '#445566'},
+        const {'base': '#112233', 'text': '#445566'},
+        const {'base': '#112233', 'text': '#445566'},
+      ],
+    ]) {
+      expect(
+        AppSettings.fromJson({'refPalette': stored}).refPalette,
+        AppSettings.defaultRefPalette,
+      );
+    }
   });
 
   test('base branches round-trip per repository', () {
@@ -6372,6 +6452,50 @@ void main() {
     );
   });
 
+  testWidgets('branch tag palette editor applies Base and Text and resets', (
+    tester,
+  ) async {
+    final saved = <AppSettings>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          settings: const AppSettings(),
+          onChanged: saved.add,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final preview = tester.widget<Container>(
+      find.byKey(const Key('ref-palette-chip-0')),
+    );
+    final decoration = preview.decoration! as BoxDecoration;
+    expect(decoration.color, const Color(0xFF1D76DB).withValues(alpha: .18));
+    expect(
+      decoration.border!.top.color,
+      const Color(0xFF68A7EA).withValues(alpha: .30),
+    );
+
+    await tester.enterText(
+      find.byKey(const Key('ref-palette-base-0')),
+      '#010203',
+    );
+    await tester.enterText(
+      find.byKey(const Key('ref-palette-text-0')),
+      '#A0B0C0',
+    );
+    await tester.pump();
+    expect(saved.last.refPalette.first, (base: '#010203', text: '#A0B0C0'));
+
+    await tester.enterText(find.byKey(const Key('ref-palette-base-0')), '#01');
+    await tester.pump();
+    expect(saved.last.refPalette.first.base, '#010203');
+
+    await tester.tap(find.byKey(const Key('reset-ref-palette')));
+    await tester.pump();
+    expect(saved.last.refPalette, AppSettings.defaultRefPalette);
+  });
+
   testWidgets('stored timeline colors reach the base and fallback rails', (
     tester,
   ) async {
@@ -6406,6 +6530,38 @@ void main() {
             as CommitGraphPainter;
     expect(painter.row.branch, 0);
     expect(painter.committerColor, const Color(0xFF0C8599));
+  });
+
+  testWidgets('stored ref palette reaches timeline chips', (tester) async {
+    final store = MemorySettingsStore()
+      ..current = const AppSettings(
+        refPalette: [
+          (base: '#010203', text: '#A0B0C0'),
+          (base: '#E99695', text: '#E89292'),
+          (base: '#C5DEF5', text: '#C2DDF4'),
+          (base: '#0E8A16', text: '#18E022'),
+          (base: '#5319E7', text: '#DACFFA'),
+        ],
+      );
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository(
+          (_, _) async => [commit('tip', 'tip')],
+          refs: const RepoRefs(local: ['d'], current: 'd', tips: {'d': 'tip'}),
+        ),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final decoration =
+        tester
+                .widget<Container>(find.byKey(const Key('ref-chip-tip-d')))
+                .decoration!
+            as BoxDecoration;
+    expect(decoration.color, const Color(0xFF010203).withValues(alpha: .18));
   });
 
   test('social time counts calendar days, like the date headings', () {
@@ -7346,6 +7502,12 @@ void main() {
             commit('multi', 'multi ref commit', refs: refs),
             commit('plain', 'plain commit', refs: const []),
           ],
+          refs: const RepoRefs(
+            local: ['main'],
+            remote: ['origin/main'],
+            tags: ['v1.0'],
+            current: 'main',
+          ),
         ),
         controller,
       ),
@@ -7354,7 +7516,7 @@ void main() {
 
     // Every ref that fits gets an equal share of the cell; no badge at all.
     final cell = tester.getRect(find.byKey(const Key('refs-cell-0')));
-    final chip = tester.getRect(find.byKey(const Key('ref-chip-multi-v1.0')));
+    final chip = tester.getRect(find.byKey(const Key('ref-chip-multi-main')));
     for (final ref in refs) {
       expect(find.byKey(Key('ref-chip-multi-${ref.name}')), findsOneWidget);
     }
@@ -7370,7 +7532,7 @@ void main() {
     );
     expect(
       cell.right -
-          tester.getRect(find.byKey(const Key('ref-chip-multi-main'))).right,
+          tester.getRect(find.byKey(const Key('ref-chip-multi-v1.0'))).right,
       14,
     );
 
@@ -7411,6 +7573,7 @@ void main() {
       GitRef(name: 'v1.0', isTag: true),
       GitRef(name: 'origin/main'),
       GitRef(name: 'main', isHead: true),
+      GitRef(name: 'd'),
     ];
     await tester.pumpWidget(
       app(
@@ -7444,6 +7607,18 @@ void main() {
         findsOneWidget,
       );
     }
+    expect(
+      tester
+          .widget<Container>(find.byKey(const Key('modal-accent-main')))
+          .color,
+      const Color(0xFFE89292),
+    );
+    expect(
+      tester
+          .widget<Container>(find.byKey(const Key('modal-accent-d')))
+          .color,
+      const Color(0xFF68A7EA),
+    );
     final row = tester.getRect(find.byKey(const Key('refs-cell-5')));
     expect(tester.getRect(modal).bottom, lessThanOrEqualTo(row.top));
 
@@ -10284,6 +10459,105 @@ void main() {
   });
 
   // ------------------------------------------------------------------ §17.2
+  test('ref palette mapping is stable and covers all five records', () {
+    expect(
+      [for (final name in ['d', 'e', 'a', 'b', 'c'])
+        stableRefPaletteIndex(name, 5)],
+      [0, 1, 2, 3, 4],
+    );
+    expect(
+      refPaletteColorsForName('d', AppSettings.defaultRefPalette),
+      (
+        base: const Color(0xFF1D76DB),
+        text: const Color(0xFF68A7EA),
+      ),
+    );
+  });
+
+  test('timeline refs prefer HEAD, local, remote, tag, then decoration', () {
+    final value = timelineRefsForCommit(
+      commit(
+        'tip',
+        'tip',
+        refs: const [GitRef(name: 'log-only')],
+      ),
+      const RepoRefs(
+        local: ['local'],
+        remote: ['origin/remote'],
+        tags: ['v1'],
+        current: 'head',
+        tips: {
+          'head': 'tip',
+          'local': 'tip',
+          'origin/remote': 'tip',
+          'v1': 'tip',
+        },
+      ),
+    );
+    expect(
+      [for (final ref in value) ref.name],
+      ['head', 'local', 'origin/remote', 'v1', 'log-only'],
+    );
+    expect(value.first.isHead, isTrue);
+    expect(value[3].isTag, isTrue);
+  });
+
+  test('named branch lines use the representative ref text color', () {
+    final rows = layoutGraph([
+      commit('tip', 'tip', refs: const [GitRef(name: 'd', isHead: true)]),
+    ]);
+    final names = branchRefNames(
+      rows,
+      const RepoRefs(
+        local: ['d'],
+        current: 'd',
+        tips: {'d': 'tip'},
+      ),
+    );
+    expect(
+      assignBranchColors(
+        rows,
+        42,
+        branchNames: names,
+        refPalette: AppSettings.defaultRefPalette,
+      )[rows.single.branch],
+      const Color(0xFF68A7EA),
+    );
+  });
+
+  test('branch lines choose the best ref across every row', () {
+    final rows = [
+      graphRow(
+        commit: commit('old', 'old', refs: const [GitRef(name: 'log-only')]),
+        lane: 0,
+        branch: 0,
+      ),
+      graphRow(
+        commit: commit(
+          'newer-local',
+          'newer local',
+          refs: const [GitRef(name: 'z-local')],
+        ),
+        lane: 0,
+        branch: 0,
+      ),
+      graphRow(
+        commit: commit(
+          'later-local',
+          'later local',
+          refs: const [GitRef(name: 'a-local')],
+        ),
+        lane: 0,
+        branch: 0,
+      ),
+    ];
+
+    expect(
+      branchRefNames(rows, const RepoRefs(local: ['a-local', 'z-local'])),
+      const {0: 'a-local'},
+    );
+  });
+
   test('branch colors take fixed roles, then a non-colliding pool', () {
     GraphRow born(int id, Map<int, int> active) => graphRow(
       commit: commit('$id', 'line $id'),
@@ -10364,7 +10638,7 @@ void main() {
     );
   });
 
-  test('the live base color wins while other assignments stay fixed', () {
+  test('configured assignments win over branch color fallbacks', () {
     addTearDown(() {
       AvatarService.baseBranchColor = AvatarService.defaultBaseBranchColor;
       AvatarService.branchAssignments = const {};
@@ -10377,8 +10651,60 @@ void main() {
     };
     AvatarService.baseBranchColor = const Color(0xFFAABBCC);
 
-    expect(AvatarService.branchColor(0), const Color(0xFFAABBCC));
+    expect(AvatarService.branchColor(0), const Color(0xFF010203));
     expect(AvatarService.branchColor(1), const Color(0xFF040506));
+  });
+
+  test('painted branch-zero rails and curves use the assigned ref color', () {
+    addTearDown(() {
+      AvatarService.baseBranchColor = AvatarService.defaultBaseBranchColor;
+      AvatarService.branchAssignments = const {};
+    });
+    const assigned = Color(0xFF68A7EA);
+    AvatarService.baseBranchColor = const Color(0xFFAABBCC);
+    AvatarService.branchAssignments = const {0: assigned};
+
+    final railPainter = CommitGraphPainter(
+      row: graphRow(
+        commit: commit('side', 'side'),
+        lane: 1,
+        activeLanes: const [0, 1],
+        nextLanes: const [0, 1],
+        activeLaneShas: const {0: 'base', 1: 'side'},
+        nextLaneShas: const {0: 'base', 1: 'side'},
+        branch: 1,
+        activeLaneBranches: const {0: 0, 1: 1},
+        nextLaneBranches: const {0: 0, 1: 1},
+      ),
+      selected: false,
+      committerColor: const Color(0xFF040506),
+    );
+    final curvePainter = CommitGraphPainter(
+      row: graphRow(
+        commit: commit('base', 'base', parents: const ['root']),
+        lane: 1,
+        activeLanes: const [1],
+        nextLanes: const [0],
+        activeLaneShas: const {1: 'base'},
+        nextLaneShas: const {0: 'root'},
+        transitions: const [(from: 1, to: 0, sha: 'root')],
+        parentLanes: const [0],
+        branch: 0,
+        activeLaneBranches: const {1: 0},
+        nextLaneBranches: const {0: 0},
+      ),
+      selected: false,
+      committerColor: assigned,
+    );
+
+    expect(
+      (Canvas canvas) => railPainter.paint(canvas, const Size(168, 36)),
+      paints..line(color: assigned),
+    );
+    expect(
+      (Canvas canvas) => curvePainter.paint(canvas, const Size(168, 36)),
+      paints..path(color: assigned),
+    );
   });
 
   test(
@@ -10473,6 +10799,12 @@ void main() {
               commit('three', 'three refs', refs: many.take(3).toList()),
               commit('five', 'five refs', refs: many),
             ],
+            refs: const RepoRefs(
+              local: ['main'],
+              remote: ['origin/main'],
+              tags: ['v1.0'],
+              current: 'main',
+            ),
           ),
           controller: controller,
           // 150px of chips: floor(150 / 40) = 3 chips at 50px each.
@@ -10488,10 +10820,13 @@ void main() {
       expect(chip('three', ref.name).width, greaterThanOrEqualTo(40));
     }
     // Equal shares, in order, inside the cell.
-    expect(chip('three', 'main').left, lessThan(chip('three', 'v1.0').left));
     expect(
-      chip('three', 'v1.0').left,
+      chip('three', 'main').left,
       lessThan(chip('three', 'origin/main').left),
+    );
+    expect(
+      chip('three', 'origin/main').left,
+      lessThan(chip('three', 'v1.0').left),
     );
     expect(
       chip('three', 'main').width,
@@ -12876,7 +13211,7 @@ void main() {
             commit('root', 'root commit'),
           ],
           workingTree: () async => workingTreeCommit('tip'),
-          refs: const RepoRefs(local: ['main'], current: 'main'),
+          refs: const RepoRefs(local: ['main', long], current: 'main'),
         ),
         controller,
       ),

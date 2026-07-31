@@ -532,9 +532,100 @@ const _branchColorPool = [
 ];
 const _secondBranchColors = [Color(0xFF00E5FF), Color(0xFFFF3131)];
 
+int stableRefPaletteIndex(String name, int length) {
+  var hash = 0;
+  for (final codeUnit in name.codeUnits) {
+    hash = (hash * 31 + codeUnit) & 0x7fffffff;
+  }
+  return hash % length;
+}
+
+RefPaletteColors refPaletteColorsForName(
+  String name,
+  List<RefPaletteEntry> palette,
+) {
+  final valid = palette.length == AppSettings.defaultRefPalette.length &&
+          palette.every(
+            (entry) =>
+                parseHexColor(entry.base) != null &&
+                parseHexColor(entry.text) != null,
+          )
+      ? palette
+      : AppSettings.defaultRefPalette;
+  final entry = valid[stableRefPaletteIndex(name, valid.length)];
+  return (
+    base: parseHexColor(entry.base)!,
+    text: parseHexColor(entry.text)!,
+  );
+}
+
+int refPriority(GitRef ref, RepoRefs refs) {
+  if (ref.isHead || ref.name == refs.current) return 0;
+  if (refs.local.contains(ref.name)) return 1;
+  if (refs.remote.contains(ref.name)) return 2;
+  if (ref.isTag || refs.tags.contains(ref.name)) return 3;
+  return 4;
+}
+
+int compareTimelineRefs(GitRef left, GitRef right, RepoRefs refs) {
+  final priority = refPriority(left, refs).compareTo(refPriority(right, refs));
+  return priority != 0 ? priority : left.name.compareTo(right.name);
+}
+
+List<GitRef> timelineRefsForCommit(GitCommit commit, RepoRefs refs) {
+  final byName = <String, GitRef>{};
+  void add(GitRef ref) {
+    final previous = byName[ref.name];
+    byName[ref.name] = GitRef(
+      name: ref.name,
+      isHead: ref.isHead || previous?.isHead == true,
+      isTag: ref.isTag || previous?.isTag == true,
+    );
+  }
+
+  for (final ref in commit.refs) {
+    add(ref);
+  }
+  if (commit.sha.isNotEmpty) {
+    for (final entry in refs.tips.entries) {
+      if (entry.value != commit.sha) continue;
+      add(
+        GitRef(
+          name: entry.key,
+          isHead: entry.key == refs.current,
+          isTag: refs.tags.contains(entry.key),
+        ),
+      );
+    }
+  }
+  final result = byName.values.toList();
+  result.sort((left, right) => compareTimelineRefs(left, right, refs));
+  return result;
+}
+
+Map<int, String> branchRefNames(List<GraphRow> rows, RepoRefs refs) {
+  final representatives = <int, GitRef>{};
+  for (final row in rows) {
+    for (final ref in timelineRefsForCommit(row.commit, refs)) {
+      final current = representatives[row.branch];
+      if (current == null || compareTimelineRefs(ref, current, refs) < 0) {
+        representatives[row.branch] = ref;
+      }
+    }
+  }
+  return {
+    for (final entry in representatives.entries) entry.key: entry.value.name,
+  };
+}
+
 /// Branch id → color, decided at each line's birth row and therefore stable as
 /// pages append. [seed] keeps a repository's colors the same across launches.
-Map<int, Color> assignBranchColors(List<GraphRow> rows, int seed) {
+Map<int, Color> assignBranchColors(
+  List<GraphRow> rows,
+  int seed, {
+  Map<int, String> branchNames = const {},
+  List<RefPaletteEntry> refPalette = AppSettings.defaultRefPalette,
+}) {
   final colors = <int, Color>{};
   final overflow = [
     for (final color in AvatarService.defaultColors)
@@ -552,6 +643,11 @@ Map<int, Color> assignBranchColors(List<GraphRow> rows, int seed) {
     }.toList()..sort();
     for (final id in ids) {
       if (id < 0 || colors.containsKey(id)) continue;
+      final name = branchNames[id];
+      if (name != null) {
+        colors[id] = refPaletteColorsForName(name, refPalette).text;
+        continue;
+      }
       if (id == 0) {
         colors[id] = AvatarService.baseBranchColor;
         continue;
@@ -610,6 +706,7 @@ class TimelineScreen extends StatefulWidget {
     this.columnWidths = const TimelineColumnWidths(),
     this.fullDiffColumnWidths = const FullDiffColumnWidths(),
     this.fullDiffPreferences = const FullDiffPreferences(),
+    this.refPalette = AppSettings.defaultRefPalette,
     this.branchPreviewMode = BranchPreviewMode.merge,
     this.previewWidth = 288,
     this.previewHeight = 280,
@@ -648,6 +745,7 @@ class TimelineScreen extends StatefulWidget {
   final TimelineColumnWidths columnWidths;
   final FullDiffColumnWidths fullDiffColumnWidths;
   final FullDiffPreferences fullDiffPreferences;
+  final List<RefPaletteEntry> refPalette;
   final BranchPreviewMode branchPreviewMode;
   final double previewWidth;
   final double previewHeight;
@@ -1021,6 +1119,9 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (widget.branchPreviewMode != oldWidget.branchPreviewMode) {
       _branchPreviewMode = widget.branchPreviewMode;
     }
+    if (!listEquals(widget.refPalette, oldWidget.refPalette)) {
+      _rebuildGraph();
+    }
     final preferredBranchBecameReady =
         widget.preferredBranchReady && !oldWidget.preferredBranchReady;
     if (_refsLoaded &&
@@ -1180,6 +1281,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     AvatarService.branchAssignments = assignBranchColors(
       _normalRows,
       widget.repository.root.hashCode,
+      branchNames: branchRefNames(_normalRows, _refs),
+      refPalette: widget.refPalette,
     );
   }
 
@@ -4700,20 +4803,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         ),
       ];
     }
-    final refs = [...commit.refs];
-    if (commit.sha.isEmpty || _refs.tips.isEmpty) return refs;
-    final seen = {for (final ref in refs) ref.name};
-    for (final entry in _refs.tips.entries) {
-      if (entry.value != commit.sha || !seen.add(entry.key)) continue;
-      refs.add(
-        GitRef(
-          name: entry.key,
-          isHead: entry.key == _refs.current,
-          isTag: _refs.tags.contains(entry.key),
-        ),
-      );
-    }
-    return refs;
+    return timelineRefsForCommit(commit, _refs);
   }
 
   /// Only the rows whose selected or hovered state flipped rebuild.
@@ -5485,18 +5575,31 @@ class _TimelineScreenState extends State<TimelineScreen>
         ),
       );
 
-  Widget _refChip(GitCommit commit, GitRef ref, Color color) => Container(
-    key: Key('ref-chip-${commit.sha}-${ref.name}'),
-    padding: const EdgeInsets.symmetric(horizontal: 5),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: 0.14),
-      border: Border.all(color: color.withValues(alpha: 0.55)),
-      borderRadius: BorderRadius.circular(5),
-    ),
-    child: Row(
-      children: [_refGlyph(ref, color, false), _refName(ref, color, false)],
-    ),
-  );
+  Widget _refChip(GitCommit commit, GitRef ref, Color color) {
+    final colors = refPaletteColorsForName(ref.name, widget.refPalette);
+    final background = _comparison == null
+        ? colors.base.withValues(alpha: .18)
+        : color.withValues(alpha: .14);
+    final border = _comparison == null
+        ? colors.text.withValues(alpha: .30)
+        : color.withValues(alpha: .55);
+    final foreground = _comparison == null ? colors.text : color;
+    return Container(
+      key: Key('ref-chip-${commit.sha}-${ref.name}'),
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      decoration: BoxDecoration(
+        color: background,
+        border: Border.all(color: border),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Row(
+        children: [
+          _refGlyph(ref, foreground, false),
+          _refName(ref, foreground, false),
+        ],
+      ),
+    );
+  }
 
   Widget _refGlyph(GitRef ref, Color color, bool selected) =>
       ref.isHead || ref.isTag
@@ -5610,25 +5713,35 @@ class _TimelineScreenState extends State<TimelineScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 for (final ref in refs)
-                  SizedBox(
-                    height: 24,
-                    child: Row(
-                      children: [
-                        // A straight 2px bar, no rounding.
-                        Container(
-                          key: Key('modal-accent-${ref.name}'),
-                          width: 2,
-                          height: 20,
-                          color: color,
+                  Builder(
+                    builder: (context) {
+                      final refColor = _comparison == null
+                          ? refPaletteColorsForName(
+                              ref.name,
+                              widget.refPalette,
+                            ).text
+                          : color;
+                      return SizedBox(
+                        height: 24,
+                        child: Row(
+                          children: [
+                            // A straight 2px bar, no rounding.
+                            Container(
+                              key: Key('modal-accent-${ref.name}'),
+                              width: 2,
+                              height: 20,
+                              color: refColor,
+                            ),
+                            const SizedBox(width: 7),
+                            _refGlyph(ref, refColor, false),
+                            _refName(ref, refColor, false, ellipsis: false),
+                            const SizedBox(width: 6),
+                            _CopyButton(text: ref.name, color: refColor),
+                            const SizedBox(width: 4),
+                          ],
                         ),
-                        const SizedBox(width: 7),
-                        _refGlyph(ref, color, false),
-                        _refName(ref, color, false, ellipsis: false),
-                        const SizedBox(width: 6),
-                        _CopyButton(text: ref.name, color: color),
-                        const SizedBox(width: 4),
-                      ],
-                    ),
+                      );
+                    },
                   ),
               ],
             ),
@@ -8704,7 +8817,7 @@ class CommitGraphPainter extends CustomPainter {
                       committersBySha[sha] ?? row.commit.committer,
                     )
                   : branch == 0
-                  ? baseBranchColor
+                  ? AvatarService.branchAssignments[0] ?? baseBranchColor
                   : AvatarService.branchColor(branch))
     ..style = PaintingStyle.stroke
     ..strokeWidth = dashed ? previewRailWidth : railWidth
