@@ -39,7 +39,7 @@ List<RefTreeNode> buildRefTree(Iterable<String> names) {
   return [for (final root in roots.values) root.freeze()];
 }
 
-List<String> sortTagsNewestFirst(
+List<String> sortRefsNewestFirst(
   Iterable<String> names,
   Map<String, int> creatorTimes,
 ) {

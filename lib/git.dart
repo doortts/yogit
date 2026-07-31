@@ -1553,6 +1553,7 @@ class RepoRefs {
     this.tips = const {},
     this.localTips = const {},
     this.birthTimes = const {},
+    this.branchActivityTimes = const {},
     this.tagCreatorTimes = const {},
     this.aheadBehind = const {},
     this.upstreams = const {},
@@ -1567,6 +1568,9 @@ class RepoRefs {
   /// Local branch name → creation unix time, read from the branch's oldest
   /// reflog entry. Absent when the reflog no longer records the birth.
   final Map<String, int> birthTimes;
+
+  /// Local or remote branch name → tip commit unix time.
+  final Map<String, int> branchActivityTimes;
 
   /// Short ref name → tip commit sha, for every entry in the three lists.
   final Map<String, String> tips;
@@ -2948,6 +2952,7 @@ class GitRepository implements FullDiffRepository {
     final tags = <String>[];
     final tips = <String, String>{};
     final localTips = <String, String>{};
+    final branchActivityTimes = <String, int>{};
     final tagCreatorTimes = <String, int>{};
     final upstreams = <String, String>{};
     final upstreamRemotes = <String, String>{};
@@ -2982,6 +2987,10 @@ class GitRepository implements FullDiffRepository {
         if (bucket.value == tags && creatorTime != null) {
           tagCreatorTimes[short] = creatorTime;
         }
+        if ((bucket.value == local || bucket.value == remote) &&
+            creatorTime != null) {
+          branchActivityTimes[short] = creatorTime;
+        }
         break;
       }
     }
@@ -2999,6 +3008,7 @@ class GitRepository implements FullDiffRepository {
       current: current.isEmpty ? null : current,
       tips: tips,
       localTips: localTips,
+      branchActivityTimes: branchActivityTimes,
       tagCreatorTimes: tagCreatorTimes,
       birthTimes: {
         for (var index = 0; index < local.length; index++)

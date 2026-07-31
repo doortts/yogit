@@ -2905,7 +2905,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (collapsed) return;
 
     final orderedNames = section == _RefSection.tags
-        ? sortTagsNewestFirst(names, _refs.tagCreatorTimes)
+        ? sortRefsNewestFirst(names, _refs.tagCreatorTimes)
         : names;
     final hiddenTagCount = section == _RefSection.tags
         ? math.max(0, orderedNames.length - _collapsedTagLimit)
