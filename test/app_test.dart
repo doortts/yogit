@@ -3060,6 +3060,38 @@ void main() {
     );
   });
 
+  testWidgets('virtual merge row hides borrowed date and author', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            current: 'main',
+            tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async => branchComparison(),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+
+    final row = find.byKey(const Key('virtual-preview-row'));
+    expect(
+      find.descendant(of: row, matching: find.text('Ada Author')),
+      findsNothing,
+    );
+    expect(find.descendant(of: row, matching: find.text('—')), findsNWidgets(2));
+  });
+
   testWidgets('branch comparison failure is shown in the preview summary', (
     tester,
   ) async {
