@@ -613,12 +613,16 @@ class TimelineScreen extends StatefulWidget {
     this.branchPreviewMode = BranchPreviewMode.merge,
     this.previewWidth = 288,
     this.previewHeight = 280,
+    this.previewDiffLeftWidth,
+    this.previewDiffRightWidth,
+    this.previewDiffBottomHeight,
     this.onPreviewPlacementChanged,
     this.onColumnWidthsChanged,
     this.onFullDiffColumnWidthsChanged,
     this.onFullDiffPreferencesChanged,
     this.onBranchPreviewModeChanged,
     this.onPreviewSizeChanged,
+    this.onPreviewDiffSizeChanged,
     this.editorForTesting,
     this.documentLoaderForTesting,
     super.key,
@@ -651,12 +655,17 @@ class TimelineScreen extends StatefulWidget {
   final BranchPreviewMode branchPreviewMode;
   final double previewWidth;
   final double previewHeight;
+  final double? previewDiffLeftWidth;
+  final double? previewDiffRightWidth;
+  final double? previewDiffBottomHeight;
   final ValueChanged<PreviewPlacement>? onPreviewPlacementChanged;
   final ValueChanged<TimelineColumnWidths>? onColumnWidthsChanged;
   final ValueChanged<FullDiffColumnWidths>? onFullDiffColumnWidthsChanged;
   final ValueChanged<FullDiffPreferences>? onFullDiffPreferencesChanged;
   final ValueChanged<BranchPreviewMode>? onBranchPreviewModeChanged;
   final ValueChanged<({double width, double height})>? onPreviewSizeChanged;
+  final ValueChanged<({PreviewPlacement placement, double extent})>?
+  onPreviewDiffSizeChanged;
 
   @visibleForTesting
   final Widget? editorForTesting;
@@ -703,7 +712,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   final _timelineKey = GlobalKey();
   final _scrollController = ScrollController();
   final _previewFilesScrollController = ScrollController();
-  ScrollController? _previewDiffScrollController;
+  final _previewDiffScrollController = ScrollController();
   final _selectedPreviewFileKey = GlobalKey(
     debugLabel: 'selected preview file',
   );
@@ -770,6 +779,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   final _previewFileLists = <String, List<GitFileChange>>{};
   final _previewDiffs = <({String sha, String path}), Future<List<DiffLine>>>{};
   final _previewPaths = <String, String>{};
+  var _previewDiffOpen = false;
   late final Map<String, String> _deletedBranchNames;
   final _deletedBranchLookupAttempts = <String>{};
   final _deletedBranchRevision = ValueNotifier(0);
@@ -827,6 +837,11 @@ class _TimelineScreenState extends State<TimelineScreen>
   var _commitAvailableWidth = 0.0;
   late double _previewWidth = widget.previewWidth;
   late double _previewHeight = widget.previewHeight;
+  late double? _previewDiffLeftWidth = widget.previewDiffLeftWidth;
+  late double? _previewDiffRightWidth = widget.previewDiffRightWidth;
+  late double? _previewDiffBottomHeight = widget.previewDiffBottomHeight;
+  var _visiblePreviewDiffExtent = 0.0;
+  var _maxPreviewDiffExtent = 0.0;
   var _bottomPreviewMaxHeight = double.maxFinite;
   _FullDiffRouteSession? _fullDiffRouteSession;
   FullDiffPreferences? _pendingFullDiffPreferences;
@@ -1066,6 +1081,13 @@ class _TimelineScreenState extends State<TimelineScreen>
       _previewWidth = widget.previewWidth;
       _previewHeight = widget.previewHeight;
     }
+    if (widget.previewDiffLeftWidth != oldWidget.previewDiffLeftWidth ||
+        widget.previewDiffRightWidth != oldWidget.previewDiffRightWidth ||
+        widget.previewDiffBottomHeight != oldWidget.previewDiffBottomHeight) {
+      _previewDiffLeftWidth = widget.previewDiffLeftWidth;
+      _previewDiffRightWidth = widget.previewDiffRightWidth;
+      _previewDiffBottomHeight = widget.previewDiffBottomHeight;
+    }
     if (widget.branchPreviewMode != oldWidget.branchPreviewMode) {
       _branchPreviewMode = widget.branchPreviewMode;
     }
@@ -1127,6 +1149,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       ..removeListener(_maybeLoadNextPage)
       ..dispose();
     _previewFilesScrollController.dispose();
+    _previewDiffScrollController.dispose();
     for (final node in _resizerFocus.values) {
       node.dispose();
     }
@@ -1393,7 +1416,11 @@ class _TimelineScreenState extends State<TimelineScreen>
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.escape) {
-      unawaited(_previewController.setPreview(PreviewPlacement.closed));
+      if (_previewDiffOpen) {
+        _closePreviewDiff();
+      } else {
+        unawaited(_previewController.setPreview(PreviewPlacement.closed));
+      }
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -1551,13 +1578,16 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   /// Enter and Space toggle the panel; Esc always closes.
-  void _togglePreview() => unawaited(
-    _previewController.setPreview(
-      _previewController.previewPlacement == PreviewPlacement.closed
-          ? widget.preferredPreviewPlacement
-          : PreviewPlacement.closed,
-    ),
-  );
+  void _togglePreview() {
+    final closing =
+        _previewController.previewPlacement != PreviewPlacement.closed;
+    if (closing && _previewDiffOpen) _closePreviewDiff();
+    unawaited(
+      _previewController.setPreview(
+        closing ? PreviewPlacement.closed : widget.preferredPreviewPlacement,
+      ),
+    );
+  }
 
   /// Sidebar click: jump to the newest commit decorated with [name]. Remote
   /// entries also match the branch name without their remote prefix.
@@ -1629,10 +1659,20 @@ class _TimelineScreenState extends State<TimelineScreen>
         constraints.maxHeight - timelineChromeHeight,
       );
       final extent = math.min(_previewHeight, _bottomPreviewMaxHeight);
+      final diffExtent = _previewDiffExtent(
+        placement,
+        math.max(0.0, constraints.maxHeight - extent),
+      );
       return Column(
         key: const Key('preview-layout-bottom'),
         children: [
           timeline,
+          if (_previewDiffOpen)
+            SizedBox(
+              height: diffExtent,
+              width: constraints.maxWidth,
+              child: _adjacentPreviewDiff(placement),
+            ),
           _animatedPreview(
             axis: Axis.vertical,
             extent: extent,
@@ -1656,10 +1696,35 @@ class _TimelineScreenState extends State<TimelineScreen>
       height: constraints.maxHeight,
       visible: beside,
     );
+    final diffExtent = _previewDiffExtent(
+      placement,
+      beside ? math.max(0.0, constraints.maxWidth - extent) : 0.0,
+    );
+    final diff = SizedBox(
+      width: diffExtent,
+      height: constraints.maxHeight,
+      child: _adjacentPreviewDiff(placement),
+    );
     return Row(
       key: Key(onLeft ? 'preview-layout-left' : 'preview-layout-right'),
-      children: onLeft ? [preview, timeline] : [timeline, preview],
+      children: onLeft
+          ? [preview, if (_previewDiffOpen) diff, timeline]
+          : [timeline, if (_previewDiffOpen) diff, preview],
     );
+  }
+
+  double _previewDiffExtent(PreviewPlacement placement, double available) {
+    _maxPreviewDiffExtent = available;
+    final saved = switch (placement) {
+      PreviewPlacement.left => _previewDiffLeftWidth,
+      PreviewPlacement.right => _previewDiffRightWidth,
+      PreviewPlacement.bottom => _previewDiffBottomHeight,
+      PreviewPlacement.closed => null,
+    };
+    _visiblePreviewDiffExtent = _previewDiffOpen
+        ? (saved ?? math.max(0.0, available - 100)).clamp(0.0, available)
+        : 0.0;
+    return _visiblePreviewDiffExtent;
   }
 
   Widget _animatedPreview({
@@ -6357,15 +6422,18 @@ class _TimelineScreenState extends State<TimelineScreen>
     int? revealDirection,
     bool animateReveal = true,
   }) {
-    setState(() => _previewPaths[_previewKey(commit)] = path);
+    setState(() {
+      _previewPaths[_previewKey(commit)] = path;
+      _previewDiffOpen = true;
+    });
+    _focusNode.requestFocus();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final outerOffset = _previewFilesScrollController.hasClients
           ? _previewFilesScrollController.offset
           : null;
-      final diffController = _previewDiffScrollController;
-      if (diffController?.hasClients ?? false) {
-        diffController!.jumpTo(0);
+      if (_previewDiffScrollController.hasClients) {
+        _previewDiffScrollController.jumpTo(0);
       }
       if (outerOffset != null && _previewFilesScrollController.hasClients) {
         _previewFilesScrollController.jumpTo(
@@ -6393,10 +6461,10 @@ class _TimelineScreenState extends State<TimelineScreen>
           outer.position.pixels < outer.position.maxScrollExtent) {
         return outer;
       }
-      return inner?.hasClients ?? false ? inner : null;
+      return inner.hasClients ? inner : null;
     }
-    if ((inner?.hasClients ?? false) &&
-        inner!.position.pixels > inner.position.minScrollExtent) {
+    if (inner.hasClients &&
+        inner.position.pixels > inner.position.minScrollExtent) {
       return inner;
     }
     return outer.hasClients ? outer : null;
@@ -6438,9 +6506,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       builder: (context, snapshot) {
         final changes = snapshot.data;
         final key = _previewKey(commit);
-        final requestedPath =
-            _previewPaths[key] ??
-            (changes == null || changes.isEmpty ? null : changes.first.path);
+        final requestedPath = _previewDiffOpen ? _previewPaths[key] : null;
         GitFileChange? selectedFile;
         if (changes != null && changes.isNotEmpty) {
           selectedFile = changes.firstWhere(
@@ -6546,20 +6612,6 @@ class _TimelineScreenState extends State<TimelineScreen>
             ],
           ),
         );
-        final diff = Padding(
-          padding: EdgeInsets.zero,
-          child: Container(
-            key: const Key('preview-diff'),
-            child: selectedPath == null
-                ? Center(
-                    child: Text(
-                      'Select a file to load its diff.',
-                      style: TextStyle(color: _palette.muted, fontSize: 12),
-                    ),
-                  )
-                : _previewDiff(commit, selectedFile!),
-          ),
-        );
         return NestedScrollView(
           key: const Key('preview-content-scroll'),
           controller: _previewFilesScrollController,
@@ -6570,24 +6622,144 @@ class _TimelineScreenState extends State<TimelineScreen>
                 child: info,
               ),
             ),
-            SliverToBoxAdapter(
-              child: Divider(height: 1, color: _palette.border),
-            ),
           ],
-          body: Builder(
-            builder: (context) {
-              _previewDiffScrollController = PrimaryScrollController.maybeOf(
-                context,
-              );
-              return KeyedSubtree(
-                key: const Key('preview-diff-scroll'),
-                child: diff,
-              );
-            },
-          ),
+          body: const SizedBox.shrink(),
         );
       },
     );
+  }
+
+  Widget _adjacentPreviewDiff(PreviewPlacement placement) => Stack(
+    children: [
+      Positioned.fill(
+        child: ValueListenableBuilder<int>(
+          valueListenable: _selectedIndex,
+          builder: (context, _, _) {
+            final commit = _selectedCommit;
+            if (commit == null) return const SizedBox.shrink();
+            return FutureBuilder<List<GitFileChange>>(
+              key: ValueKey(_previewKey(commit)),
+              future: _previewFilesFor(commit),
+              builder: (context, snapshot) {
+                final changes = snapshot.data;
+                if (changes == null || changes.isEmpty) {
+                  return const SizedBox.shrink();
+                }
+                final requestedPath = _previewPaths[_previewKey(commit)];
+                final file = changes.firstWhere(
+                  (file) => file.path == requestedPath,
+                  orElse: () => changes.first,
+                );
+                return Container(
+                  key: const Key('preview-diff'),
+                  decoration: BoxDecoration(
+                    color: _palette.background,
+                    border: Border.all(color: _palette.border),
+                  ),
+                  child: SelectionArea(
+                    child: KeyedSubtree(
+                      key: const Key('preview-diff-scroll'),
+                      child: _previewDiff(commit, file),
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        ),
+      ),
+      _previewDiffResizer(placement),
+    ],
+  );
+
+  Widget _previewDiffResizer(PreviewPlacement placement) {
+    final vertical = placement == PreviewPlacement.bottom;
+    final handle = MouseRegion(
+      cursor: vertical
+          ? SystemMouseCursors.resizeRow
+          : SystemMouseCursors.resizeColumn,
+      child: GestureDetector(
+        key: const Key('preview-diff-resizer'),
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragUpdate: vertical
+            ? null
+            : (details) => setState(() {
+                final delta = placement == PreviewPlacement.right
+                    ? -details.delta.dx
+                    : details.delta.dx;
+                _setPreviewDiffExtent(
+                  placement,
+                  ((_storedPreviewDiffExtent(placement) ??
+                              _visiblePreviewDiffExtent) +
+                          delta)
+                      .clamp(0.0, _maxPreviewDiffExtent),
+                );
+              }),
+        onHorizontalDragEnd: vertical
+            ? null
+            : (_) => _savePreviewDiffExtent(placement),
+        onVerticalDragUpdate: vertical
+            ? (details) => setState(
+                () => _setPreviewDiffExtent(
+                  placement,
+                  ((_storedPreviewDiffExtent(placement) ??
+                              _visiblePreviewDiffExtent) -
+                          details.delta.dy)
+                      .clamp(0.0, _maxPreviewDiffExtent),
+                ),
+              )
+            : null,
+        onVerticalDragEnd: vertical
+            ? (_) => _savePreviewDiffExtent(placement)
+            : null,
+      ),
+    );
+    return vertical
+        ? Positioned(left: 0, right: 0, top: 0, height: 8, child: handle)
+        : Positioned(
+            left: placement == PreviewPlacement.right ? 0 : null,
+            right: placement == PreviewPlacement.left ? 0 : null,
+            top: 0,
+            bottom: 0,
+            width: 8,
+            child: handle,
+          );
+  }
+
+  void _setPreviewDiffExtent(PreviewPlacement placement, double extent) {
+    switch (placement) {
+      case PreviewPlacement.left:
+        _previewDiffLeftWidth = extent;
+        return;
+      case PreviewPlacement.right:
+        _previewDiffRightWidth = extent;
+        return;
+      case PreviewPlacement.bottom:
+        _previewDiffBottomHeight = extent;
+        return;
+      case PreviewPlacement.closed:
+        return;
+    }
+  }
+
+  double? _storedPreviewDiffExtent(PreviewPlacement placement) =>
+      switch (placement) {
+        PreviewPlacement.left => _previewDiffLeftWidth,
+        PreviewPlacement.right => _previewDiffRightWidth,
+        PreviewPlacement.bottom => _previewDiffBottomHeight,
+        PreviewPlacement.closed => null,
+      };
+
+  void _savePreviewDiffExtent(PreviewPlacement placement) =>
+      widget.onPreviewDiffSizeChanged?.call((
+        placement: placement,
+        extent:
+            _storedPreviewDiffExtent(placement) ?? _visiblePreviewDiffExtent,
+      ));
+
+  void _closePreviewDiff() {
+    setState(() => _previewDiffOpen = false);
+    _focusNode.requestFocus();
   }
 
   Widget _previewPerson(GitCommit commit) {
@@ -7414,58 +7586,86 @@ class _TimelineScreenState extends State<TimelineScreen>
             color: _palette.surface,
             border: Border(bottom: BorderSide(color: _palette.border)),
           ),
-          child: Row(
-            children: [
-              Flexible(
-                child: Text(
-                  path,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _palette.text,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+          child: LayoutBuilder(
+            builder: (context, constraints) => constraints.maxWidth < 80
+                ? const SizedBox.shrink()
+                : Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          path,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: _palette.text,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          status,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.right,
+                          style: TextStyle(
+                            color: conflict ? _previewConflict : _deleted,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Flexible(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Container(
+                            key: const Key('branch-preview-layout-switch'),
+                            padding: const EdgeInsets.all(2),
+                            decoration: BoxDecoration(
+                              color: _palette.background,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _previewDiffLayoutButton(
+                                  key: const Key(
+                                    'branch-preview-layout-unified',
+                                  ),
+                                  label: 'Unified',
+                                  layout: DiffLayout.unified,
+                                ),
+                                _previewDiffLayoutButton(
+                                  key: const Key(
+                                    'branch-preview-layout-side-by-side',
+                                  ),
+                                  label: 'Side-by-side',
+                                  layout: DiffLayout.sideBySide,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      SizedBox.square(
+                        dimension: 24,
+                        child: IconButton(
+                          key: const Key('preview-diff-close'),
+                          tooltip: 'diff 닫기',
+                          padding: EdgeInsets.zero,
+                          onPressed: _closePreviewDiff,
+                          icon: Icon(
+                            Icons.close,
+                            size: 16,
+                            color: _palette.muted,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  status,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                    color: conflict ? _previewConflict : _deleted,
-                    fontSize: 10,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Container(
-                key: const Key('branch-preview-layout-switch'),
-                padding: const EdgeInsets.all(2),
-                decoration: BoxDecoration(
-                  color: _palette.background,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _previewDiffLayoutButton(
-                      key: const Key('branch-preview-layout-unified'),
-                      label: 'Unified',
-                      layout: DiffLayout.unified,
-                    ),
-                    _previewDiffLayoutButton(
-                      key: const Key('branch-preview-layout-side-by-side'),
-                      label: 'Side-by-side',
-                      layout: DiffLayout.sideBySide,
-                    ),
-                  ],
-                ),
-              ),
-            ],
           ),
         ),
         Expanded(
