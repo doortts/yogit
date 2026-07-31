@@ -544,7 +544,8 @@ RefPaletteColors refPaletteColorsForName(
   String name,
   List<RefPaletteEntry> palette,
 ) {
-  final valid = palette.length == AppSettings.defaultRefPalette.length &&
+  final valid =
+      palette.length == AppSettings.defaultRefPalette.length &&
           palette.every(
             (entry) =>
                 parseHexColor(entry.base) != null &&
@@ -553,10 +554,7 @@ RefPaletteColors refPaletteColorsForName(
       ? palette
       : AppSettings.defaultRefPalette;
   final entry = valid[stableRefPaletteIndex(name, valid.length)];
-  return (
-    base: parseHexColor(entry.base)!,
-    text: parseHexColor(entry.text)!,
-  );
+  return (base: parseHexColor(entry.base)!, text: parseHexColor(entry.text)!);
 }
 
 int refPriority(GitRef ref, RepoRefs refs) {

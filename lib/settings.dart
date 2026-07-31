@@ -362,10 +362,7 @@ class AppSettings {
         values.any((entry) => entry.base == null || entry.text == null)) {
       return const AppSettings().refPaletteColorValues;
     }
-    return [
-      for (final entry in values)
-        (base: entry.base!, text: entry.text!),
-    ];
+    return [for (final entry in values) (base: entry.base!, text: entry.text!)];
   }
 
   Color get baseBranchColorValue =>

@@ -6274,7 +6274,9 @@ void main() {
 
     for (final stored in [
       <Object>[],
-      [const {'base': '#112233', 'text': 'bad'}],
+      [
+        const {'base': '#112233', 'text': 'bad'},
+      ],
       [
         const {'base': '#112233', 'text': '#445566'},
         const {'base': '#112233', 'text': '#445566'},
@@ -8252,9 +8254,7 @@ void main() {
       const Color(0xFFE89292),
     );
     expect(
-      tester
-          .widget<Container>(find.byKey(const Key('modal-accent-d')))
-          .color,
+      tester.widget<Container>(find.byKey(const Key('modal-accent-d'))).color,
       const Color(0xFF68A7EA),
     );
     final row = tester.getRect(find.byKey(const Key('refs-cell-5')));
@@ -11099,26 +11099,21 @@ void main() {
   // ------------------------------------------------------------------ §17.2
   test('ref palette mapping is stable and covers all five records', () {
     expect(
-      [for (final name in ['d', 'e', 'a', 'b', 'c'])
-        stableRefPaletteIndex(name, 5)],
+      [
+        for (final name in ['d', 'e', 'a', 'b', 'c'])
+          stableRefPaletteIndex(name, 5),
+      ],
       [0, 1, 2, 3, 4],
     );
-    expect(
-      refPaletteColorsForName('d', AppSettings.defaultRefPalette),
-      (
-        base: const Color(0xFF1D76DB),
-        text: const Color(0xFF68A7EA),
-      ),
-    );
+    expect(refPaletteColorsForName('d', AppSettings.defaultRefPalette), (
+      base: const Color(0xFF1D76DB),
+      text: const Color(0xFF68A7EA),
+    ));
   });
 
   test('timeline refs prefer HEAD, local, remote, tag, then decoration', () {
     final value = timelineRefsForCommit(
-      commit(
-        'tip',
-        'tip',
-        refs: const [GitRef(name: 'log-only')],
-      ),
+      commit('tip', 'tip', refs: const [GitRef(name: 'log-only')]),
       const RepoRefs(
         local: ['local'],
         remote: ['origin/remote'],
@@ -11146,11 +11141,7 @@ void main() {
     ]);
     final names = branchRefNames(
       rows,
-      const RepoRefs(
-        local: ['d'],
-        current: 'd',
-        tips: {'d': 'tip'},
-      ),
+      const RepoRefs(local: ['d'], current: 'd', tips: {'d': 'tip'}),
     );
     expect(
       assignBranchColors(

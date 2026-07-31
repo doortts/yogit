@@ -2511,10 +2511,7 @@ void main() {
       FetchOriginResult.unchanged,
     );
     output = '* refs/heads/main:refs/remotes/company/main\t[new branch]\n';
-    expect(
-      await repository.fetchRemote('company'),
-      FetchOriginResult.updated,
-    );
+    expect(await repository.fetchRemote('company'), FetchOriginResult.updated);
     expect(calls, [
       [
         '-c',
