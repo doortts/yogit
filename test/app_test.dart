@@ -5393,6 +5393,149 @@ void main() {
     expect(alphaAt(58, height - 1), greaterThan(0));
   });
 
+  test('rebase mapping routes use half the commit lane spacing', () async {
+    final rows = [
+      for (var index = 0; index < 3; index++)
+        graphRow(
+          commit: commit('row-$index', 'row $index'),
+          lane: 0,
+          activeLanes: const [0],
+          nextLanes: const [0],
+        ),
+    ];
+    final painter = RebaseMappingPainter(
+      rows: rows,
+      mappings: const [
+        (
+          originalSha: 'row-2',
+          rewrittenSha: 'row-0',
+          originalRow: 2,
+          rewrittenRow: 0,
+          routeLane: 0,
+          color: Color(0xFFFF0000),
+        ),
+        (
+          originalSha: 'row-2',
+          rewrittenSha: 'row-0',
+          originalRow: 2,
+          rewrittenRow: 0,
+          routeLane: 1,
+          color: Color(0xFF00FF00),
+        ),
+      ],
+      rowIndex: 1,
+      laneSpacing: 30.5,
+      compact: false,
+    );
+    const width = 100;
+    const height = 36;
+    final recorder = ui.PictureRecorder();
+    painter.paint(Canvas(recorder), const Size(100, 36));
+    final image = await recorder.endRecording().toImage(width, height);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    int alphaAt(int x) => bytes!.getUint8(((height ~/ 2) * width + x) * 4 + 3);
+
+    expect(alphaAt(58), greaterThan(0));
+    expect(alphaAt(73), greaterThan(0));
+    expect(alphaAt(89), 0);
+  });
+
+  test(
+    'narrow rebase mapping paints only the focused route inside its width',
+    () async {
+      final rows = [
+        for (var index = 0; index < 6; index++)
+          graphRow(
+            commit: commit('row-$index', 'row $index'),
+            lane: 0,
+            activeLanes: const [0],
+            nextLanes: const [0],
+          ),
+      ];
+      final selectedIndex = ValueNotifier(1);
+      final painter = RebaseMappingPainter(
+        rows: rows,
+        entries: [
+          for (var index = 0; index < rows.length; index++)
+            (rowIndex: index, label: null, row: rows[index]),
+        ],
+        selectedIndex: selectedIndex,
+        mappings: const [
+          (
+            originalSha: 'row-5',
+            rewrittenSha: 'row-0',
+            originalRow: 5,
+            rewrittenRow: 0,
+            routeLane: 0,
+            color: Color(0xFFFF0000),
+          ),
+          (
+            originalSha: 'row-4',
+            rewrittenSha: 'row-1',
+            originalRow: 4,
+            rewrittenRow: 1,
+            routeLane: 1,
+            color: Color(0xFF00FF00),
+          ),
+          (
+            originalSha: 'row-3',
+            rewrittenSha: 'row-2',
+            originalRow: 3,
+            rewrittenRow: 2,
+            routeLane: 2,
+            color: Color(0xFF0000FF),
+          ),
+        ],
+        rowIndex: 2,
+        laneSpacing: 30.5,
+        compact: false,
+      );
+      const imageWidth = 100;
+      const paintWidth = 70;
+      const height = 36;
+      final recorder = ui.PictureRecorder();
+      painter.paint(Canvas(recorder), const Size(70, 36));
+      final image = await recorder.endRecording().toImage(imageWidth, height);
+      final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      int channelAt(int x, int channel) =>
+          bytes!.getUint8(((height ~/ 2) * imageWidth + x) * 4 + channel);
+
+      expect(channelAt(58, 1), greaterThan(channelAt(58, 0)));
+      for (var x = paintWidth; x < imageWidth; x++) {
+        expect(channelAt(x, 3), 0);
+      }
+    },
+  );
+
+  test('rebase mapping repaints when the focused commit changes', () {
+    final rows = [
+      graphRow(
+        commit: commit('row-0', 'row 0'),
+        lane: 0,
+        activeLanes: const [0],
+        nextLanes: const [0],
+      ),
+    ];
+    final selectedIndex = ValueNotifier(0);
+    final painter = RebaseMappingPainter(
+      rows: rows,
+      entries: [(rowIndex: 0, label: null, row: rows.single)],
+      selectedIndex: selectedIndex,
+      mappings: const [],
+      rowIndex: 0,
+      laneSpacing: 30.5,
+      compact: false,
+    );
+    var repaints = 0;
+    void listener() => repaints++;
+    painter.addListener(listener);
+
+    selectedIndex.value = 1;
+
+    expect(repaints, 1);
+    painter.removeListener(listener);
+  });
+
   test('rebase mapping arrowhead is an open one-pixel chevron', () async {
     final rows = [
       for (var index = 0; index < 3; index++)
