@@ -1102,19 +1102,39 @@ class _TimelineScreenState extends State<TimelineScreen>
     _ => true,
   };
 
+  int get _graphLayoutDepth {
+    if (_comparison == null || _comparisonRows.isEmpty) return _ratchetLane;
+    final deepest = _comparisonRows.fold<int>(
+      0,
+      (value, row) => math.max(value, row.maxLane),
+    );
+    final mappings = _previewGraph?.mappings.length ?? 0;
+    return mappings == 0 ? deepest : deepest + ((mappings + 2) ~/ 2);
+  }
+
+  double get _graphLayoutSpacing => _comparison == null
+      ? CommitGraphPainter.defaultLaneSpacing
+      : CommitGraphPainter.previewLaneSpacing;
+
   /// Auto-fit: the snuggest width that still shows every loaded lane's node, so
   /// the first launch shows the whole graph and no more. The resizer reaches
   /// further down than this range; auto-fit never does.
   double get _graphColumnWidth =>
       _graphWidth ??
       CommitGraphPainter.contentWidth(
-        _ratchetLane,
+        _graphLayoutDepth,
+        laneSpacing: _graphLayoutSpacing,
       ).clamp(96.0, timelineColumns['graph']!.max);
 
   /// Widens the ratchet when deeper lanes scroll into view. Rows off screen do
   /// not count, so a shallow head of history opens at its snuggest width.
   void _updateRatchet() {
-    if (!mounted || _entries.isEmpty || !_scrollController.hasClients) return;
+    if (!mounted ||
+        _comparison != null ||
+        _entries.isEmpty ||
+        !_scrollController.hasClients) {
+      return;
+    }
     final position = _scrollController.position;
     final first = (position.pixels / TimelineScreen.rowHeight).floor().clamp(
       0,
@@ -1131,13 +1151,6 @@ class _TimelineScreenState extends State<TimelineScreen>
       for (final lane in [row.lane, ...row.activeLanes, ...row.nextLanes]) {
         if (lane > deepest) deepest = lane;
       }
-    }
-    if (_previewGraph?.mappings case final mappings? when mappings.isNotEmpty) {
-      final graphDeepest = _comparisonRows.fold<int>(
-        0,
-        (value, row) => math.max(value, row.maxLane),
-      );
-      deepest = math.max(deepest, graphDeepest + ((mappings.length + 2) ~/ 2));
     }
     if (deepest != _ratchetLane) setState(() => _ratchetLane = deepest);
   }
@@ -4832,7 +4845,11 @@ class _TimelineScreenState extends State<TimelineScreen>
     committerColor:
         committerColor ?? AvatarService.branchColor(entry.row.branch),
     committersBySha: _committersBySha,
-    laneSpacing: CommitGraphPainter.spacingFor(graphWidth, _ratchetLane),
+    laneSpacing: CommitGraphPainter.spacingFor(
+      graphWidth,
+      _graphLayoutDepth,
+      maxLaneSpacing: _graphLayoutSpacing,
+    ),
     compact: graphWidth <= CommitGraphPainter.compactWidth,
     refConnector: refConnector,
     passThrough: entry.rowIndex < 0,
@@ -8262,6 +8279,7 @@ class CommitGraphPainter extends CustomPainter {
 
   static const laneInset = 28.0;
   static const defaultLaneSpacing = 30.0;
+  static const previewLaneSpacing = 49.0;
   static const railWidth = 2.0;
   static const previewRailWidth = 1.0;
   static const avatarDiameter = 22.0;
@@ -8281,17 +8299,25 @@ class CommitGraphPainter extends CustomPainter {
 
   /// The narrowest cell that still shows every node whole. Empty space right of
   /// it clips away before any lane moves.
-  static double contentWidth(int deepestLane) =>
-      laneInset + deepestLane * defaultLaneSpacing + nodeExtent;
+  static double contentWidth(
+    int deepestLane, {
+    double laneSpacing = defaultLaneSpacing,
+  }) => laneInset + deepestLane * laneSpacing + nodeExtent;
 
   /// Stage 1 (the cell still holds the rightmost node) keeps
   /// [defaultLaneSpacing]; stage 2 squeezes the lanes so that node stays just
   /// inside the cell.
-  static double spacingFor(double width, int deepestLane) {
-    if (width >= contentWidth(deepestLane)) return defaultLaneSpacing;
+  static double spacingFor(
+    double width,
+    int deepestLane, {
+    double maxLaneSpacing = defaultLaneSpacing,
+  }) {
+    if (width >= contentWidth(deepestLane, laneSpacing: maxLaneSpacing)) {
+      return maxLaneSpacing;
+    }
     return ((width - laneInset - nodeExtent) / math.max(deepestLane, 1)).clamp(
       minLaneSpacing,
-      defaultLaneSpacing,
+      maxLaneSpacing,
     );
   }
 

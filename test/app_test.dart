@@ -3060,6 +3060,71 @@ void main() {
     );
   });
 
+  testWidgets('merge preview spacing ignores deeper normal history lanes', (
+    tester,
+  ) async {
+    final repository = FakeGitRepository(
+      (_, _) async => [
+        commit(
+          'octopus',
+          'deep normal history',
+          parents: const ['a', 'b', 'c', 'd', 'e', 'f'],
+        ),
+        for (final sha in const ['a', 'b', 'c', 'd', 'e', 'f'])
+          commit(sha, sha),
+      ],
+      refs: const RepoRefs(
+        local: ['main', 'feature'],
+        current: 'main',
+        tips: {'main': 'octopus', 'feature': 'feature-tip'},
+      ),
+      compareBranchesCallback: (_, _) async => branchComparison(),
+      simulateRebaseCallback: ({required baseRef, required compareRef}) =>
+          Future.value(
+            const RebaseCheckResult(status: RebaseCheckStatus.clean),
+          ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: repository,
+          controller: controller,
+          columnWidths: const TimelineColumnWidths(graph: 96),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    CommitGraphPainter painterFor(String sha) => tester
+        .widgetList<CustomPaint>(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is CustomPaint && widget.painter is CommitGraphPainter,
+          ),
+        )
+        .map((paint) => paint.painter! as CommitGraphPainter)
+        .firstWhere((painter) => painter.row.commit.sha == sha);
+
+    final normalPainter = painterFor('octopus');
+    expect(normalPainter.laneSpacing, CommitGraphPainter.minLaneSpacing);
+
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+
+    final previewPainter = tester
+        .widgetList<CustomPaint>(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is CustomPaint && widget.painter is CommitGraphPainter,
+          ),
+        )
+        .map((paint) => paint.painter! as CommitGraphPainter)
+        .firstWhere((painter) => painter.row.commit.shortSha == 'VM');
+    expect(previewPainter.laneX(1) - previewPainter.laneX(0), 49);
+  });
+
   testWidgets('branch comparison failure is shown in the preview summary', (
     tester,
   ) async {
