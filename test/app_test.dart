@@ -5328,6 +5328,45 @@ void main() {
     },
   );
 
+  testWidgets('ref chip and graph use the same palette text color', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('tip', 'tip')],
+            refs: const RepoRefs(
+              local: ['d'],
+              current: 'd',
+              tips: {'d': 'tip'},
+            ),
+          ),
+          controller: controller,
+          refPalette: AppSettings.defaultRefPalette,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final decoration =
+        tester
+                .widget<Container>(find.byKey(const Key('ref-chip-tip-d')))
+                .decoration!
+            as BoxDecoration;
+    expect(decoration.color, const Color(0xFF1D76DB).withValues(alpha: .18));
+    expect(
+      decoration.border!.top.color,
+      const Color(0xFF68A7EA).withValues(alpha: .30),
+    );
+    final painter =
+        tester
+                .widget<CustomPaint>(find.byKey(const Key('graph-painter-0')))
+                .painter!
+            as CommitGraphPainter;
+    expect(painter.committerColor, const Color(0xFF68A7EA));
+  });
+
   testWidgets('preview describes the working tree row and counts files', (
     tester,
   ) async {
@@ -6413,6 +6452,50 @@ void main() {
     );
   });
 
+  testWidgets('branch tag palette editor applies Base and Text and resets', (
+    tester,
+  ) async {
+    final saved = <AppSettings>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          settings: const AppSettings(),
+          onChanged: saved.add,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final preview = tester.widget<Container>(
+      find.byKey(const Key('ref-palette-chip-0')),
+    );
+    final decoration = preview.decoration! as BoxDecoration;
+    expect(decoration.color, const Color(0xFF1D76DB).withValues(alpha: .18));
+    expect(
+      decoration.border!.top.color,
+      const Color(0xFF68A7EA).withValues(alpha: .30),
+    );
+
+    await tester.enterText(
+      find.byKey(const Key('ref-palette-base-0')),
+      '#010203',
+    );
+    await tester.enterText(
+      find.byKey(const Key('ref-palette-text-0')),
+      '#A0B0C0',
+    );
+    await tester.pump();
+    expect(saved.last.refPalette.first, (base: '#010203', text: '#A0B0C0'));
+
+    await tester.enterText(find.byKey(const Key('ref-palette-base-0')), '#01');
+    await tester.pump();
+    expect(saved.last.refPalette.first.base, '#010203');
+
+    await tester.tap(find.byKey(const Key('reset-ref-palette')));
+    await tester.pump();
+    expect(saved.last.refPalette, AppSettings.defaultRefPalette);
+  });
+
   testWidgets('stored timeline colors reach the base and fallback rails', (
     tester,
   ) async {
@@ -6447,6 +6530,38 @@ void main() {
             as CommitGraphPainter;
     expect(painter.row.branch, 0);
     expect(painter.committerColor, const Color(0xFF0C8599));
+  });
+
+  testWidgets('stored ref palette reaches timeline chips', (tester) async {
+    final store = MemorySettingsStore()
+      ..current = const AppSettings(
+        refPalette: [
+          (base: '#010203', text: '#A0B0C0'),
+          (base: '#E99695', text: '#E89292'),
+          (base: '#C5DEF5', text: '#C2DDF4'),
+          (base: '#0E8A16', text: '#18E022'),
+          (base: '#5319E7', text: '#DACFFA'),
+        ],
+      );
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository(
+          (_, _) async => [commit('tip', 'tip')],
+          refs: const RepoRefs(local: ['d'], current: 'd', tips: {'d': 'tip'}),
+        ),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final decoration =
+        tester
+                .widget<Container>(find.byKey(const Key('ref-chip-tip-d')))
+                .decoration!
+            as BoxDecoration;
+    expect(decoration.color, const Color(0xFF010203).withValues(alpha: .18));
   });
 
   test('social time counts calendar days, like the date headings', () {
@@ -7458,6 +7573,7 @@ void main() {
       GitRef(name: 'v1.0', isTag: true),
       GitRef(name: 'origin/main'),
       GitRef(name: 'main', isHead: true),
+      GitRef(name: 'd'),
     ];
     await tester.pumpWidget(
       app(
@@ -7491,6 +7607,18 @@ void main() {
         findsOneWidget,
       );
     }
+    expect(
+      tester
+          .widget<Container>(find.byKey(const Key('modal-accent-main')))
+          .color,
+      const Color(0xFFE89292),
+    );
+    expect(
+      tester
+          .widget<Container>(find.byKey(const Key('modal-accent-d')))
+          .color,
+      const Color(0xFF68A7EA),
+    );
     final row = tester.getRect(find.byKey(const Key('refs-cell-5')));
     expect(tester.getRect(modal).bottom, lessThanOrEqualTo(row.top));
 

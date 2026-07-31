@@ -5570,18 +5570,31 @@ class _TimelineScreenState extends State<TimelineScreen>
         ),
       );
 
-  Widget _refChip(GitCommit commit, GitRef ref, Color color) => Container(
-    key: Key('ref-chip-${commit.sha}-${ref.name}'),
-    padding: const EdgeInsets.symmetric(horizontal: 5),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: 0.14),
-      border: Border.all(color: color.withValues(alpha: 0.55)),
-      borderRadius: BorderRadius.circular(5),
-    ),
-    child: Row(
-      children: [_refGlyph(ref, color, false), _refName(ref, color, false)],
-    ),
-  );
+  Widget _refChip(GitCommit commit, GitRef ref, Color color) {
+    final colors = refPaletteColorsForName(ref.name, widget.refPalette);
+    final background = _comparison == null
+        ? colors.base.withValues(alpha: .18)
+        : color.withValues(alpha: .14);
+    final border = _comparison == null
+        ? colors.text.withValues(alpha: .30)
+        : color.withValues(alpha: .55);
+    final foreground = _comparison == null ? colors.text : color;
+    return Container(
+      key: Key('ref-chip-${commit.sha}-${ref.name}'),
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      decoration: BoxDecoration(
+        color: background,
+        border: Border.all(color: border),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Row(
+        children: [
+          _refGlyph(ref, foreground, false),
+          _refName(ref, foreground, false),
+        ],
+      ),
+    );
+  }
 
   Widget _refGlyph(GitRef ref, Color color, bool selected) =>
       ref.isHead || ref.isTag
@@ -5695,25 +5708,35 @@ class _TimelineScreenState extends State<TimelineScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 for (final ref in refs)
-                  SizedBox(
-                    height: 24,
-                    child: Row(
-                      children: [
-                        // A straight 2px bar, no rounding.
-                        Container(
-                          key: Key('modal-accent-${ref.name}'),
-                          width: 2,
-                          height: 20,
-                          color: color,
+                  Builder(
+                    builder: (context) {
+                      final refColor = _comparison == null
+                          ? refPaletteColorsForName(
+                              ref.name,
+                              widget.refPalette,
+                            ).text
+                          : color;
+                      return SizedBox(
+                        height: 24,
+                        child: Row(
+                          children: [
+                            // A straight 2px bar, no rounding.
+                            Container(
+                              key: Key('modal-accent-${ref.name}'),
+                              width: 2,
+                              height: 20,
+                              color: refColor,
+                            ),
+                            const SizedBox(width: 7),
+                            _refGlyph(ref, refColor, false),
+                            _refName(ref, refColor, false, ellipsis: false),
+                            const SizedBox(width: 6),
+                            _CopyButton(text: ref.name, color: refColor),
+                            const SizedBox(width: 4),
+                          ],
                         ),
-                        const SizedBox(width: 7),
-                        _refGlyph(ref, color, false),
-                        _refName(ref, color, false, ellipsis: false),
-                        const SizedBox(width: 6),
-                        _CopyButton(text: ref.name, color: color),
-                        const SizedBox(width: 4),
-                      ],
-                    ),
+                      );
+                    },
                   ),
               ],
             ),
