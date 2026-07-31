@@ -1027,9 +1027,9 @@ class GraphRow {
   final Map<int, String> nextLaneShas;
   final List<LaneTransition> transitions;
 
-  /// Stable id of the branch line this row's node sits on. Branch lines are
-  /// numbered in birth order top-down, so ids survive page appends. The
-  /// palette color of a rail is `palette[branch % palette.length]`.
+  /// Stable id of the branch line this row's node sits on. The preferred line
+  /// reserves id 0; other lines are numbered in birth order top-down, so ids
+  /// survive page appends.
   final int branch;
 
   /// Lane → branch-line id for the columns entering/leaving this row.
@@ -1164,7 +1164,7 @@ List<GraphRow> layoutGraph(List<GitCommit> commits, {String? preferredTip}) {
   var preferredTipLoaded = false;
   final mergeChildRows = <String, List<int>>{};
   final rows = <_RowBuffer>[];
-  var lines = 0;
+  var lines = preferredTip == null ? 0 : 1;
 
   for (var index = 0; index < commits.length; index++) {
     final commit = commits[index];
@@ -1219,6 +1219,8 @@ List<GraphRow> layoutGraph(List<GitCommit> commits, {String? preferredTip}) {
     // Taking over a column continues its line; a fresh or reused one is a birth.
     final branch = columns[lane].sha == commit.sha
         ? columns[lane].line
+        : startsPreferred
+        ? 0
         : lines++;
 
     // Every other line waiting for this commit converges into its column. The
@@ -1262,7 +1264,7 @@ List<GraphRow> layoutGraph(List<GitCommit> commits, {String? preferredTip}) {
         columns[lane] = (sha: null, row: index, line: -1);
       }
       if (columns[0].sha == null) {
-        columns[0] = (sha: preferredTip, row: index, line: lines++);
+        columns[0] = (sha: preferredTip, row: index, line: 0);
       }
     }
     final parentLanes = [for (final _ in commit.parents) lane];

@@ -523,7 +523,7 @@ GraphRow passThroughRow({required GitCommit commit, GraphRow? above}) =>
       nextLaneBranches: above?.nextLaneBranches ?? const {},
     );
 
-/// The mainline is fixed, the second line is one of two, and every later line
+/// The base branch is fixed, the second line is one of two, and every later line
 /// takes the first pool color no line running beside it at birth already wears.
 const _branchColorPool = [
   Color(0xFF3B82F6),
@@ -540,7 +540,7 @@ Map<int, Color> assignBranchColors(List<GraphRow> rows, int seed) {
     for (final color in AvatarService.defaultColors)
       if (!_branchColorPool.contains(color) &&
           !_secondBranchColors.contains(color) &&
-          color != AvatarService.mainBranchColor)
+          color != AvatarService.baseBranchColor)
         color,
   ]..shuffle(math.Random(seed));
   var taken = 0;
@@ -553,7 +553,7 @@ Map<int, Color> assignBranchColors(List<GraphRow> rows, int seed) {
     for (final id in ids) {
       if (id < 0 || colors.containsKey(id)) continue;
       if (id == 0) {
-        colors[id] = AvatarService.mainBranchColor;
+        colors[id] = AvatarService.baseBranchColor;
         continue;
       }
       if (id == 1) {
@@ -629,7 +629,7 @@ class TimelineScreen extends StatefulWidget {
   });
 
   /// Every row is this tall — commits and date headings alike.
-  static const rowHeight = 32.0;
+  static const rowHeight = 30.0;
 
   final GitRepository repository;
   final WindowFrameController? controller;
@@ -5068,16 +5068,16 @@ class _TimelineScreenState extends State<TimelineScreen>
         ? _palette.muted
         : AvatarService.branchColor(row.branch);
     final previewKind = _previewGraph?.kinds[commit.sha];
+    final virtualMerge = previewKind == PreviewGraphNodeKind.virtualMerge;
     final rebaseConflict =
         _rebasePreview?.status == RebasePreviewStatus.conflict &&
         _rebasePreview?.currentCommit?.sha == commit.sha;
     final rebaseApplying = _rebaseApplyingSha == commit.sha;
     final virtualPreview =
-        previewKind == PreviewGraphNodeKind.virtualMerge ||
-        previewKind == PreviewGraphNodeKind.virtualRebase;
+        virtualMerge || previewKind == PreviewGraphNodeKind.virtualRebase;
     final mergeConflict =
-        previewKind == PreviewGraphNodeKind.virtualMerge &&
-        _effectiveMergeStatus == MergeConflictStatus.conflicts;
+        virtualMerge && _effectiveMergeStatus == MergeConflictStatus.conflicts;
+    final synthetic = commit.isWorkingTree || virtualMerge;
     final previewColor = previewKind == PreviewGraphNodeKind.conflictTarget
         ? _previewPurple
         : virtualPreview
@@ -5360,12 +5360,14 @@ class _TimelineScreenState extends State<TimelineScreen>
                       _w('time'),
                       // The cell reads socially; the tooltip gives the exact moment.
                       _tooltip(
-                        commit.isWorkingTree
+                        synthetic
                             ? null
                             : exactCommitTime(commit.committerTimestamp),
                         Text(
                           commit.isWorkingTree
                               ? 'working tree'
+                              : virtualMerge
+                              ? '—'
                               : _socialTime(commit.committerTimestamp),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -5379,7 +5381,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                   if (_showName)
                     _cell(
                       _w('name'),
-                      commit.isWorkingTree
+                      synthetic
                           ? Text(
                               '—',
                               style: TextStyle(
@@ -5622,7 +5624,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                   for (var index = 0; index < shown.length; index++)
                     Positioned(
                       left: inset + index * slot,
-                      top: 4,
+                      top: (TimelineScreen.rowHeight - 24) / 2,
                       width: slot,
                       height: 24,
                       child: _refChip(commit, shown[index], color),
@@ -5632,7 +5634,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                       key: Key('ref-chip-connector-${commit.sha}'),
                       left: constraints.maxWidth - inset,
                       right: 0,
-                      top: 15.5,
+                      top: (TimelineScreen.rowHeight - 1) / 2,
                       height: 1,
                       child: ColoredBox(color: color),
                     ),
@@ -6827,6 +6829,9 @@ class _TimelineScreenState extends State<TimelineScreen>
     required int? timestamp,
   }) {
     final identity = committer ? commit.committer : commit.author;
+    final role = committer ? 'Committer' : 'Author';
+    final email = identity.email.trim();
+    final roleLine = email.isEmpty ? role : '$role · $email';
     return Row(
       key: Key(committer ? 'preview-committer' : 'preview-author'),
       children: [
@@ -6866,9 +6871,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               Text(
                 commit.isWorkingTree
                     ? 'No commit object or committer'
-                    : committer
-                    ? 'Committer'
-                    : 'Author',
+                    : roleLine,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: _palette.muted, fontSize: 12),
@@ -8593,7 +8596,7 @@ class RebaseMappingPainter extends CustomPainter {
 /// Draws one row of the commit graph: pass-through rails, the rounded lane
 /// curves into parent lanes, and the row's own node.
 class CommitGraphPainter extends CustomPainter {
-  const CommitGraphPainter({
+  CommitGraphPainter({
     required this.row,
     required this.selected,
     required this.committerColor,
@@ -8609,7 +8612,7 @@ class CommitGraphPainter extends CustomPainter {
     this.outgoingRailColor,
     this.backgroundColor = const Color(0xFF1C1C1E),
     this.selectedRowColor = const Color(0xFF234D72),
-  });
+  }) : baseBranchColor = AvatarService.baseBranchColor;
 
   static const laneInset = 28.0;
   static const defaultLaneSpacing = 30.0;
@@ -8675,6 +8678,7 @@ class CommitGraphPainter extends CustomPainter {
   final bool selected;
   final Color backgroundColor;
   final Color selectedRowColor;
+  final Color baseBranchColor;
 
   /// The color of the branch line this row's node sits on: `row.branch` through
   /// the settings palette. Named for history — nothing here is per-committer.
@@ -9059,6 +9063,8 @@ class CommitGraphPainter extends CustomPainter {
                   ? AvatarService.color(
                       committersBySha[sha] ?? row.commit.committer,
                     )
+                  : branch == 0
+                  ? baseBranchColor
                   : AvatarService.branchColor(branch))
     ..style = PaintingStyle.stroke
     ..strokeWidth = dashed ? previewRailWidth : railWidth
@@ -9114,6 +9120,7 @@ class CommitGraphPainter extends CustomPainter {
       oldDelegate.previous != previous ||
       oldDelegate.selected != selected ||
       oldDelegate.committerColor != committerColor ||
+      oldDelegate.baseBranchColor != baseBranchColor ||
       oldDelegate.committersBySha != committersBySha ||
       oldDelegate.laneSpacing != laneSpacing ||
       oldDelegate.compact != compact ||

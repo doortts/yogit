@@ -211,6 +211,7 @@ class _YogitAppState extends State<YogitApp> {
     final settings = loaded.migrateLegacyGraphWidth(_repository.root);
     if (!mounted) return;
     setState(() {
+      AvatarService.baseBranchColor = settings.baseBranchColorValue;
       AvatarService.palette = settings.laneColorValues;
       _settings = settings;
       _settingsLoaded = true;
@@ -253,6 +254,7 @@ class _YogitAppState extends State<YogitApp> {
 
   void _changeSettings(AppSettings settings) {
     setState(() {
+      AvatarService.baseBranchColor = settings.baseBranchColorValue;
       AvatarService.palette = settings.laneColorValues;
       _settings = settings;
       _settingsLoaded = true;

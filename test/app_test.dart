@@ -328,7 +328,7 @@ void main() {
     final list = tester.widget<ListView>(
       find.byKey(const Key('timeline-list')),
     );
-    expect(TimelineScreen.rowHeight, 32);
+    expect(TimelineScreen.rowHeight, 30);
     expect(list.itemExtent, TimelineScreen.rowHeight);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
@@ -486,7 +486,10 @@ void main() {
 
     // Nothing moved until the selected row's bottom passed the viewport bottom,
     // and then only far enough to hold the row flush against that edge.
-    expect(index * TimelineScreen.rowHeight, greaterThan(viewport - 34));
+    expect(
+      index * TimelineScreen.rowHeight,
+      greaterThan(viewport - TimelineScreen.rowHeight),
+    );
     expect(position.pixels, (index + 1) * TimelineScreen.rowHeight - viewport);
     final anchored = position.pixels;
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
@@ -1172,7 +1175,7 @@ void main() {
       expect(painter.refArrowTipX, tip.dx);
       expect(
         painter.refArrowheadPath(centerY).getBounds(),
-        const Rect.fromLTRB(6, 11, 13, 21),
+        Rect.fromLTRB(6, centerY - 5, 13, centerY + 5),
       );
       expect(
         (Canvas canvas) => painter.paint(canvas, size),
@@ -3673,6 +3676,41 @@ void main() {
     expect(previewPainter.laneX(1) - previewPainter.laneX(0), 49);
   });
 
+  testWidgets('virtual merge row hides borrowed date and author', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            current: 'main',
+            tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async => branchComparison(),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+
+    final row = find.byKey(const Key('virtual-preview-row'));
+    expect(
+      find.descendant(of: row, matching: find.text('Ada Author')),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: row, matching: find.text('—')),
+      findsNWidgets(2),
+    );
+  });
+
   testWidgets('branch comparison failure is shown in the preview summary', (
     tester,
   ) async {
@@ -6102,13 +6140,25 @@ void main() {
     expect(parseHexColor('#39C5C'), isNull);
     expect(parseHexColor('teal'), isNull);
 
-    const custom = AppSettings(laneColors: ['#112233', '#445566']);
+    const custom = AppSettings(
+      baseBranchColor: '#112233',
+      laneColors: ['#445566', '#778899'],
+    );
     final decoded = AppSettings.fromJson(custom.toJson());
     expect(decoded, custom);
+    expect(decoded.baseBranchColorValue, const Color(0xFF112233));
     expect(decoded.laneColorValues, const [
-      Color(0xFF112233),
       Color(0xFF445566),
+      Color(0xFF778899),
     ]);
+    expect(
+      AppSettings.fromJson(const {'baseBranchColor': 'bad'}).baseBranchColor,
+      AppSettings.defaultBaseBranchColor,
+    );
+    expect(
+      AppSettings.fromJson(const {}).baseBranchColor,
+      AppSettings.defaultBaseBranchColor,
+    );
 
     // One bad entry drops the whole palette back to GitHub dark.
     for (final stored in [
@@ -6890,20 +6940,35 @@ void main() {
                     .decoration!
                 as BoxDecoration)
             .color!;
+    Color baseSwatch() =>
+        (tester
+                    .widget<Container>(
+                      find.byKey(const Key('base-branch-swatch')),
+                    )
+                    .decoration!
+                as BoxDecoration)
+            .color!;
 
     expect(find.text('Timeline colors'), findsOneWidget);
     expect(find.byKey(const Key('lane-swatch-7')), findsOneWidget);
     expect(swatch(0), const Color(0xFFFF2D95));
-    // The mainline swatch is the fixed green and is not editable.
-    expect(
-      (tester
-                  .widget<Container>(find.byKey(const Key('lane-swatch-main')))
-                  .decoration!
-              as BoxDecoration)
-          .color,
-      AvatarService.mainBranchColor,
+    expect(find.text('Base branch'), findsOneWidget);
+    expect(find.text('Main line (fixed)'), findsNothing);
+    expect(find.byKey(const Key('base-branch-color')), findsOneWidget);
+    expect(baseSwatch(), const Color(0xFF5CB270));
+
+    await tester.enterText(
+      find.byKey(const Key('base-branch-color')),
+      '#654321',
     );
-    expect(find.byKey(const Key('lane-color-main')), findsNothing);
+    await tester.pumpAndSettle();
+    expect(saved.last.baseBranchColor, '#654321');
+    expect(baseSwatch(), const Color(0xFF654321));
+
+    await tester.enterText(find.byKey(const Key('base-branch-color')), '#65');
+    await tester.pumpAndSettle();
+    expect(saved.last.baseBranchColor, '#654321');
+
     // No row context in the preview, so those avatars stay identity-colored.
     expect(
       tester
@@ -6925,6 +6990,15 @@ void main() {
     await tester.ensureVisible(find.byKey(const Key('reset-lane-colors')));
     await tester.tap(find.byKey(const Key('reset-lane-colors')));
     await tester.pumpAndSettle();
+    expect(saved.last.baseBranchColor, AppSettings.defaultBaseBranchColor);
+    expect(baseSwatch(), const Color(0xFF5CB270));
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('base-branch-color')))
+          .controller
+          ?.text,
+      '#5CB270',
+    );
     expect(saved.last.laneColors, AppSettings.defaultLaneColors);
     expect(swatch(0), const Color(0xFFFF2D95));
     expect(
@@ -6936,10 +7010,19 @@ void main() {
     );
   });
 
-  testWidgets('a stored palette reaches the timeline rails', (tester) async {
-    addTearDown(() => AvatarService.palette = AvatarService.defaultColors);
+  testWidgets('stored timeline colors reach the base and fallback rails', (
+    tester,
+  ) async {
+    addTearDown(() {
+      AvatarService.baseBranchColor = AvatarService.defaultBaseBranchColor;
+      AvatarService.palette = AvatarService.defaultColors;
+      AvatarService.branchAssignments = const {};
+    });
     final store = MemorySettingsStore()
-      ..current = const AppSettings(laneColors: ['#0B7285']);
+      ..current = const AppSettings(
+        baseBranchColor: '#0C8599',
+        laneColors: ['#0B7285'],
+      );
     await tester.pumpWidget(
       YogitApp(
         repository: FakeGitRepository(
@@ -6952,16 +7035,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(AvatarService.baseBranchColor, const Color(0xFF0C8599));
     expect(AvatarService.palette, const [Color(0xFF0B7285)]);
     final painter =
         tester
                 .widget<CustomPaint>(find.byKey(const Key('graph-painter-0')))
                 .painter!
             as CommitGraphPainter;
-    // Main is the fixed green; the stored palette is only the fallback now.
     expect(painter.row.branch, 0);
-    expect(painter.committerColor, const Color(0xFF5CB270));
-    expect(AvatarService.palette, const [Color(0xFF0B7285)]);
+    expect(painter.committerColor, const Color(0xFF0C8599));
   });
 
   test('social time counts calendar days, like the date headings', () {
@@ -7916,6 +7998,14 @@ void main() {
     }
     expect(find.byKey(const Key('ref-more-multi')), findsNothing);
     expect(chip.left - cell.left, 14);
+    expect(chip.center.dy, cell.center.dy);
+    expect(
+      tester
+          .getRect(find.byKey(const Key('ref-chip-connector-multi')))
+          .center
+          .dy,
+      cell.center.dy,
+    );
     expect(
       cell.right -
           tester.getRect(find.byKey(const Key('ref-chip-multi-main'))).right,
@@ -10884,19 +10974,92 @@ void main() {
     );
   });
 
-  test('assigned branch colors win over the fallback palette', () {
+  test('the selected base branch owns the configurable branch-zero color', () {
     addTearDown(() {
+      AvatarService.baseBranchColor = AvatarService.defaultBaseBranchColor;
+      AvatarService.branchAssignments = const {};
+    });
+    AvatarService.baseBranchColor = const Color(0xFF123456);
+    final rows = layoutGraph([
+      commit('other-tip', 'other', parents: const ['root']),
+      commit('base-tip', 'base', parents: const ['root']),
+      commit('root', 'root'),
+    ], preferredTip: 'base-tip');
+
+    final assignments = assignBranchColors(rows, 7);
+    expect(rows.singleWhere((row) => row.commit.sha == 'base-tip').branch, 0);
+    expect(assignments[0], const Color(0xFF123456));
+
+    final comparison = branchComparison();
+    final comparisonRows = layoutBranchComparison(comparison.commits);
+    final baseSha = comparison.commits
+        .singleWhere((entry) => entry.side == BranchCommitSide.baseOnly)
+        .commit
+        .sha;
+    expect(
+      comparisonRows.singleWhere((row) => row.commit.sha == baseSha).branch,
+      0,
+    );
+  });
+
+  test('the live base color wins while other assignments stay fixed', () {
+    addTearDown(() {
+      AvatarService.baseBranchColor = AvatarService.defaultBaseBranchColor;
       AvatarService.branchAssignments = const {};
       AvatarService.palette = AvatarService.defaultColors;
     });
 
-    AvatarService.branchAssignments = const {0: Color(0xFF010203)};
-    expect(AvatarService.branchColor(0), const Color(0xFF010203));
-    // An id the map does not carry keeps the palette fallback; main stays green.
-    AvatarService.branchAssignments = const {};
-    expect(AvatarService.branchColor(0), const Color(0xFF5CB270));
-    expect(AvatarService.branchColor(1), AvatarService.defaultColors.first);
+    AvatarService.branchAssignments = const {
+      0: Color(0xFF010203),
+      1: Color(0xFF040506),
+    };
+    AvatarService.baseBranchColor = const Color(0xFFAABBCC);
+
+    expect(AvatarService.branchColor(0), const Color(0xFFAABBCC));
+    expect(AvatarService.branchColor(1), const Color(0xFF040506));
   });
+
+  test(
+    'a side-branch painter repaints its passing base rail after an edit',
+    () {
+      addTearDown(
+        () => AvatarService.baseBranchColor =
+            AvatarService.defaultBaseBranchColor,
+      );
+      final row = graphRow(
+        commit: commit('feature', 'feature'),
+        lane: 1,
+        activeLanes: const [0, 1],
+        nextLanes: const [0, 1],
+        branch: 1,
+        activeLaneBranches: const {0: 0, 1: 1},
+        nextLaneBranches: const {0: 0, 1: 1},
+      );
+
+      AvatarService.baseBranchColor = const Color(0xFF112233);
+      final before = CommitGraphPainter(
+        row: row,
+        selected: false,
+        committerColor: const Color(0xFF445566),
+      );
+      AvatarService.baseBranchColor = const Color(0xFF778899);
+      final after = CommitGraphPainter(
+        row: row,
+        selected: false,
+        committerColor: const Color(0xFF445566),
+      );
+
+      expect(after.shouldRepaint(before), isTrue);
+      expect(
+        (Canvas canvas) => before.paint(canvas, const Size(168, 36)),
+        paints..line(color: const Color(0xFF112233)),
+      );
+      expect(
+        (Canvas canvas) => after.paint(canvas, const Size(168, 36)),
+        paints..line(color: const Color(0xFF778899)),
+      );
+    },
+  );
 
   testWidgets('the timeline colors the graph with its assigned lines', (
     tester,
@@ -12217,7 +12380,7 @@ void main() {
     expect(sizeOf('commit 1'), 12);
     expect(sizeOf('Ada Author'), 14);
     expect(sizeOf('Cam Committer'), 14);
-    expect(sizeOf('Committer'), 12);
+    expect(sizeOf('Committer · cam@example.com'), 12);
     expect(sizeOf('2 files changed'), 12);
     expect(sizeOf('lib/a.dart'), 12);
 
@@ -13669,7 +13832,7 @@ void main() {
           matching: find.byType(Scrollable),
         ),
       );
-      scrollable.position.jumpTo(32);
+      scrollable.position.jumpTo(TimelineScreen.rowHeight);
       await tester.pump();
       final before = scrollable.position.pixels;
 
@@ -14609,7 +14772,10 @@ void main() {
       isNull,
     );
     expect(
-      find.descendant(of: author, matching: find.text('Author')),
+      find.descendant(
+        of: author,
+        matching: find.text('Author · ada@example.com'),
+      ),
       findsOneWidget,
     );
     expect(
@@ -14624,7 +14790,10 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.descendant(of: committer, matching: find.text('Committer')),
+      find.descendant(
+        of: committer,
+        matching: find.text('Committer · cam@example.com'),
+      ),
       findsOneWidget,
     );
     expect(
@@ -14680,6 +14849,44 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('preview-author')), findsOneWidget);
     expect(find.byKey(const Key('preview-committer')), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('preview-author')),
+        matching: find.text('Author · ada@example.com'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('preview omits an empty identity email', (tester) async {
+    const identity = GitIdentity(name: 'Ada Author', email: '   ');
+    final blankEmailCommit = GitCommit(
+      sha: 'blank-email',
+      shortSha: 'blank',
+      parents: const [],
+      author: identity,
+      authorTimestamp: 1700000000,
+      committer: identity,
+      committerTimestamp: 1700000120,
+      refs: const [],
+      subject: 'blank email',
+    );
+    await tester.pumpWidget(
+      app(FakeGitRepository((_, _) async => [blankEmailCommit]), controller),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    final author = find.byKey(const Key('preview-author'));
+    expect(
+      find.descendant(of: author, matching: find.text('Author')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: author, matching: find.textContaining('Author ·')),
+      findsNothing,
+    );
   });
 
   // ------------------------------------------------------------------ H3
