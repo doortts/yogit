@@ -4873,16 +4873,16 @@ class _TimelineScreenState extends State<TimelineScreen>
         ? _palette.muted
         : AvatarService.branchColor(row.branch);
     final previewKind = _previewGraph?.kinds[commit.sha];
+    final virtualMerge = previewKind == PreviewGraphNodeKind.virtualMerge;
     final rebaseConflict =
         _rebasePreview?.status == RebasePreviewStatus.conflict &&
         _rebasePreview?.currentCommit?.sha == commit.sha;
     final rebaseApplying = _rebaseApplyingSha == commit.sha;
     final virtualPreview =
-        previewKind == PreviewGraphNodeKind.virtualMerge ||
-        previewKind == PreviewGraphNodeKind.virtualRebase;
+        virtualMerge || previewKind == PreviewGraphNodeKind.virtualRebase;
     final mergeConflict =
-        previewKind == PreviewGraphNodeKind.virtualMerge &&
-        _effectiveMergeStatus == MergeConflictStatus.conflicts;
+        virtualMerge && _effectiveMergeStatus == MergeConflictStatus.conflicts;
+    final synthetic = commit.isWorkingTree || virtualMerge;
     final previewColor = previewKind == PreviewGraphNodeKind.conflictTarget
         ? _previewPurple
         : virtualPreview
@@ -5165,12 +5165,14 @@ class _TimelineScreenState extends State<TimelineScreen>
                       _w('time'),
                       // The cell reads socially; the tooltip gives the exact moment.
                       _tooltip(
-                        commit.isWorkingTree
+                        synthetic
                             ? null
                             : exactCommitTime(commit.committerTimestamp),
                         Text(
                           commit.isWorkingTree
                               ? 'working tree'
+                              : virtualMerge
+                              ? '—'
                               : _socialTime(commit.committerTimestamp),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -5184,7 +5186,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                   if (_showName)
                     _cell(
                       _w('name'),
-                      commit.isWorkingTree
+                      synthetic
                           ? Text(
                               '—',
                               style: TextStyle(
