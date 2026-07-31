@@ -2057,7 +2057,15 @@ class GitRepository implements FullDiffRepository {
     required BranchComparisonResult comparison,
     required String treeSha,
   }) async {
-    await _verifyApplyTips(comparison);
+    final refs = await _verifyApplyTips(comparison);
+    final target = resolveBranchApplyTarget(
+      mode: BranchApplyMode.merge,
+      comparison: comparison,
+      refs: refs,
+    );
+    if (target == null || target.needsRecalculation) {
+      throw GitRepositoryException(root, '로컬 기준 브랜치로 미리보기를 다시 계산해야 합니다.');
+    }
     final tree = (await _run([
       'rev-parse',
       '--verify',
@@ -2076,18 +2084,18 @@ class GitRepository implements FullDiffRepository {
       "Merge branch '${comparison.compareRef}' into ${comparison.baseRef}",
     ])).trim();
     await _moveLocalBranch(
-      branch: comparison.baseRef,
-      expected: comparison.baseTip,
+      branch: target.localBranch,
+      expected: target.selectedTip,
       next: mergeCommit,
     );
     return BranchApplyResult(
       mode: BranchApplyMode.merge,
-      baseBranch: comparison.baseRef,
+      baseBranch: target.localBranch,
       compareBranch: comparison.compareRef,
       baseBefore: comparison.baseTip,
-      baseAfter: await _localBranchTip(comparison.baseRef),
+      baseAfter: await _localBranchTip(target.localBranch),
       compareBefore: comparison.compareTip,
-      compareAfter: await _localBranchTip(comparison.compareRef),
+      compareAfter: comparison.compareTip,
     );
   }
 
@@ -2118,36 +2126,46 @@ class GitRepository implements FullDiffRepository {
   }
 
   Future<void> restoreBranchApply(BranchApplyResult result) async {
-    final baseTip = await _localBranchTip(result.baseBranch);
-    final compareTip = await _localBranchTip(result.compareBranch);
-    if (baseTip != result.baseAfter || compareTip != result.compareAfter) {
-      throw GitRepositoryException(root, '적용 뒤 브랜치가 바뀌어 이전 시점으로 되돌릴 수 없습니다.');
-    }
-    if (baseTip != result.baseBefore) {
+    if (result.mode == BranchApplyMode.merge) {
+      if (await _localBranchTip(result.baseBranch) != result.baseAfter) {
+        throw GitRepositoryException(root, '적용 뒤 브랜치가 바뀌어 이전 시점으로 되돌릴 수 없습니다.');
+      }
       await _moveLocalBranch(
         branch: result.baseBranch,
         expected: result.baseAfter,
         next: result.baseBefore,
       );
+      return;
     }
-    if (compareTip != result.compareBefore) {
-      await _moveLocalBranch(
-        branch: result.compareBranch,
-        expected: result.compareAfter,
-        next: result.compareBefore,
-      );
+    if (await _localBranchTip(result.compareBranch) != result.compareAfter) {
+      throw GitRepositoryException(root, '적용 뒤 브랜치가 바뀌어 이전 시점으로 되돌릴 수 없습니다.');
     }
-    if (await _localBranchTip(result.baseBranch) != result.baseBefore ||
-        await _localBranchTip(result.compareBranch) != result.compareBefore) {
-      throw GitRepositoryException(root, '브랜치를 적용 전 SHA로 되돌리지 못했습니다.');
-    }
+    await _moveLocalBranch(
+      branch: result.compareBranch,
+      expected: result.compareAfter,
+      next: result.compareBefore,
+    );
   }
 
-  Future<void> _verifyApplyTips(BranchComparisonResult comparison) async {
-    if (await _localBranchTip(comparison.baseRef) != comparison.baseTip ||
-        await _localBranchTip(comparison.compareRef) != comparison.compareTip) {
+  Future<String> _refTip(String ref, RepoRefs refs) async {
+    final fullRef = refs.local.contains(ref)
+        ? 'refs/heads/$ref'
+        : refs.remote.contains(ref)
+        ? 'refs/remotes/$ref'
+        : null;
+    if (fullRef == null) {
+      throw GitRepositoryException(ref, '브랜치를 찾을 수 없습니다.');
+    }
+    return (await _run(['rev-parse', '--verify', '$fullRef^{commit}'])).trim();
+  }
+
+  Future<RepoRefs> _verifyApplyTips(BranchComparisonResult comparison) async {
+    final refs = await loadRefs();
+    if (await _refTip(comparison.baseRef, refs) != comparison.baseTip ||
+        await _refTip(comparison.compareRef, refs) != comparison.compareTip) {
       throw GitRepositoryException(root, '브랜치가 바뀌어 미리보기를 다시 계산해야 합니다.');
     }
+    return refs;
   }
 
   Future<String> _localBranchTip(String branch) async {

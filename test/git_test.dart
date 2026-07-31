@@ -1250,6 +1250,91 @@ void main() {
     );
   });
 
+  test('remote merge preview updates only the local base', () async {
+    final fixture = await _remoteBranchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final commands = <List<String>>[];
+    final repository = GitRepository(
+      fixture.root.path,
+      runner: (executable, arguments, {workingDirectory, environment}) async {
+        commands.add(List<String>.of(arguments));
+        return runProcess(
+          executable,
+          arguments,
+          workingDirectory: workingDirectory,
+          environment: environment,
+        );
+      },
+    );
+
+    final applied = await repository.applyMergePreview(
+      comparison: fixture.comparison,
+      treeSha: fixture.comparison.merge.treeSha!,
+    );
+
+    expect(applied.mode, BranchApplyMode.merge);
+    expect(applied.baseBranch, 'main');
+    expect(applied.compareBranch, 'origin/feature');
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'origin/feature'])).trim(),
+      fixture.remoteTip,
+    );
+    final localFeature = await Process.run('git', [
+      'show-ref',
+      '--verify',
+      'refs/heads/feature',
+    ], workingDirectory: fixture.root.path);
+    expect(localFeature.exitCode, isNot(0));
+
+    await repository.restoreBranchApply(applied);
+
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+      fixture.comparison.baseTip,
+    );
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'origin/feature'])).trim(),
+      fixture.remoteTip,
+    );
+    expect(
+      commands.where(
+        (arguments) =>
+            arguments.isNotEmpty &&
+            (arguments.first == 'push' || arguments.first == 'fetch'),
+      ),
+      isEmpty,
+    );
+  });
+
+  test('remote merge apply rejects a changed remote tip', () async {
+    final fixture = await _remoteBranchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    await _git(fixture.root, [
+      'update-ref',
+      'refs/remotes/origin/feature',
+      fixture.comparison.baseTip,
+    ]);
+
+    await expectLater(
+      repository.applyMergePreview(
+        comparison: fixture.comparison,
+        treeSha: fixture.comparison.merge.treeSha!,
+      ),
+      throwsA(
+        isA<GitRepositoryException>().having(
+          (error) => error.message,
+          'message',
+          contains('브랜치가 바뀌어 미리보기를 다시 계산'),
+        ),
+      ),
+    );
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+      fixture.comparison.baseTip,
+    );
+  });
+
   test(
     'rebase preview applies its virtual tip and restores both tips',
     () async {
@@ -1330,7 +1415,7 @@ void main() {
   });
 
   test(
-    'branch preview restore rejects changed tips without partial moves',
+    'merge restore ignores changes to its read-only comparison ref',
     () async {
       final fixture = await _branchPreviewFixture();
       addTearDown(() => fixture.root.delete(recursive: true));
@@ -1346,13 +1431,11 @@ void main() {
         fixture.comparison.baseTip,
       ]);
 
-      await expectLater(
-        repository.restoreBranchApply(applied),
-        throwsA(isA<GitRepositoryException>()),
-      );
+      await repository.restoreBranchApply(applied);
+
       expect(
         (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
-        applied.baseAfter,
+        fixture.comparison.baseTip,
       );
       expect(
         (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
@@ -2366,5 +2449,23 @@ _branchPreviewFixture() async {
     comparison: await GitRepository(
       root.path,
     ).compareBranches('main', 'feature'),
+  );
+}
+
+Future<({Directory root, BranchComparisonResult comparison, String remoteTip})>
+_remoteBranchPreviewFixture() async {
+  final fixture = await _branchPreviewFixture();
+  final remoteTip = fixture.comparison.compareTip;
+  await _git(fixture.root, [
+    'update-ref',
+    'refs/remotes/origin/feature',
+    remoteTip,
+  ]);
+  await _git(fixture.root, ['branch', '-D', 'feature']);
+  final repository = GitRepository(fixture.root.path);
+  return (
+    root: fixture.root,
+    comparison: await repository.compareBranches('main', 'origin/feature'),
+    remoteTip: remoteTip,
   );
 }
