@@ -68,4 +68,3 @@
 - [ ] **Step 5: 관련 위젯 테스트 통과 확인**
 - [ ] **Step 6: `flutter analyze`와 전체 `flutter test -r silent` 실행**
 - [ ] **Step 7: 변경 커밋**
-

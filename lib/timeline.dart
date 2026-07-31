@@ -996,7 +996,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       unawaited(_resolveSelectedDeletedBranchName());
       if (comparisonTipsChanged || retryComparison) {
         unawaited(
-          _selectComparison(compared!, preserveCurrent: comparison != null),
+          _selectComparison(compared, preserveCurrent: comparison != null),
         );
       }
       if (widget.preferredBranchReady &&
