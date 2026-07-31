@@ -567,6 +567,11 @@ int refPriority(GitRef ref, RepoRefs refs) {
   return 4;
 }
 
+int compareTimelineRefs(GitRef left, GitRef right, RepoRefs refs) {
+  final priority = refPriority(left, refs).compareTo(refPriority(right, refs));
+  return priority != 0 ? priority : left.name.compareTo(right.name);
+}
+
 List<GitRef> timelineRefsForCommit(GitCommit commit, RepoRefs refs) {
   final byName = <String, GitRef>{};
   void add(GitRef ref) {
@@ -594,23 +599,23 @@ List<GitRef> timelineRefsForCommit(GitCommit commit, RepoRefs refs) {
     }
   }
   final result = byName.values.toList();
-  result.sort((left, right) {
-    final priority = refPriority(left, refs).compareTo(
-      refPriority(right, refs),
-    );
-    return priority != 0 ? priority : left.name.compareTo(right.name);
-  });
+  result.sort((left, right) => compareTimelineRefs(left, right, refs));
   return result;
 }
 
 Map<int, String> branchRefNames(List<GraphRow> rows, RepoRefs refs) {
-  final names = <int, String>{};
+  final representatives = <int, GitRef>{};
   for (final row in rows) {
-    if (names.containsKey(row.branch)) continue;
-    final rowRefs = timelineRefsForCommit(row.commit, refs);
-    if (rowRefs.isNotEmpty) names[row.branch] = rowRefs.first.name;
+    for (final ref in timelineRefsForCommit(row.commit, refs)) {
+      final current = representatives[row.branch];
+      if (current == null || compareTimelineRefs(ref, current, refs) < 0) {
+        representatives[row.branch] = ref;
+      }
+    }
   }
-  return names;
+  return {
+    for (final entry in representatives.entries) entry.key: entry.value.name,
+  };
 }
 
 /// Branch id → color, decided at each line's birth row and therefore stable as
@@ -8812,7 +8817,7 @@ class CommitGraphPainter extends CustomPainter {
                       committersBySha[sha] ?? row.commit.committer,
                     )
                   : branch == 0
-                  ? baseBranchColor
+                  ? AvatarService.branchAssignments[0] ?? baseBranchColor
                   : AvatarService.branchColor(branch))
     ..style = PaintingStyle.stroke
     ..strokeWidth = dashed ? previewRailWidth : railWidth

@@ -10525,6 +10525,39 @@ void main() {
     );
   });
 
+  test('branch lines choose the best ref across every row', () {
+    final rows = [
+      graphRow(
+        commit: commit('old', 'old', refs: const [GitRef(name: 'log-only')]),
+        lane: 0,
+        branch: 0,
+      ),
+      graphRow(
+        commit: commit(
+          'newer-local',
+          'newer local',
+          refs: const [GitRef(name: 'z-local')],
+        ),
+        lane: 0,
+        branch: 0,
+      ),
+      graphRow(
+        commit: commit(
+          'later-local',
+          'later local',
+          refs: const [GitRef(name: 'a-local')],
+        ),
+        lane: 0,
+        branch: 0,
+      ),
+    ];
+
+    expect(
+      branchRefNames(rows, const RepoRefs(local: ['a-local', 'z-local'])),
+      const {0: 'a-local'},
+    );
+  });
+
   test('branch colors take fixed roles, then a non-colliding pool', () {
     GraphRow born(int id, Map<int, int> active) => graphRow(
       commit: commit('$id', 'line $id'),
@@ -10620,6 +10653,58 @@ void main() {
 
     expect(AvatarService.branchColor(0), const Color(0xFF010203));
     expect(AvatarService.branchColor(1), const Color(0xFF040506));
+  });
+
+  test('painted branch-zero rails and curves use the assigned ref color', () {
+    addTearDown(() {
+      AvatarService.baseBranchColor = AvatarService.defaultBaseBranchColor;
+      AvatarService.branchAssignments = const {};
+    });
+    const assigned = Color(0xFF68A7EA);
+    AvatarService.baseBranchColor = const Color(0xFFAABBCC);
+    AvatarService.branchAssignments = const {0: assigned};
+
+    final railPainter = CommitGraphPainter(
+      row: graphRow(
+        commit: commit('side', 'side'),
+        lane: 1,
+        activeLanes: const [0, 1],
+        nextLanes: const [0, 1],
+        activeLaneShas: const {0: 'base', 1: 'side'},
+        nextLaneShas: const {0: 'base', 1: 'side'},
+        branch: 1,
+        activeLaneBranches: const {0: 0, 1: 1},
+        nextLaneBranches: const {0: 0, 1: 1},
+      ),
+      selected: false,
+      committerColor: const Color(0xFF040506),
+    );
+    final curvePainter = CommitGraphPainter(
+      row: graphRow(
+        commit: commit('base', 'base', parents: const ['root']),
+        lane: 1,
+        activeLanes: const [1],
+        nextLanes: const [0],
+        activeLaneShas: const {1: 'base'},
+        nextLaneShas: const {0: 'root'},
+        transitions: const [(from: 1, to: 0, sha: 'root')],
+        parentLanes: const [0],
+        branch: 0,
+        activeLaneBranches: const {1: 0},
+        nextLaneBranches: const {0: 0},
+      ),
+      selected: false,
+      committerColor: assigned,
+    );
+
+    expect(
+      (Canvas canvas) => railPainter.paint(canvas, const Size(168, 36)),
+      paints..line(color: assigned),
+    );
+    expect(
+      (Canvas canvas) => curvePainter.paint(canvas, const Size(168, 36)),
+      paints..path(color: assigned),
+    );
   });
 
   test(
