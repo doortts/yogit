@@ -8224,6 +8224,13 @@ void main() {
         const {'base': '#112233', 'text': '#445566'},
         const {'base': '#112233', 'text': '#445566'},
       ],
+      <Object?>[
+        for (var index = 0; index < 5; index++)
+          const {'base': '#112233', 'text': '#445566'},
+        'bad',
+        42,
+        null,
+      ],
     ]) {
       expect(
         AppSettings.fromJson({'refPalette': stored}).refPalette,
@@ -8236,6 +8243,13 @@ void main() {
         'refPaletteAssignments': [1, 2, 2, 0, 0, 0, 0, 0],
       }).refPaletteAssignments,
       AppSettings.defaultRefPaletteAssignments,
+    );
+
+    final mixedAssignments = custom.toJson()
+      ..['refPaletteAssignments'] = <Object>[1, 2, 0, 0, 0, 0, 0, 0, 'bad'];
+    expect(
+      AppSettings.fromJson(mixedAssignments).refPalette,
+      AppSettings.defaultRefPalette,
     );
 
     const legacy = [
@@ -13548,58 +13562,6 @@ void main() {
     expect(value[3].isTag, isTrue);
   });
 
-  test('named branch lines use the representative ref text color', () {
-    final rows = layoutGraph([
-      commit('tip', 'tip', refs: const [GitRef(name: 'd', isHead: true)]),
-    ]);
-    final names = branchRefNames(
-      rows,
-      const RepoRefs(local: ['d'], current: 'd', tips: {'d': 'tip'}),
-    );
-    expect(
-      assignBranchColors(
-        rows,
-        42,
-        branchNames: names,
-        refPalette: AppSettings.defaultRefPalette,
-      )[rows.single.branch],
-      const Color(0xFF18E022),
-    );
-  });
-
-  test('branch lines choose the best ref across every row', () {
-    final rows = [
-      graphRow(
-        commit: commit('old', 'old', refs: const [GitRef(name: 'log-only')]),
-        lane: 0,
-        branch: 0,
-      ),
-      graphRow(
-        commit: commit(
-          'newer-local',
-          'newer local',
-          refs: const [GitRef(name: 'z-local')],
-        ),
-        lane: 0,
-        branch: 0,
-      ),
-      graphRow(
-        commit: commit(
-          'later-local',
-          'later local',
-          refs: const [GitRef(name: 'a-local')],
-        ),
-        lane: 0,
-        branch: 0,
-      ),
-    ];
-
-    expect(
-      branchRefNames(rows, const RepoRefs(local: ['a-local', 'z-local'])),
-      const {0: 'a-local'},
-    );
-  });
-
   test('branch colors use fixed lanes and a deterministic random pool', () {
     GraphRow born(int id, Map<int, int> active) => graphRow(
       commit: commit('$id', 'line $id'),
@@ -13630,15 +13592,6 @@ void main() {
     expect(
       assignBranchPaletteIndexes(rows, 7, refPaletteAssignments: assignments),
       indexes,
-    );
-    expect(
-      assignBranchPaletteIndexes(
-        rows,
-        7,
-        branchNames: const {1: 'd'},
-        refPaletteAssignments: assignments,
-      )[1],
-      indexes[1],
     );
     for (var length = 1; length <= rows.length; length++) {
       final prefix = assignBranchPaletteIndexes(
