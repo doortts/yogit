@@ -7387,6 +7387,12 @@ void main() {
             commit('multi', 'multi ref commit', refs: refs),
             commit('plain', 'plain commit', refs: const []),
           ],
+          refs: const RepoRefs(
+            local: ['main'],
+            remote: ['origin/main'],
+            tags: ['v1.0'],
+            current: 'main',
+          ),
         ),
         controller,
       ),
@@ -7395,7 +7401,7 @@ void main() {
 
     // Every ref that fits gets an equal share of the cell; no badge at all.
     final cell = tester.getRect(find.byKey(const Key('refs-cell-0')));
-    final chip = tester.getRect(find.byKey(const Key('ref-chip-multi-v1.0')));
+    final chip = tester.getRect(find.byKey(const Key('ref-chip-multi-main')));
     for (final ref in refs) {
       expect(find.byKey(Key('ref-chip-multi-${ref.name}')), findsOneWidget);
     }
@@ -7411,7 +7417,7 @@ void main() {
     );
     expect(
       cell.right -
-          tester.getRect(find.byKey(const Key('ref-chip-multi-main'))).right,
+          tester.getRect(find.byKey(const Key('ref-chip-multi-v1.0'))).right,
       14,
     );
 
@@ -10325,6 +10331,72 @@ void main() {
   });
 
   // ------------------------------------------------------------------ §17.2
+  test('ref palette mapping is stable and covers all five records', () {
+    expect(
+      [for (final name in ['d', 'e', 'a', 'b', 'c'])
+        stableRefPaletteIndex(name, 5)],
+      [0, 1, 2, 3, 4],
+    );
+    expect(
+      refPaletteColorsForName('d', AppSettings.defaultRefPalette),
+      (
+        base: const Color(0xFF1D76DB),
+        text: const Color(0xFF68A7EA),
+      ),
+    );
+  });
+
+  test('timeline refs prefer HEAD, local, remote, tag, then decoration', () {
+    final value = timelineRefsForCommit(
+      commit(
+        'tip',
+        'tip',
+        refs: const [GitRef(name: 'log-only')],
+      ),
+      const RepoRefs(
+        local: ['local'],
+        remote: ['origin/remote'],
+        tags: ['v1'],
+        current: 'head',
+        tips: {
+          'head': 'tip',
+          'local': 'tip',
+          'origin/remote': 'tip',
+          'v1': 'tip',
+        },
+      ),
+    );
+    expect(
+      [for (final ref in value) ref.name],
+      ['head', 'local', 'origin/remote', 'v1', 'log-only'],
+    );
+    expect(value.first.isHead, isTrue);
+    expect(value[3].isTag, isTrue);
+  });
+
+  test('named branch lines use the representative ref text color', () {
+    final rows = layoutGraph([
+      commit('tip', 'tip', refs: const [GitRef(name: 'd', isHead: true)]),
+    ]);
+    final names = branchRefNames(
+      rows,
+      const RepoRefs(
+        local: ['d'],
+        current: 'd',
+        tips: {'d': 'tip'},
+      ),
+    );
+    expect(
+      assignBranchColors(
+        rows,
+        42,
+        branchNames: names,
+        refPalette: AppSettings.defaultRefPalette,
+      )[rows.single.branch],
+      const Color(0xFF68A7EA),
+    );
+  });
+
   test('branch colors take fixed roles, then a non-colliding pool', () {
     GraphRow born(int id, Map<int, int> active) => graphRow(
       commit: commit('$id', 'line $id'),
@@ -10405,7 +10477,7 @@ void main() {
     );
   });
 
-  test('the live base color wins while other assignments stay fixed', () {
+  test('configured assignments win over branch color fallbacks', () {
     addTearDown(() {
       AvatarService.baseBranchColor = AvatarService.defaultBaseBranchColor;
       AvatarService.branchAssignments = const {};
@@ -10418,7 +10490,7 @@ void main() {
     };
     AvatarService.baseBranchColor = const Color(0xFFAABBCC);
 
-    expect(AvatarService.branchColor(0), const Color(0xFFAABBCC));
+    expect(AvatarService.branchColor(0), const Color(0xFF010203));
     expect(AvatarService.branchColor(1), const Color(0xFF040506));
   });
 
@@ -10514,6 +10586,12 @@ void main() {
               commit('three', 'three refs', refs: many.take(3).toList()),
               commit('five', 'five refs', refs: many),
             ],
+            refs: const RepoRefs(
+              local: ['main'],
+              remote: ['origin/main'],
+              tags: ['v1.0'],
+              current: 'main',
+            ),
           ),
           controller: controller,
           // 150px of chips: floor(150 / 40) = 3 chips at 50px each.
@@ -10529,10 +10607,13 @@ void main() {
       expect(chip('three', ref.name).width, greaterThanOrEqualTo(40));
     }
     // Equal shares, in order, inside the cell.
-    expect(chip('three', 'main').left, lessThan(chip('three', 'v1.0').left));
     expect(
-      chip('three', 'v1.0').left,
+      chip('three', 'main').left,
       lessThan(chip('three', 'origin/main').left),
+    );
+    expect(
+      chip('three', 'origin/main').left,
+      lessThan(chip('three', 'v1.0').left),
     );
     expect(
       chip('three', 'main').width,
@@ -12917,7 +12998,7 @@ void main() {
             commit('root', 'root commit'),
           ],
           workingTree: () async => workingTreeCommit('tip'),
-          refs: const RepoRefs(local: ['main'], current: 'main'),
+          refs: const RepoRefs(local: ['main', long], current: 'main'),
         ),
         controller,
       ),

@@ -293,9 +293,9 @@ class AvatarService {
   /// A branch line's color. Every rail, curve, chip and dot on one line shares
   /// it, so the graph reads by branch rather than by person.
   static Color branchColor(int branch) {
-    if (branch == 0) return baseBranchColor;
     final assigned = branchAssignments[branch];
     if (assigned != null) return assigned;
+    if (branch == 0) return baseBranchColor;
     final colors = palette.isEmpty ? defaultColors : palette;
     return colors[(branch.abs() - 1) % colors.length];
   }
