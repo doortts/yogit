@@ -11415,12 +11415,12 @@ void main() {
                 .painter!
             as CommitGraphPainter;
     expect(painter.row.branch, 0);
-    expect(painter.committerColor, const Color(0xFF5CB270));
-    expect(AvatarService.branchAssignments[0], const Color(0xFF5CB270));
-    expect(
-      AvatarService.branchAssignments[1],
-      anyOf(const Color(0xFF00E5FF), const Color(0xFFFF3131)),
-    );
+    expect(painter.committerColor, const Color(0xFF18E022));
+    expect(AvatarService.branchAssignments[0], const Color(0xFF18E022));
+    expect([
+      for (final entry in AppSettings.defaultRefPalette.skip(1))
+        parseHexColor(entry.text),
+    ], contains(AvatarService.branchAssignments[1]));
   });
 
   // ------------------------------------------------------------------ §17.3
