@@ -795,6 +795,9 @@ class _TimelineScreenState extends State<TimelineScreen>
       ? null
       : _refs.localTips[_baseBranch!] ?? _refs.tips[_baseBranch!];
 
+  String? _refTip(RepoRefs refs, String ref) =>
+      refs.localTips[ref] ?? refs.tips[ref];
+
   /// Which way the cursor last travelled, so the ref modal opens on the side the
   /// cursor came from. Null after a click or a jump, which have no direction.
   bool? _arrivedGoingDown;
@@ -954,6 +957,24 @@ class _TimelineScreenState extends State<TimelineScreen>
           (refs.local.contains(compared) ||
               refs.remote.contains(compared) ||
               refs.tags.contains(compared));
+      final comparison = _comparison;
+      final baseTip = comparison == null
+          ? null
+          : _refTip(refs, comparison.baseRef);
+      final compareTip = comparison == null
+          ? null
+          : _refTip(refs, comparison.compareRef);
+      final comparisonTipsChanged =
+          comparisonStillExists &&
+          comparison != null &&
+          baseTip != null &&
+          compareTip != null &&
+          (baseTip != comparison.baseTip ||
+              compareTip != comparison.compareTip);
+      final retryComparison =
+          comparisonStillExists &&
+          comparison == null &&
+          _comparisonError != null;
       setState(() {
         _refs = refs;
         _refsLoading = false;
@@ -973,7 +994,11 @@ class _TimelineScreenState extends State<TimelineScreen>
       });
       _scheduleRatchetUpdate();
       unawaited(_resolveSelectedDeletedBranchName());
-      if (comparisonStillExists) unawaited(_selectComparison(compared));
+      if (comparisonTipsChanged || retryComparison) {
+        unawaited(
+          _selectComparison(compared!, preserveCurrent: comparison != null),
+        );
+      }
       if (widget.preferredBranchReady &&
           branch != null &&
           branch != widget.preferredBranch) {
@@ -1979,23 +2004,28 @@ class _TimelineScreenState extends State<TimelineScreen>
     _focusNode.requestFocus();
   }
 
-  Future<void> _selectComparison(String compareRef) async {
+  Future<void> _selectComparison(
+    String compareRef, {
+    bool preserveCurrent = false,
+  }) async {
     final baseRef = _baseBranch;
     if (_branchApplyBusy || baseRef == null || compareRef == baseRef) return;
     final serial = ++_comparisonSerial;
-    _dropMergePreview();
-    _dropRebasePreview();
-    setState(() {
-      _compareRef = compareRef;
-      _resetBranchApply();
-      _comparison = null;
-      _comparisonRows = [];
-      _comparisonEntries = [];
-      _previewGraph = null;
-      _rebaseCheck = null;
-      _comparisonError = null;
-      _selectedIndex.value = 0;
-    });
+    if (!preserveCurrent) {
+      _dropMergePreview();
+      _dropRebasePreview();
+      setState(() {
+        _compareRef = compareRef;
+        _resetBranchApply();
+        _comparison = null;
+        _comparisonRows = [];
+        _comparisonEntries = [];
+        _previewGraph = null;
+        _rebaseCheck = null;
+        _comparisonError = null;
+        _selectedIndex.value = 0;
+      });
+    }
     try {
       final result = await widget.repository.compareBranches(
         baseRef,
@@ -2008,7 +2038,13 @@ class _TimelineScreenState extends State<TimelineScreen>
         return;
       }
       final rows = layoutBranchComparison(result.commits);
+      if (preserveCurrent) {
+        _dropMergePreview();
+        _dropRebasePreview();
+      }
       setState(() {
+        _compareRef = compareRef;
+        _resetBranchApply();
         _comparison = result;
         _previewGraph = _branchPreviewMode == BranchPreviewMode.merge
             ? layoutMergePreviewGraph(result)
@@ -2018,6 +2054,9 @@ class _TimelineScreenState extends State<TimelineScreen>
           for (var index = 0; index < _comparisonRows.length; index++)
             (rowIndex: index, label: null, row: _comparisonRows[index]),
         ];
+        _rebaseCheck = null;
+        _comparisonError = null;
+        _selectedIndex.value = 0;
       });
       _scheduleRatchetUpdate();
       _showFirstComparisonRow();

@@ -2996,6 +2996,187 @@ void main() {
     );
   });
 
+  testWidgets('unchanged remote refresh does not reload refs', (tester) async {
+    var fetches = 0;
+    var refLoads = 0;
+    const refs = RepoRefs(
+      local: ['main'],
+      remote: ['origin/main'],
+      remoteNames: ['origin'],
+      current: 'main',
+      tips: {'main': 'main-tip', 'origin/main': 'remote-tip'},
+      localTips: {'main': 'main-tip'},
+      upstreams: {'main': 'origin/main'},
+      upstreamRemotes: {'main': 'origin'},
+    );
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refsLoader: () async {
+            refLoads++;
+            return refs;
+          },
+          fetchRemoteCallback: (_) async {
+            fetches++;
+            return FetchOriginResult.unchanged;
+          },
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(refLoads, 1);
+    expect(fetches, 1);
+
+    await tester.pump(const Duration(minutes: 3));
+    await tester.pump();
+
+    expect(refLoads, 1);
+    expect(fetches, 2);
+  });
+
+  testWidgets('unchanged comparison tips do not recompute branch preview', (
+    tester,
+  ) async {
+    var remoteChanged = false;
+    var compareCalls = 0;
+    const refs = RepoRefs(
+      local: ['main', 'feature'],
+      remote: ['origin/main'],
+      remoteNames: ['origin'],
+      current: 'main',
+      tips: {
+        'main': 'main-tip',
+        'feature': 'feature-tip',
+        'origin/main': 'remote-tip',
+      },
+      localTips: {'main': 'main-tip', 'feature': 'feature-tip'},
+      upstreams: {'main': 'origin/main'},
+      upstreamRemotes: {'main': 'origin'},
+    );
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refsLoader: () async => refs,
+          fetchRemoteCallback: (_) async => remoteChanged
+              ? FetchOriginResult.updated
+              : FetchOriginResult.unchanged,
+          compareBranchesCallback: (_, _) async {
+            compareCalls++;
+            return branchComparison();
+          },
+          simulateRebaseCallback:
+              ({required baseRef, required compareRef}) async =>
+                  const RebaseCheckResult(status: RebaseCheckStatus.clean),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+
+    expect(compareCalls, 1);
+    expect(find.text('feature only'), findsOneWidget);
+
+    remoteChanged = true;
+    await tester.pump(const Duration(minutes: 3));
+    await tester.pumpAndSettle();
+
+    expect(compareCalls, 1);
+    expect(find.text('feature only'), findsOneWidget);
+  });
+
+  testWidgets('changed comparison tips replace branch preview atomically', (
+    tester,
+  ) async {
+    var remoteChanged = false;
+    var refs = const RepoRefs(
+      local: ['main', 'feature'],
+      remote: ['origin/main'],
+      remoteNames: ['origin'],
+      current: 'main',
+      tips: {
+        'main': 'main-tip',
+        'feature': 'feature-tip',
+        'origin/main': 'remote-tip',
+      },
+      localTips: {'main': 'main-tip', 'feature': 'feature-tip'},
+      upstreams: {'main': 'origin/main'},
+      upstreamRemotes: {'main': 'origin'},
+    );
+    final replacement = Completer<BranchComparisonResult>();
+    var compareCalls = 0;
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refsLoader: () async => refs,
+          fetchRemoteCallback: (_) async => remoteChanged
+              ? FetchOriginResult.updated
+              : FetchOriginResult.unchanged,
+          compareBranchesCallback: (_, _) {
+            compareCalls++;
+            if (compareCalls == 1) {
+              return Future.value(
+                branchComparison(compareSubject: 'old feature'),
+              );
+            }
+            return replacement.future;
+          },
+          simulateRebaseCallback:
+              ({required baseRef, required compareRef}) async =>
+                  const RebaseCheckResult(status: RebaseCheckStatus.clean),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+    expect(find.text('old feature'), findsOneWidget);
+
+    refs = const RepoRefs(
+      local: ['main', 'feature'],
+      remote: ['origin/main'],
+      remoteNames: ['origin'],
+      current: 'main',
+      tips: {
+        'main': 'main-tip',
+        'feature': 'feature-next',
+        'origin/main': 'remote-tip',
+      },
+      localTips: {'main': 'main-tip', 'feature': 'feature-next'},
+      upstreams: {'main': 'origin/main'},
+      upstreamRemotes: {'main': 'origin'},
+    );
+    remoteChanged = true;
+    await tester.pump(const Duration(minutes: 3));
+    await tester.pump();
+
+    expect(compareCalls, 2);
+    expect(find.text('old feature'), findsOneWidget);
+    expect(find.text('normal history'), findsNothing);
+
+    replacement.complete(
+      branchComparison(
+        compareTip: 'feature-next',
+        compareSubject: 'new feature',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('new feature'), findsOneWidget);
+    expect(find.text('old feature'), findsNothing);
+  });
+
   testWidgets('remote ref reload keeps a selected tag comparison', (
     tester,
   ) async {
