@@ -8244,7 +8244,7 @@ class RebaseMappingPainter extends CustomPainter {
 /// Draws one row of the commit graph: pass-through rails, the rounded lane
 /// curves into parent lanes, and the row's own node.
 class CommitGraphPainter extends CustomPainter {
-  const CommitGraphPainter({
+  CommitGraphPainter({
     required this.row,
     required this.selected,
     required this.committerColor,
@@ -8260,7 +8260,7 @@ class CommitGraphPainter extends CustomPainter {
     this.outgoingRailColor,
     this.backgroundColor = const Color(0xFF1C1C1E),
     this.selectedRowColor = const Color(0xFF234D72),
-  });
+  }) : baseBranchColor = AvatarService.baseBranchColor;
 
   static const laneInset = 28.0;
   static const defaultLaneSpacing = 30.0;
@@ -8317,6 +8317,7 @@ class CommitGraphPainter extends CustomPainter {
   final bool selected;
   final Color backgroundColor;
   final Color selectedRowColor;
+  final Color baseBranchColor;
 
   /// The color of the branch line this row's node sits on: `row.branch` through
   /// the settings palette. Named for history — nothing here is per-committer.
@@ -8701,6 +8702,8 @@ class CommitGraphPainter extends CustomPainter {
                   ? AvatarService.color(
                       committersBySha[sha] ?? row.commit.committer,
                     )
+                  : branch == 0
+                  ? baseBranchColor
                   : AvatarService.branchColor(branch))
     ..style = PaintingStyle.stroke
     ..strokeWidth = dashed ? previewRailWidth : railWidth
@@ -8756,6 +8759,7 @@ class CommitGraphPainter extends CustomPainter {
       oldDelegate.previous != previous ||
       oldDelegate.selected != selected ||
       oldDelegate.committerColor != committerColor ||
+      oldDelegate.baseBranchColor != baseBranchColor ||
       oldDelegate.committersBySha != committersBySha ||
       oldDelegate.laneSpacing != laneSpacing ||
       oldDelegate.compact != compact ||

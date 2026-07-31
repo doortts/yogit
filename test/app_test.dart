@@ -10370,6 +10370,48 @@ void main() {
     expect(AvatarService.branchColor(1), const Color(0xFF040506));
   });
 
+  test(
+    'a side-branch painter repaints its passing base rail after an edit',
+    () {
+      addTearDown(
+        () => AvatarService.baseBranchColor =
+            AvatarService.defaultBaseBranchColor,
+      );
+      final row = graphRow(
+        commit: commit('feature', 'feature'),
+        lane: 1,
+        activeLanes: const [0, 1],
+        nextLanes: const [0, 1],
+        branch: 1,
+        activeLaneBranches: const {0: 0, 1: 1},
+        nextLaneBranches: const {0: 0, 1: 1},
+      );
+
+      AvatarService.baseBranchColor = const Color(0xFF112233);
+      final before = CommitGraphPainter(
+        row: row,
+        selected: false,
+        committerColor: const Color(0xFF445566),
+      );
+      AvatarService.baseBranchColor = const Color(0xFF778899);
+      final after = CommitGraphPainter(
+        row: row,
+        selected: false,
+        committerColor: const Color(0xFF445566),
+      );
+
+      expect(after.shouldRepaint(before), isTrue);
+      expect(
+        (Canvas canvas) => before.paint(canvas, const Size(168, 36)),
+        paints..line(color: const Color(0xFF112233)),
+      );
+      expect(
+        (Canvas canvas) => after.paint(canvas, const Size(168, 36)),
+        paints..line(color: const Color(0xFF778899)),
+      );
+    },
+  );
+
   testWidgets('the timeline colors the graph with its assigned lines', (
     tester,
   ) async {
