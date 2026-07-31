@@ -11731,7 +11731,7 @@ void main() {
     expect(sizeOf('commit 1'), 12);
     expect(sizeOf('Ada Author'), 14);
     expect(sizeOf('Cam Committer'), 14);
-    expect(sizeOf('Committer'), 12);
+    expect(sizeOf('Committer · cam@example.com'), 12);
     expect(sizeOf('2 files changed'), 12);
     expect(sizeOf('lib/a.dart'), 12);
     expect(sizeOf('lib/a.dart body'), 14);
@@ -13991,7 +13991,10 @@ void main() {
       isNull,
     );
     expect(
-      find.descendant(of: author, matching: find.text('Author')),
+      find.descendant(
+        of: author,
+        matching: find.text('Author · ada@example.com'),
+      ),
       findsOneWidget,
     );
     expect(
@@ -14006,7 +14009,10 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.descendant(of: committer, matching: find.text('Committer')),
+      find.descendant(
+        of: committer,
+        matching: find.text('Committer · cam@example.com'),
+      ),
       findsOneWidget,
     );
     expect(
@@ -14062,6 +14068,44 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('preview-author')), findsOneWidget);
     expect(find.byKey(const Key('preview-committer')), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('preview-author')),
+        matching: find.text('Author · ada@example.com'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('preview omits an empty identity email', (tester) async {
+    const identity = GitIdentity(name: 'Ada Author', email: '   ');
+    final blankEmailCommit = GitCommit(
+      sha: 'blank-email',
+      shortSha: 'blank',
+      parents: const [],
+      author: identity,
+      authorTimestamp: 1700000000,
+      committer: identity,
+      committerTimestamp: 1700000120,
+      refs: const [],
+      subject: 'blank email',
+    );
+    await tester.pumpWidget(
+      app(FakeGitRepository((_, _) async => [blankEmailCommit]), controller),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    final author = find.byKey(const Key('preview-author'));
+    expect(
+      find.descendant(of: author, matching: find.text('Author')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: author, matching: find.textContaining('Author ·')),
+      findsNothing,
+    );
   });
 
   // ------------------------------------------------------------------ H3

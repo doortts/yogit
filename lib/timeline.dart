@@ -6506,6 +6506,9 @@ class _TimelineScreenState extends State<TimelineScreen>
     required int? timestamp,
   }) {
     final identity = committer ? commit.committer : commit.author;
+    final role = committer ? 'Committer' : 'Author';
+    final email = identity.email.trim();
+    final roleLine = email.isEmpty ? role : '$role · $email';
     return Row(
       key: Key(committer ? 'preview-committer' : 'preview-author'),
       children: [
@@ -6545,9 +6548,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               Text(
                 commit.isWorkingTree
                     ? 'No commit object or committer'
-                    : committer
-                    ? 'Committer'
-                    : 'Author',
+                    : roleLine,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: _palette.muted, fontSize: 12),
