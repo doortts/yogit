@@ -928,7 +928,9 @@ class _TimelineScreenState extends State<TimelineScreen>
       final compared = _compareRef;
       final comparisonStillExists =
           compared != null &&
-          (refs.local.contains(compared) || refs.remote.contains(compared));
+          (refs.local.contains(compared) ||
+              refs.remote.contains(compared) ||
+              refs.tags.contains(compared));
       setState(() {
         _refs = refs;
         _refsLoading = false;

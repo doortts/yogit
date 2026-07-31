@@ -2914,6 +2914,58 @@ void main() {
     );
   });
 
+  testWidgets('remote ref reload keeps a selected tag comparison', (
+    tester,
+  ) async {
+    var fetches = 0;
+    const refs = RepoRefs(
+      local: ['main'],
+      remote: ['origin/main'],
+      tags: ['v1.0.0'],
+      current: 'main',
+      upstreams: {'main': 'origin/main'},
+      upstreamRemotes: {'main': 'origin'},
+    );
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: refs,
+          refsLoader: () async => refs,
+          fetchRemoteCallback: (_) async {
+            fetches++;
+            if (fetches == 1) throw StateError('offline');
+            return FetchOriginResult.updated;
+          },
+          compareBranchesCallback: (_, compare) async =>
+              branchComparison(compareRef: compare),
+          simulateRebaseCallback:
+              ({required baseRef, required compareRef}) async =>
+                  const RebaseCheckResult(status: RebaseCheckStatus.clean),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-v1.0.0')));
+    await tester.pumpAndSettle();
+    expect(find.text('v1.0.0'), findsWidgets);
+
+    await tester.tap(find.byKey(const Key('retry-origin-fetch')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('branch-diff-selector')),
+        matching: find.text('v1.0.0'),
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('branch comparison keeps only two branch lanes', (tester) async {
     final result = branchComparison();
     await tester.pumpWidget(
