@@ -7840,17 +7840,17 @@ void main() {
                 .widget<Container>(find.byKey(const Key('ref-chip-tip-d')))
                 .decoration!
             as BoxDecoration;
-    expect(decoration.color, const Color(0xFF1D76DB).withValues(alpha: .18));
+    expect(decoration.color, const Color(0xFF0E8A16).withValues(alpha: .18));
     expect(
       decoration.border!.top.color,
-      const Color(0xFF68A7EA).withValues(alpha: .30),
+      const Color(0xFF18E022).withValues(alpha: .30),
     );
     final painter =
         tester
                 .widget<CustomPaint>(find.byKey(const Key('graph-painter-0')))
                 .painter!
             as CommitGraphPainter;
-    expect(painter.committerColor, const Color(0xFF68A7EA));
+    expect(painter.committerColor, const Color(0xFF18E022));
   });
 
   testWidgets('preview describes the working tree row and counts files', (
@@ -9432,7 +9432,7 @@ void main() {
     );
   });
 
-  testWidgets('stored timeline colors reach the base and fallback rails', (
+  testWidgets('legacy timeline colors do not override the unified palette', (
     tester,
   ) async {
     addTearDown(() {
@@ -9465,7 +9465,7 @@ void main() {
                 .painter!
             as CommitGraphPainter;
     expect(painter.row.branch, 0);
-    expect(painter.committerColor, const Color(0xFF0C8599));
+    expect(painter.committerColor, const Color(0xFF18E022));
   });
 
   testWidgets('stored ref palette reaches timeline chips', (tester) async {
@@ -9473,10 +9473,13 @@ void main() {
       ..current = const AppSettings(
         refPalette: [
           (base: '#010203', text: '#A0B0C0'),
-          (base: '#E99695', text: '#E89292'),
-          (base: '#C5DEF5', text: '#C2DDF4'),
-          (base: '#0E8A16', text: '#18E022'),
+          (base: '#111213', text: '#D0E0F0'),
+          (base: '#212223', text: '#102030'),
+          (base: '#313233', text: '#405060'),
           (base: '#5319E7', text: '#DACFFA'),
+          (base: '#008FA3', text: '#00E5FF'),
+          (base: '#B89B00', text: '#FFF01F'),
+          (base: '#C94E10', text: '#FF6E27'),
         ],
       );
     await tester.pumpWidget(
@@ -10547,11 +10550,15 @@ void main() {
       tester
           .widget<Container>(find.byKey(const Key('modal-accent-main')))
           .color,
-      const Color(0xFFE89292),
+      (tester
+                  .widget<CustomPaint>(find.byKey(const Key('graph-painter-5')))
+                  .painter!
+              as CommitGraphPainter)
+          .committerColor,
     );
     expect(
       tester.widget<Container>(find.byKey(const Key('modal-accent-d'))).color,
-      const Color(0xFF68A7EA),
+      const Color(0xFFDACFFA),
     );
     final row = tester.getRect(find.byKey(const Key('refs-cell-5')));
     expect(tester.getRect(modal).bottom, lessThanOrEqualTo(row.top));
@@ -13424,7 +13431,7 @@ void main() {
   });
 
   // ------------------------------------------------------------------ §17.2
-  test('ref palette mapping is stable and covers all five records', () {
+  test('ref palette mapping uses only deterministic Random colors', () {
     expect(
       [
         for (final name in ['d', 'e', 'a', 'b', 'c'])
@@ -13432,10 +13439,14 @@ void main() {
       ],
       [0, 1, 2, 3, 4],
     );
-    expect(refPaletteColorsForName('d', AppSettings.defaultRefPalette), (
-      base: const Color(0xFF1D76DB),
-      text: const Color(0xFF68A7EA),
-    ));
+    expect(
+      refPaletteColorsForName(
+        'd',
+        AppSettings.defaultRefPalette,
+        refPaletteAssignments: AppSettings.defaultRefPaletteAssignments,
+      ),
+      (base: const Color(0xFF5319E7), text: const Color(0xFFDACFFA)),
+    );
   });
 
   test('timeline refs prefer HEAD, local, remote, tag, then decoration', () {
@@ -13477,7 +13488,7 @@ void main() {
         branchNames: names,
         refPalette: AppSettings.defaultRefPalette,
       )[rows.single.branch],
-      const Color(0xFF68A7EA),
+      const Color(0xFF18E022),
     );
   });
 
@@ -13514,7 +13525,7 @@ void main() {
     );
   });
 
-  test('branch colors take fixed roles, then a non-colliding pool', () {
+  test('branch colors use fixed lanes and a deterministic random pool', () {
     GraphRow born(int id, Map<int, int> active) => graphRow(
       commit: commit('$id', 'line $id'),
       lane: 0,
@@ -13524,54 +13535,57 @@ void main() {
       activeLaneBranches: active,
       nextLaneBranches: active,
     );
-    // main, then a second line, then three lines each born while the earlier
-    // ones are still running, then one more with the pool exhausted.
     final rows = [
       born(0, const {0: 0}),
       born(1, const {0: 0, 1: 1}),
       born(2, const {0: 0, 1: 1, 2: 2}),
-      born(3, const {0: 0, 2: 2, 3: 3}),
-      born(4, const {0: 0, 2: 2, 3: 3, 4: 4}),
-      born(5, const {2: 2, 3: 3, 4: 4, 5: 5}),
+      born(9, const {0: 0, 9: 9}),
     ];
+    const assignments = [1, 0, 3, 0, 0, 0, 0, 0];
+    final indexes = assignBranchPaletteIndexes(
+      rows,
+      7,
+      refPaletteAssignments: assignments,
+    );
 
-    final colors = assignBranchColors(rows, 7);
-
-    expect(colors[0], const Color(0xFF5CB270));
-    expect(colors[1], anyOf(const Color(0xFF00E5FF), const Color(0xFFFF3131)));
-    // Pool order, skipping colors already on screen at birth.
-    expect(colors[2], const Color(0xFF3B82F6));
-    expect(colors[3], const Color(0xFFFFF01F));
-    expect(colors[4], const Color(0xFFB026FF));
-    // Pool exhausted: a seeded pick from the rest of the palette.
-    expect(colors[5], isNot(const Color(0xFF3B82F6)));
-    expect(colors[5], isNot(const Color(0xFFFFF01F)));
-    expect(colors[5], isNot(const Color(0xFFB026FF)));
-    expect(colors[5], isNot(const Color(0xFF5CB270)));
-    expect(colors[5], isNotNull);
-
-    // Deterministic per seed, and stable as rows are appended.
-    expect(assignBranchColors(rows, 7), colors);
-    expect(assignBranchColors(rows, 8)[0], colors[0]);
+    expect(indexes[0], 0);
+    expect(indexes[2], 2);
+    expect(indexes[1], isNot(2));
+    expect(indexes[9], isNot(2));
+    expect(
+      assignBranchPaletteIndexes(rows, 7, refPaletteAssignments: assignments),
+      indexes,
+    );
     for (var length = 1; length <= rows.length; length++) {
-      final prefix = assignBranchColors(rows.sublist(0, length), 7);
+      final prefix = assignBranchPaletteIndexes(
+        rows.sublist(0, length),
+        7,
+        refPaletteAssignments: assignments,
+      );
       for (final entry in prefix.entries) {
-        expect(entry.value, colors[entry.key], reason: 'id ${entry.key}');
+        expect(entry.value, indexes[entry.key], reason: 'id ${entry.key}');
       }
     }
-    // Both second-line colors are reachable across seeds.
+
     expect(
-      {for (var seed = 0; seed < 8; seed++) assignBranchColors(rows, seed)[1]},
-      {const Color(0xFF00E5FF), const Color(0xFFFF3131)},
+      assignBranchColors(rows, 7, refPaletteAssignments: assignments)[2],
+      const Color(0xFF68A7EA),
+    );
+    expect(
+      assignBranchPaletteIndexes(
+        rows,
+        7,
+        refPaletteAssignments: const [1, 2, 3, 4, 5, 6, 7, 8],
+      )[9],
+      inInclusiveRange(1, 7),
     );
   });
 
-  test('the selected base branch owns the configurable branch-zero color', () {
+  test('the selected base branch owns Color 1', () {
     addTearDown(() {
       AvatarService.baseBranchColor = AvatarService.defaultBaseBranchColor;
       AvatarService.branchAssignments = const {};
     });
-    AvatarService.baseBranchColor = const Color(0xFF123456);
     final rows = layoutGraph([
       commit('other-tip', 'other', parents: const ['root']),
       commit('base-tip', 'base', parents: const ['root']),
@@ -13580,7 +13594,7 @@ void main() {
 
     final assignments = assignBranchColors(rows, 7);
     expect(rows.singleWhere((row) => row.commit.sha == 'base-tip').branch, 0);
-    expect(assignments[0], const Color(0xFF123456));
+    expect(assignments[0], const Color(0xFF18E022));
 
     final comparison = branchComparison();
     final comparisonRows = layoutBranchComparison(comparison.commits);
