@@ -6299,20 +6299,35 @@ void main() {
                     .decoration!
                 as BoxDecoration)
             .color!;
+    Color baseSwatch() =>
+        (tester
+                    .widget<Container>(
+                      find.byKey(const Key('base-branch-swatch')),
+                    )
+                    .decoration!
+                as BoxDecoration)
+            .color!;
 
     expect(find.text('Timeline colors'), findsOneWidget);
     expect(find.byKey(const Key('lane-swatch-7')), findsOneWidget);
     expect(swatch(0), const Color(0xFFFF2D95));
-    // The mainline swatch is the fixed green and is not editable.
-    expect(
-      (tester
-                  .widget<Container>(find.byKey(const Key('lane-swatch-main')))
-                  .decoration!
-              as BoxDecoration)
-          .color,
-      AvatarService.baseBranchColor,
+    expect(find.text('Base branch'), findsOneWidget);
+    expect(find.text('Main line (fixed)'), findsNothing);
+    expect(find.byKey(const Key('base-branch-color')), findsOneWidget);
+    expect(baseSwatch(), const Color(0xFF5CB270));
+
+    await tester.enterText(
+      find.byKey(const Key('base-branch-color')),
+      '#654321',
     );
-    expect(find.byKey(const Key('lane-color-main')), findsNothing);
+    await tester.pumpAndSettle();
+    expect(saved.last.baseBranchColor, '#654321');
+    expect(baseSwatch(), const Color(0xFF654321));
+
+    await tester.enterText(find.byKey(const Key('base-branch-color')), '#65');
+    await tester.pumpAndSettle();
+    expect(saved.last.baseBranchColor, '#654321');
+
     // No row context in the preview, so those avatars stay identity-colored.
     expect(
       tester
@@ -6334,6 +6349,15 @@ void main() {
     await tester.ensureVisible(find.byKey(const Key('reset-lane-colors')));
     await tester.tap(find.byKey(const Key('reset-lane-colors')));
     await tester.pumpAndSettle();
+    expect(saved.last.baseBranchColor, AppSettings.defaultBaseBranchColor);
+    expect(baseSwatch(), const Color(0xFF5CB270));
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('base-branch-color')))
+          .controller
+          ?.text,
+      '#5CB270',
+    );
     expect(saved.last.laneColors, AppSettings.defaultLaneColors);
     expect(swatch(0), const Color(0xFFFF2D95));
     expect(

@@ -571,12 +571,16 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late AppSettings _settings = widget.settings;
   var _section = _SettingsSection.gitIntegrations;
+  late final _baseBranchColorField = TextEditingController(
+    text: _settings.baseBranchColor,
+  );
   late final _laneFields = [
     for (final hex in _settings.laneColors) TextEditingController(text: hex),
   ];
 
   @override
   void dispose() {
+    _baseBranchColorField.dispose();
     for (final field in _laneFields) {
       field.dispose();
     }
@@ -596,8 +600,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _change(_settings.copyWith(laneColors: colors));
   }
 
+  void _changeBaseBranchColor(String value) {
+    if (parseHexColor(value) == null) return;
+    _change(_settings.copyWith(baseBranchColor: formatHexColor(value)));
+  }
+
   void _resetLaneColors() {
-    _change(_settings.copyWith(laneColors: AppSettings.defaultLaneColors));
+    _change(
+      _settings.copyWith(
+        baseBranchColor: AppSettings.defaultBaseBranchColor,
+        laneColors: AppSettings.defaultLaneColors,
+      ),
+    );
+    _baseBranchColorField.text = AppSettings.defaultBaseBranchColor;
     for (var index = 0; index < _laneFields.length; index++) {
       _laneFields[index].text = AppSettings.defaultLaneColors[index];
     }
@@ -855,23 +870,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
       const SizedBox(height: 6),
-      // The mainline is always white and not part of the editable palette.
       Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Row(
           children: [
             Container(
-              key: const Key('lane-swatch-main'),
+              key: const Key('base-branch-swatch'),
               width: 20,
               height: 20,
               decoration: BoxDecoration(
-                color: AvatarService.branchColor(0),
+                color:
+                    parseHexColor(_settings.baseBranchColor) ??
+                    AvatarService.defaultBaseBranchColor,
                 borderRadius: BorderRadius.circular(5),
               ),
             ),
             const SizedBox(width: 10),
+            SizedBox(
+              width: 120,
+              child: TextField(
+                key: const Key('base-branch-color'),
+                controller: _baseBranchColorField,
+                onChanged: _changeBaseBranchColor,
+                style: const TextStyle(
+                  color: Color(0xFFE8EAF2),
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                ),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 7,
+                  ),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
             const Text(
-              'Main line (fixed)',
+              'Base branch',
               style: TextStyle(color: Color(0xFF8D94A8), fontSize: 11),
             ),
           ],
