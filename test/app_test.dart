@@ -8675,6 +8675,73 @@ void main() {
     );
   });
 
+  testWidgets('recent ref choices lead each branch selector group', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('tip', 'tip')],
+            refs: const RepoRefs(
+              local: ['old', 'new'],
+              remote: ['origin/old', 'origin/new'],
+              tags: ['v1.0.0', 'v2.0.0'],
+              current: 'old',
+              tips: {
+                'old': 'tip',
+                'new': 'tip',
+                'origin/old': 'tip',
+                'origin/new': 'tip',
+                'v1.0.0': 'tip',
+                'v2.0.0': 'tip',
+              },
+              branchActivityTimes: {
+                'old': 100,
+                'new': 300,
+                'origin/old': 200,
+                'origin/new': 400,
+              },
+              birthTimes: {'old': 150, 'new': 250},
+              tagCreatorTimes: {'v1.0.0': 500, 'v2.0.0': 600},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('base-branch-selector')));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getTopLeft(find.byKey(const Key('base-branch-menu-new'))).dy,
+      lessThan(
+        tester.getTopLeft(find.byKey(const Key('base-branch-menu-old'))).dy,
+      ),
+    );
+    await tester.tap(find.byKey(const Key('base-branch-menu-new')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .getTopLeft(find.byKey(const Key('branch-diff-menu-origin/new')))
+          .dy,
+      lessThan(
+        tester
+            .getTopLeft(find.byKey(const Key('branch-diff-menu-origin/old')))
+            .dy,
+      ),
+    );
+    expect(
+      tester.getTopLeft(find.byKey(const Key('branch-diff-menu-v2.0.0'))).dy,
+      lessThan(
+        tester.getTopLeft(find.byKey(const Key('branch-diff-menu-v1.0.0'))).dy,
+      ),
+    );
+  });
+
   testWidgets(
     'YogitApp persists a fallback resolved before settings finish loading',
     (tester) async {

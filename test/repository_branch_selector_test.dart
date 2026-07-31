@@ -122,6 +122,7 @@ void main() {
             repositoryPath: '/repos/yogit',
             localBranches: const ['main', 'feature/a'],
             remoteBranches: const ['origin/main'],
+            tags: const ['v2.0.0', 'v1.0.0'],
             selectedBranch: 'main',
             comparedBranch: 'feature/a',
             refsLoading: false,
@@ -139,6 +140,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('LOCAL'), findsOneWidget);
     expect(find.text('REMOTE'), findsOneWidget);
+    expect(find.text('TAG'), findsOneWidget);
+    expect(find.byKey(const Key('branch-diff-menu-v2.0.0')), findsOneWidget);
     expect(find.byKey(const Key('branch-diff-menu-main')), findsNothing);
     expect(
       find.descendant(

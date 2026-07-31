@@ -1736,8 +1736,15 @@ class _TimelineScreenState extends State<TimelineScreen>
                     child: RepositoryBranchSelector(
                       repositoryName: _repositoryName,
                       repositoryPath: widget.repository.root,
-                      localBranches: _refs.local,
-                      remoteBranches: _refs.remote,
+                      localBranches: _recentLocalBranches,
+                      remoteBranches: sortRefsNewestFirst(
+                        _refs.remote,
+                        _refs.branchActivityTimes,
+                      ),
+                      tags: sortRefsNewestFirst(
+                        _refs.tags,
+                        _refs.tagCreatorTimes,
+                      ),
                       selectedBranch: _baseBranch,
                       comparedBranch: _compareRef,
                       refsLoading: _refsLoading,
@@ -1762,6 +1769,16 @@ class _TimelineScreenState extends State<TimelineScreen>
       ),
     ],
   );
+
+  List<String> get _recentLocalBranches => sortRefsNewestFirst(_refs.local, {
+    for (final name in _refs.local)
+      if (_refs.branchActivityTimes[name] != null ||
+          _refs.birthTimes[name] != null)
+        name: math.max(
+          _refs.branchActivityTimes[name] ?? 0,
+          _refs.birthTimes[name] ?? 0,
+        ),
+  });
 
   /// The drag stretch and wordmark share whatever the functional clusters
   /// leave. The wordmark steps down to 20px and then goes rather than squeeze
