@@ -486,7 +486,10 @@ void main() {
 
     // Nothing moved until the selected row's bottom passed the viewport bottom,
     // and then only far enough to hold the row flush against that edge.
-    expect(index * TimelineScreen.rowHeight, greaterThan(viewport - 34));
+    expect(
+      index * TimelineScreen.rowHeight,
+      greaterThan(viewport - TimelineScreen.rowHeight),
+    );
     expect(position.pixels, (index + 1) * TimelineScreen.rowHeight - viewport);
     final anchored = position.pixels;
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
@@ -7357,6 +7360,14 @@ void main() {
     }
     expect(find.byKey(const Key('ref-more-multi')), findsNothing);
     expect(chip.left - cell.left, 14);
+    expect(chip.center.dy, cell.center.dy);
+    expect(
+      tester
+          .getRect(find.byKey(const Key('ref-chip-connector-multi')))
+          .center
+          .dy,
+      cell.center.dy,
+    );
     expect(
       cell.right -
           tester.getRect(find.byKey(const Key('ref-chip-multi-main'))).right,
@@ -13051,7 +13062,7 @@ void main() {
           matching: find.byType(Scrollable),
         ),
       );
-      scrollable.position.jumpTo(32);
+      scrollable.position.jumpTo(TimelineScreen.rowHeight);
       await tester.pump();
       final before = scrollable.position.pixels;
 
