@@ -3596,10 +3596,23 @@ class _TimelineScreenState extends State<TimelineScreen>
               _rebasePreview?.virtualTip != null;
   }
 
+  BranchApplyTarget? get _branchPreviewTarget {
+    final comparison = _comparison;
+    if (comparison == null) return null;
+    return resolveBranchApplyTarget(
+      mode: _branchPreviewMode == BranchPreviewMode.merge
+          ? BranchApplyMode.merge
+          : BranchApplyMode.rebase,
+      comparison: comparison,
+      refs: _refs,
+    );
+  }
+
+  bool get _branchPreviewCanPrepare =>
+      _branchPreviewReady && _branchPreviewTarget != null;
+
   bool get _branchPreviewCanApply =>
-      _branchPreviewReady &&
-      _refs.local.contains(_comparison!.baseRef) &&
-      _refs.local.contains(_comparison!.compareRef);
+      _branchPreviewCanPrepare && !_branchPreviewTarget!.needsRecalculation;
 
   bool get _branchApplyBusy =>
       _branchApplyStatus == BranchApplyStatus.applying ||
@@ -3607,14 +3620,54 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   String get _branchPreviewApplyLabel {
     final comparison = _comparison!;
+    final target = _branchPreviewTarget;
+    if (target?.needsRecalculation == true) {
+      return '로컬 ${target!.localBranch} 기준으로 다시 계산';
+    }
     return _branchPreviewMode == BranchPreviewMode.merge
-        ? '${comparison.compareRef}를 ${comparison.baseRef}에 Merge 실제 적용'
-        : '${comparison.baseRef} 위로 ${comparison.compareRef} Rebase 실제 적용';
+        ? '${comparison.compareRef}를 ${target?.localBranch ?? comparison.baseRef}에 Merge 실제 적용'
+        : '${comparison.baseRef} 위로 ${target?.localBranch ?? comparison.compareRef} Rebase 실제 적용';
+  }
+
+  String get _branchPreviewApplyHelp {
+    final comparison = _comparison!;
+    final target = _branchPreviewTarget;
+    if (target == null) return '적용할 로컬 브랜치를 찾을 수 없습니다.';
+    if (target.needsRecalculation) {
+      return '기존 로컬 ${target.localBranch} 기준으로 다시 계산해야 합니다.';
+    }
+    if (target.createsBranch) {
+      return '로컬 ${target.localBranch}를 ${target.selectedRef}에서 만든 뒤 결과를 적용합니다.';
+    }
+    if (_branchPreviewMode == BranchPreviewMode.merge &&
+        _refs.remote.contains(comparison.compareRef)) {
+      return '${comparison.compareRef}는 입력으로만 사용합니다. 실제 변경은 로컬 ${target.localBranch}에 적용됩니다.';
+    }
+    return '가상 결과를 로컬 ${target.localBranch}에 적용할 수 있습니다.';
+  }
+
+  Future<void> _prepareBranchPreviewApply() async {
+    final target = _branchPreviewTarget;
+    if (target == null || !_branchPreviewReady || _branchApplyBusy) return;
+    if (target.needsRecalculation) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('기존 로컬 ${target.localBranch} 기준으로 미리보기를 다시 계산했습니다.'),
+        ),
+      );
+      await _selectComparison(target.localBranch);
+      return;
+    }
+    await _confirmBranchPreviewApply();
   }
 
   Future<void> _confirmBranchPreviewApply() async {
     final comparison = _comparison;
-    if (comparison == null || !_branchPreviewCanApply || _branchApplyBusy) {
+    final target = _branchPreviewTarget;
+    if (comparison == null ||
+        target == null ||
+        !_branchPreviewCanApply ||
+        _branchApplyBusy) {
       return;
     }
     final merge = _branchPreviewMode == BranchPreviewMode.merge;
@@ -3627,9 +3680,9 @@ class _TimelineScreenState extends State<TimelineScreen>
           '${comparison.baseTip}\n\n'
           '대상 브랜치 ${comparison.compareRef}\n'
           '${comparison.compareTip}\n\n'
-          '${merge ? comparison.baseRef : comparison.compareRef} 로컬 브랜치만 변경합니다. '
-          '원격 저장소로 push하지 않습니다.\n'
-          '완료한 뒤에도 두 브랜치를 이 시작 SHA의 이전 시점으로 되돌릴 수 있습니다.',
+          '로컬 ${target.localBranch} 브랜치만 변경합니다. '
+          '원격 추적 브랜치와 원격 저장소는 변경하지 않습니다.\n'
+          '완료 뒤 적용 전 SHA로 되돌릴 수 있습니다.',
         ),
         actions: [
           TextButton(
@@ -3721,6 +3774,32 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
   }
 
+  String get _branchPreviewAppliedSummary {
+    final result = _branchApplyResult!;
+    final local = result.mode == BranchApplyMode.merge
+        ? '${result.baseBranch}: ${result.baseBefore} → ${result.baseAfter}'
+        : result.compareBranchCreated
+        ? '${result.compareBranch}: 새 브랜치 → ${result.compareAfter}'
+        : '${result.compareBranch}: ${result.compareBefore} → ${result.compareAfter}';
+    final compareRef = _comparison?.compareRef;
+    return compareRef != null && _refs.remote.contains(compareRef)
+        ? '$local\n$compareRef: 변경 없음'
+        : local;
+  }
+
+  String _branchPreviewRollbackMessage(BranchApplyResult result) {
+    final local = result.mode == BranchApplyMode.merge
+        ? '로컬 ${result.baseBranch}을 ${result.baseBefore}으로 되돌립니다.'
+        : result.compareBranchCreated
+        ? '적용 과정에서 만든 로컬 ${result.compareBranch}를 삭제합니다.'
+        : '로컬 ${result.compareBranch}를 ${result.compareBefore}으로 되돌립니다.';
+    final compareRef = _comparison?.compareRef;
+    final remote = compareRef != null && _refs.remote.contains(compareRef)
+        ? '\n$compareRef는 변경하지 않습니다.'
+        : '';
+    return '$local$remote\n원격 저장소는 변경하지 않습니다.';
+  }
+
   Future<void> _confirmBranchPreviewRollback() async {
     final result = _branchApplyResult;
     if (result == null || _branchApplyStatus != BranchApplyStatus.applied) {
@@ -3732,11 +3811,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         title: Text(
           '${result.mode == BranchApplyMode.merge ? 'Merge' : 'Rebase'} 이전 시점으로 되돌리기',
         ),
-        content: Text(
-          '${result.baseBranch}: ${result.baseBefore}\n'
-          '${result.compareBranch}: ${result.compareBefore}\n\n'
-          '두 로컬 브랜치를 위 SHA로 되돌립니다. 원격 저장소는 변경하지 않습니다.',
-        ),
+        content: Text(_branchPreviewRollbackMessage(result)),
         actions: [
           TextButton(
             autofocus: true,
@@ -3773,9 +3848,9 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   Widget _branchPreviewApplyButton() => FilledButton(
     key: const Key('branch-preview-apply'),
-    onPressed: _branchApplyBusy || !_branchPreviewCanApply
+    onPressed: _branchApplyBusy || !_branchPreviewCanPrepare
         ? null
-        : () => unawaited(_confirmBranchPreviewApply()),
+        : () => unawaited(_prepareBranchPreviewApply()),
     style: FilledButton.styleFrom(
       foregroundColor: const Color(0xFFFFF4FF),
       backgroundColor: const Color(0xFF594576),
@@ -3917,8 +3992,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           if (result != null) ...[
             const SizedBox(height: 8),
             Text(
-              '${result.baseBranch}: ${result.baseBefore} → ${result.baseAfter}\n'
-              '${result.compareBranch}: ${result.compareBefore} → ${result.compareAfter}',
+              _branchPreviewAppliedSummary,
               style: TextStyle(
                 color: _palette.muted,
                 fontSize: 10,
@@ -3949,15 +4023,11 @@ class _TimelineScreenState extends State<TimelineScreen>
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (!_branchPreviewCanApply || merge) ...[
-                  Text(
-                    !_branchPreviewCanApply
-                        ? '원격 브랜치는 바로 적용할 수 없습니다. 로컬 브랜치를 선택해 주세요.'
-                        : '가상 결과를 실제 브랜치에 적용할 수 있습니다.',
-                    style: TextStyle(color: _palette.muted, fontSize: 10),
-                  ),
-                  const SizedBox(height: 7),
-                ],
+                Text(
+                  _branchPreviewApplyHelp,
+                  style: TextStyle(color: _palette.muted, fontSize: 10),
+                ),
+                const SizedBox(height: 7),
                 SizedBox(
                   width: double.infinity,
                   child: _branchPreviewApplyButton(),

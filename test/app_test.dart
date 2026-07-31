@@ -4048,8 +4048,8 @@ void main() {
     await tester.tap(find.byKey(const Key('branch-preview-apply')));
     await tester.pumpAndSettle();
     expect(find.text('Merge 실제 적용'), findsWidgets);
-    expect(find.textContaining('원격 저장소로 push하지 않습니다'), findsOneWidget);
-    expect(find.textContaining('이전 시점으로 되돌릴 수'), findsOneWidget);
+    expect(find.textContaining('원격 추적 브랜치와 원격 저장소는 변경하지 않습니다'), findsOneWidget);
+    expect(find.textContaining('적용 전 SHA로 되돌릴 수'), findsOneWidget);
     expect(find.textContaining('main-tip'), findsWidgets);
     expect(find.textContaining('feature-tip'), findsWidgets);
     await tester.tap(find.widgetWithText(FilledButton, 'Merge 실제 적용'));
@@ -4057,6 +4057,14 @@ void main() {
 
     expect(find.text('Merge 이전 시점으로 되돌리기'), findsOneWidget);
     expect(find.textContaining('merge-commit'), findsOneWidget);
+    await tester.drag(
+      find.byKey(const Key('preview-content-scroll')),
+      const Offset(0, 300),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(const Key('branch-preview-rollback')),
+    );
     await tester.tap(find.byKey(const Key('branch-preview-rollback')));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '되돌리기'));
@@ -4312,7 +4320,7 @@ void main() {
     );
   });
 
-  testWidgets('remote branch preview cannot be applied directly', (
+  testWidgets('remote merge preview applies to the local base only', (
     tester,
   ) async {
     final comparison = branchComparison(
@@ -4322,6 +4330,8 @@ void main() {
         treeSha: 'merge-tree',
       ),
     );
+    var applied = false;
+    var restored = false;
     await tester.pumpWidget(
       app(
         FakeGitRepository(
@@ -4331,8 +4341,23 @@ void main() {
             remote: ['origin/feature'],
             current: 'main',
             tips: {'main': 'main-tip', 'origin/feature': 'feature-tip'},
+            localTips: {'main': 'main-tip'},
           ),
           compareBranchesCallback: (_, _) async => comparison,
+          applyMergePreviewCallback:
+              ({required comparison, required treeSha}) async {
+                applied = true;
+                return const BranchApplyResult(
+                  mode: BranchApplyMode.merge,
+                  baseBranch: 'main',
+                  compareBranch: 'origin/feature',
+                  baseBefore: 'main-tip',
+                  baseAfter: 'merge-tip',
+                  compareBefore: 'feature-tip',
+                  compareAfter: 'feature-tip',
+                );
+              },
+          restoreBranchApplyCallback: (_) async => restored = true,
         ),
         controller,
       ),
@@ -4345,17 +4370,199 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('branch-preview-apply-card')), findsOneWidget);
     expect(
-      find.text('원격 브랜치는 바로 적용할 수 없습니다. 로컬 브랜치를 선택해 주세요.'),
+      find.text('origin/feature는 입력으로만 사용합니다. 실제 변경은 로컬 main에 적용됩니다.'),
       findsOneWidget,
     );
+    final button = tester.widget<FilledButton>(
+      find.byKey(const Key('branch-preview-apply')),
+    );
+    expect(button.onPressed, isNotNull);
+    expect(find.text('origin/feature를 main에 Merge 실제 적용'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('branch-preview-apply')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('로컬 main 브랜치만 변경합니다'), findsOneWidget);
+    expect(find.textContaining('원격 추적 브랜치와 원격 저장소는 변경하지 않습니다'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Merge 실제 적용'));
+    await tester.pumpAndSettle();
+
+    expect(applied, isTrue);
+    expect(find.textContaining('main: main-tip → merge-tip'), findsOneWidget);
+    expect(find.textContaining('origin/feature: 변경 없음'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('branch-preview-rollback')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('로컬 main을 main-tip으로 되돌립니다'), findsOneWidget);
+    expect(find.textContaining('origin/feature는 변경하지 않습니다'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '되돌리기'));
+    await tester.pumpAndSettle();
+    expect(restored, isTrue);
+  });
+
+  testWidgets('remote rebase preview creates a local branch before apply', (
+    tester,
+  ) async {
+    final comparison = branchComparison(compareRef: 'origin/feature');
+    final original = comparison.commits
+        .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
+        .commit;
+    final preview = RebasePreviewResult(
+      status: RebasePreviewStatus.clean,
+      baseTip: comparison.baseTip,
+      compareTip: comparison.compareTip,
+      rewritten: [(original: original, rewrittenSha: 'rewritten-feature')],
+      completed: 1,
+      total: 1,
+      virtualTip: 'rewritten-feature',
+    );
+    var applied = false;
+    var restored = false;
+    late FakeGitRepository repository;
+    repository = FakeGitRepository(
+      (_, _) async => [commit('normal', 'normal history')],
+      refs: const RepoRefs(
+        local: ['main'],
+        remote: ['origin/feature'],
+        current: 'main',
+        tips: {'main': 'main-tip', 'origin/feature': 'feature-tip'},
+        localTips: {'main': 'main-tip'},
+      ),
+      compareBranchesCallback: (_, _) async => comparison,
+      openRebasePreviewCallback:
+          ({required baseRef, required compareRef}) async =>
+              FakeRebasePreviewSession(repository, preview),
+      applyRebasePreviewCallback:
+          ({required comparison, required virtualTip}) async {
+            applied = true;
+            return const BranchApplyResult(
+              mode: BranchApplyMode.rebase,
+              baseBranch: 'main',
+              compareBranch: 'feature',
+              baseBefore: 'main-tip',
+              baseAfter: 'main-tip',
+              compareBefore: 'feature-tip',
+              compareAfter: 'rewritten-feature',
+              compareBranchCreated: true,
+            );
+          },
+      restoreBranchApplyCallback: (_) async => restored = true,
+      filesBetween: (_, _) async => const [],
+    );
+    await tester.pumpWidget(
+      app(repository, controller, branchPreviewMode: BranchPreviewMode.rebase),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-origin/feature')));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('로컬 feature를 origin/feature에서 만든 뒤 결과를 적용합니다.'),
+      findsOneWidget,
+    );
+    expect(find.text('main 위로 feature Rebase 실제 적용'), findsOneWidget);
     expect(
       tester
           .widget<FilledButton>(find.byKey(const Key('branch-preview-apply')))
           .onPressed,
-      isNull,
+      isNotNull,
     );
+
+    await tester.tap(find.byKey(const Key('branch-preview-apply')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('로컬 feature 브랜치만 변경합니다'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Rebase 실제 적용'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 220));
+    await tester.pumpAndSettle();
+    expect(applied, isTrue);
+    expect(
+      find.textContaining('feature: 새 브랜치 → rewritten-feature'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('origin/feature: 변경 없음'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('branch-preview-rollback')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('적용 과정에서 만든 로컬 feature를 삭제합니다'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '되돌리기'));
+    await tester.pumpAndSettle();
+    expect(restored, isTrue);
+  });
+
+  testWidgets('divergent local rebase target recalculates before apply', (
+    tester,
+  ) async {
+    final comparisons = <String>[];
+    late FakeGitRepository repository;
+    repository = FakeGitRepository(
+      (_, _) async => [commit('normal', 'normal history')],
+      refs: const RepoRefs(
+        local: ['main', 'feature'],
+        remote: ['origin/feature'],
+        current: 'main',
+        tips: {
+          'main': 'main-tip',
+          'feature': 'local-tip',
+          'origin/feature': 'feature-tip',
+        },
+        localTips: {'main': 'main-tip', 'feature': 'local-tip'},
+      ),
+      compareBranchesCallback: (base, compare) async {
+        comparisons.add(compare);
+        return branchComparison(
+          compareRef: compare,
+          compareTip: compare == 'feature' ? 'local-tip' : 'feature-tip',
+        );
+      },
+      openRebasePreviewCallback:
+          ({required baseRef, required compareRef}) async {
+            final compareTip = compareRef == 'feature'
+                ? 'local-tip'
+                : 'feature-tip';
+            final original = commit(
+              compareTip,
+              'feature only',
+              parents: const ['root'],
+            );
+            return FakeRebasePreviewSession(
+              repository,
+              RebasePreviewResult(
+                status: RebasePreviewStatus.clean,
+                baseTip: 'main-tip',
+                compareTip: compareTip,
+                rewritten: [
+                  (original: original, rewrittenSha: 'rewritten-$compareTip'),
+                ],
+                completed: 1,
+                total: 1,
+                virtualTip: 'rewritten-$compareTip',
+              ),
+            );
+          },
+      filesBetween: (_, _) async => const [],
+    );
+    await tester.pumpWidget(
+      app(repository, controller, branchPreviewMode: BranchPreviewMode.rebase),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-origin/feature')));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(find.text('로컬 feature 기준으로 다시 계산'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('branch-preview-apply')));
+    await tester.pumpAndSettle();
+
+    expect(comparisons, ['origin/feature', 'feature']);
+    expect(find.text('기존 로컬 feature 기준으로 미리보기를 다시 계산했습니다.'), findsOneWidget);
   });
 
   testWidgets('rebase conflict focuses the actual commit row', (tester) async {
