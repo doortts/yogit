@@ -625,7 +625,7 @@ class TimelineScreen extends StatefulWidget {
   });
 
   /// Every row is this tall — commits and date headings alike.
-  static const rowHeight = 32.0;
+  static const rowHeight = 30.0;
 
   final GitRepository repository;
   final WindowFrameController? controller;
@@ -5429,7 +5429,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                   for (var index = 0; index < shown.length; index++)
                     Positioned(
                       left: inset + index * slot,
-                      top: 4,
+                      top: (TimelineScreen.rowHeight - 24) / 2,
                       width: slot,
                       height: 24,
                       child: _refChip(commit, shown[index], color),
@@ -5439,7 +5439,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                       key: Key('ref-chip-connector-${commit.sha}'),
                       left: constraints.maxWidth - inset,
                       right: 0,
-                      top: 15.5,
+                      top: (TimelineScreen.rowHeight - 1) / 2,
                       height: 1,
                       child: ColoredBox(color: color),
                     ),
