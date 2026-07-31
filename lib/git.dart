@@ -926,6 +926,57 @@ class BranchComparisonResult {
 
 enum BranchApplyMode { merge, rebase }
 
+class BranchApplyTarget {
+  const BranchApplyTarget({
+    required this.selectedRef,
+    required this.selectedTip,
+    required this.localBranch,
+    required this.localTip,
+  });
+
+  final String selectedRef;
+  final String selectedTip;
+  final String localBranch;
+  final String? localTip;
+
+  bool get createsBranch => localTip == null;
+  bool get needsRecalculation => localTip != null && localTip != selectedTip;
+}
+
+BranchApplyTarget? resolveBranchApplyTarget({
+  required BranchApplyMode mode,
+  required BranchComparisonResult comparison,
+  required RepoRefs refs,
+}) {
+  final selectedRef = mode == BranchApplyMode.merge
+      ? comparison.baseRef
+      : comparison.compareRef;
+  final selectedTip = mode == BranchApplyMode.merge
+      ? comparison.baseTip
+      : comparison.compareTip;
+
+  if (refs.local.contains(selectedRef)) {
+    return BranchApplyTarget(
+      selectedRef: selectedRef,
+      selectedTip: selectedTip,
+      localBranch: selectedRef,
+      localTip: refs.localTips[selectedRef] ?? refs.tips[selectedRef],
+    );
+  }
+  if (mode == BranchApplyMode.merge || !refs.remote.contains(selectedRef)) {
+    return null;
+  }
+  final separator = selectedRef.indexOf('/');
+  if (separator <= 0 || separator == selectedRef.length - 1) return null;
+  final localBranch = selectedRef.substring(separator + 1);
+  return BranchApplyTarget(
+    selectedRef: selectedRef,
+    selectedTip: selectedTip,
+    localBranch: localBranch,
+    localTip: refs.localTips[localBranch],
+  );
+}
+
 class BranchApplyResult {
   const BranchApplyResult({
     required this.mode,

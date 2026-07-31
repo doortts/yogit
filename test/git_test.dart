@@ -138,6 +138,92 @@ void main() {
     expect(resolveBaseBranch(const RepoRefs(), null), isNull);
   });
 
+  const remoteComparison = BranchComparisonResult(
+    baseRef: 'main',
+    compareRef: 'origin/feature',
+    baseTip: 'main-tip',
+    compareTip: 'remote-tip',
+    baseParent: null,
+    compareParent: null,
+    mergeBases: [],
+    commits: [],
+    files: [],
+    merge: MergeConflictCheck(
+      status: MergeConflictStatus.clean,
+      treeSha: 'merge-tree',
+    ),
+  );
+
+  test('remote rebase target maps to a missing local branch', () {
+    const refs = RepoRefs(
+      local: ['main'],
+      remote: ['origin/feature'],
+      tips: {'main': 'main-tip', 'origin/feature': 'remote-tip'},
+      localTips: {'main': 'main-tip'},
+    );
+
+    final target = resolveBranchApplyTarget(
+      mode: BranchApplyMode.rebase,
+      comparison: remoteComparison,
+      refs: refs,
+    );
+
+    expect(target?.selectedRef, 'origin/feature');
+    expect(target?.selectedTip, 'remote-tip');
+    expect(target?.localBranch, 'feature');
+    expect(target?.localTip, isNull);
+    expect(target?.createsBranch, isTrue);
+    expect(target?.needsRecalculation, isFalse);
+  });
+
+  test('different same-named local rebase target requires recalculation', () {
+    const refs = RepoRefs(
+      local: ['main', 'feature'],
+      remote: ['origin/feature'],
+      tips: {
+        'main': 'main-tip',
+        'feature': 'local-tip',
+        'origin/feature': 'remote-tip',
+      },
+      localTips: {'main': 'main-tip', 'feature': 'local-tip'},
+    );
+
+    final target = resolveBranchApplyTarget(
+      mode: BranchApplyMode.rebase,
+      comparison: remoteComparison,
+      refs: refs,
+    );
+
+    expect(target?.localBranch, 'feature');
+    expect(target?.localTip, 'local-tip');
+    expect(target?.createsBranch, isFalse);
+    expect(target?.needsRecalculation, isTrue);
+  });
+
+  test('matching same-named local rebase target is reused', () {
+    const refs = RepoRefs(
+      local: ['main', 'feature'],
+      remote: ['origin/feature'],
+      tips: {
+        'main': 'main-tip',
+        'feature': 'remote-tip',
+        'origin/feature': 'remote-tip',
+      },
+      localTips: {'main': 'main-tip', 'feature': 'remote-tip'},
+    );
+
+    final target = resolveBranchApplyTarget(
+      mode: BranchApplyMode.rebase,
+      comparison: remoteComparison,
+      refs: refs,
+    );
+
+    expect(target?.localBranch, 'feature');
+    expect(target?.localTip, 'remote-tip');
+    expect(target?.createsBranch, isFalse);
+    expect(target?.needsRecalculation, isFalse);
+  });
+
   test('preferred tip reserves lane zero across newer branch commits', () {
     final commits = [
       _commit('feature-tip', ['base']),
