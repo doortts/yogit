@@ -7048,93 +7048,24 @@ void main() {
     );
   });
 
-  testWidgets('the timeline colors editor applies hex edits and resets', (
+  testWidgets('timeline colors only shows the unified palette editor', (
     tester,
   ) async {
-    final saved = <AppSettings>[];
     await tester.pumpWidget(
       MaterialApp(
-        home: SettingsScreen(
-          settings: const AppSettings(),
-          onChanged: saved.add,
-        ),
+        home: SettingsScreen(settings: const AppSettings(), onChanged: (_) {}),
       ),
     );
     await tester.pumpAndSettle();
-    Color swatch(int index) =>
-        (tester
-                    .widget<Container>(find.byKey(Key('lane-swatch-$index')))
-                    .decoration!
-                as BoxDecoration)
-            .color!;
-    Color baseSwatch() =>
-        (tester
-                    .widget<Container>(
-                      find.byKey(const Key('base-branch-swatch')),
-                    )
-                    .decoration!
-                as BoxDecoration)
-            .color!;
 
     expect(find.text('Timeline colors'), findsOneWidget);
-    expect(find.byKey(const Key('lane-swatch-7')), findsOneWidget);
-    expect(swatch(0), const Color(0xFFFF2D95));
+    expect(find.text('Branch / Tag & graph palette'), findsOneWidget);
+    expect(find.text('Base branch and lane fallback'), findsNothing);
+    expect(find.byKey(const Key('base-branch-color')), findsNothing);
+    expect(find.byKey(const Key('lane-color-0')), findsNothing);
     expect(find.text('Base branch'), findsOneWidget);
-    expect(find.text('Main line (fixed)'), findsNothing);
-    expect(find.byKey(const Key('base-branch-color')), findsOneWidget);
-    expect(baseSwatch(), const Color(0xFF5CB270));
-
-    await tester.enterText(
-      find.byKey(const Key('base-branch-color')),
-      '#654321',
-    );
-    await tester.pumpAndSettle();
-    expect(saved.last.baseBranchColor, '#654321');
-    expect(baseSwatch(), const Color(0xFF654321));
-
-    await tester.enterText(find.byKey(const Key('base-branch-color')), '#65');
-    await tester.pumpAndSettle();
-    expect(saved.last.baseBranchColor, '#654321');
-
-    // No row context in the preview, so those avatars stay identity-colored.
-    expect(
-      tester
-          .widgetList<IdentityAvatar>(find.byType(IdentityAvatar))
-          .map((avatar) => avatar.discColor),
-      everyElement(isNull),
-    );
-
-    await tester.enterText(find.byKey(const Key('lane-color-0')), '#123456');
-    await tester.pumpAndSettle();
-    expect(saved.last.laneColors.first, '#123456');
-    expect(swatch(0), const Color(0xFF123456));
-
-    // A half-typed hex leaves the last good color in place.
-    await tester.enterText(find.byKey(const Key('lane-color-0')), '#12');
-    await tester.pumpAndSettle();
-    expect(saved.last.laneColors.first, '#123456');
-
-    await tester.ensureVisible(find.byKey(const Key('reset-lane-colors')));
-    await tester.tap(find.byKey(const Key('reset-lane-colors')));
-    await tester.pumpAndSettle();
-    expect(saved.last.baseBranchColor, AppSettings.defaultBaseBranchColor);
-    expect(baseSwatch(), const Color(0xFF5CB270));
-    expect(
-      tester
-          .widget<TextField>(find.byKey(const Key('base-branch-color')))
-          .controller
-          ?.text,
-      '#5CB270',
-    );
-    expect(saved.last.laneColors, AppSettings.defaultLaneColors);
-    expect(swatch(0), const Color(0xFFFF2D95));
-    expect(
-      tester
-          .widget<TextField>(find.byKey(const Key('lane-color-0')))
-          .controller
-          ?.text,
-      '#FF2D95',
-    );
+    expect(find.text('Color 2'), findsNothing);
+    expect(find.text('Color 9'), findsOneWidget);
   });
 
   testWidgets('branch tag palette editor applies Base and Text and resets', (
@@ -7155,11 +7086,31 @@ void main() {
       find.byKey(const Key('ref-palette-chip-0')),
     );
     final decoration = preview.decoration! as BoxDecoration;
-    expect(decoration.color, const Color(0xFF1D76DB).withValues(alpha: .18));
+    expect(decoration.color, const Color(0xFF0E8A16).withValues(alpha: .18));
     expect(
       decoration.border!.top.color,
-      const Color(0xFF68A7EA).withValues(alpha: .30),
+      const Color(0xFF18E022).withValues(alpha: .30),
     );
+    expect(find.byKey(const Key('ref-palette-assignment-0')), findsNothing);
+
+    await tester.ensureVisible(
+      find.byKey(const Key('ref-palette-assignment-1')),
+    );
+    await tester.tap(find.byKey(const Key('ref-palette-assignment-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Lane 2').last);
+    await tester.pumpAndSettle();
+    expect(saved.last.refPaletteAssignments[1], 2);
+
+    await tester.ensureVisible(
+      find.byKey(const Key('ref-palette-assignment-2')),
+    );
+    await tester.tap(find.byKey(const Key('ref-palette-assignment-2')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Lane 2').last);
+    await tester.pumpAndSettle();
+    expect(saved.last.refPaletteAssignments[1], 0);
+    expect(saved.last.refPaletteAssignments[2], 2);
 
     await tester.enterText(
       find.byKey(const Key('ref-palette-base-0')),
@@ -7179,6 +7130,10 @@ void main() {
     await tester.tap(find.byKey(const Key('reset-ref-palette')));
     await tester.pump();
     expect(saved.last.refPalette, AppSettings.defaultRefPalette);
+    expect(
+      saved.last.refPaletteAssignments,
+      AppSettings.defaultRefPaletteAssignments,
+    );
   });
 
   testWidgets('stored timeline colors reach the base and fallback rails', (

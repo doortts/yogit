@@ -709,9 +709,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   late AppSettings _settings = widget.settings;
   var _section = _SettingsSection.gitIntegrations;
-  late final _baseBranchColorField = TextEditingController(
-    text: _settings.baseBranchColor,
-  );
   late final _refPaletteFields = [
     for (final entry in _settings.refPalette)
       (
@@ -719,19 +716,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         text: TextEditingController(text: entry.text),
       ),
   ];
-  late final _laneFields = [
-    for (final hex in _settings.laneColors) TextEditingController(text: hex),
-  ];
 
   @override
   void dispose() {
-    _baseBranchColorField.dispose();
     for (final fields in _refPaletteFields) {
       fields.base.dispose();
       fields.text.dispose();
-    }
-    for (final field in _laneFields) {
-      field.dispose();
     }
     super.dispose();
   }
@@ -739,19 +729,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _change(AppSettings value) {
     setState(() => _settings = value);
     widget.onChanged(value);
-  }
-
-  /// Live validation: a half-typed hex leaves the timeline on the last good one.
-  void _changeLaneColor(int index, String value) {
-    if (parseHexColor(value) == null) return;
-    final colors = [..._settings.laneColors];
-    colors[index] = formatHexColor(value);
-    _change(_settings.copyWith(laneColors: colors));
-  }
-
-  void _changeBaseBranchColor(String value) {
-    if (parseHexColor(value) == null) return;
-    _change(_settings.copyWith(baseBranchColor: formatHexColor(value)));
   }
 
   void _changeRefPalette(int index, {String? base, String? text}) {
@@ -767,26 +744,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _change(_settings.copyWith(refPalette: palette));
   }
 
+  void _changeRefPaletteAssignment(int index, int lane) {
+    final assignments = [..._settings.refPaletteAssignments];
+    if (lane != 0) {
+      for (var other = 1; other < assignments.length; other++) {
+        if (assignments[other] == lane) assignments[other] = 0;
+      }
+    }
+    assignments[index] = lane;
+    _change(_settings.copyWith(refPaletteAssignments: assignments));
+  }
+
   void _resetRefPalette() {
-    _change(_settings.copyWith(refPalette: AppSettings.defaultRefPalette));
+    _change(
+      _settings.copyWith(
+        refPalette: AppSettings.defaultRefPalette,
+        refPaletteAssignments: AppSettings.defaultRefPaletteAssignments,
+      ),
+    );
     for (var index = 0; index < _refPaletteFields.length; index++) {
       _refPaletteFields[index].base.text =
           AppSettings.defaultRefPalette[index].base;
       _refPaletteFields[index].text.text =
           AppSettings.defaultRefPalette[index].text;
-    }
-  }
-
-  void _resetLaneColors() {
-    _change(
-      _settings.copyWith(
-        baseBranchColor: AppSettings.defaultBaseBranchColor,
-        laneColors: AppSettings.defaultLaneColors,
-      ),
-    );
-    _baseBranchColorField.text = AppSettings.defaultBaseBranchColor;
-    for (var index = 0; index < _laneFields.length; index++) {
-      _laneFields[index].text = AppSettings.defaultLaneColors[index];
     }
   }
 
@@ -1019,7 +999,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ),
   );
 
-  /// The lane palette: one swatch and hex field per color, plus the way back.
+  /// One palette drives both Branch / Tag chips and graph lines.
   Widget _laneColors() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -1034,15 +1014,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
       const SizedBox(height: 6),
       Row(
         children: [
-          const Text(
-            'Branch / Tag palette',
-            style: TextStyle(
-              color: Color(0xFFE8EAF2),
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
+          const Expanded(
+            child: Text(
+              'Branch / Tag & graph palette',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Color(0xFFE8EAF2),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
-          const Spacer(),
           TextButton(
             key: const Key('reset-ref-palette'),
             onPressed: _resetRefPalette,
@@ -1056,25 +1038,81 @@ class _SettingsScreenState extends State<SettingsScreen> {
           padding: const EdgeInsets.only(bottom: 8),
           child: Row(
             children: [
-              Container(
-                key: Key('ref-palette-chip-$index'),
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                decoration: BoxDecoration(
-                  color: _settings.refPaletteColorValues[index].base.withValues(
-                    alpha: .18,
-                  ),
-                  border: Border.all(
-                    color: _settings.refPaletteColorValues[index].text
-                        .withValues(alpha: .30),
-                  ),
-                  borderRadius: BorderRadius.circular(5),
-                ),
-                child: Text(
-                  'Color ${index + 1}',
-                  style: TextStyle(
-                    color: _settings.refPaletteColorValues[index].text,
-                    fontSize: 11,
-                  ),
+              SizedBox(
+                width: 240,
+                child: Row(
+                  children: [
+                    Container(
+                      key: Key('ref-palette-chip-$index'),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _settings.refPaletteColorValues[index].base
+                            .withValues(alpha: .18),
+                        border: Border.all(
+                          color: _settings.refPaletteColorValues[index].text
+                              .withValues(alpha: .30),
+                        ),
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: Text(
+                        'Color ${AppSettings.refPaletteNumbers[index]}',
+                        style: TextStyle(
+                          color: _settings.refPaletteColorValues[index].text,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    if (index == 0)
+                      const Text(
+                        'Base branch',
+                        style: TextStyle(
+                          color: Color(0xFF8D94A8),
+                          fontSize: 11,
+                        ),
+                      )
+                    else
+                      Expanded(
+                        child: Container(
+                          height: 30,
+                          padding: const EdgeInsets.symmetric(horizontal: 7),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF15171E),
+                            border: Border.all(color: const Color(0xFF565D6E)),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<int>(
+                              key: Key('ref-palette-assignment-$index'),
+                              value: _settings.refPaletteAssignments[index],
+                              isExpanded: true,
+                              isDense: true,
+                              dropdownColor: const Color(0xFF1D2029),
+                              style: const TextStyle(
+                                color: Color(0xFFE8EAF2),
+                                fontSize: 11,
+                              ),
+                              items: [
+                                const DropdownMenuItem(
+                                  value: 0,
+                                  child: Text('Random'),
+                                ),
+                                for (var lane = 2; lane <= 9; lane++)
+                                  DropdownMenuItem(
+                                    value: lane,
+                                    child: Text('Lane $lane'),
+                                  ),
+                              ],
+                              onChanged: (lane) =>
+                                  _changeRefPaletteAssignment(index, lane!),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
               const SizedBox(width: 10),
@@ -1095,87 +1133,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   key: Key('ref-palette-text-$index'),
                   controller: _refPaletteFields[index].text,
                   onChanged: (value) => _changeRefPalette(index, text: value),
-                  style: _colorFieldStyle,
-                  decoration: _colorFieldDecoration,
-                ),
-              ),
-            ],
-          ),
-        ),
-      Row(
-        children: [
-          const Expanded(
-            child: Text(
-              'Base branch and lane fallback',
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: Color(0xFF8D94A8), fontSize: 11),
-            ),
-          ),
-          TextButton(
-            key: const Key('reset-lane-colors'),
-            onPressed: _resetLaneColors,
-            child: const Text('Reset to defaults'),
-          ),
-        ],
-      ),
-      const SizedBox(height: 6),
-      Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Row(
-          children: [
-            Container(
-              key: const Key('base-branch-swatch'),
-              width: 20,
-              height: 20,
-              decoration: BoxDecoration(
-                color:
-                    parseHexColor(_settings.baseBranchColor) ??
-                    AvatarService.defaultBaseBranchColor,
-                borderRadius: BorderRadius.circular(5),
-              ),
-            ),
-            const SizedBox(width: 10),
-            SizedBox(
-              width: 120,
-              child: TextField(
-                key: const Key('base-branch-color'),
-                controller: _baseBranchColorField,
-                onChanged: _changeBaseBranchColor,
-                style: _colorFieldStyle,
-                decoration: _colorFieldDecoration,
-              ),
-            ),
-            const SizedBox(width: 10),
-            const Text(
-              'Base branch',
-              style: TextStyle(color: Color(0xFF8D94A8), fontSize: 11),
-            ),
-          ],
-        ),
-      ),
-      for (var index = 0; index < _laneFields.length; index++)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Row(
-            children: [
-              Container(
-                key: Key('lane-swatch-$index'),
-                width: 20,
-                height: 20,
-                decoration: BoxDecoration(
-                  color:
-                      parseHexColor(_settings.laneColors[index]) ??
-                      const Color(0xFF343946),
-                  borderRadius: BorderRadius.circular(5),
-                ),
-              ),
-              const SizedBox(width: 10),
-              SizedBox(
-                width: 120,
-                child: TextField(
-                  key: Key('lane-color-$index'),
-                  controller: _laneFields[index],
-                  onChanged: (value) => _changeLaneColor(index, value),
                   style: _colorFieldStyle,
                   decoration: _colorFieldDecoration,
                 ),
