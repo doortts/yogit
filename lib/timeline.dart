@@ -781,8 +781,8 @@ class _TimelineScreenState extends State<TimelineScreen>
   var _refsLoadFailed = false;
   var _refsLoaded = false;
   Timer? _fetchTimer;
-  var _fetchingRemotes = false;
-  Object? _fetchError;
+  final _fetchingRemotes = ValueNotifier(false);
+  final _fetchError = ValueNotifier<Object?>(null);
   CherryPickState? _cherryPickState;
   Object? _cherryPickError;
   var _cherryPickBusy = false;
@@ -883,11 +883,11 @@ class _TimelineScreenState extends State<TimelineScreen>
     if ((lifecycleState != null &&
             lifecycleState != AppLifecycleState.resumed) ||
         remotes.isEmpty ||
-        _fetchingRemotes ||
+        _fetchingRemotes.value ||
         _cherryPickState != null) {
       return;
     }
-    setState(() => _fetchingRemotes = true);
+    _fetchingRemotes.value = true;
     try {
       var updated = false;
       Object? fetchError;
@@ -901,9 +901,9 @@ class _TimelineScreenState extends State<TimelineScreen>
       }
       if (!mounted) return;
       if (updated) await _loadRefs();
-      if (mounted) setState(() => _fetchError = fetchError);
+      if (mounted) _fetchError.value = fetchError;
     } finally {
-      if (mounted) setState(() => _fetchingRemotes = false);
+      if (mounted) _fetchingRemotes.value = false;
     }
   }
 
@@ -1118,6 +1118,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (_ownsPreviewController) _previewController.dispose();
     _selectedIndex.removeListener(_selectedCommitChanged);
     _selectedIndex.dispose();
+    _fetchingRemotes.dispose();
+    _fetchError.dispose();
     _deletedBranchRevision.dispose();
     _hoverIndex.dispose();
     _hoveredHeader.dispose();
@@ -3374,35 +3376,41 @@ class _TimelineScreenState extends State<TimelineScreen>
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: _fetchError == null
-              ? Row(
-                  children: [
-                    _legend('commit', const _LegendDot()),
-                    _legend('merge', const _LegendDot(filled: true)),
-                    _legend('WIP', const _LegendDot(dashed: true)),
-                  ],
-                )
-              : Row(
-                  children: [
-                    Text(
-                      '원격 갱신 실패',
-                      style: TextStyle(color: _behind, fontSize: 10),
-                    ),
-                    const SizedBox(width: 4),
-                    TextButton(
-                      key: const Key('retry-origin-fetch'),
-                      onPressed: _fetchingRemotes
-                          ? null
-                          : () => unawaited(_refreshRemotes()),
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(0, 24),
-                        padding: const EdgeInsets.symmetric(horizontal: 6),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          child: ValueListenableBuilder<Object?>(
+            valueListenable: _fetchError,
+            builder: (context, error, _) => error == null
+                ? Row(
+                    children: [
+                      _legend('commit', const _LegendDot()),
+                      _legend('merge', const _LegendDot(filled: true)),
+                      _legend('WIP', const _LegendDot(dashed: true)),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      Text(
+                        '원격 갱신 실패',
+                        style: TextStyle(color: _behind, fontSize: 10),
                       ),
-                      child: const Text('다시 시도'),
-                    ),
-                  ],
-                ),
+                      const SizedBox(width: 4),
+                      ValueListenableBuilder<bool>(
+                        valueListenable: _fetchingRemotes,
+                        builder: (context, fetching, _) => TextButton(
+                          key: const Key('retry-origin-fetch'),
+                          onPressed: fetching
+                              ? null
+                              : () => unawaited(_refreshRemotes()),
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(0, 24),
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: const Text('다시 시도'),
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
         ),
         // The branch the focused commit's line belongs to, under the column that
         // line's chip sits in.
