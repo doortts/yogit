@@ -694,7 +694,7 @@ class AppSettings {
           ? defaultBaseBranchColor
           : formatHexColor(storedBaseBranchColor),
       laneColors: valid ? laneColors : defaultLaneColors,
-      refPalette: validRefPalette ? refPalette : migratedRefPalette,
+      refPalette: validRefPaletteAssignments ? refPalette : migratedRefPalette,
       refPaletteAssignments: validRefPaletteAssignments
           ? refPaletteAssignments
           : defaultRefPaletteAssignments,
@@ -1562,6 +1562,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
       const SizedBox(height: 6),
+      const Row(
+        children: [
+          SizedBox(width: 250),
+          SizedBox(
+            width: 100,
+            child: Text(
+              'Base',
+              style: TextStyle(color: Color(0xFF8D94A8), fontSize: 10),
+            ),
+          ),
+          SizedBox(width: 8),
+          SizedBox(
+            width: 100,
+            child: Text(
+              'Text / line',
+              style: TextStyle(color: Color(0xFF8D94A8), fontSize: 10),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 4),
       for (var index = 0; index < _refPaletteFields.length; index++)
         Padding(
           padding: const EdgeInsets.only(bottom: 8),

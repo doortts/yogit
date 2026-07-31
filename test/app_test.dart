@@ -7853,6 +7853,66 @@ void main() {
     expect(painter.committerColor, const Color(0xFF18E022));
   });
 
+  testWidgets('a pinned Color 4 reaches its lane chip and graph', (
+    tester,
+  ) async {
+    final store = MemorySettingsStore()
+      ..current = const AppSettings(
+        refPaletteAssignments: [1, 0, 3, 0, 0, 0, 0, 0],
+      );
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository(
+          (_, _) async => [
+            commit('main', 'main'),
+            commit('second', 'second'),
+            commit(
+              'third',
+              'third',
+              refs: const [GitRef(name: 'v3', isTag: true)],
+            ),
+          ],
+          refs: const RepoRefs(
+            local: ['main'],
+            current: 'main',
+            tips: {'main': 'main'},
+          ),
+        ),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final decoration =
+        tester
+                .widget<Container>(find.byKey(const Key('ref-chip-third-v3')))
+                .decoration!
+            as BoxDecoration;
+    expect(decoration.color, const Color(0xFF1D76DB).withValues(alpha: .18));
+    expect(
+      decoration.border!.top.color,
+      const Color(0xFF68A7EA).withValues(alpha: .30),
+    );
+    final painter =
+        tester
+                .widget<CustomPaint>(find.byKey(const Key('graph-painter-2')))
+                .painter!
+            as CommitGraphPainter;
+    expect(painter.row.branch, 2);
+    expect(painter.committerColor, const Color(0xFF68A7EA));
+    final connector = find.byKey(const Key('ref-chip-connector-third'));
+    expect(
+      tester
+          .widget<ColoredBox>(
+            find.descendant(of: connector, matching: find.byType(ColoredBox)),
+          )
+          .color,
+      const Color(0xFF68A7EA),
+    );
+  });
+
   testWidgets('preview describes the working tree row and counts files', (
     tester,
   ) async {
@@ -8139,6 +8199,19 @@ void main() {
       base: const Color(0xFF010203),
       text: const Color(0xFFA0B0C0),
     ));
+
+    for (final assignments in [
+      <int>[1, 2, 2, 0, 0, 0, 0, 0],
+      <int>[1, 10, 0, 0, 0, 0, 0, 0],
+    ]) {
+      final damaged = custom.toJson()..['refPaletteAssignments'] = assignments;
+      final restored = AppSettings.fromJson(damaged);
+      expect(restored.refPalette, AppSettings.defaultRefPalette);
+      expect(
+        restored.refPaletteAssignments,
+        AppSettings.defaultRefPaletteAssignments,
+      );
+    }
 
     for (final stored in [
       <Object>[],
@@ -9360,6 +9433,8 @@ void main() {
     expect(find.byKey(const Key('base-branch-color')), findsNothing);
     expect(find.byKey(const Key('lane-color-0')), findsNothing);
     expect(find.text('Base branch'), findsOneWidget);
+    expect(find.text('Base'), findsOneWidget);
+    expect(find.text('Text / line'), findsOneWidget);
     expect(find.text('Color 2'), findsNothing);
     expect(find.text('Color 9'), findsOneWidget);
   });
@@ -13555,6 +13630,15 @@ void main() {
     expect(
       assignBranchPaletteIndexes(rows, 7, refPaletteAssignments: assignments),
       indexes,
+    );
+    expect(
+      assignBranchPaletteIndexes(
+        rows,
+        7,
+        branchNames: const {1: 'd'},
+        refPaletteAssignments: assignments,
+      )[1],
+      indexes[1],
     );
     for (var length = 1; length <= rows.length; length++) {
       final prefix = assignBranchPaletteIndexes(
