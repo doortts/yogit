@@ -756,6 +756,63 @@ void main() {
     },
   );
 
+  testWidgets('preview diff resizer shows blue line only on hover', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 700);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          files: (_, _) async => const [
+            GitFileChange(
+              path: 'lib/a.dart',
+              status: 'M',
+              additions: 1,
+              deletions: 1,
+            ),
+          ],
+          diff: (_, _, _, _, _) async => const [
+            DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+            DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
+    await tester.pumpAndSettle();
+
+    Color lineColor() => tester
+        .widget<ColoredBox>(find.byKey(const Key('preview-diff-hover-line')))
+        .color;
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: const Offset(1190, 690));
+    expect(lineColor(), Colors.transparent);
+    expect(
+      tester.getRect(find.byKey(const Key('preview-diff-hover-line'))).left,
+      tester.getRect(find.byKey(const Key('preview-diff'))).left,
+    );
+
+    await mouse.moveTo(
+      tester.getCenter(find.byKey(const Key('preview-diff-resizer'))),
+    );
+    await tester.pump();
+    expect(lineColor(), const Color(0xFF5AB0FF));
+
+    await mouse.moveTo(const Offset(1190, 690));
+    await tester.pump();
+    expect(lineColor(), Colors.transparent);
+  });
+
   testWidgets(
     'adjacent diff size defaults, persists, and reaches both endpoints',
     (tester) async {

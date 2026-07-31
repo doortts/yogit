@@ -8,7 +8,7 @@ Make the left/right preview diff splitter discoverable without adding a permanen
 
 - Keep the existing neutral one-pixel pane border at rest.
 - Use a 12 logical-pixel invisible pointer target around the divider.
-- While the pointer is inside that target, draw a centered two-pixel `#5AB0FF` vertical line.
+- While the pointer is inside that target, draw a two-pixel `#5AB0FF` vertical line on the pane boundary.
 - Remove the blue line immediately when the pointer leaves, including after a drag.
 - Do not change the bottom preview's horizontal splitter or any resize calculations.
 

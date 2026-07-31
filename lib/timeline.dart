@@ -840,6 +840,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   late double? _previewDiffLeftWidth = widget.previewDiffLeftWidth;
   late double? _previewDiffRightWidth = widget.previewDiffRightWidth;
   late double? _previewDiffBottomHeight = widget.previewDiffBottomHeight;
+  var _previewDiffResizerHovered = false;
   var _visiblePreviewDiffExtent = 0.0;
   var _maxPreviewDiffExtent = 0.0;
   var _bottomPreviewMaxHeight = double.maxFinite;
@@ -6678,6 +6679,12 @@ class _TimelineScreenState extends State<TimelineScreen>
       cursor: vertical
           ? SystemMouseCursors.resizeRow
           : SystemMouseCursors.resizeColumn,
+      onEnter: vertical
+          ? null
+          : (_) => setState(() => _previewDiffResizerHovered = true),
+      onExit: vertical
+          ? null
+          : (_) => setState(() => _previewDiffResizerHovered = false),
       child: GestureDetector(
         key: const Key('preview-diff-resizer'),
         behavior: HitTestBehavior.opaque,
@@ -6712,6 +6719,20 @@ class _TimelineScreenState extends State<TimelineScreen>
         onVerticalDragEnd: vertical
             ? (_) => _savePreviewDiffExtent(placement)
             : null,
+        child: vertical
+            ? const SizedBox.expand()
+            : Align(
+                alignment: placement == PreviewPlacement.right
+                    ? Alignment.centerLeft
+                    : Alignment.centerRight,
+                child: ColoredBox(
+                  key: const Key('preview-diff-hover-line'),
+                  color: _previewDiffResizerHovered
+                      ? const Color(0xFF5AB0FF)
+                      : Colors.transparent,
+                  child: const SizedBox(width: 2, height: double.infinity),
+                ),
+              ),
       ),
     );
     return vertical
@@ -6721,7 +6742,7 @@ class _TimelineScreenState extends State<TimelineScreen>
             right: placement == PreviewPlacement.left ? 0 : null,
             top: 0,
             bottom: 0,
-            width: 8,
+            width: 12,
             child: handle,
           );
   }

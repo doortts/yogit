@@ -12,7 +12,7 @@
 
 - Add no dependencies or new reusable components.
 - Keep the neutral one-pixel divider at rest.
-- Use a 12-pixel pointer target and a centered two-pixel `#5AB0FF` line on hover.
+- Use a 12-pixel pointer target and a two-pixel `#5AB0FF` line on the pane boundary when hovered.
 - Apply the accent only to left/right preview placements.
 
 ---
@@ -51,14 +51,17 @@ Expected: FAIL because `preview-diff-hover-line` does not exist.
 
 - [ ] **Step 3: Add the minimal hover state and line**
 
-Add one boolean state field. Use `MouseRegion.onEnter` and `onExit` for left/right placements, then give the existing `GestureDetector` a centered two-pixel child.
+Add one boolean state field. Use `MouseRegion.onEnter` and `onExit` for left/right placements, then give the existing `GestureDetector` a two-pixel child aligned with the pane boundary.
 
 ```dart
 onEnter: vertical ? null : (_) => setState(() => _previewDiffResizerHovered = true),
 onExit: vertical ? null : (_) => setState(() => _previewDiffResizerHovered = false),
 child: vertical
     ? const SizedBox.expand()
-    : Center(
+    : Align(
+        alignment: placement == PreviewPlacement.right
+            ? Alignment.centerLeft
+            : Alignment.centerRight,
         child: ColoredBox(
           key: const Key('preview-diff-hover-line'),
           color: _previewDiffResizerHovered
