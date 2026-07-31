@@ -986,6 +986,7 @@ class BranchApplyResult {
     required this.baseAfter,
     required this.compareBefore,
     required this.compareAfter,
+    this.compareBranchCreated = false,
   });
 
   final BranchApplyMode mode;
@@ -995,6 +996,7 @@ class BranchApplyResult {
   final String baseAfter;
   final String compareBefore;
   final String compareAfter;
+  final bool compareBranchCreated;
 }
 
 class GraphRow {
@@ -2103,26 +2105,74 @@ class GitRepository implements FullDiffRepository {
     required BranchComparisonResult comparison,
     required String virtualTip,
   }) async {
-    await _verifyApplyTips(comparison);
+    final refs = await _verifyApplyTips(comparison);
     final rewrittenTip = (await _run([
       'rev-parse',
       '--verify',
       '$virtualTip^{commit}',
     ])).trim();
-    await _moveLocalBranch(
-      branch: comparison.compareRef,
-      expected: comparison.compareTip,
-      next: rewrittenTip,
-    );
-    return BranchApplyResult(
+    final target = resolveBranchApplyTarget(
       mode: BranchApplyMode.rebase,
-      baseBranch: comparison.baseRef,
-      compareBranch: comparison.compareRef,
-      baseBefore: comparison.baseTip,
-      baseAfter: await _localBranchTip(comparison.baseRef),
-      compareBefore: comparison.compareTip,
-      compareAfter: await _localBranchTip(comparison.compareRef),
+      comparison: comparison,
+      refs: refs,
     );
+    if (target == null || target.needsRecalculation) {
+      throw GitRepositoryException(root, '기존 로컬 브랜치 기준으로 미리보기를 다시 계산해야 합니다.');
+    }
+
+    var created = false;
+    try {
+      if (target.createsBranch) {
+        await _run([
+          'branch',
+          '--no-track',
+          target.localBranch,
+          target.selectedTip,
+        ]);
+        created = true;
+        await _run([
+          'branch',
+          '--set-upstream-to=${target.selectedRef}',
+          target.localBranch,
+        ]);
+        final refreshedRefs = await loadRefs();
+        if (await _refTip(target.selectedRef, refreshedRefs) !=
+                target.selectedTip ||
+            await _localBranchTip(target.localBranch) != target.selectedTip) {
+          throw GitRepositoryException(
+            target.localBranch,
+            '원격 브랜치가 바뀌어 미리보기를 다시 계산해야 합니다.',
+          );
+        }
+      }
+      await _moveLocalBranch(
+        branch: target.localBranch,
+        expected: target.selectedTip,
+        next: rewrittenTip,
+      );
+      return BranchApplyResult(
+        mode: BranchApplyMode.rebase,
+        baseBranch: comparison.baseRef,
+        compareBranch: target.localBranch,
+        baseBefore: comparison.baseTip,
+        baseAfter: comparison.baseTip,
+        compareBefore: comparison.compareTip,
+        compareAfter: await _localBranchTip(target.localBranch),
+        compareBranchCreated: created,
+      );
+    } catch (_) {
+      if (created) {
+        try {
+          await _deleteLocalBranch(
+            branch: target.localBranch,
+            expected: target.selectedTip,
+          );
+        } on Object {
+          // 예상 SHA가 아니면 사용자 작업일 수 있으므로 남긴다.
+        }
+      }
+      rethrow;
+    }
   }
 
   Future<void> restoreBranchApply(BranchApplyResult result) async {
@@ -2134,6 +2184,13 @@ class GitRepository implements FullDiffRepository {
         branch: result.baseBranch,
         expected: result.baseAfter,
         next: result.baseBefore,
+      );
+      return;
+    }
+    if (result.compareBranchCreated) {
+      await _deleteLocalBranch(
+        branch: result.compareBranch,
+        expected: result.compareAfter,
       );
       return;
     }
@@ -2181,6 +2238,31 @@ class GitRepository implements FullDiffRepository {
     return sha;
   }
 
+  Future<void> _deleteLocalBranch({
+    required String branch,
+    required String expected,
+  }) async {
+    if (await _localBranchTip(branch) != expected) {
+      throw GitRepositoryException(branch, '브랜치가 바뀌어 삭제하지 않았습니다.');
+    }
+    await _run(['branch', '-D', branch]);
+  }
+
+  Future<String?> _branchWorktreePath(String branch) async {
+    final output = await _run(['worktree', 'list', '--porcelain']);
+    String? path;
+    for (final line in output.split('\n')) {
+      if (line.startsWith('worktree ')) {
+        path = line.substring('worktree '.length);
+      } else if (line == 'branch refs/heads/$branch') {
+        return path;
+      } else if (line.isEmpty) {
+        path = null;
+      }
+    }
+    return null;
+  }
+
   Future<void> _moveLocalBranch({
     required String branch,
     required String expected,
@@ -2199,6 +2281,13 @@ class GitRepository implements FullDiffRepository {
       }
       await _run(['reset', '--hard', next]);
       return;
+    }
+    final worktreePath = await _branchWorktreePath(branch);
+    if (worktreePath != null) {
+      throw GitRepositoryException(
+        branch,
+        '다른 worktree에서 체크아웃한 브랜치라 적용할 수 없습니다.',
+      );
     }
     await _run(['update-ref', 'refs/heads/$branch', next, expected]);
   }

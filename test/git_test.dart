@@ -1376,6 +1376,236 @@ void main() {
     },
   );
 
+  test(
+    'remote rebase preview creates a local tracking branch and undo removes it',
+    () async {
+      final fixture = await _remoteBranchPreviewFixture();
+      addTearDown(() => fixture.root.delete(recursive: true));
+      final commands = <List<String>>[];
+      final repository = GitRepository(
+        fixture.root.path,
+        runner: (executable, arguments, {workingDirectory, environment}) async {
+          commands.add(List<String>.of(arguments));
+          return runProcess(
+            executable,
+            arguments,
+            workingDirectory: workingDirectory,
+            environment: environment,
+          );
+        },
+      );
+      final session = await repository.openRebasePreview(
+        baseRef: 'main',
+        compareRef: 'origin/feature',
+      );
+      addTearDown(session.dispose);
+      final preview = await session.start();
+
+      final applied = await repository.applyRebasePreview(
+        comparison: fixture.comparison,
+        virtualTip: preview.virtualTip!,
+      );
+
+      expect(applied.compareBranch, 'feature');
+      expect(applied.compareBranchCreated, isTrue);
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
+        preview.virtualTip,
+      );
+      expect(
+        (await _git(fixture.root, [
+          'rev-parse',
+          '--abbrev-ref',
+          'feature@{upstream}',
+        ])).trim(),
+        'origin/feature',
+      );
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'origin/feature'])).trim(),
+        fixture.remoteTip,
+      );
+
+      await repository.restoreBranchApply(applied);
+
+      final localFeature = await Process.run('git', [
+        'show-ref',
+        '--verify',
+        'refs/heads/feature',
+      ], workingDirectory: fixture.root.path);
+      expect(localFeature.exitCode, isNot(0));
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'origin/feature'])).trim(),
+        fixture.remoteTip,
+      );
+      expect(
+        commands.where(
+          (arguments) =>
+              arguments.isNotEmpty &&
+              (arguments.first == 'push' || arguments.first == 'fetch'),
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
+    'remote rebase apply rejects a divergent same-named local branch',
+    () async {
+      final fixture = await _remoteBranchPreviewFixture();
+      addTearDown(() => fixture.root.delete(recursive: true));
+      await _git(fixture.root, ['branch', 'feature', 'main']);
+      final repository = GitRepository(fixture.root.path);
+
+      await expectLater(
+        repository.applyRebasePreview(
+          comparison: fixture.comparison,
+          virtualTip: fixture.comparison.baseTip,
+        ),
+        throwsA(
+          isA<GitRepositoryException>().having(
+            (error) => error.message,
+            'message',
+            contains('기존 로컬 브랜치 기준으로 미리보기를 다시 계산'),
+          ),
+        ),
+      );
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
+        fixture.comparison.baseTip,
+      );
+    },
+  );
+
+  test(
+    'remote rebase reuses a matching local branch and undo keeps it',
+    () async {
+      final fixture = await _remoteBranchPreviewFixture();
+      addTearDown(() => fixture.root.delete(recursive: true));
+      await _git(fixture.root, [
+        'branch',
+        '--no-track',
+        'feature',
+        'origin/feature',
+      ]);
+      final repository = GitRepository(fixture.root.path);
+      final session = await repository.openRebasePreview(
+        baseRef: 'main',
+        compareRef: 'origin/feature',
+      );
+      addTearDown(session.dispose);
+      final preview = await session.start();
+
+      final applied = await repository.applyRebasePreview(
+        comparison: fixture.comparison,
+        virtualTip: preview.virtualTip!,
+      );
+      expect(applied.compareBranchCreated, isFalse);
+
+      await repository.restoreBranchApply(applied);
+
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
+        fixture.remoteTip,
+      );
+      final upstream = await Process.run('git', [
+        'rev-parse',
+        '--abbrev-ref',
+        'feature@{upstream}',
+      ], workingDirectory: fixture.root.path);
+      expect(upstream.exitCode, isNot(0));
+    },
+  );
+
+  test(
+    'rebase apply rejects a target checked out in another worktree',
+    () async {
+      final fixture = await _remoteBranchPreviewFixture();
+      addTearDown(() => fixture.root.delete(recursive: true));
+      await _git(fixture.root, [
+        'branch',
+        '--no-track',
+        'feature',
+        'origin/feature',
+      ]);
+      final temporary = await Directory.systemTemp.createTemp(
+        'yogit_apply_worktree_',
+      );
+      final worktreePath = temporary.path;
+      await temporary.delete();
+      await _git(fixture.root, ['worktree', 'add', worktreePath, 'feature']);
+      addTearDown(() async {
+        await Process.run('git', [
+          'worktree',
+          'remove',
+          '--force',
+          worktreePath,
+        ], workingDirectory: fixture.root.path);
+        final directory = Directory(worktreePath);
+        if (await directory.exists()) await directory.delete(recursive: true);
+      });
+      final repository = GitRepository(fixture.root.path);
+
+      await expectLater(
+        repository.applyRebasePreview(
+          comparison: fixture.comparison,
+          virtualTip: fixture.comparison.baseTip,
+        ),
+        throwsA(
+          isA<GitRepositoryException>().having(
+            (error) => error.message,
+            'message',
+            contains('다른 worktree에서 체크아웃한 브랜치'),
+          ),
+        ),
+      );
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
+        fixture.remoteTip,
+      );
+    },
+  );
+
+  test(
+    'failed remote rebase apply removes its unchanged created branch',
+    () async {
+      final fixture = await _remoteBranchPreviewFixture();
+      addTearDown(() => fixture.root.delete(recursive: true));
+      final repository = GitRepository(
+        fixture.root.path,
+        runner: (executable, arguments, {workingDirectory, environment}) async {
+          if (arguments case ['update-ref', 'refs/heads/feature', _, _]) {
+            return ProcessResult(1, 1, '', 'forced update failure');
+          }
+          return runProcess(
+            executable,
+            arguments,
+            workingDirectory: workingDirectory,
+            environment: environment,
+          );
+        },
+      );
+
+      await expectLater(
+        repository.applyRebasePreview(
+          comparison: fixture.comparison,
+          virtualTip: fixture.comparison.baseTip,
+        ),
+        throwsA(isA<ProcessException>()),
+      );
+
+      final localFeature = await Process.run('git', [
+        'show-ref',
+        '--verify',
+        'refs/heads/feature',
+      ], workingDirectory: fixture.root.path);
+      expect(localFeature.exitCode, isNot(0));
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'origin/feature'])).trim(),
+        fixture.remoteTip,
+      );
+    },
+  );
+
   test('branch preview apply rejects a dirty checked-out branch', () async {
     final fixture = await _branchPreviewFixture();
     addTearDown(() => fixture.root.delete(recursive: true));
@@ -2456,6 +2686,7 @@ Future<({Directory root, BranchComparisonResult comparison, String remoteTip})>
 _remoteBranchPreviewFixture() async {
   final fixture = await _branchPreviewFixture();
   final remoteTip = fixture.comparison.compareTip;
+  await _git(fixture.root, ['remote', 'add', 'origin', '.']);
   await _git(fixture.root, [
     'update-ref',
     'refs/remotes/origin/feature',
