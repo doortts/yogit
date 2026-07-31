@@ -2325,6 +2325,9 @@ void main() {
       '/tmp/repository',
       runner: (executable, arguments, {workingDirectory, environment}) async {
         calls.add(arguments);
+        if (arguments.first == 'remote') {
+          return ProcessResult(1, 0, 'company\n', '');
+        }
         if (arguments.first == 'for-each-ref') {
           return ProcessResult(
             1,
@@ -2356,6 +2359,7 @@ void main() {
 
     expect(refs.local, ['main', 'feature/x']);
     expect(refs.remote, ['company/trunk']);
+    expect(refs.remoteNames, ['company']);
     expect(refs.tags, ['undated', 'v0.1.0']);
     expect(refs.tagCreatorTimes, {'v0.1.0': 1700000400});
     expect(refs.branchActivityTimes, {
@@ -2380,6 +2384,7 @@ void main() {
     // Only local branches have a birth time, and an empty reflog just has none.
     expect(refs.birthTimes, {'main': 1700000100});
     expect(calls, [
+      ['remote'],
       [
         'for-each-ref',
         '--format=%(refname)%00%(objectname)%00%(creatordate:unix)'
@@ -2394,7 +2399,7 @@ void main() {
         'rev-list',
         '--left-right',
         '--count',
-        'main...refs/remotes/company/trunk',
+        'refs/heads/main...refs/remotes/company/trunk',
       ],
       ['branch', '--show-current'],
     ]);
@@ -2421,6 +2426,7 @@ void main() {
     await _git(root, ['commit', '-m', 'base']);
     await _git(root, ['remote', 'add', 'origin', remote.path]);
     await _git(root, ['push', '-u', 'origin', 'main']);
+    await _git(root, ['tag', 'main']);
 
     await File('${root.path}/local.txt').writeAsString('local\n');
     await _git(root, ['add', 'local.txt']);
@@ -2440,6 +2446,52 @@ void main() {
     expect(refs.aheadBehind['main']?.ahead, 1);
     expect(refs.aheadBehind['main']?.behind, 1);
   });
+
+  test(
+    'loadRefs reports remote divergence from a same-named local branch',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'yogit_remote_divergence_',
+      );
+      final remote = await Directory.systemTemp.createTemp(
+        'yogit_remote_divergence_origin_',
+      );
+      final other = await Directory.systemTemp.createTemp(
+        'yogit_remote_divergence_other_',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      addTearDown(() => remote.delete(recursive: true));
+      addTearDown(() => other.delete(recursive: true));
+
+      await _git(remote, ['init', '--bare']);
+      await _initRepository(root);
+      await File('${root.path}/file.txt').writeAsString('base\n');
+      await _git(root, ['add', 'file.txt']);
+      await _git(root, ['commit', '-m', 'base']);
+      await _git(root, ['remote', 'add', 'foo/bar', remote.path]);
+      await _git(root, ['push', '-u', 'foo/bar', 'main']);
+      await _git(root, ['branch', '--unset-upstream', 'main']);
+
+      await File('${root.path}/local.txt').writeAsString('local\n');
+      await _git(root, ['add', 'local.txt']);
+      await _git(root, ['commit', '-m', 'local']);
+
+      await _git(other, ['clone', remote.path, '.']);
+      await _git(other, ['config', 'user.name', 'Other User']);
+      await _git(other, ['config', 'user.email', 'other@example.com']);
+      await File('${other.path}/remote.txt').writeAsString('remote\n');
+      await _git(other, ['add', 'remote.txt']);
+      await _git(other, ['commit', '-m', 'remote']);
+      await _git(other, ['push', 'origin', 'main']);
+      await _git(root, ['fetch', 'foo/bar']);
+
+      final refs = await GitRepository(root.path).loadRefs();
+
+      expect(refs.aheadBehind, isEmpty);
+      expect(refs.remoteAheadBehind['foo/bar/main']?.ahead, 1);
+      expect(refs.remoteAheadBehind['foo/bar/main']?.behind, 1);
+    },
+  );
 
   test(
     'fetchRemote fetches the named remote without terminal prompts',

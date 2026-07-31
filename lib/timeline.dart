@@ -781,7 +781,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   var _refsLoadFailed = false;
   var _refsLoaded = false;
   Timer? _fetchTimer;
-  var _fetchingOrigin = false;
+  var _fetchingRemotes = false;
   Object? _fetchError;
   CherryPickState? _cherryPickState;
   Object? _cherryPickError;
@@ -853,37 +853,60 @@ class _TimelineScreenState extends State<TimelineScreen>
     unawaited(_restoreCherryPickThenRefresh());
     _fetchTimer = Timer.periodic(
       _fetchInterval,
-      (_) => unawaited(_refreshSelectedRemote()),
+      (_) => unawaited(_refreshRemotes()),
     );
   }
 
-  Future<void> _refreshSelectedRemote() async {
+  List<String> get _remotesToRefresh {
+    final remotes = <String>{};
     final branch = _baseBranch;
-    final remote = branch == null ? null : _refs.upstreamRemotes[branch];
+    final upstreamRemote = branch == null
+        ? null
+        : _refs.upstreamRemotes[branch];
+    if (upstreamRemote != null) remotes.add(upstreamRemote);
+    for (final remoteBranch in _refs.remote) {
+      final split = splitRemoteBranchName(remoteBranch, _refs.remoteNames);
+      if (split == null || !_refs.local.contains(split.branch)) {
+        continue;
+      }
+      remotes.add(split.remote);
+    }
+    return remotes.toList()..sort();
+  }
+
+  Future<void> _refreshRemotes() async {
+    final remotes = _remotesToRefresh;
     final lifecycleState = WidgetsBinding.instance.lifecycleState;
     if ((lifecycleState != null &&
             lifecycleState != AppLifecycleState.resumed) ||
-        remote == null ||
-        _fetchingOrigin ||
+        remotes.isEmpty ||
+        _fetchingRemotes ||
         _cherryPickState != null) {
       return;
     }
-    setState(() => _fetchingOrigin = true);
+    setState(() => _fetchingRemotes = true);
     try {
-      final result = await widget.repository.fetchRemote(remote);
+      var updated = false;
+      Object? fetchError;
+      for (final remote in remotes) {
+        try {
+          final result = await widget.repository.fetchRemote(remote);
+          updated |= result == FetchOriginResult.updated;
+        } catch (error) {
+          fetchError ??= error;
+        }
+      }
       if (!mounted) return;
-      if (result == FetchOriginResult.updated) await _loadRefs();
-      if (mounted) setState(() => _fetchError = null);
-    } catch (error) {
-      if (mounted) setState(() => _fetchError = error);
+      if (updated) await _loadRefs();
+      if (mounted) setState(() => _fetchError = fetchError);
     } finally {
-      if (mounted) setState(() => _fetchingOrigin = false);
+      if (mounted) setState(() => _fetchingRemotes = false);
     }
   }
 
   Future<void> _restoreCherryPickThenRefresh() async {
     await Future.wait([_loadRefs(), _reloadCherryPickState()]);
-    if (_cherryPickState == null) await _refreshSelectedRemote();
+    if (_cherryPickState == null) await _refreshRemotes();
   }
 
   Future<void> _reloadCherryPickState() async {
@@ -1046,7 +1069,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           _rebuildGraph();
         });
         _scheduleRatchetUpdate();
-        unawaited(_refreshSelectedRemote());
+        unawaited(_refreshRemotes());
       }
       if (branch != null &&
           (pendingUserSelection || branch != widget.preferredBranch)) {
@@ -1952,7 +1975,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       _pendingBaseBranch = branch;
       _pendingBaseBranchIsUserSelection = true;
     }
-    unawaited(_refreshSelectedRemote());
+    unawaited(_refreshRemotes());
     _focusNode.requestFocus();
   }
 
@@ -3050,6 +3073,11 @@ class _TimelineScreenState extends State<TimelineScreen>
     final selectedLocal =
         section == _RefSection.local && name != null && name == _baseBranch;
     final behind = selectedLocal ? _refs.aheadBehind[name]?.behind ?? 0 : 0;
+    final remoteDifference = section == _RefSection.remote && name != null
+        ? _refs.remoteAheadBehind[name]
+        : null;
+    final remoteAhead = remoteDifference?.ahead ?? 0;
+    final remoteBehind = remoteDifference?.behind ?? 0;
     final inFolderTree = name == null || depth > 0;
 
     void toggleFolder() => setState(() {
@@ -3123,6 +3151,43 @@ class _TimelineScreenState extends State<TimelineScreen>
                     ),
                   ),
                 ),
+              if (remoteAhead > 0 || remoteBehind > 0) ...[
+                const SizedBox(width: 4),
+                Tooltip(
+                  message: [
+                    if (remoteAhead > 0) '로컬보다 $remoteAhead개 커밋 앞서 있습니다',
+                    if (remoteBehind > 0) '로컬보다 $remoteBehind개 커밋 뒤처져 있습니다',
+                  ].join(' · '),
+                  child: SizedBox(
+                    width: 36,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text.rich(
+                        key: Key('sidebar-remote-divergence-$name'),
+                        TextSpan(
+                          children: [
+                            if (remoteAhead > 0)
+                              TextSpan(
+                                text: '+$remoteAhead',
+                                style: const TextStyle(color: _success),
+                              ),
+                            if (remoteAhead > 0 && remoteBehind > 0)
+                              const TextSpan(text: ' '),
+                            if (remoteBehind > 0)
+                              TextSpan(
+                                text: '−$remoteBehind',
+                                style: const TextStyle(color: _remoteBehind),
+                              ),
+                          ],
+                        ),
+                        maxLines: 1,
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
           // When the branch was cut, in the Date column's own words.
@@ -3287,9 +3352,9 @@ class _TimelineScreenState extends State<TimelineScreen>
                     const SizedBox(width: 4),
                     TextButton(
                       key: const Key('retry-origin-fetch'),
-                      onPressed: _fetchingOrigin
+                      onPressed: _fetchingRemotes
                           ? null
-                          : () => unawaited(_refreshSelectedRemote()),
+                          : () => unawaited(_refreshRemotes()),
                       style: TextButton.styleFrom(
                         minimumSize: const Size(0, 24),
                         padding: const EdgeInsets.symmetric(horizontal: 6),

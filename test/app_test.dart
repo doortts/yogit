@@ -2731,6 +2731,88 @@ void main() {
   );
 
   testWidgets(
+    'remote branches show divergence from same-named local branches',
+    (tester) async {
+      await tester.pumpWidget(
+        app(
+          FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+            refs: const RepoRefs(
+              local: ['main', 'release'],
+              remote: ['origin/main', 'company/release', 'origin/remote-only'],
+              current: 'main',
+              remoteAheadBehind: {
+                'origin/main': BranchAheadBehind(ahead: 2, behind: 1),
+                'company/release': BranchAheadBehind(ahead: 0, behind: 0),
+              },
+            ),
+          ),
+          controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('+2 −1', findRichText: true), findsOneWidget);
+      expect(
+        find.byKey(const Key('sidebar-remote-divergence-origin/main')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('sidebar-remote-divergence-company/release')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('sidebar-remote-divergence-origin/remote-only')),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
+    'matching remotes refresh once every three minutes while active',
+    (tester) async {
+      final remotes = <String>[];
+      await tester.pumpWidget(
+        app(
+          FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+            refs: const RepoRefs(
+              local: ['main', 'release'],
+              remote: [
+                'origin/main',
+                'origin/release',
+                'company/release',
+                'company/remote-only',
+                'foo/bar/main',
+              ],
+              remoteNames: ['origin', 'company', 'foo', 'foo/bar'],
+              current: 'main',
+            ),
+            fetchRemoteCallback: (remote) async {
+              remotes.add(remote);
+              return FetchOriginResult.noOrigin;
+            },
+          ),
+          controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(remotes, ['company', 'foo/bar', 'origin']);
+
+      await tester.pump(const Duration(minutes: 3));
+      await tester.pump();
+      expect(remotes, [
+        'company',
+        'foo/bar',
+        'origin',
+        'company',
+        'foo/bar',
+        'origin',
+      ]);
+    },
+  );
+
+  testWidgets(
     'selected upstream refresh runs every three minutes while active',
     (tester) async {
       final remotes = <String>[];
