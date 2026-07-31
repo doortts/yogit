@@ -42,9 +42,9 @@ void main() {
     ]);
   });
 
-  test('sorts dated tags newest first and undated tags by name last', () {
+  test('sorts dated refs newest first and undated refs by name last', () {
     expect(
-      sortTagsNewestFirst(
+      sortRefsNewestFirst(
         ['undated-z', 'v1', 'v3', 'undated-a', 'v2'],
         {'v1': 100, 'v2': 200, 'v3': 200},
       ),

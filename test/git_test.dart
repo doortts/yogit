@@ -2358,6 +2358,11 @@ void main() {
     expect(refs.remote, ['company/trunk']);
     expect(refs.tags, ['undated', 'v0.1.0']);
     expect(refs.tagCreatorTimes, {'v0.1.0': 1700000400});
+    expect(refs.branchActivityTimes, {
+      'main': 1700000100,
+      'feature/x': 1700000200,
+      'company/trunk': 1700000300,
+    });
     expect(refs.current, 'main');
     // company/HEAD is an alias, so it contributes neither a name nor a tip.
     expect(refs.tips, {

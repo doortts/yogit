@@ -928,7 +928,9 @@ class _TimelineScreenState extends State<TimelineScreen>
       final compared = _compareRef;
       final comparisonStillExists =
           compared != null &&
-          (refs.local.contains(compared) || refs.remote.contains(compared));
+          (refs.local.contains(compared) ||
+              refs.remote.contains(compared) ||
+              refs.tags.contains(compared));
       setState(() {
         _refs = refs;
         _refsLoading = false;
@@ -1135,7 +1137,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         0,
         (value, row) => math.max(value, row.maxLane),
       );
-      deepest = math.max(deepest, graphDeepest + mappings.length);
+      deepest = math.max(deepest, graphDeepest + ((mappings.length + 2) ~/ 2));
     }
     if (deepest != _ratchetLane) setState(() => _ratchetLane = deepest);
   }
@@ -1736,8 +1738,15 @@ class _TimelineScreenState extends State<TimelineScreen>
                     child: RepositoryBranchSelector(
                       repositoryName: _repositoryName,
                       repositoryPath: widget.repository.root,
-                      localBranches: _refs.local,
-                      remoteBranches: _refs.remote,
+                      localBranches: _recentLocalBranches,
+                      remoteBranches: sortRefsNewestFirst(
+                        _refs.remote,
+                        _refs.branchActivityTimes,
+                      ),
+                      tags: sortRefsNewestFirst(
+                        _refs.tags,
+                        _refs.tagCreatorTimes,
+                      ),
                       selectedBranch: _baseBranch,
                       comparedBranch: _compareRef,
                       refsLoading: _refsLoading,
@@ -1762,6 +1771,16 @@ class _TimelineScreenState extends State<TimelineScreen>
       ),
     ],
   );
+
+  List<String> get _recentLocalBranches => sortRefsNewestFirst(_refs.local, {
+    for (final name in _refs.local)
+      if (_refs.branchActivityTimes[name] != null ||
+          _refs.birthTimes[name] != null)
+        name: math.max(
+          _refs.branchActivityTimes[name] ?? 0,
+          _refs.birthTimes[name] ?? 0,
+        ),
+  });
 
   /// The drag stretch and wordmark share whatever the functional clusters
   /// leave. The wordmark steps down to 20px and then goes rather than squeeze
@@ -2905,7 +2924,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (collapsed) return;
 
     final orderedNames = section == _RefSection.tags
-        ? sortTagsNewestFirst(names, _refs.tagCreatorTimes)
+        ? sortRefsNewestFirst(names, _refs.tagCreatorTimes)
         : names;
     final hiddenTagCount = section == _RefSection.tags
         ? math.max(0, orderedNames.length - _collapsedTagLimit)
@@ -5058,6 +5077,8 @@ class _TimelineScreenState extends State<TimelineScreen>
                               child: CustomPaint(
                                 painter: RebaseMappingPainter(
                                   rows: _comparisonRows,
+                                  entries: _entries,
+                                  selectedIndex: _selectedIndex,
                                   mappings: mappings,
                                   rowIndex: index,
                                   laneSpacing: painter.laneSpacing,
@@ -8094,13 +8115,17 @@ class _RowStateScopeState extends State<_RowStateScope> {
 class RebaseMappingPainter extends CustomPainter {
   const RebaseMappingPainter({
     required this.rows,
+    this.entries = const [],
+    this.selectedIndex,
     required this.mappings,
     required this.rowIndex,
     required this.laneSpacing,
     required this.compact,
-  });
+  }) : super(repaint: selectedIndex);
 
   final List<GraphRow> rows;
+  final List<TimelineEntry> entries;
+  final ValueListenable<int>? selectedIndex;
   final List<RebaseGraphMapping> mappings;
   final int rowIndex;
   final double laneSpacing;
@@ -8110,19 +8135,47 @@ class RebaseMappingPainter extends CustomPainter {
       ? CommitGraphPainter.laneInset
       : CommitGraphPainter.laneInset + lane * laneSpacing;
 
+  String? get _focusedSha {
+    final index = selectedIndex?.value;
+    if (index == null || index < 0 || index >= entries.length) return null;
+    final entry = entries[index];
+    return entry.rowIndex < 0 ? null : entry.row.commit.sha;
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
-    if (compact || rowIndex < 0 || rowIndex >= rows.length) return;
+    if (compact || size.isEmpty || rowIndex < 0 || rowIndex >= rows.length) {
+      return;
+    }
     final deepest = rows.fold<int>(
       0,
       (value, row) => math.max(value, row.maxLane),
     );
+    final firstRouteX = _laneX(deepest + 1);
+    final routeSpacing = laneSpacing / 2;
+    final fitsAll = mappings.every(
+      (mapping) =>
+          firstRouteX + mapping.routeLane * routeSpacing <= size.width - 1,
+    );
+    final visibleMappings = fitsAll
+        ? mappings
+        : mappings
+              .where(
+                (mapping) =>
+                    mapping.originalSha == _focusedSha ||
+                    mapping.rewrittenSha == _focusedSha,
+              )
+              .take(1);
     final centerY = size.height / 2;
-    for (final mapping in mappings) {
+    canvas.save();
+    canvas.clipRect(Offset.zero & size);
+    for (final mapping in visibleMappings) {
       final top = math.min(mapping.rewrittenRow, mapping.originalRow);
       final bottom = math.max(mapping.rewrittenRow, mapping.originalRow);
       if (rowIndex < top || rowIndex > bottom) continue;
-      final routeX = _laneX(deepest + 1 + mapping.routeLane);
+      final routeX = fitsAll
+          ? firstRouteX + mapping.routeLane * routeSpacing
+          : math.min(firstRouteX, size.width - 1);
       final rewrittenX = _laneX(rows[mapping.rewrittenRow].lane);
       final originalX = _laneX(rows[mapping.originalRow].lane);
       final path = Path();
@@ -8172,11 +8225,14 @@ class RebaseMappingPainter extends CustomPainter {
         );
       }
     }
+    canvas.restore();
   }
 
   @override
   bool shouldRepaint(covariant RebaseMappingPainter oldDelegate) =>
       oldDelegate.rows != rows ||
+      oldDelegate.entries != entries ||
+      oldDelegate.selectedIndex != selectedIndex ||
       oldDelegate.mappings != mappings ||
       oldDelegate.rowIndex != rowIndex ||
       oldDelegate.laneSpacing != laneSpacing ||

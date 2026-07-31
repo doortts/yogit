@@ -6,6 +6,7 @@ class RepositoryBranchSelector extends StatelessWidget {
     required this.repositoryPath,
     required this.localBranches,
     this.remoteBranches = const [],
+    this.tags = const [],
     required this.selectedBranch,
     this.comparedBranch,
     required this.refsLoading,
@@ -21,6 +22,7 @@ class RepositoryBranchSelector extends StatelessWidget {
   final String repositoryPath;
   final List<String> localBranches;
   final List<String> remoteBranches;
+  final List<String> tags;
   final String? selectedBranch;
   final String? comparedBranch;
   final bool refsLoading;
@@ -100,6 +102,7 @@ class RepositoryBranchSelector extends StatelessWidget {
             child: _ComparisonSelector(
               localBranches: localBranches,
               remoteBranches: remoteBranches,
+              tags: tags,
               baseBranch: selectedBranch,
               comparedBranch: comparedBranch,
               enabled: !refsLoading && !refsLoadFailed,
@@ -117,6 +120,7 @@ class _ComparisonSelector extends StatefulWidget {
   const _ComparisonSelector({
     required this.localBranches,
     required this.remoteBranches,
+    required this.tags,
     required this.baseBranch,
     required this.comparedBranch,
     required this.enabled,
@@ -126,6 +130,7 @@ class _ComparisonSelector extends StatefulWidget {
 
   final List<String> localBranches;
   final List<String> remoteBranches;
+  final List<String> tags;
   final String? baseBranch;
   final String? comparedBranch;
   final bool enabled;
@@ -150,6 +155,7 @@ class _ComparisonSelectorState extends State<_ComparisonSelector> {
 
     final local = visible(widget.localBranches);
     final remote = visible(widget.remoteBranches);
+    final tags = visible(widget.tags);
     return MenuAnchor(
       controller: _controller,
       onClose: () {
@@ -183,7 +189,8 @@ class _ComparisonSelectorState extends State<_ComparisonSelector> {
           ),
         ..._group('LOCAL', local),
         ..._group('REMOTE', remote),
-        if (local.isEmpty && remote.isEmpty)
+        ..._group('TAG', tags),
+        if (local.isEmpty && remote.isEmpty && tags.isEmpty)
           const Padding(
             padding: EdgeInsets.all(12),
             child: Text('일치하는 브랜치 없음'),

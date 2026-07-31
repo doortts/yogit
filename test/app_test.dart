@@ -2914,6 +2914,58 @@ void main() {
     );
   });
 
+  testWidgets('remote ref reload keeps a selected tag comparison', (
+    tester,
+  ) async {
+    var fetches = 0;
+    const refs = RepoRefs(
+      local: ['main'],
+      remote: ['origin/main'],
+      tags: ['v1.0.0'],
+      current: 'main',
+      upstreams: {'main': 'origin/main'},
+      upstreamRemotes: {'main': 'origin'},
+    );
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: refs,
+          refsLoader: () async => refs,
+          fetchRemoteCallback: (_) async {
+            fetches++;
+            if (fetches == 1) throw StateError('offline');
+            return FetchOriginResult.updated;
+          },
+          compareBranchesCallback: (_, compare) async =>
+              branchComparison(compareRef: compare),
+          simulateRebaseCallback:
+              ({required baseRef, required compareRef}) async =>
+                  const RebaseCheckResult(status: RebaseCheckStatus.clean),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-v1.0.0')));
+    await tester.pumpAndSettle();
+    expect(find.text('v1.0.0'), findsWidgets);
+
+    await tester.tap(find.byKey(const Key('retry-origin-fetch')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('branch-diff-selector')),
+        matching: find.text('v1.0.0'),
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('branch comparison keeps only two branch lanes', (tester) async {
     final result = branchComparison();
     await tester.pumpWidget(
@@ -5598,6 +5650,149 @@ void main() {
     expect(alphaAt(57, height ~/ 2), 0);
     expect(alphaAt(58, 0), greaterThan(0));
     expect(alphaAt(58, height - 1), greaterThan(0));
+  });
+
+  test('rebase mapping routes use half the commit lane spacing', () async {
+    final rows = [
+      for (var index = 0; index < 3; index++)
+        graphRow(
+          commit: commit('row-$index', 'row $index'),
+          lane: 0,
+          activeLanes: const [0],
+          nextLanes: const [0],
+        ),
+    ];
+    final painter = RebaseMappingPainter(
+      rows: rows,
+      mappings: const [
+        (
+          originalSha: 'row-2',
+          rewrittenSha: 'row-0',
+          originalRow: 2,
+          rewrittenRow: 0,
+          routeLane: 0,
+          color: Color(0xFFFF0000),
+        ),
+        (
+          originalSha: 'row-2',
+          rewrittenSha: 'row-0',
+          originalRow: 2,
+          rewrittenRow: 0,
+          routeLane: 1,
+          color: Color(0xFF00FF00),
+        ),
+      ],
+      rowIndex: 1,
+      laneSpacing: 30.5,
+      compact: false,
+    );
+    const width = 100;
+    const height = 36;
+    final recorder = ui.PictureRecorder();
+    painter.paint(Canvas(recorder), const Size(100, 36));
+    final image = await recorder.endRecording().toImage(width, height);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    int alphaAt(int x) => bytes!.getUint8(((height ~/ 2) * width + x) * 4 + 3);
+
+    expect(alphaAt(58), greaterThan(0));
+    expect(alphaAt(73), greaterThan(0));
+    expect(alphaAt(89), 0);
+  });
+
+  test(
+    'narrow rebase mapping paints only the focused route inside its width',
+    () async {
+      final rows = [
+        for (var index = 0; index < 6; index++)
+          graphRow(
+            commit: commit('row-$index', 'row $index'),
+            lane: 0,
+            activeLanes: const [0],
+            nextLanes: const [0],
+          ),
+      ];
+      final selectedIndex = ValueNotifier(1);
+      final painter = RebaseMappingPainter(
+        rows: rows,
+        entries: [
+          for (var index = 0; index < rows.length; index++)
+            (rowIndex: index, label: null, row: rows[index]),
+        ],
+        selectedIndex: selectedIndex,
+        mappings: const [
+          (
+            originalSha: 'row-5',
+            rewrittenSha: 'row-0',
+            originalRow: 5,
+            rewrittenRow: 0,
+            routeLane: 0,
+            color: Color(0xFFFF0000),
+          ),
+          (
+            originalSha: 'row-4',
+            rewrittenSha: 'row-1',
+            originalRow: 4,
+            rewrittenRow: 1,
+            routeLane: 1,
+            color: Color(0xFF00FF00),
+          ),
+          (
+            originalSha: 'row-3',
+            rewrittenSha: 'row-2',
+            originalRow: 3,
+            rewrittenRow: 2,
+            routeLane: 2,
+            color: Color(0xFF0000FF),
+          ),
+        ],
+        rowIndex: 2,
+        laneSpacing: 30.5,
+        compact: false,
+      );
+      const imageWidth = 100;
+      const paintWidth = 70;
+      const height = 36;
+      final recorder = ui.PictureRecorder();
+      painter.paint(Canvas(recorder), const Size(70, 36));
+      final image = await recorder.endRecording().toImage(imageWidth, height);
+      final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      int channelAt(int x, int channel) =>
+          bytes!.getUint8(((height ~/ 2) * imageWidth + x) * 4 + channel);
+
+      expect(channelAt(58, 1), greaterThan(channelAt(58, 0)));
+      for (var x = paintWidth; x < imageWidth; x++) {
+        expect(channelAt(x, 3), 0);
+      }
+    },
+  );
+
+  test('rebase mapping repaints when the focused commit changes', () {
+    final rows = [
+      graphRow(
+        commit: commit('row-0', 'row 0'),
+        lane: 0,
+        activeLanes: const [0],
+        nextLanes: const [0],
+      ),
+    ];
+    final selectedIndex = ValueNotifier(0);
+    final painter = RebaseMappingPainter(
+      rows: rows,
+      entries: [(rowIndex: 0, label: null, row: rows.single)],
+      selectedIndex: selectedIndex,
+      mappings: const [],
+      rowIndex: 0,
+      laneSpacing: 30.5,
+      compact: false,
+    );
+    var repaints = 0;
+    void listener() => repaints++;
+    painter.addListener(listener);
+
+    selectedIndex.value = 1;
+
+    expect(repaints, 1);
+    painter.removeListener(listener);
   });
 
   test('rebase mapping arrowhead is an open one-pixel chevron', () async {
@@ -8879,6 +9074,73 @@ void main() {
         matching: find.text('release'),
       ),
       findsOneWidget,
+    );
+  });
+
+  testWidgets('recent ref choices lead each branch selector group', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [commit('tip', 'tip')],
+            refs: const RepoRefs(
+              local: ['old', 'new'],
+              remote: ['origin/old', 'origin/new'],
+              tags: ['v1.0.0', 'v2.0.0'],
+              current: 'old',
+              tips: {
+                'old': 'tip',
+                'new': 'tip',
+                'origin/old': 'tip',
+                'origin/new': 'tip',
+                'v1.0.0': 'tip',
+                'v2.0.0': 'tip',
+              },
+              branchActivityTimes: {
+                'old': 100,
+                'new': 300,
+                'origin/old': 200,
+                'origin/new': 400,
+              },
+              birthTimes: {'old': 150, 'new': 250},
+              tagCreatorTimes: {'v1.0.0': 500, 'v2.0.0': 600},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('base-branch-selector')));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getTopLeft(find.byKey(const Key('base-branch-menu-new'))).dy,
+      lessThan(
+        tester.getTopLeft(find.byKey(const Key('base-branch-menu-old'))).dy,
+      ),
+    );
+    await tester.tap(find.byKey(const Key('base-branch-menu-new')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .getTopLeft(find.byKey(const Key('branch-diff-menu-origin/new')))
+          .dy,
+      lessThan(
+        tester
+            .getTopLeft(find.byKey(const Key('branch-diff-menu-origin/old')))
+            .dy,
+      ),
+    );
+    expect(
+      tester.getTopLeft(find.byKey(const Key('branch-diff-menu-v2.0.0'))).dy,
+      lessThan(
+        tester.getTopLeft(find.byKey(const Key('branch-diff-menu-v1.0.0'))).dy,
+      ),
     );
   });
 
