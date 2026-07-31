@@ -6249,12 +6249,26 @@ void main() {
   });
 
   test('branch tag palette round-trips and rejects damaged records', () {
+    expect(AppSettings.refPaletteNumbers, const [1, 3, 4, 5, 6, 7, 8, 9]);
     expect(AppSettings.defaultRefPalette, const [
-      (base: '#1D76DB', text: '#68A7EA'),
-      (base: '#E99695', text: '#E89292'),
-      (base: '#C5DEF5', text: '#C2DDF4'),
       (base: '#0E8A16', text: '#18E022'),
+      (base: '#C5DEF5', text: '#C2DDF4'),
+      (base: '#1D76DB', text: '#68A7EA'),
       (base: '#5319E7', text: '#DACFFA'),
+      (base: '#B51D68', text: '#FF2D95'),
+      (base: '#008FA3', text: '#00E5FF'),
+      (base: '#B89B00', text: '#FFF01F'),
+      (base: '#C94E10', text: '#FF6E27'),
+    ]);
+    expect(AppSettings.defaultRefPaletteAssignments, const [
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
     ]);
 
     const custom = AppSettings(
@@ -6264,7 +6278,11 @@ void main() {
         (base: '#212223', text: '#102030'),
         (base: '#313233', text: '#405060'),
         (base: '#414243', text: '#708090'),
+        (base: '#515253', text: '#8090A0'),
+        (base: '#616263', text: '#90A0B0'),
+        (base: '#717273', text: '#A0B0C0'),
       ],
+      refPaletteAssignments: [1, 2, 0, 4, 0, 0, 0, 9],
     );
     expect(AppSettings.fromJson(custom.toJson()), custom);
     expect(custom.refPaletteColorValues.first, (
@@ -6289,6 +6307,33 @@ void main() {
         AppSettings.defaultRefPalette,
       );
     }
+
+    expect(
+      AppSettings.fromJson({
+        'refPaletteAssignments': [1, 2, 2, 0, 0, 0, 0, 0],
+      }).refPaletteAssignments,
+      AppSettings.defaultRefPaletteAssignments,
+    );
+
+    const legacy = [
+      {'base': '#010101', 'text': '#111111'},
+      {'base': '#020202', 'text': '#222222'},
+      {'base': '#030303', 'text': '#333333'},
+      {'base': '#040404', 'text': '#444444'},
+      {'base': '#050505', 'text': '#555555'},
+    ];
+    final migrated = AppSettings.fromJson({'refPalette': legacy});
+    expect(migrated.refPalette, [
+      const (base: '#040404', text: '#444444'),
+      const (base: '#030303', text: '#333333'),
+      const (base: '#010101', text: '#111111'),
+      const (base: '#050505', text: '#555555'),
+      ...AppSettings.defaultRefPalette.skip(4),
+    ]);
+    expect(
+      migrated.refPaletteAssignments,
+      AppSettings.defaultRefPaletteAssignments,
+    );
   });
 
   test('base branches round-trip per repository', () {

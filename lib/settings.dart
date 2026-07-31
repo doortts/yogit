@@ -277,6 +277,7 @@ class AppSettings {
     this.baseBranchColor = defaultBaseBranchColor,
     this.laneColors = defaultLaneColors,
     this.refPalette = defaultRefPalette,
+    this.refPaletteAssignments = defaultRefPaletteAssignments,
     this.previewWidth = 288,
     this.previewHeight = 280,
     this.previewDiffLeftWidth,
@@ -301,13 +302,18 @@ class AppSettings {
     '#FF3131',
   ];
 
+  static const refPaletteNumbers = [1, 3, 4, 5, 6, 7, 8, 9];
   static const defaultRefPalette = <RefPaletteEntry>[
-    (base: '#1D76DB', text: '#68A7EA'),
-    (base: '#E99695', text: '#E89292'),
-    (base: '#C5DEF5', text: '#C2DDF4'),
     (base: '#0E8A16', text: '#18E022'),
+    (base: '#C5DEF5', text: '#C2DDF4'),
+    (base: '#1D76DB', text: '#68A7EA'),
     (base: '#5319E7', text: '#DACFFA'),
+    (base: '#B51D68', text: '#FF2D95'),
+    (base: '#008FA3', text: '#00E5FF'),
+    (base: '#B89B00', text: '#FFF01F'),
+    (base: '#C94E10', text: '#FF6E27'),
   ];
+  static const defaultRefPaletteAssignments = [1, 0, 0, 0, 0, 0, 0, 0];
 
   /// The palette that used to be the default. A settings file still carrying it
   /// unchanged never chose it, so it migrates to [defaultLaneColors]; an edited
@@ -334,6 +340,7 @@ class AppSettings {
   final String baseBranchColor;
   final List<String> laneColors;
   final List<RefPaletteEntry> refPalette;
+  final List<int> refPaletteAssignments;
   final Map<String, String> baseBranches;
   final Map<String, Map<String, String>> deletedBranchNames;
 
@@ -411,6 +418,7 @@ class AppSettings {
     String? baseBranchColor,
     List<String>? laneColors,
     List<RefPaletteEntry>? refPalette,
+    List<int>? refPaletteAssignments,
     double? previewWidth,
     double? previewHeight,
     double? previewDiffLeftWidth,
@@ -430,6 +438,7 @@ class AppSettings {
     baseBranchColor: baseBranchColor ?? this.baseBranchColor,
     laneColors: laneColors ?? this.laneColors,
     refPalette: refPalette ?? this.refPalette,
+    refPaletteAssignments: refPaletteAssignments ?? this.refPaletteAssignments,
     previewWidth: previewWidth ?? this.previewWidth,
     previewHeight: previewHeight ?? this.previewHeight,
     previewDiffLeftWidth: previewDiffLeftWidth ?? this.previewDiffLeftWidth,
@@ -469,13 +478,43 @@ class AppSettings {
               text: formatHexColor('${entry['text'] ?? ''}'),
             ),
     ];
+    final validRefPaletteEntries = refPalette.every(
+      (entry) =>
+          parseHexColor(entry.base) != null &&
+          parseHexColor(entry.text) != null,
+    );
     final validRefPalette =
-        refPalette.length == defaultRefPalette.length &&
-        refPalette.every(
-          (entry) =>
-              parseHexColor(entry.base) != null &&
-              parseHexColor(entry.text) != null,
-        );
+        refPalette.length == defaultRefPalette.length && validRefPaletteEntries;
+    final migratedRefPalette = refPalette.length == 5 && validRefPaletteEntries
+        ? [
+            refPalette[3],
+            refPalette[2],
+            refPalette[0],
+            refPalette[4],
+            ...defaultRefPalette.skip(4),
+          ]
+        : defaultRefPalette;
+    final storedRefPaletteAssignments = value['refPaletteAssignments'];
+    final refPaletteAssignments = [
+      if (storedRefPaletteAssignments is List)
+        for (final entry in storedRefPaletteAssignments)
+          if (entry is int) entry,
+    ];
+    final pinnedAssignments = refPaletteAssignments
+        .skip(1)
+        .where((assignment) => assignment != 0)
+        .toList();
+    final validRefPaletteAssignments =
+        validRefPalette &&
+        refPaletteAssignments.length == defaultRefPalette.length &&
+        refPaletteAssignments.first == 1 &&
+        refPaletteAssignments
+            .skip(1)
+            .every(
+              (assignment) =>
+                  assignment == 0 || assignment >= 2 && assignment <= 9,
+            ) &&
+        pinnedAssignments.toSet().length == pinnedAssignments.length;
     return AppSettings(
       showAvatars: value['showAvatars'] is bool
           ? value['showAvatars'] as bool
@@ -501,7 +540,10 @@ class AppSettings {
           ? defaultBaseBranchColor
           : formatHexColor(storedBaseBranchColor),
       laneColors: valid ? laneColors : defaultLaneColors,
-      refPalette: validRefPalette ? refPalette : defaultRefPalette,
+      refPalette: validRefPalette ? refPalette : migratedRefPalette,
+      refPaletteAssignments: validRefPaletteAssignments
+          ? refPaletteAssignments
+          : defaultRefPaletteAssignments,
       previewWidth: _clamped(value['previewWidth'], 288, 240, double.infinity),
       previewHeight: _clamped(
         value['previewHeight'],
@@ -533,6 +575,7 @@ class AppSettings {
     'refPalette': [
       for (final entry in refPalette) {'base': entry.base, 'text': entry.text},
     ],
+    'refPaletteAssignments': refPaletteAssignments,
     'previewWidth': previewWidth,
     'previewHeight': previewHeight,
     'previewDiffLeftWidth': ?previewDiffLeftWidth,
@@ -556,6 +599,7 @@ class AppSettings {
       baseBranchColor == other.baseBranchColor &&
       listEquals(laneColors, other.laneColors) &&
       listEquals(refPalette, other.refPalette) &&
+      listEquals(refPaletteAssignments, other.refPaletteAssignments) &&
       previewWidth == other.previewWidth &&
       previewHeight == other.previewHeight &&
       previewDiffLeftWidth == other.previewDiffLeftWidth &&
@@ -581,6 +625,7 @@ class AppSettings {
     baseBranchColor,
     Object.hashAll(laneColors),
     Object.hashAll(refPalette),
+    Object.hashAll(refPaletteAssignments),
     previewWidth,
     previewHeight,
     previewDiffLeftWidth,
