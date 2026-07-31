@@ -688,6 +688,230 @@ void main() {
     );
   });
 
+  testWidgets(
+    'a file click opens an adjacent diff without resizing the preview',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1200, 700);
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+      await tester.pumpWidget(
+        app(
+          FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+            files: (_, _) async => const [
+              GitFileChange(
+                path: 'lib/a.dart',
+                status: 'M',
+                additions: 1,
+                deletions: 1,
+              ),
+            ],
+            diff: (_, _, _, _, _) async => const [
+              DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+              DiffLine(kind: DiffLineKind.delete, text: 'old', oldNumber: 1),
+              DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
+            ],
+          ),
+          controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('preview-diff')), findsNothing);
+      final previewWidth = tester
+          .getSize(find.byKey(const Key('preview-panel')))
+          .width;
+
+      await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('preview-diff')), findsOneWidget);
+      expect(
+        tester.getSize(find.byKey(const Key('preview-panel'))).width,
+        previewWidth,
+      );
+      expect(
+        tester.getRect(find.byKey(const Key('preview-diff'))).right,
+        tester.getRect(find.byKey(const Key('preview-panel'))).left,
+      );
+
+      await tester.tap(find.text('좌측'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getRect(find.byKey(const Key('preview-panel'))).right,
+        tester.getRect(find.byKey(const Key('preview-diff'))).left,
+      );
+
+      await tester.tap(find.text('하단'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getRect(find.byKey(const Key('preview-diff'))).bottom,
+        tester.getRect(find.byKey(const Key('preview-panel'))).top,
+      );
+    },
+  );
+
+  testWidgets(
+    'adjacent diff size defaults, persists, and reaches both endpoints',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1200, 700);
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+      final store = MemorySettingsStore();
+      final repository = FakeGitRepository(
+        (_, _) async => [commit('1', 'first commit')],
+        files: (_, _) async => const [
+          GitFileChange(
+            path: 'lib/a.dart',
+            status: 'M',
+            additions: 1,
+            deletions: 1,
+          ),
+        ],
+        diff: (_, _, _, _, _) async => const [
+          DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+          DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
+        ],
+      );
+
+      Future<void> mountAndOpen() async {
+        await tester.pumpWidget(
+          YogitApp(
+            repository: repository,
+            settingsStore: store,
+            discoverAvatars: false,
+            windowFrameController: controller,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
+        await tester.pumpAndSettle();
+      }
+
+      await mountAndOpen();
+      final previewWidth = tester
+          .getSize(find.byKey(const Key('preview-panel')))
+          .width;
+      expect(
+        tester.getSize(find.byKey(const Key('timeline-viewport'))).width,
+        closeTo(100, 0.1),
+      );
+
+      final initialDiffWidth = tester
+          .getSize(find.byKey(const Key('preview-diff')))
+          .width;
+      await tester.drag(
+        find.byKey(const Key('preview-diff-resizer')),
+        Offset(initialDiffWidth - 400, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSize(find.byKey(const Key('preview-diff'))).width,
+        closeTo(400, 0.1),
+      );
+      expect(
+        store.current.toJson()['previewDiffRightWidth'],
+        closeTo(400, 0.1),
+      );
+      expect(
+        tester.getSize(find.byKey(const Key('preview-panel'))).width,
+        previewWidth,
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await controller.setPreview(PreviewPlacement.closed);
+      await mountAndOpen();
+      expect(
+        tester.getSize(find.byKey(const Key('preview-diff'))).width,
+        closeTo(400, 0.1),
+      );
+
+      await tester.drag(
+        find.byKey(const Key('preview-diff-resizer')),
+        const Offset(-5000, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSize(find.byKey(const Key('timeline-viewport'))).width,
+        closeTo(0, 0.1),
+      );
+      await tester.drag(
+        find.byKey(const Key('preview-diff-resizer')),
+        const Offset(5000, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSize(find.byKey(const Key('preview-diff'))).width,
+        closeTo(0, 0.1),
+      );
+    },
+  );
+
+  testWidgets('escape closes the adjacent diff before the preview', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [
+            commit('1', 'first commit'),
+            commit('2', 'second commit'),
+          ],
+          files: (_, _) async => const [
+            GitFileChange(
+              path: 'lib/a.dart',
+              status: 'M',
+              additions: 1,
+              deletions: 1,
+            ),
+          ],
+          diff: (_, _, _, _, _) async => const [
+            DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+            DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('timeline-viewport')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('preview-diff')), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('preview-diff')), findsNothing);
+    expect(find.byKey(const Key('preview-panel')), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.text('Commit & Diff'), findsNothing);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('preview-diff-close')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('preview-diff')), findsNothing);
+    expect(find.byKey(const Key('preview-panel')), findsOneWidget);
+  });
+
   testWidgets('preview loads real files before the first file diff once', (
     tester,
   ) async {
@@ -730,7 +954,12 @@ void main() {
 
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    // Once in the file list, once as the diff head line.
+    expect(find.text('lib/first.dart'), findsOneWidget);
+    expect(find.byKey(const Key('preview-diff')), findsNothing);
+    expect(diffLoads, 0);
+
+    await tester.tap(find.byKey(const Key('preview-state-lib/first.dart')));
+    await tester.pumpAndSettle();
     expect(find.text('lib/first.dart'), findsNWidgets(2));
     expect(find.text('README.md'), findsOneWidget);
     expect(find.text('lib/first.dart changed'), findsOneWidget);
@@ -753,10 +982,8 @@ void main() {
       isNull,
     );
     expect(
-      tester.getTopLeft(find.byKey(const Key('preview-files-scroll'))).dy,
-      lessThan(
-        tester.getTopLeft(find.byKey(const Key('preview-diff-scroll'))).dy,
-      ),
+      tester.getRect(find.byKey(const Key('preview-diff'))).right,
+      tester.getRect(find.byKey(const Key('preview-panel'))).left,
     );
 
     await tester.tap(
@@ -767,7 +994,8 @@ void main() {
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(find.byKey(const Key('preview-diff')), findsNothing);
+    await tester.tap(find.byKey(const Key('preview-state-lib/first.dart')));
     await tester.pumpAndSettle();
     expect(fileLoads, 1);
     expect(diffLoads, 1);
@@ -3660,6 +3888,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('lib/shared.dart'), findsWidgets);
+    await tester.tap(find.byKey(const Key('preview-state-lib/shared.dart')));
+    await tester.pumpAndSettle();
     expect(rangeCalls, [
       (from: 'main-tip', to: 'feature-tip', path: 'lib/shared.dart'),
     ]);
@@ -3736,6 +3966,8 @@ void main() {
     expect(find.byKey(const Key('preview-full-diff')), findsNothing);
     expect(find.text('가상 병합 커밋'), findsOneWidget);
     expect(find.text('feature.txt'), findsWidgets);
+    await tester.tap(find.byKey(const Key('preview-state-feature.txt')));
+    await tester.pumpAndSettle();
     expect(find.byType(UnifiedPresentationView), findsOneWidget);
     final fileList = find.byKey(const Key('branch-preview-file-list'));
     expect(
@@ -3877,12 +4109,7 @@ void main() {
     expect(find.text('중단'), findsOneWidget);
     expect(find.text('충돌'), findsWidgets);
     expect(find.text('lib/shared.dart'), findsWidgets);
-    final previewScroll = tester
-        .widget<NestedScrollView>(
-          find.byKey(const Key('preview-content-scroll')),
-        )
-        .controller!;
-    previewScroll.jumpTo(previewScroll.position.maxScrollExtent);
+    await tester.tap(find.byKey(const Key('preview-state-lib/shared.dart')));
     await tester.pumpAndSettle();
     expect(
       find.text('main · main change ← feature · feature change'),
@@ -3978,10 +4205,17 @@ void main() {
     expect(find.text('현재 작업 트리 변경 없음'), findsOneWidget);
     expect(find.text('종료 시 자동 삭제'), findsOneWidget);
     expect(find.text('임시 작업 공간 시작'), findsNothing);
-    await tester.drag(
-      find.byKey(const Key('preview-content-scroll')),
-      const Offset(0, -600),
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('preview-state-lib/shared.dart')),
+      100,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const Key('preview-content-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
     );
+    await tester.tap(find.byKey(const Key('preview-state-lib/shared.dart')));
     await tester.pumpAndSettle();
     expect(find.text('main side'), findsOneWidget);
     expect(find.text('docs side'), findsOneWidget);
@@ -4692,6 +4926,11 @@ void main() {
     await tester.tap(find.byKey(const Key('branch-preview-rebase')));
     await tester.pumpAndSettle();
     expect(find.text('Rebase 충돌'), findsOneWidget);
+    await tester.ensureVisible(
+      find.byKey(const Key('preview-state-lib/shared.dart')),
+    );
+    await tester.tap(find.byKey(const Key('preview-state-lib/shared.dart')));
+    await tester.pumpAndSettle();
     expect(
       tester
           .widget<InkWell>(find.byKey(const Key('rebase-conflict-use-base')))
@@ -5033,6 +5272,11 @@ void main() {
           .data,
       '0',
     );
+    await tester.ensureVisible(
+      find.byKey(const Key('preview-state-lib/shared.dart')),
+    );
+    await tester.tap(find.byKey(const Key('preview-state-lib/shared.dart')));
+    await tester.pumpAndSettle();
     expect(find.text('현재 Git 작업을 마친 뒤 해결할 수 있습니다'), findsOneWidget);
     expect(
       tester
@@ -5154,10 +5398,17 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    await tester.drag(
-      find.byKey(const Key('preview-content-scroll')),
-      const Offset(0, -600),
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('preview-state-lib/shared.dart')),
+      100,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const Key('preview-content-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
     );
+    await tester.tap(find.byKey(const Key('preview-state-lib/shared.dart')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('rebase-conflict-use-compare')));
     await tester.pump();
@@ -5713,6 +5964,8 @@ void main() {
     expect(find.text('1 file changed'), findsOneWidget);
     expect(find.text('1 files changed'), findsNothing);
 
+    await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
+    await tester.pumpAndSettle();
     final diff = find.byKey(const Key('preview-diff'));
     expect(find.byType(UnifiedPresentationView), findsOneWidget);
     expect(find.byKey(const Key('unified-line-0-0')), findsOneWidget);
@@ -11910,7 +12163,22 @@ void main() {
     expect(sizeOf('Committer'), 12);
     expect(sizeOf('2 files changed'), 12);
     expect(sizeOf('lib/a.dart'), 12);
-    expect(sizeOf('lib/a.dart body'), 14);
+
+    expect(find.text('lib/a.dart body'), findsNothing);
+    await tester.tap(
+      find.descendant(of: preview, matching: find.text('lib/a.dart')),
+    );
+    await tester.pumpAndSettle();
+    final firstBody = find.descendant(
+      of: find.byKey(const Key('preview-diff')),
+      matching: find.text('lib/a.dart body'),
+    );
+    final firstBodyText = tester.widget<Text>(firstBody);
+    expect(
+      firstBodyText.style?.fontSize ??
+          DefaultTextStyle.of(tester.element(firstBody)).style.fontSize,
+      14,
+    );
 
     // A file row still switches the diff despite the selection layer.
     await tester.tap(
@@ -11918,7 +12186,10 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(
-      find.descendant(of: preview, matching: find.text('lib/b.dart body')),
+      find.descendant(
+        of: find.byKey(const Key('preview-diff')),
+        matching: find.text('lib/b.dart body'),
+      ),
       findsOneWidget,
     );
   });
@@ -12030,6 +12301,18 @@ void main() {
         'previewWidth': 1400,
       }).previewWidth,
       1400,
+    );
+    const diffSizes = AppSettings(
+      previewDiffLeftWidth: 240,
+      previewDiffRightWidth: 360,
+      previewDiffBottomHeight: 420,
+    );
+    expect(AppSettings.fromJson(diffSizes.toJson()), diffSizes);
+    expect(
+      AppSettings.fromJson(<String, dynamic>{
+        'previewDiffLeftWidth': -1,
+      }).previewDiffLeftWidth,
+      0,
     );
   });
 
@@ -12622,7 +12905,7 @@ void main() {
   );
 
   // ------------------------------------------------------------------ C1/C2
-  testWidgets('preview info and diff move through one vertical scroll', (
+  testWidgets('preview file list and diff scroll independently', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -12662,6 +12945,8 @@ void main() {
     await tester.pumpAndSettle();
 
     final filesScrollable = find.byKey(const Key('preview-files-scroll'));
+    await tester.tap(find.byKey(const Key('preview-state-lib/file0.dart')));
+    await tester.pumpAndSettle();
     final diffScrollable = find.byKey(const Key('preview-diff-scroll'));
     expect(filesScrollable, findsOneWidget);
     expect(diffScrollable, findsOneWidget);
@@ -12670,7 +12955,7 @@ void main() {
     final before = tester.getTopLeft(firstFile).dy;
     await tester.drag(diffScrollable, const Offset(0, -160));
     await tester.pumpAndSettle();
-    expect(tester.getTopLeft(firstFile).dy, lessThan(before));
+    expect(tester.getTopLeft(firstFile).dy, closeTo(before, 0.1));
   });
 
   // ------------------------------------------------------------------ C3/H2
@@ -14295,16 +14580,13 @@ void main() {
 
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    final preview = find.byKey(const Key('preview-panel'));
-    expect(
-      find.descendant(of: preview, matching: find.text('body of lib/one.dart')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('preview-diff')), findsNothing);
 
     // Down walks the files, up walks back, and both ends clamp.
     await metaArrow(LogicalKeyboardKey.arrowDown);
+    final diff = find.byKey(const Key('preview-diff'));
     expect(
-      find.descendant(of: preview, matching: find.text('body of lib/two.dart')),
+      find.descendant(of: diff, matching: find.text('body of lib/two.dart')),
       findsOneWidget,
     );
     expect(
@@ -14320,21 +14602,18 @@ void main() {
     await metaArrow(LogicalKeyboardKey.arrowDown);
     await metaArrow(LogicalKeyboardKey.arrowDown);
     expect(
-      find.descendant(
-        of: preview,
-        matching: find.text('body of lib/three.dart'),
-      ),
+      find.descendant(of: diff, matching: find.text('body of lib/three.dart')),
       findsOneWidget,
     );
     await metaArrow(LogicalKeyboardKey.arrowUp);
     expect(
-      find.descendant(of: preview, matching: find.text('body of lib/two.dart')),
+      find.descendant(of: diff, matching: find.text('body of lib/two.dart')),
       findsOneWidget,
     );
     await metaArrow(LogicalKeyboardKey.arrowUp);
     await metaArrow(LogicalKeyboardKey.arrowUp);
     expect(
-      find.descendant(of: preview, matching: find.text('body of lib/one.dart')),
+      find.descendant(of: diff, matching: find.text('body of lib/one.dart')),
       findsOneWidget,
     );
     // The commit selection never moved while walking files.
