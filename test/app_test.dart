@@ -328,7 +328,7 @@ void main() {
     final list = tester.widget<ListView>(
       find.byKey(const Key('timeline-list')),
     );
-    expect(TimelineScreen.rowHeight, 32);
+    expect(TimelineScreen.rowHeight, 30);
     expect(list.itemExtent, TimelineScreen.rowHeight);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
@@ -887,7 +887,7 @@ void main() {
       expect(painter.refArrowTipX, tip.dx);
       expect(
         painter.refArrowheadPath(centerY).getBounds(),
-        const Rect.fromLTRB(6, 11, 13, 21),
+        Rect.fromLTRB(6, centerY - 5, 13, centerY + 5),
       );
       expect(
         (Canvas canvas) => painter.paint(canvas, size),
