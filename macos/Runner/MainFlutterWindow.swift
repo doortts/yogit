@@ -116,9 +116,10 @@ class MainFlutterWindow: NSWindow {
     guard let baseFrame = previewBaseFrame else { return }
 
     let nextFrame: NSRect
-    if placement == "right" || placement == "left" {
-      // Both side placements keep the right edge and grow the window leftward,
-      // so the timeline stays where the user last saw it.
+    if placement == "right" {
+      nextFrame = Self.rightPreviewFrame(from: baseFrame, visibleFrame: visibleFrame)
+    } else if placement == "left" {
+      // A left preview keeps the right edge and grows the window leftward.
       let width = min(baseFrame.width + 320, visibleFrame.width)
       let right = min(baseFrame.maxX, visibleFrame.maxX)
       nextFrame = NSRect(
@@ -140,6 +141,16 @@ class MainFlutterWindow: NSWindow {
       return
     }
     setFrame(nextFrame, display: true, animate: true)
+  }
+
+  static func rightPreviewFrame(from baseFrame: NSRect, visibleFrame: NSRect) -> NSRect {
+    let width = min(baseFrame.width + 320, visibleFrame.width)
+    return NSRect(
+      x: min(max(baseFrame.minX, visibleFrame.minX), visibleFrame.maxX - width),
+      y: max(visibleFrame.minY, min(baseFrame.minY, visibleFrame.maxY - baseFrame.height)),
+      width: width,
+      height: min(baseFrame.height, visibleFrame.height)
+    )
   }
 
   private func clamped(_ frame: NSRect, to visibleFrame: NSRect) -> NSRect {
