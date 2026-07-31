@@ -659,7 +659,7 @@ Map<int, int> assignBranchPaletteIndexes(
         indexes[id] = pinned;
         continue;
       }
-      final key = branchNames[id] ?? '$seed:$id';
+      final key = '$seed:$id';
       indexes[id] = candidates[stableRefPaletteIndex(key, candidates.length)];
     }
   }
