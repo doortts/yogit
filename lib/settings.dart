@@ -484,8 +484,15 @@ class AppSettings {
           parseHexColor(entry.text) != null,
     );
     final validRefPalette =
-        refPalette.length == defaultRefPalette.length && validRefPaletteEntries;
-    final migratedRefPalette = refPalette.length == 5 && validRefPaletteEntries
+        storedRefPalette is List &&
+        storedRefPalette.length == defaultRefPalette.length &&
+        storedRefPalette.every((entry) => entry is Map) &&
+        validRefPaletteEntries;
+    final migratedRefPalette =
+        storedRefPalette is List &&
+            storedRefPalette.length == 5 &&
+            storedRefPalette.every((entry) => entry is Map) &&
+            validRefPaletteEntries
         ? [
             refPalette[3],
             refPalette[2],
@@ -506,6 +513,9 @@ class AppSettings {
         .toList();
     final validRefPaletteAssignments =
         validRefPalette &&
+        storedRefPaletteAssignments is List &&
+        storedRefPaletteAssignments.length == defaultRefPalette.length &&
+        storedRefPaletteAssignments.every((entry) => entry is int) &&
         refPaletteAssignments.length == defaultRefPalette.length &&
         refPaletteAssignments.first == 1 &&
         refPaletteAssignments

@@ -616,25 +616,9 @@ List<GitRef> timelineRefsForCommit(GitCommit commit, RepoRefs refs) {
   return result;
 }
 
-Map<int, String> branchRefNames(List<GraphRow> rows, RepoRefs refs) {
-  final representatives = <int, GitRef>{};
-  for (final row in rows) {
-    for (final ref in timelineRefsForCommit(row.commit, refs)) {
-      final current = representatives[row.branch];
-      if (current == null || compareTimelineRefs(ref, current, refs) < 0) {
-        representatives[row.branch] = ref;
-      }
-    }
-  }
-  return {
-    for (final entry in representatives.entries) entry.key: entry.value.name,
-  };
-}
-
 Map<int, int> assignBranchPaletteIndexes(
   List<GraphRow> rows,
   int seed, {
-  Map<int, String> branchNames = const {},
   List<int> refPaletteAssignments = AppSettings.defaultRefPaletteAssignments,
 }) {
   final indexes = <int, int>{};
@@ -670,14 +654,12 @@ Map<int, int> assignBranchPaletteIndexes(
 Map<int, Color> assignBranchColors(
   List<GraphRow> rows,
   int seed, {
-  Map<int, String> branchNames = const {},
   List<RefPaletteEntry> refPalette = AppSettings.defaultRefPalette,
   List<int> refPaletteAssignments = AppSettings.defaultRefPaletteAssignments,
 }) {
   final indexes = assignBranchPaletteIndexes(
     rows,
     seed,
-    branchNames: branchNames,
     refPaletteAssignments: refPaletteAssignments,
   );
   return {
@@ -1383,11 +1365,9 @@ class _TimelineScreenState extends State<TimelineScreen>
   void _rebuildGraph() {
     _normalRows = layoutGraph(_normalCommits, preferredTip: _preferredTip);
     _normalEntries = timelineEntries(_normalRows, DateTime.now());
-    final branchNames = branchRefNames(_normalRows, _refs);
     _branchPaletteIndexes = assignBranchPaletteIndexes(
       _normalRows,
       widget.repository.root.hashCode,
-      branchNames: branchNames,
       refPaletteAssignments: widget.refPaletteAssignments,
     );
     AvatarService.branchAssignments = {
