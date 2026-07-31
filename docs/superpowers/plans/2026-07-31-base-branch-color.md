@@ -12,7 +12,7 @@
 
 - Keep `#5CB270` as the default base branch color.
 - Preserve the existing `laneColors` values and migration behavior.
-- Reuse the existing `preferredTip` → branch id `0` layout flow.
+- Reserve lane and branch id `0` for `preferredTip`.
 - Add no dependency, per-repository color map, or new state service.
 
 ---
@@ -23,6 +23,7 @@
 - Modify: `lib/avatars.dart:285-301`
 - Modify: `lib/settings.dart:259-505`
 - Modify: `lib/main.dart:209-260`
+- Modify: `lib/git.dart:1159-1269`
 - Modify: `lib/timeline.dart:526-579`
 - Test: `test/app_test.dart:5457-5522`
 - Test: `test/app_test.dart:6301-6327`
@@ -162,6 +163,22 @@ if (id == 0) {
   continue;
 }
 ```
+
+In `layoutGraph`, reserve branch id `0` together with lane `0` when
+`preferredTip` is present:
+
+```dart
+var lines = preferredTip == null ? 0 : 1;
+
+final branch = columns[lane].sha == commit.sha
+    ? columns[lane].line
+    : startsPreferred
+    ? 0
+    : lines++;
+```
+
+When an unloaded preferred parent first enters lane `0`, assign line id `0`
+instead of consuming the next birth-order id.
 
 Add the stored setting and parsed value to `AppSettings`:
 

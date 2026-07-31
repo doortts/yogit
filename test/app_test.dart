@@ -3089,7 +3089,10 @@ void main() {
       find.descendant(of: row, matching: find.text('Ada Author')),
       findsNothing,
     );
-    expect(find.descendant(of: row, matching: find.text('—')), findsNWidgets(2));
+    expect(
+      find.descendant(of: row, matching: find.text('—')),
+      findsNWidgets(2),
+    );
   });
 
   testWidgets('branch comparison failure is shown in the preview summary', (
@@ -5496,13 +5499,25 @@ void main() {
     expect(parseHexColor('#39C5C'), isNull);
     expect(parseHexColor('teal'), isNull);
 
-    const custom = AppSettings(laneColors: ['#112233', '#445566']);
+    const custom = AppSettings(
+      baseBranchColor: '#112233',
+      laneColors: ['#445566', '#778899'],
+    );
     final decoded = AppSettings.fromJson(custom.toJson());
     expect(decoded, custom);
+    expect(decoded.baseBranchColorValue, const Color(0xFF112233));
     expect(decoded.laneColorValues, const [
-      Color(0xFF112233),
       Color(0xFF445566),
+      Color(0xFF778899),
     ]);
+    expect(
+      AppSettings.fromJson(const {'baseBranchColor': 'bad'}).baseBranchColor,
+      AppSettings.defaultBaseBranchColor,
+    );
+    expect(
+      AppSettings.fromJson(const {}).baseBranchColor,
+      AppSettings.defaultBaseBranchColor,
+    );
 
     // One bad entry drops the whole palette back to GitHub dark.
     for (final stored in [
@@ -6295,7 +6310,7 @@ void main() {
                   .decoration!
               as BoxDecoration)
           .color,
-      AvatarService.mainBranchColor,
+      AvatarService.baseBranchColor,
     );
     expect(find.byKey(const Key('lane-color-main')), findsNothing);
     // No row context in the preview, so those avatars stay identity-colored.
@@ -6330,10 +6345,19 @@ void main() {
     );
   });
 
-  testWidgets('a stored palette reaches the timeline rails', (tester) async {
-    addTearDown(() => AvatarService.palette = AvatarService.defaultColors);
+  testWidgets('stored timeline colors reach the base and fallback rails', (
+    tester,
+  ) async {
+    addTearDown(() {
+      AvatarService.baseBranchColor = AvatarService.defaultBaseBranchColor;
+      AvatarService.palette = AvatarService.defaultColors;
+      AvatarService.branchAssignments = const {};
+    });
     final store = MemorySettingsStore()
-      ..current = const AppSettings(laneColors: ['#0B7285']);
+      ..current = const AppSettings(
+        baseBranchColor: '#0C8599',
+        laneColors: ['#0B7285'],
+      );
     await tester.pumpWidget(
       YogitApp(
         repository: FakeGitRepository(
@@ -6346,16 +6370,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(AvatarService.baseBranchColor, const Color(0xFF0C8599));
     expect(AvatarService.palette, const [Color(0xFF0B7285)]);
     final painter =
         tester
                 .widget<CustomPaint>(find.byKey(const Key('graph-painter-0')))
                 .painter!
             as CommitGraphPainter;
-    // Main is the fixed green; the stored palette is only the fallback now.
     expect(painter.row.branch, 0);
-    expect(painter.committerColor, const Color(0xFF5CB270));
-    expect(AvatarService.palette, const [Color(0xFF0B7285)]);
+    expect(painter.committerColor, const Color(0xFF0C8599));
   });
 
   test('social time counts calendar days, like the date headings', () {
@@ -10275,6 +10298,34 @@ void main() {
     expect(
       {for (var seed = 0; seed < 8; seed++) assignBranchColors(rows, seed)[1]},
       {const Color(0xFF00E5FF), const Color(0xFFFF3131)},
+    );
+  });
+
+  test('the selected base branch owns the configurable branch-zero color', () {
+    addTearDown(() {
+      AvatarService.baseBranchColor = AvatarService.defaultBaseBranchColor;
+      AvatarService.branchAssignments = const {};
+    });
+    AvatarService.baseBranchColor = const Color(0xFF123456);
+    final rows = layoutGraph([
+      commit('other-tip', 'other', parents: const ['root']),
+      commit('base-tip', 'base', parents: const ['root']),
+      commit('root', 'root'),
+    ], preferredTip: 'base-tip');
+
+    final assignments = assignBranchColors(rows, 7);
+    expect(rows.singleWhere((row) => row.commit.sha == 'base-tip').branch, 0);
+    expect(assignments[0], const Color(0xFF123456));
+
+    final comparison = branchComparison();
+    final comparisonRows = layoutBranchComparison(comparison.commits);
+    final baseSha = comparison.commits
+        .singleWhere((entry) => entry.side == BranchCommitSide.baseOnly)
+        .commit
+        .sha;
+    expect(
+      comparisonRows.singleWhere((row) => row.commit.sha == baseSha).branch,
+      0,
     );
   });
 

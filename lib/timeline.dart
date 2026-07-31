@@ -523,7 +523,7 @@ GraphRow passThroughRow({required GitCommit commit, GraphRow? above}) =>
       nextLaneBranches: above?.nextLaneBranches ?? const {},
     );
 
-/// The mainline is fixed, the second line is one of two, and every later line
+/// The base branch is fixed, the second line is one of two, and every later line
 /// takes the first pool color no line running beside it at birth already wears.
 const _branchColorPool = [
   Color(0xFF3B82F6),
@@ -540,7 +540,7 @@ Map<int, Color> assignBranchColors(List<GraphRow> rows, int seed) {
     for (final color in AvatarService.defaultColors)
       if (!_branchColorPool.contains(color) &&
           !_secondBranchColors.contains(color) &&
-          color != AvatarService.mainBranchColor)
+          color != AvatarService.baseBranchColor)
         color,
   ]..shuffle(math.Random(seed));
   var taken = 0;
@@ -553,7 +553,7 @@ Map<int, Color> assignBranchColors(List<GraphRow> rows, int seed) {
     for (final id in ids) {
       if (id < 0 || colors.containsKey(id)) continue;
       if (id == 0) {
-        colors[id] = AvatarService.mainBranchColor;
+        colors[id] = AvatarService.baseBranchColor;
         continue;
       }
       if (id == 1) {

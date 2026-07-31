@@ -281,8 +281,9 @@ class AvatarService {
     ].join().toUpperCase();
   }
 
-  /// The mainline's fixed color: branch 0 is the leftmost, first-born line.
-  static const mainBranchColor = Color(0xFF5CB270);
+  /// Branch 0 is the selected base branch.
+  static const defaultBaseBranchColor = Color(0xFF5CB270);
+  static Color baseBranchColor = defaultBaseBranchColor;
 
   /// Branch id → color for the repository on screen, assigned once per layout.
   /// Empty until the timeline assigns them, and [branchColor] falls back to the
@@ -294,7 +295,7 @@ class AvatarService {
   static Color branchColor(int branch) {
     final assigned = branchAssignments[branch];
     if (assigned != null) return assigned;
-    if (branch == 0) return mainBranchColor;
+    if (branch == 0) return baseBranchColor;
     final colors = palette.isEmpty ? defaultColors : palette;
     return colors[(branch.abs() - 1) % colors.length];
   }

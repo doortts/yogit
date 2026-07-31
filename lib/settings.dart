@@ -266,12 +266,16 @@ class AppSettings {
     this.repositoryGraphWidths = const {},
     this.fullDiffColumnWidths = const FullDiffColumnWidths(),
     this.fullDiffPreferences = const FullDiffPreferences(),
+    this.baseBranchColor = defaultBaseBranchColor,
     this.laneColors = defaultLaneColors,
     this.previewWidth = 288,
     this.previewHeight = 280,
     this.baseBranches = const {},
     this.deletedBranchNames = const {},
   });
+
+  /// The selected base branch color, as stored.
+  static const defaultBaseBranchColor = '#5CB270';
 
   /// The neon palette, as stored.
   static const defaultLaneColors = [
@@ -307,6 +311,7 @@ class AppSettings {
   final Map<String, double> repositoryGraphWidths;
   final FullDiffColumnWidths fullDiffColumnWidths;
   final FullDiffPreferences fullDiffPreferences;
+  final String baseBranchColor;
   final List<String> laneColors;
   final Map<String, String> baseBranches;
   final Map<String, Map<String, String>> deletedBranchNames;
@@ -323,6 +328,9 @@ class AppSettings {
         ? AvatarService.defaultColors
         : colors.cast<Color>();
   }
+
+  Color get baseBranchColorValue =>
+      parseHexColor(baseBranchColor) ?? AvatarService.defaultBaseBranchColor;
 
   TimelineColumnWidths columnWidthsForRepository(String root) =>
       columnWidths.withGraph(repositoryGraphWidths[root]);
@@ -364,6 +372,7 @@ class AppSettings {
     Map<String, double>? repositoryGraphWidths,
     FullDiffColumnWidths? fullDiffColumnWidths,
     FullDiffPreferences? fullDiffPreferences,
+    String? baseBranchColor,
     List<String>? laneColors,
     double? previewWidth,
     double? previewHeight,
@@ -378,6 +387,7 @@ class AppSettings {
     repositoryGraphWidths: repositoryGraphWidths ?? this.repositoryGraphWidths,
     fullDiffColumnWidths: fullDiffColumnWidths ?? this.fullDiffColumnWidths,
     fullDiffPreferences: fullDiffPreferences ?? this.fullDiffPreferences,
+    baseBranchColor: baseBranchColor ?? this.baseBranchColor,
     laneColors: laneColors ?? this.laneColors,
     previewWidth: previewWidth ?? this.previewWidth,
     previewHeight: previewHeight ?? this.previewHeight,
@@ -388,6 +398,7 @@ class AppSettings {
   factory AppSettings.fromJson(Object? value) {
     if (value is! Map<String, dynamic>) return const AppSettings();
     final storedBaseBranches = value['baseBranches'];
+    final storedBaseBranchColor = '${value['baseBranchColor'] ?? ''}';
     final baseBranches = <String, String>{
       if (storedBaseBranches is Map)
         for (final entry in storedBaseBranches.entries)
@@ -424,6 +435,9 @@ class AppSettings {
       fullDiffPreferences: FullDiffPreferences.fromJson(
         value['fullDiffPreferences'],
       ),
+      baseBranchColor: parseHexColor(storedBaseBranchColor) == null
+          ? defaultBaseBranchColor
+          : formatHexColor(storedBaseBranchColor),
       laneColors: valid ? laneColors : defaultLaneColors,
       previewWidth: _clamped(value['previewWidth'], 288, 240, double.infinity),
       previewHeight: _clamped(
@@ -446,6 +460,7 @@ class AppSettings {
     'repositoryGraphWidths': repositoryGraphWidths,
     'fullDiffColumnWidths': fullDiffColumnWidths.toJson(),
     'fullDiffPreferences': fullDiffPreferences.toJson(),
+    'baseBranchColor': baseBranchColor,
     'laneColors': laneColors,
     'previewWidth': previewWidth,
     'previewHeight': previewHeight,
@@ -464,6 +479,7 @@ class AppSettings {
       mapEquals(repositoryGraphWidths, other.repositoryGraphWidths) &&
       fullDiffColumnWidths == other.fullDiffColumnWidths &&
       fullDiffPreferences == other.fullDiffPreferences &&
+      baseBranchColor == other.baseBranchColor &&
       listEquals(laneColors, other.laneColors) &&
       previewWidth == other.previewWidth &&
       previewHeight == other.previewHeight &&
@@ -484,6 +500,7 @@ class AppSettings {
     ),
     fullDiffColumnWidths,
     fullDiffPreferences,
+    baseBranchColor,
     Object.hashAll(laneColors),
     previewWidth,
     previewHeight,
