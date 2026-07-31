@@ -18,6 +18,9 @@ enum BranchPreviewMode {
       value == 'rebase' ? rebase : merge;
 }
 
+typedef RefPaletteEntry = ({String base, String text});
+typedef RefPaletteColors = ({Color base, Color text});
+
 class TimelineColumnWidths {
   const TimelineColumnWidths({
     this.sidebar = 150,
@@ -268,6 +271,7 @@ class AppSettings {
     this.fullDiffPreferences = const FullDiffPreferences(),
     this.baseBranchColor = defaultBaseBranchColor,
     this.laneColors = defaultLaneColors,
+    this.refPalette = defaultRefPalette,
     this.previewWidth = 288,
     this.previewHeight = 280,
     this.baseBranches = const {},
@@ -287,6 +291,14 @@ class AppSettings {
     '#B026FF',
     '#04D9FF',
     '#FF3131',
+  ];
+
+  static const defaultRefPalette = <RefPaletteEntry>[
+    (base: '#1D76DB', text: '#68A7EA'),
+    (base: '#E99695', text: '#E89292'),
+    (base: '#C5DEF5', text: '#C2DDF4'),
+    (base: '#0E8A16', text: '#18E022'),
+    (base: '#5319E7', text: '#DACFFA'),
   ];
 
   /// The palette that used to be the default. A settings file still carrying it
@@ -313,6 +325,7 @@ class AppSettings {
   final FullDiffPreferences fullDiffPreferences;
   final String baseBranchColor;
   final List<String> laneColors;
+  final List<RefPaletteEntry> refPalette;
   final Map<String, String> baseBranches;
   final Map<String, Map<String, String>> deletedBranchNames;
 
@@ -327,6 +340,21 @@ class AppSettings {
     return colors.isEmpty || colors.contains(null)
         ? AvatarService.defaultColors
         : colors.cast<Color>();
+  }
+
+  List<RefPaletteColors> get refPaletteColorValues {
+    final values = [
+      for (final entry in refPalette)
+        (base: parseHexColor(entry.base), text: parseHexColor(entry.text)),
+    ];
+    if (values.length != defaultRefPalette.length ||
+        values.any((entry) => entry.base == null || entry.text == null)) {
+      return const AppSettings().refPaletteColorValues;
+    }
+    return [
+      for (final entry in values)
+        (base: entry.base!, text: entry.text!),
+    ];
   }
 
   Color get baseBranchColorValue =>
@@ -374,6 +402,7 @@ class AppSettings {
     FullDiffPreferences? fullDiffPreferences,
     String? baseBranchColor,
     List<String>? laneColors,
+    List<RefPaletteEntry>? refPalette,
     double? previewWidth,
     double? previewHeight,
     Map<String, String>? baseBranches,
@@ -389,6 +418,7 @@ class AppSettings {
     fullDiffPreferences: fullDiffPreferences ?? this.fullDiffPreferences,
     baseBranchColor: baseBranchColor ?? this.baseBranchColor,
     laneColors: laneColors ?? this.laneColors,
+    refPalette: refPalette ?? this.refPalette,
     previewWidth: previewWidth ?? this.previewWidth,
     previewHeight: previewHeight ?? this.previewHeight,
     baseBranches: baseBranches ?? this.baseBranches,
@@ -414,6 +444,23 @@ class AppSettings {
         laneColors.isNotEmpty &&
         laneColors.every((entry) => parseHexColor(entry) != null) &&
         !listEquals(laneColors, _replacedLaneColors);
+    final storedRefPalette = value['refPalette'];
+    final refPalette = <RefPaletteEntry>[
+      if (storedRefPalette is List)
+        for (final entry in storedRefPalette)
+          if (entry is Map)
+            (
+              base: formatHexColor('${entry['base'] ?? ''}'),
+              text: formatHexColor('${entry['text'] ?? ''}'),
+            ),
+    ];
+    final validRefPalette =
+        refPalette.length == defaultRefPalette.length &&
+        refPalette.every(
+          (entry) =>
+              parseHexColor(entry.base) != null &&
+              parseHexColor(entry.text) != null,
+        );
     return AppSettings(
       showAvatars: value['showAvatars'] is bool
           ? value['showAvatars'] as bool
@@ -439,6 +486,7 @@ class AppSettings {
           ? defaultBaseBranchColor
           : formatHexColor(storedBaseBranchColor),
       laneColors: valid ? laneColors : defaultLaneColors,
+      refPalette: validRefPalette ? refPalette : defaultRefPalette,
       previewWidth: _clamped(value['previewWidth'], 288, 240, double.infinity),
       previewHeight: _clamped(
         value['previewHeight'],
@@ -462,6 +510,9 @@ class AppSettings {
     'fullDiffPreferences': fullDiffPreferences.toJson(),
     'baseBranchColor': baseBranchColor,
     'laneColors': laneColors,
+    'refPalette': [
+      for (final entry in refPalette) {'base': entry.base, 'text': entry.text},
+    ],
     'previewWidth': previewWidth,
     'previewHeight': previewHeight,
     'baseBranches': baseBranches,
@@ -481,6 +532,7 @@ class AppSettings {
       fullDiffPreferences == other.fullDiffPreferences &&
       baseBranchColor == other.baseBranchColor &&
       listEquals(laneColors, other.laneColors) &&
+      listEquals(refPalette, other.refPalette) &&
       previewWidth == other.previewWidth &&
       previewHeight == other.previewHeight &&
       mapEquals(baseBranches, other.baseBranches) &&
@@ -502,6 +554,7 @@ class AppSettings {
     fullDiffPreferences,
     baseBranchColor,
     Object.hashAll(laneColors),
+    Object.hashAll(refPalette),
     previewWidth,
     previewHeight,
     Object.hashAllUnordered(

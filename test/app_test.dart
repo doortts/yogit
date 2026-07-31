@@ -5571,6 +5571,47 @@ void main() {
     );
   });
 
+  test('branch tag palette round-trips and rejects damaged records', () {
+    expect(AppSettings.defaultRefPalette, const [
+      (base: '#1D76DB', text: '#68A7EA'),
+      (base: '#E99695', text: '#E89292'),
+      (base: '#C5DEF5', text: '#C2DDF4'),
+      (base: '#0E8A16', text: '#18E022'),
+      (base: '#5319E7', text: '#DACFFA'),
+    ]);
+
+    const custom = AppSettings(
+      refPalette: [
+        (base: '#010203', text: '#A0B0C0'),
+        (base: '#111213', text: '#D0E0F0'),
+        (base: '#212223', text: '#102030'),
+        (base: '#313233', text: '#405060'),
+        (base: '#414243', text: '#708090'),
+      ],
+    );
+    expect(AppSettings.fromJson(custom.toJson()), custom);
+    expect(custom.refPaletteColorValues.first, (
+      base: const Color(0xFF010203),
+      text: const Color(0xFFA0B0C0),
+    ));
+
+    for (final stored in [
+      <Object>[],
+      [const {'base': '#112233', 'text': 'bad'}],
+      [
+        const {'base': '#112233', 'text': '#445566'},
+        const {'base': '#112233', 'text': '#445566'},
+        const {'base': '#112233', 'text': '#445566'},
+        const {'base': '#112233', 'text': '#445566'},
+      ],
+    ]) {
+      expect(
+        AppSettings.fromJson({'refPalette': stored}).refPalette,
+        AppSettings.defaultRefPalette,
+      );
+    }
+  });
+
   test('base branches round-trip per repository', () {
     const settings = AppSettings(
       baseBranches: {'/repos/one': 'main', '/repos/two': 'release'},
