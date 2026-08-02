@@ -284,7 +284,11 @@ class AppSettings {
     this.previewDiffBottomHeight,
     this.baseBranches = const {},
     this.deletedBranchNames = const {},
+    this.recentRepositories = const [],
   });
+
+  /// How many repositories the picker remembers before the oldest drops off.
+  static const maxRecentRepositories = 10;
 
   /// The selected base branch color, as stored.
   static const defaultBaseBranchColor = '#5CB270';
@@ -337,6 +341,9 @@ class AppSettings {
   final Map<String, String> baseBranches;
   final Map<String, Map<String, String>> deletedBranchNames;
 
+  /// Repository roots, most recently opened first.
+  final List<String> recentRepositories;
+
   /// The detail panel's size, per placement axis.
   final double previewWidth;
   final double previewHeight;
@@ -386,6 +393,29 @@ class AppSettings {
     );
   }
 
+  /// Moves [root] to the head of the recent list, dropping the oldest entry
+  /// once the list is longer than [maxRecentRepositories].
+  AppSettings withRecentRepository(String root) {
+    if (root.trim().isEmpty) return this;
+    final recent = [
+      root,
+      ...recentRepositories.where((entry) => entry != root),
+    ];
+    if (recent.length > maxRecentRepositories) {
+      recent.removeRange(maxRecentRepositories, recent.length);
+    }
+    return listEquals(recent, recentRepositories)
+        ? this
+        : copyWith(recentRepositories: recent);
+  }
+
+  AppSettings withoutRecentRepository(String root) => copyWith(
+    recentRepositories: [
+      for (final entry in recentRepositories)
+        if (entry != root) entry,
+    ],
+  );
+
   AppSettings migrateLegacyGraphWidth(String root) {
     final legacy = columnWidths.graph;
     if (legacy == null) return this;
@@ -418,6 +448,7 @@ class AppSettings {
     double? previewDiffBottomHeight,
     Map<String, String>? baseBranches,
     Map<String, Map<String, String>>? deletedBranchNames,
+    List<String>? recentRepositories,
   }) => AppSettings(
     showAvatars: showAvatars ?? this.showAvatars,
     timelineTheme: timelineTheme ?? this.timelineTheme,
@@ -438,6 +469,7 @@ class AppSettings {
         previewDiffBottomHeight ?? this.previewDiffBottomHeight,
     baseBranches: baseBranches ?? this.baseBranches,
     deletedBranchNames: deletedBranchNames ?? this.deletedBranchNames,
+    recentRepositories: recentRepositories ?? this.recentRepositories,
   );
 
   factory AppSettings.fromJson(Object? value) {
@@ -516,7 +548,19 @@ class AppSettings {
       ),
       baseBranches: baseBranches,
       deletedBranchNames: _parseNestedStringMap(value['deletedBranchNames']),
+      recentRepositories: _parseRecentRepositories(value['recentRepositories']),
     );
+  }
+
+  static List<String> _parseRecentRepositories(Object? value) {
+    if (value is! List) return const [];
+    final seen = <String>{};
+    for (final entry in value) {
+      if (entry is! String || entry.trim().isEmpty) continue;
+      seen.add(entry);
+      if (seen.length == maxRecentRepositories) break;
+    }
+    return seen.toList();
   }
 
   Map<String, Object> toJson() => {
@@ -540,6 +584,7 @@ class AppSettings {
     'previewDiffBottomHeight': ?previewDiffBottomHeight,
     'baseBranches': baseBranches,
     'deletedBranchNames': deletedBranchNames,
+    'recentRepositories': recentRepositories,
   };
 
   @override
@@ -562,7 +607,8 @@ class AppSettings {
       previewDiffRightWidth == other.previewDiffRightWidth &&
       previewDiffBottomHeight == other.previewDiffBottomHeight &&
       mapEquals(baseBranches, other.baseBranches) &&
-      _nestedStringMapEquals(deletedBranchNames, other.deletedBranchNames);
+      _nestedStringMapEquals(deletedBranchNames, other.deletedBranchNames) &&
+      listEquals(recentRepositories, other.recentRepositories);
 
   @override
   int get hashCode => Object.hash(
@@ -601,6 +647,7 @@ class AppSettings {
         ),
       ),
     ),
+    Object.hashAll(recentRepositories),
   );
 }
 

@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/repository_branch_selector.dart';
@@ -7,6 +8,7 @@ void main() {
     tester,
   ) async {
     String? selected;
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -14,6 +16,7 @@ void main() {
             repositoryName: 'yogit',
             repositoryPath: '/repos/yogit',
             localBranches: const ['main', 'release'],
+            branchTimes: {'main': now - 2 * 60 * 60},
             selectedBranch: 'main',
             refsLoading: false,
             refsLoadFailed: false,
@@ -34,6 +37,7 @@ void main() {
     expect(find.byKey(const Key('base-branch-menu-main')), findsOneWidget);
     expect(find.byKey(const Key('base-branch-menu-release')), findsOneWidget);
     expect(find.byKey(const Key('base-branch-menu-remote/main')), findsNothing);
+    expect(find.text('브랜치 2개 · 최근 커밋순'), findsOneWidget);
 
     expect(
       find.descendant(
@@ -42,9 +46,39 @@ void main() {
       ),
       findsOneWidget,
     );
+    // Only the branch with a known tip time carries the second line.
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('base-branch-menu-main')),
+        matching: find.text('2시간 전 커밋'),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.enterText(
+      find.byKey(const Key('base-branch-search')),
+      'rele',
+    );
+    await tester.pump();
+    expect(find.byKey(const Key('base-branch-menu-main')), findsNothing);
+    expect(find.byKey(const Key('base-branch-menu-release')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('base-branch-menu-release')));
+    await tester.pumpAndSettle();
     expect(selected, 'release');
+  });
+
+  test('relative commit labels', () {
+    final now = DateTime(2026, 8, 3, 12);
+    int at(Duration ago) => now.subtract(ago).millisecondsSinceEpoch ~/ 1000;
+    expect(relativeCommitLabel(at(Duration.zero), now), '방금 전 커밋');
+    expect(relativeCommitLabel(at(const Duration(minutes: 10)), now), '10분 전 커밋');
+    expect(relativeCommitLabel(at(const Duration(hours: 3)), now), '3시간 전 커밋');
+    expect(relativeCommitLabel(at(const Duration(hours: 30)), now), '어제 커밋');
+    expect(relativeCommitLabel(at(const Duration(days: 4)), now), '4일 전 커밋');
+    expect(relativeCommitLabel(at(const Duration(days: 21)), now), '3주 전 커밋');
+    expect(relativeCommitLabel(at(const Duration(days: 90)), now), '3개월 전 커밋');
+    expect(relativeCommitLabel(at(const Duration(days: 800)), now), '2년 전 커밋');
   });
 
   for (final state in [
@@ -69,10 +103,9 @@ void main() {
       );
 
       expect(find.text(state.label), findsOneWidget);
-      final selector = tester.widget<PopupMenuButton<String>>(
-        find.byKey(const Key('base-branch-selector')),
-      );
-      expect(selector.enabled, isFalse);
+      await tester.tap(find.byKey(const Key('base-branch-selector')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('base-branch-search')), findsNothing);
     });
   }
 
@@ -99,7 +132,10 @@ void main() {
       ),
     );
 
+    await tester.tap(find.byKey(const Key('repository-selector')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('pick-repository')));
+    await tester.pumpAndSettle();
     expect(repositoryPressed, isTrue);
     expect(find.byTooltip(repositoryPath), findsOneWidget);
     expect(find.byTooltip(branch), findsOneWidget);
@@ -109,6 +145,111 @@ void main() {
       expect(text.maxLines, 1);
       expect(text.overflow, TextOverflow.ellipsis);
     }
+  });
+
+  testWidgets('searches, opens, and forgets recent repositories', (
+    tester,
+  ) async {
+    String? opened;
+    String? forgotten;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RepositoryBranchSelector(
+            repositoryName: 'yogit',
+            repositoryPath: '/repos/yogit',
+            localBranches: const ['main'],
+            selectedBranch: 'main',
+            refsLoading: false,
+            refsLoadFailed: false,
+            onRepositoryPressed: () {},
+            recentRepositories: const [
+              '/repos/yogit',
+              '/work/payments-api',
+              '/work/design-tokens',
+            ],
+            onRecentRepositorySelected: (value) => opened = value,
+            onRecentRepositoryRemoved: (value) => forgotten = value,
+            onBranchSelected: (_) {},
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const Key('repository-selector')));
+    await tester.pumpAndSettle();
+    expect(find.text('/work/payments-api'), findsOneWidget);
+    // The open repository is marked and cannot be forgotten out from under us.
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('recent-repository-/repos/yogit')),
+        matching: find.byIcon(Icons.check),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.enterText(
+      find.byKey(const Key('repository-search')),
+      'payments',
+    );
+    await tester.pump();
+    expect(
+      find.byKey(const Key('recent-repository-/work/payments-api')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('recent-repository-/work/design-tokens')),
+      findsNothing,
+    );
+
+    // The remove button appears once the row is under the pointer.
+    final pointer = TestPointer(1, PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(
+      pointer.hover(
+        tester.getCenter(
+          find.byKey(const Key('recent-repository-/work/payments-api')),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const Key('forget-repository-/work/payments-api')),
+    );
+    await tester.pumpAndSettle();
+    expect(forgotten, '/work/payments-api');
+
+    await tester.tap(
+      find.byKey(const Key('recent-repository-/work/payments-api')),
+    );
+    await tester.pumpAndSettle();
+    expect(opened, '/work/payments-api');
+  });
+
+  testWidgets('says when there is nothing to remember', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RepositoryBranchSelector(
+            repositoryName: 'yogit',
+            repositoryPath: '/repos/yogit',
+            localBranches: const ['main'],
+            selectedBranch: 'main',
+            refsLoading: false,
+            refsLoadFailed: false,
+            onRepositoryPressed: () {},
+            onBranchSelected: (_) {},
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const Key('repository-selector')));
+    await tester.pumpAndSettle();
+    expect(find.text('최근 저장소 없음'), findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('repository-search')), 'x');
+    await tester.pump();
+    expect(find.text('최근 저장소 없음'), findsOneWidget);
   });
 
   testWidgets('searches local and remote comparison branches', (tester) async {
