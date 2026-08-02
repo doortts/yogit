@@ -2559,6 +2559,222 @@ void main() {
     expect(await noOrigin.fetchOrigin(), FetchOriginResult.noOrigin);
   });
 
+  group('remotePullState', () {
+    const refs = RepoRefs(
+      local: ['main', 'feature/lane'],
+      remote: [
+        'origin/main',
+        'origin/feature/lane',
+        'origin/feature/new-lane',
+        'unknown-prefix',
+      ],
+      remoteNames: ['origin'],
+      current: 'main',
+      remoteAheadBehind: {
+        'origin/main': BranchAheadBehind(ahead: 3, behind: 0),
+        'origin/feature/lane': BranchAheadBehind(ahead: 2, behind: 3),
+      },
+    );
+
+    test('an unknown remote prefix has no pull state', () {
+      expect(remotePullState(refs, 'unknown-prefix'), isNull);
+    });
+
+    test('a branch without a local counterpart wants a tracking branch', () {
+      final state = remotePullState(refs, 'origin/feature/new-lane')!;
+      expect(state.kind, RemotePullKind.noLocal);
+      expect(state.remote, 'origin');
+      expect(state.localBranch, 'feature/new-lane');
+    });
+
+    test('a remote strictly ahead fast-forwards the checked out local', () {
+      final state = remotePullState(refs, 'origin/main')!;
+      expect(state.kind, RemotePullKind.fastForward);
+      expect(state.ahead, 3);
+      expect(state.behind, 0);
+      expect(state.checkedOut, isTrue);
+    });
+
+    test('commits on both sides mean no fast-forward', () {
+      final state = remotePullState(refs, 'origin/feature/lane')!;
+      expect(state.kind, RemotePullKind.diverged);
+      expect(state.ahead, 2);
+      expect(state.behind, 3);
+      expect(state.checkedOut, isFalse);
+    });
+
+    test('nothing to pull is up to date, even when local is ahead', () {
+      const localAhead = RepoRefs(
+        local: ['main'],
+        remote: ['origin/main'],
+        remoteNames: ['origin'],
+        remoteAheadBehind: {
+          'origin/main': BranchAheadBehind(ahead: 0, behind: 2),
+        },
+      );
+      final state = remotePullState(localAhead, 'origin/main')!;
+      expect(state.kind, RemotePullKind.upToDate);
+      expect(state.behind, 2);
+      expect(state.checkedOut, isFalse);
+    });
+  });
+
+  test(
+    'pullRemoteBranch pulls the checkout but fetches other branches',
+    () async {
+      final calls = <List<String>>[];
+      Map<String, String>? pullEnvironment;
+      final repository = GitRepository(
+        '/repo',
+        runner: (executable, arguments, {workingDirectory, environment}) async {
+          calls.add(arguments);
+          pullEnvironment = environment;
+          return ProcessResult(1, 0, '', '');
+        },
+      );
+
+      await repository.pullRemoteBranch('origin', 'main', checkedOut: true);
+      await repository.pullRemoteBranch(
+        'origin',
+        'feature/lane',
+        checkedOut: false,
+      );
+
+      expect(calls, [
+        [
+          '-c',
+          'credential.interactive=never',
+          'pull',
+          '--ff-only',
+          'origin',
+          'main',
+        ],
+        [
+          '-c',
+          'credential.interactive=never',
+          'fetch',
+          'origin',
+          'feature/lane:feature/lane',
+        ],
+      ]);
+      expect(pullEnvironment?['GIT_TERMINAL_PROMPT'], '0');
+      expect(pullEnvironment?['GCM_INTERACTIVE'], 'Never');
+    },
+  );
+
+  test('pullRemoteBranch surfaces the git failure', () async {
+    final repository = GitRepository(
+      '/repo',
+      runner: (executable, arguments, {workingDirectory, environment}) async =>
+          ProcessResult(1, 128, '', 'fatal: not possible to fast-forward'),
+    );
+
+    await expectLater(
+      repository.pullRemoteBranch('origin', 'main', checkedOut: true),
+      throwsA(isA<ProcessException>()),
+    );
+  });
+
+  test(
+    'checkoutRemoteBranch switches, creating a tracking branch when asked',
+    () async {
+      final calls = <List<String>>[];
+      final repository = GitRepository(
+        '/repo',
+        runner: (executable, arguments, {workingDirectory, environment}) async {
+          calls.add(arguments);
+          return ProcessResult(1, 0, '', '');
+        },
+      );
+
+      await repository.checkoutRemoteBranch(
+        'origin',
+        'feature/new-lane',
+        createLocal: true,
+      );
+      await repository.checkoutRemoteBranch(
+        'origin',
+        'main',
+        createLocal: false,
+      );
+
+      expect(calls, [
+        [
+          'switch',
+          '-c',
+          'feature/new-lane',
+          '--track',
+          'origin/feature/new-lane',
+        ],
+        ['switch', 'main'],
+      ]);
+    },
+  );
+
+  test(
+    'deleteLocalBranch force-deletes and surfaces the git failure',
+    () async {
+      final calls = <List<String>>[];
+      final repository = GitRepository(
+        '/repo',
+        runner: (executable, arguments, {workingDirectory, environment}) async {
+          calls.add(arguments);
+          return ProcessResult(1, 0, '', '');
+        },
+      );
+
+      await repository.deleteLocalBranch('feature/lane');
+      expect(calls, [
+        ['branch', '-D', 'feature/lane'],
+      ]);
+
+      final failing = GitRepository(
+        '/repo',
+        runner:
+            (executable, arguments, {workingDirectory, environment}) async =>
+                ProcessResult(1, 1, '', "error: cannot delete branch 'main'"),
+      );
+      await expectLater(
+        failing.deleteLocalBranch('main'),
+        throwsA(isA<ProcessException>()),
+      );
+    },
+  );
+
+  test('removeWorktree force-removes the checkout', () async {
+    final calls = <List<String>>[];
+    final repository = GitRepository(
+      '/repo',
+      runner: (executable, arguments, {workingDirectory, environment}) async {
+        calls.add(arguments);
+        return ProcessResult(1, 0, '', '');
+      },
+    );
+
+    await repository.removeWorktree('/repo/.worktrees/lane');
+    expect(calls, [
+      ['worktree', 'remove', '--force', '/repo/.worktrees/lane'],
+    ]);
+  });
+
+  test('byteSizeLabel picks a readable unit', () {
+    expect(byteSizeLabel(512), '512 B');
+    expect(byteSizeLabel(1536), '1.5 KB');
+    expect(byteSizeLabel(10 * 1024 * 1024), '10 MB');
+    expect(byteSizeLabel(3 * 1024 * 1024 * 1024), '3.0 GB');
+  });
+
+  test('directorySizeBytes sums regular files only', () async {
+    final directory = await Directory.systemTemp.createTemp('yogit_size_');
+    addTearDown(() => directory.delete(recursive: true));
+    await File('${directory.path}/a.txt').writeAsString('12345');
+    await Directory('${directory.path}/sub').create();
+    await File('${directory.path}/sub/b.txt').writeAsString('123');
+    await Link('${directory.path}/loop').create(directory.path);
+
+    expect(await directorySizeBytes(directory.path), 8);
+  });
+
   test('a detached HEAD reports no current branch', () async {
     final repository = GitRepository(
       '/tmp/repository',
