@@ -1518,6 +1518,14 @@ class _TimelineScreenState extends State<TimelineScreen>
         _moveSelection(step, animate: event is KeyDownEvent);
         return KeyEventResult.handled;
       }
+      // ← (or h) walks over to the sidebar while the pane is open.
+      if (key == LogicalKeyboardKey.arrowLeft &&
+          event is KeyDownEvent &&
+          !_sidebarCollapsed) {
+        _sidebarFocusNode.requestFocus();
+        if (_sidebarCursor == null) _moveSidebarCursor(1);
+        return KeyEventResult.handled;
+      }
     }
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     if (event.logicalKey == LogicalKeyboardKey.keyD &&
@@ -1756,10 +1764,16 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (mounted) setState(() {});
   }
 
-  /// The timeline's selection color, dimmed while the sidebar has the
-  /// keyboard so the active pane is the brighter one.
+  /// The unfocused pane keeps its selection, drained of color: same
+  /// luminance, zero chroma, so only the focused pane reads as active.
+  static Color _achromatic(Color color) {
+    final gray = 0.299 * color.r + 0.587 * color.g + 0.114 * color.b;
+    return Color.from(alpha: color.a, red: gray, green: gray, blue: gray);
+  }
+
+  /// The timeline's selection color, gray while the sidebar has the keyboard.
   Color get _timelineSelectionColor => _sidebarFocusNode.hasFocus
-      ? Color.lerp(_palette.selectedRow, _palette.background, 0.55)!
+      ? _achromatic(_palette.selectedRow)
       : _palette.selectedRow;
 
   /// The row the sidebar's keyboard cursor sits on, highlighted like a hover.
@@ -1809,7 +1823,22 @@ class _TimelineScreenState extends State<TimelineScreen>
       _focusNode.requestFocus();
       return KeyEventResult.handled;
     }
-    final step = switch (event.logicalKey) {
+    final keyboard = HardwareKeyboard.instance;
+    final key = normalizeNavigationKey(
+      event.logicalKey,
+      hasModifier:
+          keyboard.isMetaPressed ||
+          keyboard.isAltPressed ||
+          keyboard.isShiftPressed ||
+          keyboard.isControlPressed,
+    );
+    // → (or l) hands the keyboard back to the timeline; the cursor stays so
+    // the gray selection marks where the sidebar left off.
+    if (key == LogicalKeyboardKey.arrowRight && event is KeyDownEvent) {
+      _focusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    final step = switch (key) {
       LogicalKeyboardKey.arrowDown => 1,
       LogicalKeyboardKey.arrowUp => -1,
       _ => 0,
@@ -4083,11 +4112,16 @@ class _TimelineScreenState extends State<TimelineScreen>
                         pointerHovered || _contextMenuRef == name;
                     final cursorHere = _sidebarCursor == (section, name);
                     final hovered = pointerActive || cursorHere;
-                    // The cursor highlight fades while the keyboard lives in
-                    // the timeline, mirroring the dimmed timeline selection.
-                    final selectionAlpha = _sidebarFocusNode.hasFocus
-                        ? 1.0
-                        : 0.45;
+                    // The cursor keeps its shape but drains to gray while the
+                    // keyboard lives in the timeline, so only one pane's
+                    // selection carries color at a time.
+                    final sidebarFocused = _sidebarFocusNode.hasFocus;
+                    final cursorFill = sidebarFocused
+                        ? _palette.selectedRow
+                        : _achromatic(_palette.selectedRow);
+                    final cursorEdge = sidebarFocused
+                        ? iconColor
+                        : _achromatic(iconColor);
                     return GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       // Double-clicks are detected by hand: an onDoubleTap
@@ -4136,9 +4170,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                                 // selected row, a plain hover like the
                                 // timeline's hover chip.
                                 color: cursorHere
-                                    ? _palette.selectedRow.withValues(
-                                        alpha: selectionAlpha,
-                                      )
+                                    ? cursorFill
                                     : pointerActive
                                     ? _palette.neutralChip.withValues(
                                         alpha: 0.48,
@@ -4147,9 +4179,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                                 border: Border(
                                   left: BorderSide(
                                     color: cursorHere
-                                        ? iconColor.withValues(
-                                            alpha: selectionAlpha,
-                                          )
+                                        ? cursorEdge
                                         : Colors.transparent,
                                     width: cursorHere ? 2 : 0,
                                   ),
