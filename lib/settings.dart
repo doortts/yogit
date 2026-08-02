@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -5,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'avatars.dart';
+import 'commit_profile_chip.dart' show ProfileAvatar;
 import 'full_diff_model.dart';
 import 'git.dart';
 import 'timeline_theme.dart';
@@ -264,6 +266,99 @@ bool _nestedStringMapEquals(
   return true;
 }
 
+/// A commit identity the status bar can switch a repository to: the name and
+/// email Git will sign commits with, under a label the user recognizes.
+class CommitProfile {
+  const CommitProfile({
+    required this.label,
+    required this.name,
+    required this.email,
+    this.color = defaultColor,
+  });
+
+  static const defaultColor = '#7C5CD6';
+
+  /// The palette new profiles cycle through, so two identities never look
+  /// alike in the chip without the user picking colors by hand.
+  static const paletteColors = [
+    '#7C5CD6',
+    '#2EA043',
+    '#D98032',
+    '#3B82C4',
+    '#C2528B',
+  ];
+
+  final String label;
+  final String name;
+  final String email;
+  final String color;
+
+  Color get colorValue => parseHexColor(color) ?? const Color(0xFF7C5CD6);
+
+  /// `채수원` reads as `채`, `Suwon Chae` as `SC`: at most two glyphs for the
+  /// avatar circle. Taken from the committer name, so the circle identifies
+  /// the person rather than repeating the label beside it.
+  String get initials {
+    final source = name.trim().isEmpty ? label.trim() : name.trim();
+    if (source.isEmpty) return '?';
+    final words = source.split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
+    if (words.length >= 2) {
+      return '${words.first.characters.first}'
+              '${words.elementAt(1).characters.first}'
+          .toUpperCase();
+    }
+    final characters = source.characters;
+    // Latin initials read better doubled up; CJK is dense enough at one.
+    return characters.first.codeUnitAt(0) < 0x80
+        ? characters.take(2).toString().toUpperCase()
+        : characters.first;
+  }
+
+  bool matches(GitIdentity identity) =>
+      identity.name == name && identity.email == email;
+
+  CommitProfile copyWith({
+    String? label,
+    String? name,
+    String? email,
+    String? color,
+  }) => CommitProfile(
+    label: label ?? this.label,
+    name: name ?? this.name,
+    email: email ?? this.email,
+    color: color ?? this.color,
+  );
+
+  factory CommitProfile.fromJson(Object? value) {
+    final map = value is Map ? value : const {};
+    final color = formatHexColor('${map['color'] ?? ''}');
+    return CommitProfile(
+      label: '${map['label'] ?? ''}',
+      name: '${map['name'] ?? ''}',
+      email: '${map['email'] ?? ''}',
+      color: parseHexColor(color) == null ? defaultColor : color,
+    );
+  }
+
+  Map<String, Object> toJson() => {
+    'label': label,
+    'name': name,
+    'email': email,
+    'color': color,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      other is CommitProfile &&
+      label == other.label &&
+      name == other.name &&
+      email == other.email &&
+      color == other.color;
+
+  @override
+  int get hashCode => Object.hash(label, name, email, color);
+}
+
 class AppSettings {
   const AppSettings({
     this.showAvatars = true,
@@ -285,6 +380,7 @@ class AppSettings {
     this.baseBranches = const {},
     this.deletedBranchNames = const {},
     this.recentRepositories = const [],
+    this.commitProfiles = const [],
   });
 
   /// How many repositories the picker remembers before the oldest drops off.
@@ -343,6 +439,9 @@ class AppSettings {
 
   /// Repository roots, most recently opened first.
   final List<String> recentRepositories;
+
+  /// The commit identities the status bar offers, in display order.
+  final List<CommitProfile> commitProfiles;
 
   /// The detail panel's size, per placement axis.
   final double previewWidth;
@@ -449,6 +548,7 @@ class AppSettings {
     Map<String, String>? baseBranches,
     Map<String, Map<String, String>>? deletedBranchNames,
     List<String>? recentRepositories,
+    List<CommitProfile>? commitProfiles,
   }) => AppSettings(
     showAvatars: showAvatars ?? this.showAvatars,
     timelineTheme: timelineTheme ?? this.timelineTheme,
@@ -470,6 +570,7 @@ class AppSettings {
     baseBranches: baseBranches ?? this.baseBranches,
     deletedBranchNames: deletedBranchNames ?? this.deletedBranchNames,
     recentRepositories: recentRepositories ?? this.recentRepositories,
+    commitProfiles: commitProfiles ?? this.commitProfiles,
   );
 
   factory AppSettings.fromJson(Object? value) {
@@ -549,8 +650,18 @@ class AppSettings {
       baseBranches: baseBranches,
       deletedBranchNames: _parseNestedStringMap(value['deletedBranchNames']),
       recentRepositories: _parseRecentRepositories(value['recentRepositories']),
+      commitProfiles: _parseCommitProfiles(value['commitProfiles']),
     );
   }
+
+  /// A profile with no email could never be applied, so it is dropped rather
+  /// than shown as an entry that silently does nothing.
+  static List<CommitProfile> _parseCommitProfiles(Object? value) => [
+    if (value is List)
+      for (final entry in value)
+        if (CommitProfile.fromJson(entry) case final profile)
+          if (profile.email.trim().isNotEmpty) profile,
+  ];
 
   static List<String> _parseRecentRepositories(Object? value) {
     if (value is! List) return const [];
@@ -585,6 +696,7 @@ class AppSettings {
     'baseBranches': baseBranches,
     'deletedBranchNames': deletedBranchNames,
     'recentRepositories': recentRepositories,
+    'commitProfiles': [for (final profile in commitProfiles) profile.toJson()],
   };
 
   @override
@@ -608,7 +720,8 @@ class AppSettings {
       previewDiffBottomHeight == other.previewDiffBottomHeight &&
       mapEquals(baseBranches, other.baseBranches) &&
       _nestedStringMapEquals(deletedBranchNames, other.deletedBranchNames) &&
-      listEquals(recentRepositories, other.recentRepositories);
+      listEquals(recentRepositories, other.recentRepositories) &&
+      listEquals(commitProfiles, other.commitProfiles);
 
   @override
   int get hashCode => Object.hash(
@@ -648,6 +761,7 @@ class AppSettings {
       ),
     ),
     Object.hashAll(recentRepositories),
+    Object.hashAll(commitProfiles),
   );
 }
 
@@ -679,7 +793,7 @@ class SettingsStore {
   }
 }
 
-enum _SettingsSection { gitIntegrations, appearance }
+enum _SettingsSection { gitIntegrations, commitProfiles, appearance }
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -845,6 +959,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       icon: Icons.account_tree_outlined,
                       label: 'Git integrations',
                     ),
+                    const SizedBox(height: 4),
+                    _settingsSectionRow(
+                      section: _SettingsSection.commitProfiles,
+                      key: const Key('settings-section-commit-profiles'),
+                      icon: Icons.badge_outlined,
+                      label: '커밋 프로필',
+                    ),
                   ],
                 ),
               ),
@@ -853,6 +974,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: switch (_section) {
                   _SettingsSection.appearance => _appearance(),
                   _SettingsSection.gitIntegrations => _gitIntegrations(),
+                  _SettingsSection.commitProfiles => _commitProfiles(),
                 },
               ),
             ],
@@ -949,6 +1071,157 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     ),
   );
+
+  Widget _commitProfiles() {
+    final profiles = _settings.commitProfiles;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '커밋 프로필',
+              style: TextStyle(
+                color: Color(0xFFE8EAF2),
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              '저장소마다 상태바에서 선택해 사용할 이름과 이메일 목록입니다. '
+              '고른 프로필은 그 저장소의 .git/config에 기록됩니다.',
+              style: TextStyle(color: Color(0xFF8D94A8), fontSize: 12),
+            ),
+            const SizedBox(height: 20),
+            for (var index = 0; index < profiles.length; index++)
+              _commitProfileRow(index, profiles[index]),
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: InkWell(
+                key: const Key('add-commit-profile'),
+                borderRadius: BorderRadius.circular(7),
+                onTap: _addCommitProfile,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 7,
+                  ),
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: const Color(0xFF343946),
+                      style: BorderStyle.solid,
+                    ),
+                    borderRadius: BorderRadius.circular(7),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.add, size: 14, color: Color(0xFF8D94A8)),
+                      SizedBox(width: 6),
+                      Text(
+                        '프로필 추가',
+                        style: TextStyle(
+                          color: Color(0xFF8D94A8),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _commitProfileRow(int index, CommitProfile profile) => Container(
+    key: Key('commit-profile-row-$index'),
+    margin: const EdgeInsets.only(bottom: 6),
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+    decoration: BoxDecoration(
+      color: const Color(0xFF1A1D25),
+      border: Border.all(color: const Color(0xFF343946)),
+      borderRadius: BorderRadius.circular(7),
+    ),
+    child: Row(
+      children: [
+        ProfileAvatar(
+          text: profile.initials,
+          color: profile.colorValue,
+          size: 24,
+        ),
+        const SizedBox(width: 10),
+        Text(
+          profile.label.trim().isEmpty ? profile.name : profile.label,
+          style: const TextStyle(color: Color(0xFFE8EAF2), fontSize: 12.5),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            '${profile.name} <${profile.email}>',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Color(0xFF8D94A8), fontSize: 11.5),
+          ),
+        ),
+        IconButton(
+          key: Key('edit-commit-profile-$index'),
+          icon: const Icon(Icons.edit_outlined, size: 15),
+          color: const Color(0xFF8D94A8),
+          visualDensity: VisualDensity.compact,
+          tooltip: '수정',
+          onPressed: () => unawaited(_editCommitProfile(index)),
+        ),
+        IconButton(
+          key: Key('delete-commit-profile-$index'),
+          icon: const Icon(Icons.delete_outline, size: 15),
+          color: const Color(0xFF8D94A8),
+          visualDensity: VisualDensity.compact,
+          tooltip: '삭제',
+          onPressed: () {
+            final profiles = [..._settings.commitProfiles]..removeAt(index);
+            _change(_settings.copyWith(commitProfiles: profiles));
+          },
+        ),
+      ],
+    ),
+  );
+
+  void _addCommitProfile() => unawaited(_editCommitProfile(null));
+
+  /// One dialog for both add and edit; [index] null means a new entry.
+  Future<void> _editCommitProfile(int? index) async {
+    final existing = index == null ? null : _settings.commitProfiles[index];
+    final edited = await showDialog<CommitProfile>(
+      context: context,
+      builder: (context) => _CommitProfileDialog(
+        profile:
+            existing ??
+            CommitProfile(
+              label: '',
+              name: '',
+              email: '',
+              color:
+                  CommitProfile.paletteColors[_settings.commitProfiles.length %
+                      CommitProfile.paletteColors.length],
+            ),
+        isNew: existing == null,
+      ),
+    );
+    if (edited == null) return;
+    final profiles = [..._settings.commitProfiles];
+    if (index == null) {
+      profiles.add(edited);
+    } else {
+      profiles[index] = edited;
+    }
+    _change(_settings.copyWith(commitProfiles: profiles));
+  }
 
   Widget _gitIntegrations() => SingleChildScrollView(
     padding: const EdgeInsets.all(24),
@@ -1224,6 +1497,136 @@ class _SettingsScreenState extends State<SettingsScreen> {
       },
     );
   }
+}
+
+/// Add/edit one commit profile. The email is the only required field — a
+/// profile without one could never be applied to a repository.
+class _CommitProfileDialog extends StatefulWidget {
+  const _CommitProfileDialog({required this.profile, required this.isNew});
+
+  final CommitProfile profile;
+  final bool isNew;
+
+  @override
+  State<_CommitProfileDialog> createState() => _CommitProfileDialogState();
+}
+
+class _CommitProfileDialogState extends State<_CommitProfileDialog> {
+  late final _label = TextEditingController(text: widget.profile.label);
+  late final _name = TextEditingController(text: widget.profile.name);
+  late final _email = TextEditingController(text: widget.profile.email);
+  late var _color = widget.profile.color;
+
+  @override
+  void dispose() {
+    _label.dispose();
+    _name.dispose();
+    _email.dispose();
+    super.dispose();
+  }
+
+  InputDecoration _decoration(String label) => InputDecoration(
+    labelText: label,
+    isDense: true,
+    labelStyle: const TextStyle(color: Color(0xFF8D94A8), fontSize: 12),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+    border: const OutlineInputBorder(),
+  );
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    backgroundColor: const Color(0xFF1D2029),
+    title: Text(
+      widget.isNew ? '프로필 추가' : '프로필 수정',
+      style: const TextStyle(color: Color(0xFFE8EAF2), fontSize: 15),
+    ),
+    content: SizedBox(
+      width: 360,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            key: const Key('commit-profile-label-field'),
+            controller: _label,
+            style: const TextStyle(color: Color(0xFFE8EAF2), fontSize: 13),
+            decoration: _decoration('레이블 (예: 회사, 개인)'),
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('commit-profile-name-field'),
+            controller: _name,
+            style: const TextStyle(color: Color(0xFFE8EAF2), fontSize: 13),
+            decoration: _decoration('user.name'),
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('commit-profile-email-field'),
+            controller: _email,
+            style: const TextStyle(color: Color(0xFFE8EAF2), fontSize: 13),
+            decoration: _decoration('user.email'),
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            '색',
+            style: TextStyle(color: Color(0xFF8D94A8), fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              for (final hex in CommitProfile.paletteColors)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: InkWell(
+                    key: Key('commit-profile-color-$hex'),
+                    customBorder: const CircleBorder(),
+                    onTap: () => setState(() => _color = hex),
+                    child: Container(
+                      width: 26,
+                      height: 26,
+                      decoration: BoxDecoration(
+                        color: parseHexColor(hex),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: _color == hex
+                              ? const Color(0xFFE8EAF2)
+                              : Colors.transparent,
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('취소'),
+      ),
+      FilledButton(
+        key: const Key('commit-profile-save'),
+        onPressed: _email.text.trim().isEmpty
+            ? null
+            : () => Navigator.pop(
+                context,
+                CommitProfile(
+                  label: _label.text.trim(),
+                  name: _name.text.trim(),
+                  email: _email.text.trim(),
+                  color: _color,
+                ),
+              ),
+        child: const Text('저장'),
+      ),
+    ],
+  );
 }
 
 class _TimelineThemeCard extends StatefulWidget {

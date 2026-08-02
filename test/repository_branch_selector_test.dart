@@ -55,13 +55,19 @@ void main() {
       findsOneWidget,
     );
 
-    await tester.enterText(
-      find.byKey(const Key('base-branch-search')),
-      'rele',
-    );
+    await tester.enterText(find.byKey(const Key('base-branch-search')), 'rele');
     await tester.pump();
     expect(find.byKey(const Key('base-branch-menu-main')), findsNothing);
     expect(find.byKey(const Key('base-branch-menu-release')), findsOneWidget);
+
+    // Gapped letters find the branch too, without typing it in full.
+    await tester.enterText(find.byKey(const Key('base-branch-search')), 'rls');
+    await tester.pump();
+    expect(find.byKey(const Key('base-branch-menu-main')), findsNothing);
+    expect(find.byKey(const Key('base-branch-menu-release')), findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('base-branch-search')), 'rele');
+    await tester.pump();
 
     await tester.tap(find.byKey(const Key('base-branch-menu-release')));
     await tester.pumpAndSettle();
@@ -72,7 +78,10 @@ void main() {
     final now = DateTime(2026, 8, 3, 12);
     int at(Duration ago) => now.subtract(ago).millisecondsSinceEpoch ~/ 1000;
     expect(relativeCommitLabel(at(Duration.zero), now), '방금 전 커밋');
-    expect(relativeCommitLabel(at(const Duration(minutes: 10)), now), '10분 전 커밋');
+    expect(
+      relativeCommitLabel(at(const Duration(minutes: 10)), now),
+      '10분 전 커밋',
+    );
     expect(relativeCommitLabel(at(const Duration(hours: 3)), now), '3시간 전 커밋');
     expect(relativeCommitLabel(at(const Duration(hours: 30)), now), '어제 커밋');
     expect(relativeCommitLabel(at(const Duration(days: 4)), now), '4일 전 커밋');

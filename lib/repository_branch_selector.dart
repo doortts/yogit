@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'fuzzy_match.dart';
+import 'search_icon.dart';
 import 'settings.dart';
 import 'timeline_theme.dart';
 
@@ -207,7 +209,10 @@ class _MenuSearchField extends StatelessWidget {
             hintText: hint,
             hintStyle: TextStyle(fontSize: 13, color: palette.muted),
             contentPadding: const EdgeInsets.symmetric(vertical: 7),
-            prefixIcon: Icon(Icons.search, size: 16, color: palette.muted),
+            prefixIcon: Center(
+              widthFactor: 1,
+              child: SearchIcon(color: palette.muted),
+            ),
             prefixIconConstraints: const BoxConstraints(
               minWidth: 32,
               minHeight: 30,
@@ -341,8 +346,8 @@ class _RepositorySelectorState extends State<_RepositorySelector> {
     final query = _query.trim().toLowerCase();
     final visible = [
       for (final path in widget.recentRepositories)
-        if (path.toLowerCase().contains(query) ||
-            repositoryNameOf(path).toLowerCase().contains(query))
+        if (fuzzyMatch(path, query) ||
+            fuzzyMatch(repositoryNameOf(path), query))
           path,
     ];
     final notice = visible.isNotEmpty
@@ -541,7 +546,7 @@ class _BaseBranchSelectorState extends State<_BaseBranchSelector> {
     final query = _query.trim().toLowerCase();
     final visible = [
       for (final branch in widget.localBranches)
-        if (branch.toLowerCase().contains(query)) branch,
+        if (fuzzyMatch(branch, query)) branch,
     ];
     final notice = visible.isEmpty
         ? '일치하는 브랜치 없음'
@@ -627,7 +632,7 @@ class _ComparisonSelectorState extends State<_ComparisonSelector> {
     final query = _query.trim().toLowerCase();
     List<String> visible(List<String> branches) => branches
         .where((branch) => branch != widget.baseBranch)
-        .where((branch) => branch.toLowerCase().contains(query))
+        .where((branch) => fuzzyMatch(branch, query))
         .toList();
 
     final local = visible(widget.localBranches);

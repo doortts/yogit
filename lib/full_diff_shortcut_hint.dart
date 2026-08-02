@@ -3,12 +3,18 @@ import 'package:flutter/material.dart';
 import 'full_diff_theme.dart';
 import 'typography.dart';
 
+/// A key-combination badge that hangs under [child] while [visible]. The
+/// colors default to the full-diff header's, so the timeline can pass its own
+/// palette without either screen owning a second copy of the overlay.
 class FullDiffShortcutHint extends StatefulWidget {
   const FullDiffShortcutHint({
     required this.visible,
     required this.label,
     required this.child,
     this.hintKey,
+    this.background,
+    this.borderColor,
+    this.textColor,
     super.key,
   });
 
@@ -16,6 +22,9 @@ class FullDiffShortcutHint extends StatefulWidget {
   final String label;
   final Widget child;
   final Key? hintKey;
+  final Color? background;
+  final Color? borderColor;
+  final Color? textColor;
 
   @override
   State<FullDiffShortcutHint> createState() => _FullDiffShortcutHintState();
@@ -58,16 +67,18 @@ class _FullDiffShortcutHintState extends State<FullDiffShortcutHint> {
                             vertical: 3,
                           ),
                           decoration: BoxDecoration(
-                            color: fullDiffHeader,
+                            color: widget.background ?? fullDiffHeader,
                             borderRadius: BorderRadius.circular(
                               fullDiffControlRadius,
                             ),
-                            border: Border.all(color: fullDiffDivider),
+                            border: Border.all(
+                              color: widget.borderColor ?? fullDiffDivider,
+                            ),
                           ),
                           child: Text(
                             widget.label,
                             style: technicalTextStyle.copyWith(
-                              color: Colors.white,
+                              color: widget.textColor ?? Colors.white,
                               fontSize: 11,
                               height: 1,
                             ),

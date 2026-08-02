@@ -8,20 +8,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'avatars.dart';
+import 'commit_profile_chip.dart';
 import 'diff_screen.dart';
 import 'external_editor.dart';
 import 'full_diff_commit_message_cache.dart';
 import 'full_diff_model.dart';
+import 'full_diff_shortcut_hint.dart';
 import 'full_diff_side_by_side_view.dart';
 import 'full_diff_syntax.dart';
 import 'full_diff_unified_view.dart';
+import 'fuzzy_match.dart';
 import 'git.dart';
 import 'monaco_editor_screen.dart';
 import 'page_scroll_shortcuts.dart';
 import 'ref_tree.dart';
+import 'search_icon.dart';
 import 'remote_pull_menu.dart';
 import 'repository_branch_selector.dart';
 import 'settings.dart';
+import 'shortcut_modifier.dart';
 import 'timeline_theme.dart';
 import 'typography.dart';
 import 'vim_navigation.dart';
@@ -697,6 +702,8 @@ class TimelineScreen extends StatefulWidget {
     this.onOpenRepository,
     this.recentRepositories = const [],
     this.onForgetRecentRepository,
+    this.commitProfiles = const [],
+    this.onCommitProfilesChanged,
     this.preferredBranch,
     this.preferredBranchReady = true,
     this.onPreferredBranchChanged,
@@ -742,6 +749,10 @@ class TimelineScreen extends StatefulWidget {
   /// Repository roots, most recently opened first.
   final List<String> recentRepositories;
   final ValueChanged<String>? onForgetRecentRepository;
+
+  /// The commit identities the status bar chip offers.
+  final List<CommitProfile> commitProfiles;
+  final ValueChanged<List<CommitProfile>>? onCommitProfilesChanged;
   final String? preferredBranch;
 
   /// Whether [preferredBranch] has finished loading from persistent settings.
@@ -975,9 +986,11 @@ class _TimelineScreenState extends State<TimelineScreen>
     // panes does not hold the keyboard, so both repaint on focus flips.
     _sidebarFocusNode.addListener(_onPaneFocusChanged);
     _focusNode.addListener(_onPaneFocusChanged);
+    HardwareKeyboard.instance.addHandler(_handleModifierKeyEvent);
     // Refs load beside the first page, and neither blocks the first paint. The
     // detail pane stays hidden until Enter or Space asks for it.
     _loadNextPage();
+    unawaited(_loadCommitIdentity());
     unawaited(_restoreCherryPickThenRefresh());
     _fetchTimer = Timer.periodic(
       _fetchInterval,
@@ -1154,6 +1167,16 @@ class _TimelineScreenState extends State<TimelineScreen>
       _deletedBranchLookupAttempts.clear();
       _resolvingDeletedBranchTips.clear();
     }
+    // A new repository has its own identity; an edited profile list can rename
+    // the one already in force.
+    if (!identical(widget.repository, oldWidget.repository)) {
+      unawaited(_loadCommitIdentity());
+    } else if (!listEquals(widget.commitProfiles, oldWidget.commitProfiles)) {
+      _commitIdentity = resolveCommitIdentity(
+        _commitIdentity.identity,
+        widget.commitProfiles,
+      );
+    }
     if (deletedBranchNamesChanged) {
       _deletedBranchNames
         ..clear()
@@ -1246,6 +1269,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    HardwareKeyboard.instance.removeHandler(_handleModifierKeyEvent);
     _fetchTimer?.cancel();
     _dropMergePreview();
     _dropRebasePreview();
@@ -1463,6 +1487,120 @@ class _TimelineScreenState extends State<TimelineScreen>
         context.findAncestorWidgetOfExactType<EditableText>() != null;
   }
 
+  // ------------------------------------------------------- commit identity
+
+  /// The repository's commit identity, re-read rather than remembered: the
+  /// CLI, an includeIf rule, or another GUI can change it behind the app.
+  var _commitIdentity = const CommitIdentityState.unknown();
+
+  Future<void> _loadCommitIdentity() async {
+    try {
+      final identity = await widget.repository.loadCommitIdentity();
+      if (!mounted) return;
+      setState(
+        () => _commitIdentity = resolveCommitIdentity(
+          identity,
+          widget.commitProfiles,
+        ),
+      );
+    } catch (_) {
+      // A repository that cannot answer keeps the chip on its last reading.
+    }
+  }
+
+  Future<void> _applyCommitProfile(CommitProfile profile) async {
+    try {
+      await widget.repository.setLocalCommitIdentity(
+        GitIdentity(name: profile.name, email: profile.email),
+      );
+      await _loadCommitIdentity();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('커밋 신원: ${profile.name} <${profile.email}>')),
+      );
+    } on ProcessException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('커밋 신원 변경 실패: ${error.message.trim()}')),
+        );
+      }
+    }
+  }
+
+  /// Saves the identity the repository already carries as a named profile, so
+  /// a setup made outside the app joins the list instead of fighting it.
+  void _registerCurrentIdentity() {
+    final identity = _commitIdentity.identity;
+    if (identity.email.trim().isEmpty) return;
+    final profiles = [
+      ...widget.commitProfiles,
+      CommitProfile(
+        label: identity.name.trim().isEmpty ? identity.email : identity.name,
+        name: identity.name,
+        email: identity.email,
+        color:
+            CommitProfile.paletteColors[widget.commitProfiles.length %
+                CommitProfile.paletteColors.length],
+      ),
+    ];
+    widget.onCommitProfilesChanged?.call(profiles);
+    setState(() => _commitIdentity = resolveCommitIdentity(identity, profiles));
+  }
+
+  /// Opens the profile menu above the chip, right-aligned with it.
+  Future<void> _openCommitProfileMenu() async {
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final chip =
+        _profileChipKey.currentContext?.findRenderObject() as RenderBox?;
+    if (chip == null) return;
+    final topLeft = chip.localToGlobal(Offset.zero, ancestor: overlay);
+    final right = overlay.size.width - (topLeft.dx + chip.size.width);
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.transparent,
+      builder: (context) => Stack(
+        children: [
+          Positioned(
+            right: right,
+            bottom: overlay.size.height - topLeft.dy + 7,
+            child: CommitProfileMenu(
+              repositoryName: repositoryNameOf(widget.repository.root),
+              state: _commitIdentity,
+              profiles: widget.commitProfiles,
+              onSelected: (profile) {
+                Navigator.pop(context);
+                unawaited(_applyCommitProfile(profile));
+              },
+              onRegisterCurrent: () {
+                Navigator.pop(context);
+                _registerCurrentIdentity();
+              },
+              onManage: () {
+                Navigator.pop(context);
+                widget.onOpenSettings?.call();
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  final _profileChipKey = GlobalKey();
+
+  /// Whether ⌘ (Ctrl off Apple platforms) is down right now: every on-screen
+  /// control with a shortcut shows its key combination while it is.
+  var _modifierHeld = false;
+
+  bool _handleModifierKeyEvent(KeyEvent event) {
+    if (!isShortcutModifierKey(event.logicalKey)) return false;
+    if (_modifierHeld != shortcutModifierHeld && mounted) {
+      setState(() => _modifierHeld = shortcutModifierHeld);
+    }
+    return false;
+  }
+
   KeyEventResult _onKeyEvent(FocusNode _, KeyEvent event) {
     // Holding an arrow keeps moving; everything else acts once per press.
     if (event is KeyDownEvent || event is KeyRepeatEvent) {
@@ -1528,15 +1666,13 @@ class _TimelineScreenState extends State<TimelineScreen>
       }
     }
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
-    if (event.logicalKey == LogicalKeyboardKey.keyD &&
-        HardwareKeyboard.instance.isMetaPressed) {
+    if (event.logicalKey == LogicalKeyboardKey.keyD && shortcutModifierHeld) {
       if (_selectedCommit != null) _openFullDiff();
       return KeyEventResult.handled;
     }
     // ⌘1 hands the keyboard to the sidebar, expanding it when collapsed; a
     // second ⌘1 while the sidebar holds the keyboard puts the pane away.
-    if (event.logicalKey == LogicalKeyboardKey.digit1 &&
-        HardwareKeyboard.instance.isMetaPressed) {
+    if (event.logicalKey == LogicalKeyboardKey.digit1 && shortcutModifierHeld) {
       if (!_sidebarCollapsed && _sidebarFocusNode.hasFocus) {
         setState(() => _sidebarCollapsed = true);
         _focusNode.requestFocus();
@@ -1547,9 +1683,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       if (_sidebarCursor == null) _moveSidebarCursor(1);
       return KeyEventResult.handled;
     }
-    if ((event.logicalKey == LogicalKeyboardKey.enter ||
-            event.logicalKey == LogicalKeyboardKey.space) &&
-        _commits.isNotEmpty) {
+    if (event.logicalKey == LogicalKeyboardKey.enter && _commits.isNotEmpty) {
       _togglePreview();
       return KeyEventResult.handled;
     }
@@ -1962,15 +2096,14 @@ class _TimelineScreenState extends State<TimelineScreen>
               }
               return Row(
                 children: [
+                  // Nothing selected leaves the slot empty; the disabled
+                  // buttons already say the strip is waiting.
                   Expanded(
                     child: Text(
-                      name ?? '브랜치를 선택하세요',
+                      name ?? '',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: name == null ? _palette.muted : _palette.text,
-                      ),
+                      style: TextStyle(fontSize: 11, color: _palette.text),
                     ),
                   ),
                   buttons,
@@ -3577,32 +3710,51 @@ class _TimelineScreenState extends State<TimelineScreen>
           child: Row(
             children: [
               Expanded(
-                child: TextField(
-                  key: const Key('ref-filter'),
-                  controller: _filterController,
-                  onChanged: (value) => setState(() => _filter = value),
-                  style: TextStyle(color: _palette.text, fontSize: 13),
-                  decoration: InputDecoration(
-                    isDense: true,
-                    hintText: '브랜치와 태그 찾기',
-                    hintStyle: TextStyle(color: _palette.muted, fontSize: 13),
-                    filled: true,
-                    fillColor: _palette.raised,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 7,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(5),
-                      borderSide: BorderSide(color: _palette.border),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(5),
-                      borderSide: BorderSide(color: _palette.border),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(5),
-                      borderSide: BorderSide(color: _palette.interactive),
+                child: Semantics(
+                  label: '브랜치와 태그 찾기',
+                  textField: true,
+                  child: TextField(
+                    key: const Key('ref-filter'),
+                    controller: _filterController,
+                    onChanged: (value) => setState(() => _filter = value),
+                    style: TextStyle(color: _palette.text, fontSize: 13),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      // The magnifier replaces the hint sentence; the wording
+                      // lives on in the semantics label and the tooltip.
+                      prefixIcon: Tooltip(
+                        message: '브랜치와 태그 찾기',
+                        child: Center(
+                          widthFactor: 1,
+                          child: SearchIcon(
+                            key: const Key('ref-filter-search-icon'),
+                            color: _palette.muted,
+                          ),
+                        ),
+                      ),
+                      prefixIconConstraints: const BoxConstraints(
+                        minWidth: 30,
+                        minHeight: 30,
+                      ),
+                      filled: true,
+                      fillColor: _palette.raised,
+                      contentPadding: const EdgeInsets.only(
+                        right: 8,
+                        top: 7,
+                        bottom: 7,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(5),
+                        borderSide: BorderSide(color: _palette.border),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(5),
+                        borderSide: BorderSide(color: _palette.border),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(5),
+                        borderSide: BorderSide(color: _palette.interactive),
+                      ),
                     ),
                   ),
                 ),
@@ -3650,24 +3802,47 @@ class _TimelineScreenState extends State<TimelineScreen>
     ),
   );
 
-  Widget _sidebarToggleButton({required bool opens}) => Tooltip(
-    message: opens ? '왼쪽 패널 열기' : '왼쪽 패널 닫기',
-    waitDuration: Duration.zero,
-    child: SizedBox(
-      width: 28,
-      height: 28,
-      child: IconButton(
-        key: Key(opens ? 'sidebar-expand-button' : 'sidebar-collapse-button'),
-        padding: EdgeInsets.zero,
-        constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-        onPressed: () => setState(() => _sidebarCollapsed = !opens),
-        icon: CustomPaint(
-          key: Key(opens ? 'sidebar-expand-icon' : 'sidebar-collapse-icon'),
-          size: const Size(14.4, 14.4),
-          painter: _PaneToggleIconPainter(opens: opens, color: _palette.muted),
+  Widget _sidebarToggleButton({required bool opens}) => _shortcutBadge(
+    label: shortcutLabel('1'),
+    hintKey: const Key('sidebar-toggle-shortcut'),
+    child: Tooltip(
+      message: opens ? '왼쪽 패널 열기' : '왼쪽 패널 닫기',
+      waitDuration: Duration.zero,
+      child: SizedBox(
+        width: 28,
+        height: 28,
+        child: IconButton(
+          key: Key(opens ? 'sidebar-expand-button' : 'sidebar-collapse-button'),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+          onPressed: () => setState(() => _sidebarCollapsed = !opens),
+          icon: CustomPaint(
+            key: Key(opens ? 'sidebar-expand-icon' : 'sidebar-collapse-icon'),
+            size: const Size(14.4, 14.4),
+            painter: _PaneToggleIconPainter(
+              opens: opens,
+              color: _palette.muted,
+            ),
+          ),
         ),
       ),
     ),
+  );
+
+  /// Hangs a key-combination badge under [child] while the command modifier
+  /// is held, in the timeline's own palette.
+  Widget _shortcutBadge({
+    required String label,
+    required Widget child,
+    Key? hintKey,
+  }) => FullDiffShortcutHint(
+    visible: _modifierHeld,
+    label: label,
+    hintKey: hintKey,
+    background: _palette.raised,
+    borderColor: _palette.border,
+    textColor: _palette.text,
+    child: child,
   );
 
   Widget _compactSidebarSection(_RefSection section, int count) => Semantics(
@@ -3821,9 +3996,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         ? orderedNames.take(_collapsedTagLimit).toList()
         : orderedNames;
     return filtering
-        ? orderedNames
-              .where((name) => name.toLowerCase().contains(query))
-              .toList()
+        ? orderedNames.where((name) => fuzzyMatch(name, query)).toList()
         : projectedNames;
   }
 
@@ -4277,7 +4450,18 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   Widget _statusBar() => _normalStatusBar();
 
-  Widget _normalStatusBar() => Container(
+  Widget _normalStatusBar() => LayoutBuilder(
+    builder: (context, constraints) {
+      _statusBarWidth = constraints.maxWidth;
+      return _normalStatusBarContent();
+    },
+  );
+
+  /// The status bar's own width, so the profile chip can shed its email on a
+  /// narrow window without a LayoutBuilder between Stack and Positioned.
+  double _statusBarWidth = 0;
+
+  Widget _normalStatusBarContent() => Container(
     height: 29,
     decoration: BoxDecoration(
       color: _palette.surface,
@@ -4385,6 +4569,27 @@ class _TimelineScreenState extends State<TimelineScreen>
                   ),
                 );
               },
+            ),
+          ),
+        ),
+        // The commit identity sits on the far right, out of the way of the
+        // legend and the selected commit's own readouts.
+        Positioned(
+          right: 12,
+          top: 0,
+          bottom: 0,
+          child: Align(
+            child: KeyedSubtree(
+              key: _profileChipKey,
+              child: CommitProfileChip(
+                state: _commitIdentity,
+                // A narrow window keeps the name and drops the address,
+                // which the tooltip still carries.
+                showEmail: _statusBarWidth >= 900,
+                maxWidth: math.max(120, _statusBarWidth * 0.4),
+                warningColor: _behind,
+                onPressed: () => unawaited(_openCommitProfileMenu()),
+              ),
             ),
           ),
         ),
@@ -9146,7 +9351,7 @@ class _ShowDiffButton extends StatelessWidget {
                 ),
               ),
               Text(
-                '⌘D',
+                shortcutLabel('D'),
                 style: TextStyle(
                   color: ink.withValues(alpha: 0.75),
                   fontSize: shortcutSize,

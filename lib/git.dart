@@ -3428,6 +3428,31 @@ class GitRepository implements FullDiffRepository {
   /// Switches the checkout to an existing local branch.
   Future<void> checkoutLocalBranch(String branch) => _run(['switch', branch]);
 
+  /// Who this repository commits as right now, global config included. Empty
+  /// strings where Git has nothing, so the caller can warn instead of guessing.
+  Future<GitIdentity> loadCommitIdentity() async {
+    Future<String> read(String key) async {
+      final result = await runner(gitExecutable, [
+        'config',
+        '--get',
+        key,
+      ], workingDirectory: root);
+      return result.exitCode == 0 ? result.stdout.toString().trim() : '';
+    }
+
+    return GitIdentity(
+      name: await read('user.name'),
+      email: await read('user.email'),
+    );
+  }
+
+  /// Writes the identity into this repository's own config, so the CLI and
+  /// every other Git tool see the same author the app shows.
+  Future<void> setLocalCommitIdentity(GitIdentity identity) async {
+    await _run(['config', '--local', 'user.name', identity.name]);
+    await _run(['config', '--local', 'user.email', identity.email]);
+  }
+
   /// Removes a worktree along with its directory, even when dirty.
   Future<void> removeWorktree(String path) =>
       _run(['worktree', 'remove', '--force', path]);

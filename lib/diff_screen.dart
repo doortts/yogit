@@ -28,6 +28,7 @@ import 'git.dart';
 import 'monaco_editor_screen.dart';
 import 'page_scroll_shortcuts.dart';
 import 'settings.dart';
+import 'shortcut_modifier.dart';
 import 'typography.dart';
 
 class _ReturnToTimelineIntent extends Intent {
@@ -311,11 +312,8 @@ class _DiffScreenState extends State<DiffScreen> {
   }
 
   bool _handleHardwareKeyEvent(KeyEvent event) {
-    if (event.logicalKey != LogicalKeyboardKey.metaLeft &&
-        event.logicalKey != LogicalKeyboardKey.metaRight) {
-      return false;
-    }
-    final held = HardwareKeyboard.instance.isMetaPressed;
+    if (!isShortcutModifierKey(event.logicalKey)) return false;
+    final held = shortcutModifierHeld;
     if (_commandHeld != held && mounted) {
       setState(() => _commandHeld = held);
     }

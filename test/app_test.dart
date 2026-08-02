@@ -20,6 +20,7 @@ import 'package:yogit/git.dart';
 import 'package:yogit/main.dart';
 import 'package:yogit/monaco_editor_screen.dart';
 import 'package:yogit/settings.dart';
+import 'package:yogit/shortcut_modifier.dart';
 import 'package:yogit/timeline.dart';
 import 'package:yogit/timeline_theme.dart';
 import 'package:yogit/typography.dart';
@@ -27,6 +28,8 @@ import 'package:yogit/window_frame.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  group('commit profiles', _commitProfileTests);
 
   late WindowFrameController controller;
 
@@ -401,8 +404,12 @@ void main() {
     expect(find.byKey(const Key('selected-row-3')), findsOneWidget);
     expect(find.text('Commit & Diff'), findsNothing);
 
-    // Space opens it just like Enter, on the clicked row, and closes it again.
+    // Space no longer opens the panel; Enter is the only toggle.
     await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    expect(find.text('Commit & Diff'), findsNothing);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     expect(find.text('Commit & Diff'), findsOneWidget);
     expect(
@@ -412,7 +419,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     expect(find.text('Commit & Diff'), findsNothing);
   });
@@ -2720,6 +2727,61 @@ void main() {
     );
   });
 
+  testWidgets('the ref filter shows a magnifier instead of a hint sentence', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(local: ['main'], current: 'main'),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final decoration = tester
+        .widget<TextField>(find.byKey(const Key('ref-filter')))
+        .decoration!;
+    expect(decoration.hintText, isNull);
+    expect(find.byKey(const Key('ref-filter-search-icon')), findsOneWidget);
+    // The wording survives for anyone reading the field by name.
+    expect(
+      find.ancestor(
+        of: find.byKey(const Key('ref-filter-search-icon')),
+        matching: find.byTooltip('브랜치와 태그 찾기'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('the ref filter matches loosely typed queries', (tester) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(
+            local: ['main', 'notes-split-pane', 'monaco-outline'],
+            current: 'main',
+          ),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const Key('ref-filter')), 'notsp');
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('sidebar-ref-notes-split-pane')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('sidebar-ref-monaco-outline')), findsNothing);
+    expect(find.byKey(const Key('sidebar-ref-main')), findsNothing);
+  });
+
   testWidgets('sidebar category headers use thin raised section bars', (
     tester,
   ) async {
@@ -3121,7 +3183,9 @@ void main() {
             refs: pullRefs,
             runner:
                 (executable, arguments, {workingDirectory, environment}) async {
-                  calls.add(arguments);
+                  // The status bar chip reads the identity on load; this test
+                  // is about the pull commands.
+                  if (arguments.first != 'config') calls.add(arguments);
                   return ProcessResult(1, 0, '', '');
                 },
           ),
@@ -3182,7 +3246,9 @@ void main() {
                     workingDirectory,
                     environment,
                   }) async {
-                    calls.add(arguments);
+                    // The status bar chip reads the identity on load; this test
+                    // is about the pull commands.
+                    if (arguments.first != 'config') calls.add(arguments);
                     return ProcessResult(1, 0, '', '');
                   },
             ),
@@ -3217,7 +3283,9 @@ void main() {
             refs: pullRefs,
             runner:
                 (executable, arguments, {workingDirectory, environment}) async {
-                  calls.add(arguments);
+                  // The status bar chip reads the identity on load; this test
+                  // is about the pull commands.
+                  if (arguments.first != 'config') calls.add(arguments);
                   return ProcessResult(1, 0, '', '');
                 },
           ),
@@ -3266,7 +3334,9 @@ void main() {
             refs: pullRefs,
             runner:
                 (executable, arguments, {workingDirectory, environment}) async {
-                  calls.add(arguments);
+                  // The status bar chip reads the identity on load; this test
+                  // is about the pull commands.
+                  if (arguments.first != 'config') calls.add(arguments);
                   return ProcessResult(1, 0, '', '');
                 },
           ),
@@ -12473,6 +12543,47 @@ void main() {
     expect(find.byKey(const Key('ref-filter')), findsOneWidget);
   });
 
+  testWidgets('holding the command modifier labels the sidebar toggle', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(local: ['main'], current: 'main'),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final hint = find.byKey(const Key('sidebar-toggle-shortcut'));
+    expect(hint, findsNothing);
+
+    final modifier = usesMetaModifier
+        ? LogicalKeyboardKey.metaLeft
+        : LogicalKeyboardKey.controlLeft;
+    await tester.sendKeyDownEvent(modifier);
+    await tester.pumpAndSettle();
+
+    expect(hint, findsOneWidget);
+    expect(
+      find.descendant(of: hint, matching: find.text(shortcutLabel('1'))),
+      findsOneWidget,
+    );
+    // The badge hangs under the button instead of displacing it.
+    expect(
+      tester.getRect(hint).top,
+      greaterThanOrEqualTo(
+        tester.getRect(find.byKey(const Key('sidebar-collapse-icon'))).bottom,
+      ),
+    );
+
+    await tester.sendKeyUpEvent(modifier);
+    await tester.pumpAndSettle();
+    expect(hint, findsNothing);
+  });
+
   testWidgets('sidebar hover extends left without moving branch content', (
     tester,
   ) async {
@@ -12530,9 +12641,7 @@ void main() {
       // left border is reserved for the keyboard cursor's selection.
       expect(
         decoration.color,
-        TimelineThemePalette.systemGraphite.neutralChip.withValues(
-          alpha: 0.48,
-        ),
+        TimelineThemePalette.systemGraphite.neutralChip.withValues(alpha: 0.48),
         reason: name,
       );
       expect(border.left.width, 0, reason: name);
@@ -16638,3 +16747,144 @@ BranchComparisonResult branchComparison({
   ],
   merge: merge,
 );
+
+void _commitProfileTests() {
+  const profiles = [
+    CommitProfile(
+      label: '회사',
+      name: '채수원',
+      email: 'sw.chae@navercorp.com',
+      color: '#7C5CD6',
+    ),
+    CommitProfile(
+      label: '개인',
+      name: 'doortts',
+      email: 'doortts@gmail.com',
+      color: '#2EA043',
+    ),
+  ];
+
+  /// A repository whose config reports [name]/[email] and records writes.
+  FakeGitRepository profileRepository({
+    required String name,
+    required String email,
+    List<List<String>>? calls,
+  }) => FakeGitRepository(
+    (_, _) async => [commit('1', 'first commit')],
+    runner: (executable, arguments, {workingDirectory, environment}) async {
+      calls?.add(arguments);
+      if (arguments.length >= 3 && arguments.first == 'config') {
+        final key = arguments.last;
+        return ProcessResult(
+          1,
+          0,
+          key == 'user.name'
+              ? '$name\n'
+              : key == 'user.email'
+              ? '$email\n'
+              : '',
+          '',
+        );
+      }
+      return ProcessResult(1, 0, '', '');
+    },
+  );
+
+  Widget profileApp(
+    GitRepository repository,
+    WindowFrameController controller, {
+    List<CommitProfile> registered = profiles,
+    ValueChanged<List<CommitProfile>>? onChanged,
+  }) => MaterialApp(
+    home: TimelineScreen(
+      repository: repository,
+      controller: controller,
+      commitProfiles: registered,
+      onCommitProfilesChanged: onChanged,
+    ),
+  );
+
+  testWidgets('the status bar names the matching profile', (tester) async {
+    // Wide enough that the chip keeps the address beside the label.
+    await tester.binding.setSurfaceSize(const Size(1200, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      profileApp(
+        profileRepository(name: '채수원', email: 'sw.chae@navercorp.com'),
+        WindowFrameController(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final chip = find.byKey(const Key('commit-profile-chip'));
+    expect(chip, findsOneWidget);
+    expect(
+      find.descendant(of: chip, matching: find.text('회사')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: chip, matching: find.text('sw.chae@navercorp.com')),
+      findsOneWidget,
+    );
+    // A known profile carries no warning dot.
+    expect(find.byKey(const Key('commit-profile-warning')), findsNothing);
+  });
+
+  testWidgets('an identity set outside the app warns and can be saved', (
+    tester,
+  ) async {
+    List<CommitProfile>? saved;
+    await tester.pumpWidget(
+      profileApp(
+        profileRepository(name: 'Suwon Chae', email: 'other@company.com'),
+        WindowFrameController(),
+        onChanged: (value) => saved = value,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('commit-profile-warning')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('commit-profile-chip')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('commit-profile-current-custom')),
+      findsOneWidget,
+    );
+    expect(find.text('커스텀 (앱 밖에서 설정됨)'), findsOneWidget);
+    expect(find.textContaining('.git/config에 저장'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('commit-profile-register')));
+    await tester.pumpAndSettle();
+
+    expect(saved?.length, 3);
+    expect(saved?.last.email, 'other@company.com');
+  });
+
+  testWidgets('picking a profile writes the repository config', (tester) async {
+    final calls = <List<String>>[];
+    await tester.pumpWidget(
+      profileApp(
+        profileRepository(
+          name: '채수원',
+          email: 'sw.chae@navercorp.com',
+          calls: calls,
+        ),
+        WindowFrameController(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('commit-profile-chip')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const Key('commit-profile-option-doortts@gmail.com')),
+    );
+    await tester.pumpAndSettle();
+
+    // Joined so the matcher compares contents rather than list identity.
+    final joined = [for (final call in calls) call.join(' ')];
+    expect(joined, contains('config --local user.name doortts'));
+    expect(joined, contains('config --local user.email doortts@gmail.com'));
+  });
+}

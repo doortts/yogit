@@ -335,6 +335,12 @@ class _YogitAppState extends State<YogitApp> {
           previewDiffRightWidth: _settings.previewDiffRightWidth,
           previewDiffBottomHeight: _settings.previewDiffBottomHeight,
           onOpenSettings: _settingsLoaded ? () => _openSettings(context) : null,
+          commitProfiles: _settings.commitProfiles,
+          onCommitProfilesChanged: _settingsLoaded
+              ? (profiles) => _changeSettings(
+                  _settings.copyWith(commitProfiles: profiles),
+                )
+              : null,
           onPreviewPlacementChanged: _settingsLoaded
               ? (placement) => _changeSettings(
                   _settings.copyWith(previewPlacement: placement),
