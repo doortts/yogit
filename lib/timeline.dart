@@ -1,5 +1,6 @@
 import 'dart:async';
-import 'dart:io' show ProcessException;
+import 'dart:io'
+    show Directory, FileSystemEvent, FileSystemException, ProcessException;
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -799,10 +800,15 @@ class _TimelineScreenState extends State<TimelineScreen>
   static const _collapsedTagLimit = 10;
   static const _fetchInterval = Duration(minutes: 3);
 
-  /// How often the app re-reads the repository's local fingerprint. Short
-  /// enough that a checkout in a terminal is noticed while the user is still
-  /// looking at the terminal, cheap enough to run on a timer.
-  static const _localWatchInterval = Duration(seconds: 3);
+  /// The safety net behind the ref-directory watcher. FSEvents can coalesce or
+  /// drop notifications under load, so the fingerprint is still re-read on a
+  /// slow timer — rarely enough to cost nothing, often enough that a missed
+  /// event cannot go unnoticed for a whole session.
+  static const _localWatchInterval = Duration(seconds: 60);
+
+  /// One git command writes several files, so events are collected for this
+  /// long before the fingerprint is read once.
+  static const _localWatchDebounce = Duration(milliseconds: 250);
 
   static const _pageSize = 500;
 
@@ -913,6 +919,8 @@ class _TimelineScreenState extends State<TimelineScreen>
   var _refsLoaded = false;
   Timer? _fetchTimer;
   Timer? _localWatchTimer;
+  Timer? _localWatchDebounceTimer;
+  final _refWatchers = <StreamSubscription<FileSystemEvent>>[];
 
   /// The local fingerprint the timeline is currently showing.
   String? _localSignature;
@@ -1011,6 +1019,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       (_) => unawaited(_refreshRemotes()),
     );
     unawaited(_syncLocalSignature());
+    unawaited(_startRefWatchers());
     _localWatchTimer = Timer.periodic(
       _localWatchInterval,
       (_) => unawaited(_checkLocalChanges()),
@@ -1062,6 +1071,43 @@ class _TimelineScreenState extends State<TimelineScreen>
     } finally {
       if (mounted) _fetchingRemotes.value = false;
     }
+  }
+
+  /// Subscribes to the directories Git rewrites when a ref moves, so a
+  /// checkout or commit made elsewhere is noticed as it happens instead of on
+  /// the next poll. A directory that cannot be watched is skipped; the timer
+  /// above still covers it.
+  Future<void> _startRefWatchers() async {
+    final dirs = await widget.repository.loadGitDirectories();
+    if (!mounted || dirs == null) return;
+    for (final path in refWatchPaths(
+      gitDir: dirs.gitDir,
+      commonDir: dirs.commonDir,
+    )) {
+      final directory = Directory(path);
+      if (!directory.existsSync()) continue;
+      try {
+        _refWatchers.add(
+          // Only `refs` needs the recursive walk; a branch name can nest, but
+          // the git dirs themselves hold HEAD and packed-refs at the top.
+          directory
+              .watch(recursive: path.endsWith('refs'))
+              .listen((_) => _scheduleLocalCheck()),
+        );
+      } on FileSystemException {
+        // A platform or path that refuses to be watched falls back to polling.
+      }
+    }
+  }
+
+  /// Collapses the burst of events one git command produces into a single
+  /// fingerprint read.
+  void _scheduleLocalCheck() {
+    _localWatchDebounceTimer?.cancel();
+    _localWatchDebounceTimer = Timer(
+      _localWatchDebounce,
+      () => unawaited(_checkLocalChanges()),
+    );
   }
 
   /// Records what the repository looks like right now as the state the
@@ -1344,6 +1390,10 @@ class _TimelineScreenState extends State<TimelineScreen>
     HardwareKeyboard.instance.removeHandler(_handleModifierKeyEvent);
     _fetchTimer?.cancel();
     _localWatchTimer?.cancel();
+    _localWatchDebounceTimer?.cancel();
+    for (final watcher in _refWatchers) {
+      unawaited(watcher.cancel());
+    }
     _dropMergePreview();
     _dropRebasePreview();
     _clearFullDiffRouteSession();

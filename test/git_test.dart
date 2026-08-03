@@ -2776,6 +2776,74 @@ void main() {
   });
 
   test(
+    'loadGitDirectories resolves the worktree and common git dirs',
+    () async {
+      final calls = <List<String>>[];
+      final repository = GitRepository(
+        '/repo',
+        runner: (executable, arguments, {workingDirectory, environment}) async {
+          calls.add(arguments);
+          // A linked worktree: its own git dir, plus the shared one it borrows
+          // refs from.
+          return ProcessResult(
+            1,
+            0,
+            '/repo/.git/worktrees/lane\n/repo/.git\n',
+            '',
+          );
+        },
+      );
+
+      final dirs = await repository.loadGitDirectories();
+      expect(dirs?.gitDir, '/repo/.git/worktrees/lane');
+      expect(dirs?.commonDir, '/repo/.git');
+      expect(calls.single, [
+        'rev-parse',
+        '--path-format=absolute',
+        '--absolute-git-dir',
+        '--git-common-dir',
+      ]);
+    },
+  );
+
+  test('loadGitDirectories reports null when git cannot answer', () async {
+    expect(
+      await GitRepository(
+        '/repo',
+        runner:
+            (executable, arguments, {workingDirectory, environment}) async =>
+                ProcessResult(1, 128, '', 'fatal: not a git repository'),
+      ).loadGitDirectories(),
+      isNull,
+    );
+    expect(
+      await GitRepository(
+        '/repo',
+        runner:
+            (executable, arguments, {workingDirectory, environment}) async =>
+                throw const ProcessException('git', []),
+      ).loadGitDirectories(),
+      isNull,
+    );
+  });
+
+  test('refWatchPaths covers HEAD, packed refs, and nested loose refs', () {
+    // Main worktree: one git dir, so the list must not repeat it.
+    expect(refWatchPaths(gitDir: '/repo/.git', commonDir: '/repo/.git'), [
+      '/repo/.git',
+      '/repo/.git/refs',
+    ]);
+    // Linked worktree: its own HEAD lives apart from the shared refs.
+    expect(
+      refWatchPaths(
+        gitDir: '/repo/.git/worktrees/lane',
+        commonDir: '/repo/.git',
+      ),
+      ['/repo/.git/worktrees/lane', '/repo/.git', '/repo/.git/refs'],
+    );
+  });
+
+  test(
     'loadLocalStateSignature fingerprints HEAD and local branches',
     () async {
       final calls = <List<String>>[];
@@ -2783,20 +2851,64 @@ void main() {
         '/repo',
         runner: (executable, arguments, {workingDirectory, environment}) async {
           calls.add(arguments);
-          return ProcessResult(1, 0, 'HEAD abc\nrefs/heads/main abc\n', '');
+          return ProcessResult(
+            1,
+            0,
+            arguments.contains('--symbolic-full-name')
+                ? 'aaa\nrefs/heads/main\n'
+                : 'refs/heads/main aaa\n',
+            '',
+          );
         },
       );
 
-      expect(
-        await repository.loadLocalStateSignature(),
-        'HEAD abc\nrefs/heads/main abc',
-      );
-      expect(calls.single, [
-        'for-each-ref',
-        '--format=%(refname) %(objectname)',
-        'HEAD',
-        'refs/heads',
+      final signature = await repository.loadLocalStateSignature();
+      // Both halves are present: where HEAD points, and every branch tip.
+      expect(signature, contains('refs/heads/main'));
+      expect(signature, contains('aaa'));
+      expect(calls, [
+        ['rev-parse', 'HEAD', '--symbolic-full-name', 'HEAD'],
+        ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads'],
       ]);
+    },
+  );
+
+  test(
+    'a plain checkout changes the signature even with no tip moved',
+    () async {
+      // for-each-ref never matches HEAD, so a fingerprint built from branch tips
+      // alone cannot see a checkout between two existing branches.
+      GitRepository repositoryOn(String branch, String sha) => GitRepository(
+        '/repo',
+        runner:
+            (executable, arguments, {workingDirectory, environment}) async =>
+                ProcessResult(
+                  1,
+                  0,
+                  arguments.contains('--symbolic-full-name')
+                      ? '$sha\n$branch\n'
+                      : 'refs/heads/main aaa\nrefs/heads/work bbb\n',
+                  '',
+                ),
+      );
+
+      final onMain = await repositoryOn(
+        'refs/heads/main',
+        'aaa',
+      ).loadLocalStateSignature();
+      final onWork = await repositoryOn(
+        'refs/heads/work',
+        'bbb',
+      ).loadLocalStateSignature();
+      expect(onMain, isNot(onWork));
+
+      // Two branches on the same commit still differ by name, so switching
+      // between them is noticed too.
+      final sameCommit = await repositoryOn(
+        'refs/heads/work',
+        'aaa',
+      ).loadLocalStateSignature();
+      expect(sameCommit, isNot(onMain));
     },
   );
 

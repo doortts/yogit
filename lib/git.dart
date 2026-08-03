@@ -155,6 +155,20 @@ String byteSizeLabel(int bytes) {
   return '${value.toStringAsFixed(value >= 10 ? 0 : 1)} ${units[unit]}';
 }
 
+/// The directories to watch for a ref change, most specific first. Git rewrites
+/// `HEAD` and loose refs by renaming a lock file over them, so the *directory*
+/// is what reports the change, not the file. `refs` is watched recursively
+/// because a branch name like `codex/lane` nests. `objects` is left alone: a
+/// fetch churns it constantly and none of it moves a branch.
+List<String> refWatchPaths({
+  required String gitDir,
+  required String commonDir,
+}) => [
+  gitDir,
+  if (commonDir != gitDir) commonDir,
+  '$commonDir${Platform.pathSeparator}refs',
+];
+
 class GitRepositoryException implements Exception {
   const GitRepositoryException(this.path, this.message);
 
@@ -3428,6 +3442,31 @@ class GitRepository implements FullDiffRepository {
   /// Switches the checkout to an existing local branch.
   Future<void> checkoutLocalBranch(String branch) => _run(['switch', branch]);
 
+  /// Where this repository keeps its refs: [gitDir] is this worktree's own
+  /// (holding its `HEAD`), [commonDir] the shared one every worktree borrows
+  /// refs from. They are the same directory outside a linked worktree.
+  Future<({String gitDir, String commonDir})?> loadGitDirectories() async {
+    try {
+      final result = await runner(gitExecutable, const [
+        'rev-parse',
+        '--path-format=absolute',
+        '--absolute-git-dir',
+        '--git-common-dir',
+      ], workingDirectory: root);
+      if (result.exitCode != 0) return null;
+      final lines = result.stdout
+          .toString()
+          .split('\n')
+          .map((line) => line.trim())
+          .where((line) => line.isNotEmpty)
+          .toList();
+      if (lines.length < 2) return null;
+      return (gitDir: lines[0], commonDir: lines[1]);
+    } on ProcessException {
+      return null;
+    }
+  }
+
   /// A cheap fingerprint of the repository's local state: where `HEAD` points
   /// plus every local branch tip. Comparing two readings spots a checkout,
   /// commit, or branch edit made outside the app without reloading the whole
@@ -3435,13 +3474,24 @@ class GitRepository implements FullDiffRepository {
   /// "unknown" rather than as "everything vanished".
   Future<String?> loadLocalStateSignature() async {
     try {
-      final result = await runner(gitExecutable, const [
+      // Two reads, because `for-each-ref` does not match HEAD: without the
+      // first one a checkout between two existing branches moves no tip and
+      // the fingerprint would not change at all. The symbolic name is part of
+      // it so switching between branches on the same commit still counts.
+      final head = await runner(gitExecutable, const [
+        'rev-parse',
+        'HEAD',
+        '--symbolic-full-name',
+        'HEAD',
+      ], workingDirectory: root);
+      final tips = await runner(gitExecutable, const [
         'for-each-ref',
         '--format=%(refname) %(objectname)',
-        'HEAD',
         'refs/heads',
       ], workingDirectory: root);
-      return result.exitCode == 0 ? result.stdout.toString().trim() : null;
+      if (head.exitCode != 0 || tips.exitCode != 0) return null;
+      return '${head.stdout.toString().trim()}\n'
+          '${tips.stdout.toString().trim()}';
     } on ProcessException {
       // A watcher must never be the thing that breaks the screen, so a git
       // that cannot even be launched reads as "unknown" too.

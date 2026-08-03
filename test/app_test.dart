@@ -2795,14 +2795,15 @@ void main() {
 
     final loadsBefore = historyLoads;
 
-    // Nothing changed yet, so polling stays silent.
-    await tester.pump(const Duration(seconds: 4));
+    // Widget tests cannot raise real FSEvents, so these drive the safety-net
+    // timer instead. Nothing changed yet, so it stays silent.
+    await tester.pump(const Duration(seconds: 61));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('local-change-refresh')), findsNothing);
 
     // Someone checks out another branch behind the app's back.
     signature = 'HEAD bbb\nrefs/heads/main aaa\nrefs/heads/work bbb';
-    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(seconds: 61));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('local-change-refresh')), findsOneWidget);
@@ -2828,20 +2829,20 @@ void main() {
     await tester.pumpAndSettle();
 
     signature = 'HEAD bbb';
-    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(seconds: 61));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('local-change-dismiss')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('local-change-refresh')), findsNothing);
 
     // The same state must not ask again.
-    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(seconds: 61));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('local-change-refresh')), findsNothing);
 
     // A further change is a new question, so it asks once more.
     signature = 'HEAD ccc';
-    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(seconds: 61));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('local-change-refresh')), findsOneWidget);
     await tester.tap(find.byKey(const Key('local-change-dismiss')));
@@ -3306,8 +3307,11 @@ void main() {
                 (executable, arguments, {workingDirectory, environment}) async {
                   // The status bar chip and the local-change watcher both
                   // read on load; this test is about the pull commands.
-                  if (arguments.first != 'config' &&
-                      arguments.first != 'for-each-ref') {
+                  if (!const {
+                    'config',
+                    'for-each-ref',
+                    'rev-parse',
+                  }.contains(arguments.first)) {
                     calls.add(arguments);
                   }
                   return ProcessResult(1, 0, '', '');
@@ -3372,8 +3376,11 @@ void main() {
                   }) async {
                     // The status bar chip and the local-change watcher both
                     // read on load; this test is about the pull commands.
-                    if (arguments.first != 'config' &&
-                        arguments.first != 'for-each-ref') {
+                    if (!const {
+                      'config',
+                      'for-each-ref',
+                      'rev-parse',
+                    }.contains(arguments.first)) {
                       calls.add(arguments);
                     }
                     return ProcessResult(1, 0, '', '');
@@ -3412,8 +3419,11 @@ void main() {
                 (executable, arguments, {workingDirectory, environment}) async {
                   // The status bar chip and the local-change watcher both
                   // read on load; this test is about the pull commands.
-                  if (arguments.first != 'config' &&
-                      arguments.first != 'for-each-ref') {
+                  if (!const {
+                    'config',
+                    'for-each-ref',
+                    'rev-parse',
+                  }.contains(arguments.first)) {
                     calls.add(arguments);
                   }
                   return ProcessResult(1, 0, '', '');
@@ -3466,8 +3476,11 @@ void main() {
                 (executable, arguments, {workingDirectory, environment}) async {
                   // The status bar chip and the local-change watcher both
                   // read on load; this test is about the pull commands.
-                  if (arguments.first != 'config' &&
-                      arguments.first != 'for-each-ref') {
+                  if (!const {
+                    'config',
+                    'for-each-ref',
+                    'rev-parse',
+                  }.contains(arguments.first)) {
                     calls.add(arguments);
                   }
                   return ProcessResult(1, 0, '', '');
