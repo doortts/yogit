@@ -82,9 +82,9 @@ class YogitAlert extends StatelessWidget {
   static const destructiveFill = Color(0xFF4A2528);
   static const destructiveText = Color(0xFFFF6B6B);
 
-  /// The kit's alert width. Dialog would floor this at 280, so the shell
-  /// builds its own surface instead of using Dialog.
-  static const width = 260.0;
+  /// The approved mockup's alert width. The shell builds its own surface
+  /// rather than using Dialog, so this is exact and not Dialog's floor.
+  static const width = 280.0;
 
   /// For alerts whose body is a block rather than a sentence.
   static const wideWidth = 340.0;
@@ -118,75 +118,64 @@ class YogitAlert extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = TimelineThemePalette.of(context);
-    // The kit's measurements: 16px side padding with the text block inset a
-    // further 6, 20px of headroom, 10 between title and description, 14 down
-    // to the buttons. Sentence layout uses the text block's real width.
-    final contentWidth = (wide ? wideWidth : width) - 32 - 12;
+    // Every number here is the approved mockup's CSS, one to one: 16px
+    // padding, a 13px w700 title, 11px body on a 1.5 line height at 82%,
+    // 5px under the title, 13px above the buttons.
+    final contentWidth = (wide ? wideWidth : width) - 32;
     const titleStyle = TextStyle(
       fontSize: 13,
-      fontWeight: FontWeight.w600,
-      height: 16 / 13,
+      fontWeight: FontWeight.w700,
+      height: 1.35,
       letterSpacing: -0.08,
     );
-    const messageStyle = TextStyle(fontSize: 11, height: 14 / 11);
+    const messageStyle = TextStyle(fontSize: 11, height: 1.5);
 
-    // Not a Dialog: Dialog floors its width at 280 and the kit says 260.
     return Center(
       child: Material(
         color: palette.raised,
         elevation: 24,
         shadowColor: Colors.black.withValues(alpha: 0.5),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(26),
+          borderRadius: BorderRadius.circular(22),
           side: BorderSide(color: palette.border, width: 0.5),
         ),
         child: SizedBox(
           width: wide ? wideWidth : width,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+            padding: const EdgeInsets.all(16),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(6, 0, 6, 2),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: titleStyle.copyWith(color: palette.text),
-                      ),
-                      if (message case final message?) ...[
-                        const SizedBox(height: 10),
-                        Text(
-                          layoutAlertMessage(
-                            message,
-                            style: messageStyle,
-                            maxWidth: contentWidth,
-                          ),
-                          style: messageStyle.copyWith(color: palette.text),
-                        ),
-                      ],
-                      if (detail case final detail?) ...[
-                        const SizedBox(height: 10),
-                        Text(
-                          layoutAlertMessage(
-                            detail,
-                            style: messageStyle,
-                            maxWidth: contentWidth,
-                          ),
-                          style: messageStyle.copyWith(color: palette.muted),
-                        ),
-                      ],
-                    ],
+                Text(title, style: titleStyle.copyWith(color: palette.text)),
+                if (message case final message?) ...[
+                  const SizedBox(height: 5),
+                  Text(
+                    layoutAlertMessage(
+                      message,
+                      style: messageStyle,
+                      maxWidth: contentWidth,
+                    ),
+                    style: messageStyle.copyWith(
+                      color: palette.text.withValues(alpha: 0.82),
+                    ),
                   ),
-                ),
-                if (body case final body?) ...[
-                  const SizedBox(height: 10),
-                  body,
                 ],
-                const SizedBox(height: 14),
+                if (body case final body?) ...[const SizedBox(height: 8), body],
+                if (detail case final detail?) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    layoutAlertMessage(
+                      detail,
+                      style: messageStyle,
+                      maxWidth: contentWidth,
+                    ),
+                    style: messageStyle.copyWith(
+                      color: palette.text.withValues(alpha: 0.65),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 13),
                 ..._actions(context, palette),
               ],
             ),
@@ -218,7 +207,7 @@ class YogitAlert extends StatelessWidget {
     if (destructiveLabel case final label?) {
       return [
         confirm,
-        const SizedBox(height: 6),
+        const SizedBox(height: 7),
         _AlertButton(
           key: destructiveKey,
           label: label,
@@ -227,7 +216,7 @@ class YogitAlert extends StatelessWidget {
           onPressed: () =>
               Navigator.pop(context, onDestructive?.call() ?? 'destructive'),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 7),
         cancel,
       ];
     }
@@ -235,7 +224,7 @@ class YogitAlert extends StatelessWidget {
       Row(
         children: [
           Expanded(child: cancel),
-          const SizedBox(width: 6),
+          const SizedBox(width: 7),
           Expanded(child: confirm),
         ],
       ),

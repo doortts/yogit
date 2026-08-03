@@ -33,17 +33,19 @@ void main() {
       ),
     );
 
+    // The approved mockup is the contract: a 280 alert.
+    expect(YogitAlert.width, 280);
     final confirm = tester.getRect(find.byKey(const Key('confirm')));
     final cancel = tester.getRect(find.byKey(const Key('cancel')));
-    // The kit's two-choice anatomy: one row, cancel leading, same size.
+    // The mockup's two-choice anatomy: one row, cancel leading, same size.
     expect(cancel.top, confirm.top);
     expect(cancel.right, lessThan(confirm.left));
     expect(confirm.width, closeTo(cancel.width, 0.01));
     expect(confirm.height, 28);
     expect(cancel.height, 28);
     // 7px between the pair, 16px padding on both sides of a 280 dialog.
-    expect(confirm.left - cancel.right, 6);
-    expect(cancel.width + confirm.width, YogitAlert.width - 32 - 6);
+    expect(confirm.left - cancel.right, 7);
+    expect(cancel.width + confirm.width, YogitAlert.width - 32 - 7);
     expect(
       tester
           .widget<TextButton>(
@@ -86,8 +88,8 @@ void main() {
       expect(rect.width, YogitAlert.width - 32);
       expect(rect.height, 28);
     }
-    expect(destructive.top - confirm.bottom, 6);
-    expect(cancel.top - destructive.bottom, 6);
+    expect(destructive.top - confirm.bottom, 7);
+    expect(cancel.top - destructive.bottom, 7);
   });
 
   testWidgets('destructive actions carry the tint, not a solid red', (
