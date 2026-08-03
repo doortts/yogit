@@ -82,10 +82,9 @@ class YogitAlert extends StatelessWidget {
   static const destructiveFill = Color(0xFF4A2528);
   static const destructiveText = Color(0xFFFF6B6B);
 
-  /// Apple's alert is 270pt; Flutter's Dialog floors its child at 280, so
-  /// that floor is the width rather than fighting it for ten points. Long
-  /// content grows downward, never sideways.
-  static const width = 280.0;
+  /// The kit's alert width. Dialog would floor this at 280, so the shell
+  /// builds its own surface instead of using Dialog.
+  static const width = 260.0;
 
   /// For alerts whose body is a block rather than a sentence.
   static const wideWidth = 340.0;
@@ -119,63 +118,78 @@ class YogitAlert extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = TimelineThemePalette.of(context);
-    final contentWidth = (wide ? wideWidth : width) - 32;
-    const messageStyle = TextStyle(fontSize: 11, height: 1.45);
+    // The kit's measurements: 16px side padding with the text block inset a
+    // further 6, 20px of headroom, 10 between title and description, 14 down
+    // to the buttons. Sentence layout uses the text block's real width.
+    final contentWidth = (wide ? wideWidth : width) - 32 - 12;
+    const titleStyle = TextStyle(
+      fontSize: 13,
+      fontWeight: FontWeight.w600,
+      height: 16 / 13,
+      letterSpacing: -0.08,
+    );
+    const messageStyle = TextStyle(fontSize: 11, height: 14 / 11);
 
-    return Dialog(
-      backgroundColor: palette.raised,
-      surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(22),
-        side: BorderSide(color: palette.border, width: 0.5),
-      ),
-      insetPadding: const EdgeInsets.all(24),
-      child: SizedBox(
-        width: wide ? wideWidth : width,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  color: palette.text,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  height: 1.35,
-                  letterSpacing: -0.08,
-                ),
-              ),
-              if (message case final message?) ...[
-                const SizedBox(height: 5),
-                Text(
-                  layoutAlertMessage(
-                    message,
-                    style: messageStyle,
-                    maxWidth: contentWidth,
+    // Not a Dialog: Dialog floors its width at 280 and the kit says 260.
+    return Center(
+      child: Material(
+        color: palette.raised,
+        elevation: 24,
+        shadowColor: Colors.black.withValues(alpha: 0.5),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(26),
+          side: BorderSide(color: palette.border, width: 0.5),
+        ),
+        child: SizedBox(
+          width: wide ? wideWidth : width,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(6, 0, 6, 2),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: titleStyle.copyWith(color: palette.text),
+                      ),
+                      if (message case final message?) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          layoutAlertMessage(
+                            message,
+                            style: messageStyle,
+                            maxWidth: contentWidth,
+                          ),
+                          style: messageStyle.copyWith(color: palette.text),
+                        ),
+                      ],
+                      if (detail case final detail?) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          layoutAlertMessage(
+                            detail,
+                            style: messageStyle,
+                            maxWidth: contentWidth,
+                          ),
+                          style: messageStyle.copyWith(color: palette.muted),
+                        ),
+                      ],
+                    ],
                   ),
-                  style: messageStyle.copyWith(
-                    color: palette.text.withValues(alpha: 0.85),
-                  ),
                 ),
+                if (body case final body?) ...[
+                  const SizedBox(height: 10),
+                  body,
+                ],
+                const SizedBox(height: 14),
+                ..._actions(context, palette),
               ],
-              if (body case final body?) ...[const SizedBox(height: 8), body],
-              if (detail case final detail?) ...[
-                const SizedBox(height: 8),
-                Text(
-                  layoutAlertMessage(
-                    detail,
-                    style: messageStyle,
-                    maxWidth: contentWidth,
-                  ),
-                  style: messageStyle.copyWith(color: palette.muted),
-                ),
-              ],
-              const SizedBox(height: 13),
-              ..._actions(context, palette),
-            ],
+            ),
           ),
         ),
       ),
@@ -204,7 +218,7 @@ class YogitAlert extends StatelessWidget {
     if (destructiveLabel case final label?) {
       return [
         confirm,
-        const SizedBox(height: 7),
+        const SizedBox(height: 6),
         _AlertButton(
           key: destructiveKey,
           label: label,
@@ -213,7 +227,7 @@ class YogitAlert extends StatelessWidget {
           onPressed: () =>
               Navigator.pop(context, onDestructive?.call() ?? 'destructive'),
         ),
-        const SizedBox(height: 7),
+        const SizedBox(height: 6),
         cancel,
       ];
     }
@@ -221,7 +235,7 @@ class YogitAlert extends StatelessWidget {
       Row(
         children: [
           Expanded(child: cancel),
-          const SizedBox(width: 7),
+          const SizedBox(width: 6),
           Expanded(child: confirm),
         ],
       ),
@@ -295,7 +309,7 @@ class _AlertButton extends StatelessWidget {
       onPressed: onPressed,
       style: TextButton.styleFrom(
         minimumSize: const Size.fromHeight(28),
-        padding: const EdgeInsets.symmetric(horizontal: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         backgroundColor: filled ? fill : palette.border,
         foregroundColor: textColor ?? (filled ? Colors.white : palette.text),

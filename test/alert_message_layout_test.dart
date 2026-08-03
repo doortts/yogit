@@ -42,8 +42,8 @@ void main() {
     expect(confirm.height, 28);
     expect(cancel.height, 28);
     // 7px between the pair, 16px padding on both sides of a 280 dialog.
-    expect(confirm.left - cancel.right, 7);
-    expect(cancel.width + confirm.width, YogitAlert.width - 32 - 7);
+    expect(confirm.left - cancel.right, 6);
+    expect(cancel.width + confirm.width, YogitAlert.width - 32 - 6);
     expect(
       tester
           .widget<TextButton>(
@@ -86,8 +86,8 @@ void main() {
       expect(rect.width, YogitAlert.width - 32);
       expect(rect.height, 28);
     }
-    expect(destructive.top - confirm.bottom, 7);
-    expect(cancel.top - destructive.bottom, 7);
+    expect(destructive.top - confirm.bottom, 6);
+    expect(cancel.top - destructive.bottom, 6);
   });
 
   testWidgets('destructive actions carry the tint, not a solid red', (
