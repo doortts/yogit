@@ -1376,11 +1376,46 @@ void main() {
     expect(
       spans.any(
         (span) =>
-            span.style?.backgroundColor == fullDiffWordChange &&
+            span.style?.backgroundColor == fullDiffAddedWord &&
             span.style?.decoration == TextDecoration.underline,
       ),
       isTrue,
     );
+  });
+
+  testWidgets('added and deleted words carry their own emphasis color', (
+    tester,
+  ) async {
+    Future<Color?> emphasisFor(DiffLineKind kind) async {
+      await tester.pumpWidget(
+        qaApp(
+          FullDiffCodeRow(
+            line: DiffLine(
+              kind: kind,
+              text: 'Scale := WindowPixelRatio;',
+              newNumber: 314,
+            ),
+            path: fileA.path,
+            wrapLines: false,
+            highlighter: fakeHighlighter,
+            wordRanges: const [
+              WordRange(text: 'WindowPixelRatio', start: 9, end: 25),
+            ],
+          ),
+        ),
+      );
+      final richText = tester.widget<RichText>(
+        find.byKey(const Key('code-row-source-text')),
+      );
+      final spans = (richText.text as TextSpan).children!.cast<TextSpan>();
+      return spans
+          .firstWhere((span) => span.style?.backgroundColor != null)
+          .style
+          ?.backgroundColor;
+    }
+
+    expect(await emphasisFor(DiffLineKind.add), fullDiffAddedWord);
+    expect(await emphasisFor(DiffLineKind.delete), fullDiffDeletedWord);
   });
 
   testWidgets('hunk headers use the approved compact type size', (

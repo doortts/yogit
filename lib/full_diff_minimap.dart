@@ -69,7 +69,7 @@ class MinimapGeometry {
             anchor: anchor,
             top: lineToTop(line, sourceLineCount, height),
             height: _markerHeight,
-            color: deletionOnly ? fullDiffDeletedMark : fullDiffAccent,
+            color: deletionOnly ? fullDiffMinimapDeleted : fullDiffMinimapAdded,
             active: _sameAnchor(anchor, activeAnchor),
           );
         }),

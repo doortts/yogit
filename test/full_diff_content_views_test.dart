@@ -761,6 +761,27 @@ void main() {
     expect(tester.getRect(paint), tester.getRect(clip));
   });
 
+  testWidgets('hatched cells paint from the central palette', (tester) async {
+    await tester.pumpWidget(
+      qaApp(
+        const SizedBox(
+          width: 80,
+          child: HatchedDiffCell(key: Key('hatched-cell')),
+        ),
+      ),
+    );
+
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('hatched-cell')),
+        matching: find.byType(CustomPaint),
+      ),
+      paints
+        ..rect(color: fullDiffHatchBackground)
+        ..line(color: fullDiffHatchStroke),
+    );
+  });
+
   testWidgets('history exposes the selected row as a semantic button', (
     tester,
   ) async {

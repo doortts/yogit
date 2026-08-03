@@ -279,14 +279,22 @@ class FullDiffCodeRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final compactSourceRow = compact || leadingMetadata != null;
-    final (sourceColor, gutterColor, marker) = switch (line.kind) {
-      DiffLineKind.add => (fullDiffAddedSource, fullDiffAddedGutter, '+'),
+    // One switch decides everything the line's kind colors: its fill, its
+    // gutter, its sign, and the emphasis a changed word carries on top.
+    final (sourceColor, gutterColor, marker, wordColor) = switch (line.kind) {
+      DiffLineKind.add => (
+        fullDiffAddedSource,
+        fullDiffAddedGutter,
+        '+',
+        fullDiffAddedWord,
+      ),
       DiffLineKind.delete => (
         fullDiffDeletedSource,
         fullDiffDeletedGutter,
         '−',
+        fullDiffDeletedWord,
       ),
-      _ => (fullDiffCanvas, fullDiffCanvas, ' '),
+      _ => (fullDiffCanvas, fullDiffCanvas, ' ', fullDiffAddedWord),
     };
     final richText = _SourceText(
       wrapLines: wrapLines,
@@ -298,6 +306,7 @@ class FullDiffCodeRow extends StatelessWidget {
               ? highlighter.highlightLine(path, line.text)
               : const [],
           wordRanges,
+          wordColor,
         ),
       ),
     );
@@ -541,6 +550,7 @@ List<TextSpan> _sourceSpans(
   String source,
   List<CodeTokenSpan> syntaxSpans,
   List<WordRange> wordRanges,
+  Color wordColor,
 ) {
   if (source.isEmpty) return const [TextSpan(text: '')];
 
@@ -566,6 +576,7 @@ List<TextSpan> _sourceSpans(
           offsets[index + 1],
           syntaxSpans,
           wordRanges,
+          wordColor,
         ),
   ];
 }
@@ -576,6 +587,7 @@ TextSpan _sourceSpan(
   int end,
   List<CodeTokenSpan> syntaxSpans,
   List<WordRange> wordRanges,
+  Color wordColor,
 ) {
   final syntax = syntaxSpans.cast<CodeTokenSpan?>().firstWhere(
     (span) => span!.start <= start && span.end >= end,
@@ -588,7 +600,7 @@ TextSpan _sourceSpan(
   if (syntax != null) style = style.merge(syntax.style);
   if (changed) {
     style = style.copyWith(
-      backgroundColor: fullDiffWordChange,
+      backgroundColor: wordColor,
       decoration: TextDecoration.underline,
       decorationColor: fullDiffAccent,
     );

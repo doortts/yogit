@@ -729,10 +729,10 @@ class _HatchedDiffPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     canvas.drawRect(
       Offset.zero & size,
-      Paint()..color = const Color(0xFF353535),
+      Paint()..color = fullDiffHatchBackground,
     );
     final paint = Paint()
-      ..color = const Color(0xFF4A4A4A)
+      ..color = fullDiffHatchStroke
       ..strokeWidth = 1;
     for (var offset = -size.height; offset < size.width; offset += 8) {
       canvas.drawLine(

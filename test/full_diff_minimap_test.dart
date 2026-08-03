@@ -29,9 +29,9 @@ void main() {
     expect(geometry.markers, hasLength(2));
     expect(geometry.markers[0].top, closeTo(50.202, 0.001));
     expect(geometry.markers[0].height, 3);
-    expect(geometry.markers[0].color, fullDiffAccent);
+    expect(geometry.markers[0].color, fullDiffMinimapAdded);
     expect(geometry.markers[0].active, isFalse);
-    expect(geometry.markers[1].color, fullDiffDeletedMark);
+    expect(geometry.markers[1].color, fullDiffMinimapDeleted);
     expect(geometry.markers[1].active, isTrue);
   });
 

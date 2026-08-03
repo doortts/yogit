@@ -9592,7 +9592,7 @@ void main() {
                 .first,
           )
           .color,
-      const Color(0xFF34251F),
+      fullDiffDeletedSource,
     );
     expect(
       tester
@@ -9602,7 +9602,7 @@ void main() {
                 .first,
           )
           .color,
-      const Color(0xFF262E36),
+      fullDiffAddedSource,
     );
   });
 
