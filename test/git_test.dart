@@ -2775,6 +2775,49 @@ void main() {
     expect(await directorySizeBytes(directory.path), 8);
   });
 
+  test(
+    'loadLocalStateSignature fingerprints HEAD and local branches',
+    () async {
+      final calls = <List<String>>[];
+      final repository = GitRepository(
+        '/repo',
+        runner: (executable, arguments, {workingDirectory, environment}) async {
+          calls.add(arguments);
+          return ProcessResult(1, 0, 'HEAD abc\nrefs/heads/main abc\n', '');
+        },
+      );
+
+      expect(
+        await repository.loadLocalStateSignature(),
+        'HEAD abc\nrefs/heads/main abc',
+      );
+      expect(calls.single, [
+        'for-each-ref',
+        '--format=%(refname) %(objectname)',
+        'HEAD',
+        'refs/heads',
+      ]);
+    },
+  );
+
+  test('loadLocalStateSignature reports null when git cannot answer', () async {
+    final repository = GitRepository(
+      '/repo',
+      runner: (executable, arguments, {workingDirectory, environment}) async =>
+          ProcessResult(1, 128, '', 'fatal: not a git repository'),
+    );
+
+    expect(await repository.loadLocalStateSignature(), isNull);
+
+    final unlaunchable = GitRepository(
+      '/repo',
+      runner: (executable, arguments, {workingDirectory, environment}) async =>
+          throw const ProcessException('git', [], 'No such file or directory'),
+    );
+
+    expect(await unlaunchable.loadLocalStateSignature(), isNull);
+  });
+
   test('a detached HEAD reports no current branch', () async {
     final repository = GitRepository(
       '/tmp/repository',

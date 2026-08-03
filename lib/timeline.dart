@@ -799,6 +799,11 @@ class _TimelineScreenState extends State<TimelineScreen>
   static const _collapsedTagLimit = 10;
   static const _fetchInterval = Duration(minutes: 3);
 
+  /// How often the app re-reads the repository's local fingerprint. Short
+  /// enough that a checkout in a terminal is noticed while the user is still
+  /// looking at the terminal, cheap enough to run on a timer.
+  static const _localWatchInterval = Duration(seconds: 3);
+
   static const _pageSize = 500;
 
   static const _sidebarRange = (min: 150.0, max: 320.0);
@@ -907,6 +912,15 @@ class _TimelineScreenState extends State<TimelineScreen>
   var _refsLoadFailed = false;
   var _refsLoaded = false;
   Timer? _fetchTimer;
+  Timer? _localWatchTimer;
+
+  /// The local fingerprint the timeline is currently showing.
+  String? _localSignature;
+
+  /// A fingerprint the user chose not to load, so the same change is not asked
+  /// about twice.
+  String? _declinedSignature;
+  var _localChangePromptOpen = false;
   final _fetchingRemotes = ValueNotifier(false);
   final _fetchError = ValueNotifier<Object?>(null);
   CherryPickState? _cherryPickState;
@@ -996,6 +1010,11 @@ class _TimelineScreenState extends State<TimelineScreen>
       _fetchInterval,
       (_) => unawaited(_refreshRemotes()),
     );
+    unawaited(_syncLocalSignature());
+    _localWatchTimer = Timer.periodic(
+      _localWatchInterval,
+      (_) => unawaited(_checkLocalChanges()),
+    );
   }
 
   List<String> get _remotesToRefresh {
@@ -1042,6 +1061,59 @@ class _TimelineScreenState extends State<TimelineScreen>
       if (mounted) _fetchError.value = fetchError;
     } finally {
       if (mounted) _fetchingRemotes.value = false;
+    }
+  }
+
+  /// Records what the repository looks like right now as the state the
+  /// timeline is showing, so an app-initiated change never prompts.
+  Future<void> _syncLocalSignature() async {
+    final signature = await widget.repository.loadLocalStateSignature();
+    if (mounted && signature != null) _localSignature = signature;
+  }
+
+  /// Polls the repository's fingerprint and offers to reload when someone
+  /// moved HEAD or a branch outside the app — a terminal checkout, a commit
+  /// from another tool, a rebase in a second window.
+  Future<void> _checkLocalChanges() async {
+    if (!mounted || _localChangePromptOpen) return;
+    // A mutation the app is running will refresh on its own; interrupting it
+    // with a question would race its own reload.
+    if (_branchApplyBusy || _pullingRemote != null) return;
+    final signature = await widget.repository.loadLocalStateSignature();
+    if (!mounted || signature == null) return;
+    if (_localSignature == null) {
+      _localSignature = signature;
+      return;
+    }
+    if (signature == _localSignature || signature == _declinedSignature) return;
+    _localChangePromptOpen = true;
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('저장소가 바뀌었습니다'),
+        content: const Text('앱 밖에서 HEAD나 브랜치가 변경되었습니다. 새로 읽어올까요?'),
+        actions: [
+          TextButton(
+            key: const Key('local-change-dismiss'),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('나중에'),
+          ),
+          FilledButton(
+            key: const Key('local-change-refresh'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('새로고침'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    _localChangePromptOpen = false;
+    if (accepted == true) {
+      _localSignature = signature;
+      _declinedSignature = null;
+      await _reloadTimelineAfterCherryPick(null);
+    } else {
+      _declinedSignature = signature;
     }
   }
 
@@ -1271,6 +1343,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     WidgetsBinding.instance.removeObserver(this);
     HardwareKeyboard.instance.removeHandler(_handleModifierKeyEvent);
     _fetchTimer?.cancel();
+    _localWatchTimer?.cancel();
     _dropMergePreview();
     _dropRebasePreview();
     _clearFullDiffRouteSession();
@@ -3533,6 +3606,9 @@ class _TimelineScreenState extends State<TimelineScreen>
     });
     await _fetchNextPage();
     await _loadRefs();
+    // Whatever the repository says after a reload is what the timeline shows,
+    // so an app-initiated change never comes back as a prompt.
+    await _syncLocalSignature();
     if (!mounted || headSha == null) return;
     final index = _entries.indexWhere(
       (entry) => entry.rowIndex >= 0 && entry.row.commit.sha == headSha,
@@ -6078,6 +6154,9 @@ class _TimelineScreenState extends State<TimelineScreen>
               _branchPreviewHasConflict
         ? _previewConflict
         : _previewPurple,
+    previewMergeArrow:
+        _previewGraph?.kinds[entry.row.commit.sha] ==
+        PreviewGraphNodeKind.virtualMerge,
     outgoingRailColor: outgoingRailColor,
     backgroundColor: _palette.background,
     selectedRowColor: _timelineSelectionColor,
@@ -9669,6 +9748,7 @@ class CommitGraphPainter extends CustomPainter {
     this.dashedLanes = const {},
     this.previousDashedLanes = const {},
     this.previewRailColor,
+    this.previewMergeArrow = false,
     this.outgoingRailColor,
     this.backgroundColor = const Color(0xFF1C1C1E),
     this.selectedRowColor = const Color(0xFF234D72),
@@ -9763,6 +9843,11 @@ class CommitGraphPainter extends CustomPainter {
   final bool passThrough;
   final Set<int> dashedLanes;
   final Set<int> previousDashedLanes;
+
+  /// Whether this row is a merge preview's virtual commit. Its dashed second
+  /// parent edge then ends in an arrowhead, so the line reads as the compare
+  /// branch arriving at the merge rather than leaving it.
+  final bool previewMergeArrow;
   final Color? previewRailColor;
   final Color? outgoingRailColor;
 
@@ -9787,6 +9872,28 @@ class CommitGraphPainter extends CustomPainter {
       ..moveTo(tipX - refArrowLength, centerY - refArrowHalfHeight)
       ..lineTo(tipX, centerY)
       ..lineTo(tipX - refArrowLength, centerY + refArrowHalfHeight);
+  }
+
+  /// The arrowhead closing the dashed merge edge, or null when this row has no
+  /// such edge. The tip sits one node-radius plus a gap from the node center,
+  /// on the side the edge leaves toward, and points back at the node.
+  Path? previewMergeArrowheadPath(double centerY) {
+    if (!previewMergeArrow) return null;
+    final edge = row.transitions
+        .where(
+          (transition) =>
+              transition.from == row.lane && isDashedLane(transition.to),
+        )
+        .firstOrNull;
+    if (edge == null) return null;
+    // Which way the edge leaves decides which way the head points.
+    final direction = laneX(edge.to) > laneX(edge.from) ? 1.0 : -1.0;
+    final tipX = laneX(row.lane) + direction * (nodeRadius + refArrowGap);
+    final baseX = tipX + direction * refArrowLength;
+    return Path()
+      ..moveTo(baseX, centerY - refArrowHalfHeight)
+      ..lineTo(tipX, centerY)
+      ..lineTo(baseX, centerY + refArrowHalfHeight);
   }
 
   /// A line being born out of this row's node: the second-or-later parent edge of
@@ -10001,6 +10108,17 @@ class CommitGraphPainter extends CustomPainter {
     }
     if (passThrough) return;
     final nodeX = laneX(row.lane);
+    if (previewMergeArrowheadPath(centerY) case final head?) {
+      canvas.drawPath(
+        head,
+        Paint()
+          ..color = previewRailColor ?? committerColor
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = railWidth
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round,
+      );
+    }
     if (refConnector) {
       final connectorPaint = Paint()
         ..color = committerColor

@@ -1261,6 +1261,53 @@ void main() {
     expect(painter.isDashedAbove(1), isFalse);
   });
 
+  test('the dashed merge edge points an arrowhead at the virtual commit', () {
+    // The virtual merge sits in lane 0 and hands its second parent down lane 1,
+    // which is the dashed line the preview draws.
+    final virtual = graphRow(
+      commit: commit('virtual', 'merge', parents: const ['base', 'compare']),
+      lane: 0,
+      parentLanes: const [0, 1],
+      activeLanes: const [0],
+      nextLanes: const [0, 1],
+      activeLaneShas: const {0: 'virtual'},
+      nextLaneShas: const {0: 'base', 1: 'compare'},
+      transitions: const [(from: 0, to: 1, sha: 'compare')],
+    );
+    final painter = CommitGraphPainter(
+      row: virtual,
+      selected: false,
+      committerColor: const Color(0xFF34C759),
+      dashedLanes: const {1},
+      previewRailColor: const Color(0xFFC69AFF),
+      previewMergeArrow: true,
+    );
+
+    final head = painter.previewMergeArrowheadPath(18);
+    expect(head, isNotNull);
+    // The tip sits just right of the node and points back at it, so the line
+    // reads as arriving rather than leaving.
+    final bounds = head!.getBounds();
+    expect(bounds.left, lessThan(bounds.right));
+    expect(
+      bounds.left,
+      greaterThan(painter.laneX(0) + CommitGraphPainter.nodeRadius - 1),
+    );
+    expect(bounds.center.dy, closeTo(18, 0.01));
+
+    // Without the flag the same row draws no arrowhead.
+    expect(
+      CommitGraphPainter(
+        row: virtual,
+        selected: false,
+        committerColor: const Color(0xFF34C759),
+        dashedLanes: const {1},
+        previewRailColor: const Color(0xFFC69AFF),
+      ).previewMergeArrowheadPath(18),
+      isNull,
+    );
+  });
+
   test(
     'compact preview keeps the virtual segment dashed above its real parent',
     () async {
@@ -2727,6 +2774,80 @@ void main() {
     );
   });
 
+  testWidgets('an outside branch change offers a refresh and reloads on yes', (
+    tester,
+  ) async {
+    var signature = 'HEAD aaa\nrefs/heads/main aaa';
+    var historyLoads = 0;
+    final repository = FakeGitRepository(
+      (_, _) async {
+        historyLoads++;
+        return [commit('1', 'first commit')];
+      },
+      refs: const RepoRefs(local: ['main'], current: 'main'),
+      runner: (executable, arguments, {workingDirectory, environment}) async =>
+          arguments.first == 'for-each-ref'
+          ? ProcessResult(1, 0, signature, '')
+          : ProcessResult(1, 0, '', ''),
+    );
+    await tester.pumpWidget(app(repository, controller));
+    await tester.pumpAndSettle();
+
+    final loadsBefore = historyLoads;
+
+    // Nothing changed yet, so polling stays silent.
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('local-change-refresh')), findsNothing);
+
+    // Someone checks out another branch behind the app's back.
+    signature = 'HEAD bbb\nrefs/heads/main aaa\nrefs/heads/work bbb';
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('local-change-refresh')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('local-change-refresh')));
+    await tester.pumpAndSettle();
+
+    expect(historyLoads, greaterThan(loadsBefore));
+  });
+
+  testWidgets('declining the refresh stops the prompt from returning', (
+    tester,
+  ) async {
+    var signature = 'HEAD aaa';
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('1', 'first commit')],
+      refs: const RepoRefs(local: ['main'], current: 'main'),
+      runner: (executable, arguments, {workingDirectory, environment}) async =>
+          arguments.first == 'for-each-ref'
+          ? ProcessResult(1, 0, signature, '')
+          : ProcessResult(1, 0, '', ''),
+    );
+    await tester.pumpWidget(app(repository, controller));
+    await tester.pumpAndSettle();
+
+    signature = 'HEAD bbb';
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('local-change-dismiss')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('local-change-refresh')), findsNothing);
+
+    // The same state must not ask again.
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('local-change-refresh')), findsNothing);
+
+    // A further change is a new question, so it asks once more.
+    signature = 'HEAD ccc';
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('local-change-refresh')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('local-change-dismiss')));
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('the ref filter shows a magnifier instead of a hint sentence', (
     tester,
   ) async {
@@ -3183,9 +3304,12 @@ void main() {
             refs: pullRefs,
             runner:
                 (executable, arguments, {workingDirectory, environment}) async {
-                  // The status bar chip reads the identity on load; this test
-                  // is about the pull commands.
-                  if (arguments.first != 'config') calls.add(arguments);
+                  // The status bar chip and the local-change watcher both
+                  // read on load; this test is about the pull commands.
+                  if (arguments.first != 'config' &&
+                      arguments.first != 'for-each-ref') {
+                    calls.add(arguments);
+                  }
                   return ProcessResult(1, 0, '', '');
                 },
           ),
@@ -3246,9 +3370,12 @@ void main() {
                     workingDirectory,
                     environment,
                   }) async {
-                    // The status bar chip reads the identity on load; this test
-                    // is about the pull commands.
-                    if (arguments.first != 'config') calls.add(arguments);
+                    // The status bar chip and the local-change watcher both
+                    // read on load; this test is about the pull commands.
+                    if (arguments.first != 'config' &&
+                        arguments.first != 'for-each-ref') {
+                      calls.add(arguments);
+                    }
                     return ProcessResult(1, 0, '', '');
                   },
             ),
@@ -3283,9 +3410,12 @@ void main() {
             refs: pullRefs,
             runner:
                 (executable, arguments, {workingDirectory, environment}) async {
-                  // The status bar chip reads the identity on load; this test
-                  // is about the pull commands.
-                  if (arguments.first != 'config') calls.add(arguments);
+                  // The status bar chip and the local-change watcher both
+                  // read on load; this test is about the pull commands.
+                  if (arguments.first != 'config' &&
+                      arguments.first != 'for-each-ref') {
+                    calls.add(arguments);
+                  }
                   return ProcessResult(1, 0, '', '');
                 },
           ),
@@ -3334,9 +3464,12 @@ void main() {
             refs: pullRefs,
             runner:
                 (executable, arguments, {workingDirectory, environment}) async {
-                  // The status bar chip reads the identity on load; this test
-                  // is about the pull commands.
-                  if (arguments.first != 'config') calls.add(arguments);
+                  // The status bar chip and the local-change watcher both
+                  // read on load; this test is about the pull commands.
+                  if (arguments.first != 'config' &&
+                      arguments.first != 'for-each-ref') {
+                    calls.add(arguments);
+                  }
                   return ProcessResult(1, 0, '', '');
                 },
           ),
@@ -4049,6 +4182,9 @@ void main() {
         .map((paint) => paint.painter! as CommitGraphPainter)
         .firstWhere((painter) => painter.row.commit.shortSha == 'VM');
     expect(previewPainter.laneX(1) - previewPainter.laneX(0), 49);
+    // The dashed second-parent edge ends in an arrowhead at the virtual commit.
+    expect(previewPainter.previewMergeArrow, isTrue);
+    expect(previewPainter.previewMergeArrowheadPath(15), isNotNull);
   });
 
   testWidgets('virtual merge row hides borrowed date and author', (

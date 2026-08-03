@@ -3428,6 +3428,27 @@ class GitRepository implements FullDiffRepository {
   /// Switches the checkout to an existing local branch.
   Future<void> checkoutLocalBranch(String branch) => _run(['switch', branch]);
 
+  /// A cheap fingerprint of the repository's local state: where `HEAD` points
+  /// plus every local branch tip. Comparing two readings spots a checkout,
+  /// commit, or branch edit made outside the app without reloading the whole
+  /// ref list. Null when Git cannot answer, so a transient failure reads as
+  /// "unknown" rather than as "everything vanished".
+  Future<String?> loadLocalStateSignature() async {
+    try {
+      final result = await runner(gitExecutable, const [
+        'for-each-ref',
+        '--format=%(refname) %(objectname)',
+        'HEAD',
+        'refs/heads',
+      ], workingDirectory: root);
+      return result.exitCode == 0 ? result.stdout.toString().trim() : null;
+    } on ProcessException {
+      // A watcher must never be the thing that breaks the screen, so a git
+      // that cannot even be launched reads as "unknown" too.
+      return null;
+    }
+  }
+
   /// Who this repository commits as right now, global config included. Empty
   /// strings where Git has nothing, so the caller can warn instead of guessing.
   Future<GitIdentity> loadCommitIdentity() async {
