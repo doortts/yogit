@@ -22,8 +22,9 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      const MaterialApp(
-        home: YogitAlert(
+      MaterialApp(
+        theme: ThemeData(visualDensity: VisualDensity.adaptivePlatformDensity),
+        home: const YogitAlert(
           title: '저장소가 바뀌었습니다',
           cancelLabel: '나중에',
           cancelKey: Key('cancel'),
@@ -66,8 +67,9 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      const MaterialApp(
-        home: YogitAlert(
+      MaterialApp(
+        theme: ThemeData(visualDensity: VisualDensity.adaptivePlatformDensity),
+        home: const YogitAlert(
           title: '워크트리도 함께 삭제할까요?',
           confirmLabel: '워크트리만 정리',
           confirmKey: Key('confirm'),
@@ -118,8 +120,9 @@ void main() {
 
     // A two-choice destructive alert tints its confirm button.
     await tester.pumpWidget(
-      const MaterialApp(
-        home: YogitAlert(
+      MaterialApp(
+        theme: ThemeData(visualDensity: VisualDensity.adaptivePlatformDensity),
+        home: const YogitAlert(
           title: '브랜치를 삭제할까요?',
           confirmLabel: '삭제',
           confirmKey: Key('confirm'),
@@ -133,8 +136,9 @@ void main() {
 
     // A normal alert keeps the blue primary.
     await tester.pumpWidget(
-      const MaterialApp(
-        home: YogitAlert(
+      MaterialApp(
+        theme: ThemeData(visualDensity: VisualDensity.adaptivePlatformDensity),
+        home: const YogitAlert(
           title: '적용할까요?',
           confirmLabel: '적용',
           confirmKey: Key('confirm'),
@@ -152,8 +156,9 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      const MaterialApp(
-        home: YogitAlert(
+      MaterialApp(
+        theme: ThemeData(visualDensity: VisualDensity.adaptivePlatformDensity),
+        home: const YogitAlert(
           title: '브랜치를 삭제할까요?',
           confirmLabel: '삭제',
           confirmKey: Key('confirm'),
@@ -172,8 +177,9 @@ void main() {
     expect(focused(const Key('confirm')), isFalse);
 
     await tester.pumpWidget(
-      const MaterialApp(
-        home: YogitAlert(
+      MaterialApp(
+        theme: ThemeData(visualDensity: VisualDensity.adaptivePlatformDensity),
+        home: const YogitAlert(
           title: '적용할까요?',
           confirmLabel: '적용',
           confirmKey: Key('confirm'),

@@ -293,6 +293,11 @@ class _AlertButton extends StatelessWidget {
       onPressed: onPressed,
       style: TextButton.styleFrom(
         minimumSize: const Size.fromHeight(28),
+        // Pinned: the theme's adaptive density is compact on macOS and would
+        // quietly shave these buttons to 20px — which is exactly how the
+        // shipped alert drifted below the approved mockup once already.
+        visualDensity: VisualDensity.standard,
+        fixedSize: const Size.fromHeight(28),
         padding: const EdgeInsets.symmetric(horizontal: 8),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         backgroundColor: filled ? fill : palette.border,
