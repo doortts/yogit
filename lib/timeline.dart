@@ -9834,6 +9834,16 @@ class CommitGraphPainter extends CustomPainter {
       ..lineTo(tipX - refArrowLength, centerY + refArrowHalfHeight);
   }
 
+  /// The arrowhead is stroked at the dashed rail's own weight, not the solid
+  /// rail's: at [railWidth] the head came out twice as heavy as the line it
+  /// closes and as every other arrow in the graph.
+  Paint previewMergeArrowPaint() => Paint()
+    ..color = previewRailColor ?? committerColor
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = previewRailWidth
+    ..strokeCap = StrokeCap.round
+    ..strokeJoin = StrokeJoin.round;
+
   /// The arrowhead closing the dashed merge edge, or null when this row has no
   /// such edge. The tip sits one node-radius plus a gap from the node center,
   /// on the side the edge leaves toward, and points back at the node.
@@ -10069,15 +10079,7 @@ class CommitGraphPainter extends CustomPainter {
     if (passThrough) return;
     final nodeX = laneX(row.lane);
     if (previewMergeArrowheadPath(centerY) case final head?) {
-      canvas.drawPath(
-        head,
-        Paint()
-          ..color = previewRailColor ?? committerColor
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = railWidth
-          ..strokeCap = StrokeCap.round
-          ..strokeJoin = StrokeJoin.round,
-      );
+      canvas.drawPath(head, previewMergeArrowPaint());
     }
     if (refConnector) {
       final connectorPaint = Paint()

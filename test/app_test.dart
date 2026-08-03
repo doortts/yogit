@@ -1295,6 +1295,17 @@ void main() {
     );
     expect(bounds.center.dy, closeTo(18, 0.01));
 
+    // The head is stroked at the dashed rail's own weight, which is also the
+    // ref connector arrow's, so every arrow in the graph is one size.
+    expect(
+      CommitGraphPainter.previewRailWidth,
+      CommitGraphPainter.connectorWidth,
+    );
+    expect(
+      painter.previewMergeArrowPaint().strokeWidth,
+      CommitGraphPainter.previewRailWidth,
+    );
+
     // Without the flag the same row draws no arrowhead.
     expect(
       CommitGraphPainter(
