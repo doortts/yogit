@@ -72,7 +72,6 @@ class YogitAlert extends StatelessWidget {
     this.destructiveLabel,
     this.destructiveKey,
     this.onDestructive,
-    this.wide = false,
     this.onConfirm,
     super.key,
   });
@@ -85,9 +84,6 @@ class YogitAlert extends StatelessWidget {
   /// The approved mockup's alert width. The shell builds its own surface
   /// rather than using Dialog, so this is exact and not Dialog's floor.
   static const width = 280.0;
-
-  /// For alerts whose body is a block rather than a sentence.
-  static const wideWidth = 340.0;
 
   final String title;
   final String? message;
@@ -109,7 +105,6 @@ class YogitAlert extends StatelessWidget {
   final String? destructiveLabel;
   final Key? destructiveKey;
   final Object? Function()? onDestructive;
-  final bool wide;
 
   /// Returns what the dialog should pop with, or null to pop `true`. A form
   /// uses this to hand back its value.
@@ -121,7 +116,7 @@ class YogitAlert extends StatelessWidget {
     // Every number here is the approved mockup's CSS, one to one: 16px
     // padding, a 13px w700 title, 11px body on a 1.5 line height at 82%,
     // 5px under the title, 13px above the buttons.
-    final contentWidth = (wide ? wideWidth : width) - 32;
+    final contentWidth = width - 32;
     const titleStyle = TextStyle(
       fontSize: 13,
       fontWeight: FontWeight.w700,
@@ -140,7 +135,7 @@ class YogitAlert extends StatelessWidget {
           side: BorderSide(color: palette.border, width: 0.5),
         ),
         child: SizedBox(
-          width: wide ? wideWidth : width,
+          width: width,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -313,9 +308,10 @@ class _AlertButton extends StatelessWidget {
   }
 }
 
-/// Shows [alert] and answers what the user chose: the confirm value, or null
+/// Shows [alert] — a [YogitAlert] or a widget that builds one, such as a
+/// form dialog — and answers what the user chose: the confirm value, or null
 /// when they cancelled, pressed Escape, or clicked outside.
-Future<T?> showYogitAlert<T>(BuildContext context, YogitAlert alert) =>
+Future<T?> showYogitAlert<T>(BuildContext context, Widget alert) =>
     showDialog<T>(
       context: context,
       builder: (context) => Shortcuts(

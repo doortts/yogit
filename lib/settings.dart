@@ -1198,9 +1198,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   /// One dialog for both add and edit; [index] null means a new entry.
   Future<void> _editCommitProfile(int? index) async {
     final existing = index == null ? null : _settings.commitProfiles[index];
-    final edited = await showDialog<CommitProfile>(
-      context: context,
-      builder: (context) => _CommitProfileDialog(
+    final edited = await showYogitAlert<CommitProfile>(
+      context,
+      _CommitProfileDialog(
         profile:
             existing ??
             CommitProfile(
@@ -1536,7 +1536,6 @@ class _CommitProfileDialogState extends State<_CommitProfileDialog> {
 
   @override
   Widget build(BuildContext context) => YogitAlert(
-    wide: true,
     title: widget.isNew ? '프로필을 추가할까요?' : '프로필을 수정할까요?',
     confirmLabel: '저장',
     confirmKey: const Key('commit-profile-save'),

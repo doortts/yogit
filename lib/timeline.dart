@@ -4984,10 +4984,9 @@ class _TimelineScreenState extends State<TimelineScreen>
       return;
     }
     final merge = _branchPreviewMode == BranchPreviewMode.merge;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => YogitAlert(
-        wide: true,
+    final confirmed = await showYogitAlert<bool>(
+      context,
+      YogitAlert(
         title: '${merge ? 'Merge' : 'Rebase'}를 실제로 적용할까요?',
         message:
             '로컬 ${target.localBranch} 브랜치만 변경합니다. '
@@ -5109,10 +5108,9 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (result == null || _branchApplyStatus != BranchApplyStatus.applied) {
       return;
     }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => YogitAlert(
-        wide: true,
+    final confirmed = await showYogitAlert<bool>(
+      context,
+      YogitAlert(
         title:
             '${result.mode == BranchApplyMode.merge ? 'Merge' : 'Rebase'} 이전 시점으로 되돌릴까요?',
         body: YogitAlertBlock(
