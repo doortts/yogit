@@ -4212,6 +4212,41 @@ void main() {
     expect(previewPainter.previewMergeArrowheadPath(15), isNotNull);
   });
 
+  testWidgets('choosing a comparison opens the preview pane by itself', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            current: 'main',
+            tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async => branchComparison(),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    // The pane starts closed; nothing has asked for it yet.
+    expect(controller.previewPlacement, PreviewPlacement.closed);
+
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+
+    // A merge preview is worth seeing the moment it exists.
+    expect(controller.previewPlacement, PreviewPlacement.right);
+
+    // Switching to rebase keeps it open rather than reopening it elsewhere.
+    await tester.tap(find.byKey(const Key('branch-preview-rebase-button')));
+    await tester.pumpAndSettle();
+    expect(controller.previewPlacement, PreviewPlacement.right);
+  });
+
   testWidgets('virtual merge row hides borrowed date and author', (
     tester,
   ) async {
@@ -4515,8 +4550,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
+    // The preview pane opens with the comparison now, so Enter would close it.
 
     expect(find.text('lib/shared.dart'), findsWidgets);
     await tester.tap(find.byKey(const Key('preview-state-lib/shared.dart')));
@@ -4588,8 +4622,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
+    // The preview pane opens with the comparison now, so Enter would close it.
 
     expect(find.byKey(const Key('branch-preview-file-list')), findsOneWidget);
     expect(find.text('브랜치 Diff'), findsNothing);
@@ -5064,6 +5097,10 @@ void main() {
     );
     await tester.pumpWidget(app(repository, controller));
     await tester.pumpAndSettle();
+    // The preview pane covers the timeline once it opens with the
+    // comparison, so close it before dragging the list.
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
     await tester.drag(
       find.byKey(const Key('timeline-list')),
       const Offset(0, -400),
@@ -5176,6 +5213,10 @@ void main() {
           .color,
     );
 
+    // The preview pane covers the timeline once it opens with the
+    // comparison, so close it before dragging the list.
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
     await tester.drag(
       find.byKey(const Key('timeline-list')),
       const Offset(0, -1600),
@@ -5265,8 +5306,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('branch-diff-menu-fix/docs')));
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
+    // The preview pane opens with the comparison now, so Enter would close it.
 
     expect(find.text('fix/docs를 main에 Merge 실제 적용'), findsOneWidget);
     expect(find.text('Merge 미리보기 성공'), findsOneWidget);
@@ -5373,7 +5413,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('branch-diff-menu-$compareRef')));
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    // The comparison opens the preview pane itself now.
     await tester.pumpAndSettle();
 
     expect(find.text('main 위로 $compareRef Rebase 실제 적용'), findsOneWidget);
@@ -5442,8 +5482,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
+    // The preview pane opens with the comparison now, so Enter would close it.
 
     expect(session.disposed, isTrue);
     expect(find.text('Merge 검사 실패'), findsOneWidget);
@@ -5483,8 +5522,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
+    // The preview pane opens with the comparison now, so Enter would close it.
 
     expect(session.disposed, isTrue);
     expect(find.text('Rebase 검사 실패'), findsOneWidget);
@@ -5617,8 +5655,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('branch-diff-menu-origin/feature')));
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
+    // The preview pane opens with the comparison now, so Enter would close it.
 
     expect(
       find.text('origin/feature는 입력으로만 사용합니다. 실제 변경은 로컬 main에 적용됩니다.'),
@@ -5707,8 +5744,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('branch-diff-menu-origin/feature')));
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
+    // The preview pane opens with the comparison now, so Enter would close it.
 
     expect(
       find.text('로컬 feature를 origin/feature에서 만든 뒤 결과를 적용합니다.'),
@@ -5804,8 +5840,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('branch-diff-menu-origin/feature')));
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
+    // The preview pane opens with the comparison now, so Enter would close it.
 
     expect(find.text('로컬 feature 기준으로 다시 계산'), findsOneWidget);
     await tester.tap(find.byKey(const Key('branch-preview-apply')));

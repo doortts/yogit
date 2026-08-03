@@ -2816,6 +2816,15 @@ class _TimelineScreenState extends State<TimelineScreen>
     );
   }
 
+  /// A merge or rebase preview is worth seeing the moment it exists, so the
+  /// detail pane opens itself rather than waiting for a conflict to force it.
+  /// A pane the user already placed is left where it is.
+  Future<void> _openPaneForBranchPreview() async {
+    if (_comparison == null || !mounted) return;
+    if (_previewController.previewPlacement != PreviewPlacement.closed) return;
+    await _previewController.setPreview(widget.preferredPreviewPlacement);
+  }
+
   void _setBranchPreviewMode(BranchPreviewMode mode) {
     if (_branchPreviewMode == mode ||
         _branchApplyStatus == BranchApplyStatus.applying ||
@@ -2841,6 +2850,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     });
     _showFirstComparisonRow();
     widget.onBranchPreviewModeChanged?.call(mode);
+    unawaited(_openPaneForBranchPreview());
     _scheduleRatchetUpdate();
     if (mode == BranchPreviewMode.rebase) {
       _dropMergePreview();
@@ -2939,6 +2949,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       });
       _scheduleRatchetUpdate();
       _showFirstComparisonRow();
+      unawaited(_openPaneForBranchPreview());
       if (_branchPreviewMode == BranchPreviewMode.rebase) {
         unawaited(_startRebasePreview());
       } else if (result.merge.status == MergeConflictStatus.conflicts) {
