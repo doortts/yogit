@@ -341,6 +341,16 @@ class CommitProfileChip extends StatefulWidget {
   final bool showEmail;
   final VoidCallback onPressed;
 
+  /// The narrowest chip: padding (11), avatar (15) and its border (2). Below
+  /// the widths below it sheds text rather than overflow.
+  static const minWidth = 28.0;
+
+  /// Enough room for the avatar and a readable label beside it.
+  static const minLabelWidth = 74.0;
+
+  /// Enough room for the label and the address together.
+  static const minEmailWidth = 180.0;
+
   /// The chip never eats more than this much of the status bar; the name and
   /// address ellipsize inside it.
   final double maxWidth;
@@ -385,64 +395,79 @@ class _CommitProfileChipState extends State<CommitProfileChip> {
               ),
               borderRadius: BorderRadius.circular(11),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Stack(
-                  clipBehavior: Clip.none,
+            // A chip squeezed past its text drops to the avatar alone rather
+            // than overflowing: the tooltip still carries the whole identity,
+            // and the status bar can then hand its space to the commit date.
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final room = constraints.maxWidth;
+                final showsLabel = room >= CommitProfileChip.minLabelWidth;
+                final showsEmail =
+                    widget.showEmail &&
+                    email.isNotEmpty &&
+                    room >= CommitProfileChip.minEmailWidth;
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    ProfileAvatar.forIdentity(
-                      state,
-                      size: 15,
-                      palette: palette,
-                      warningColor: widget.warningColor,
-                    ),
-                    // The dot rides the avatar's shoulder so a mismatched
-                    // identity is visible without reading the text.
-                    if (state.kind != CommitIdentityKind.profile)
-                      Positioned(
-                        top: -1,
-                        right: -2,
-                        child: Container(
-                          key: const Key('commit-profile-warning'),
-                          width: 7,
-                          height: 7,
-                          decoration: BoxDecoration(
-                            color: widget.warningColor,
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: palette.surface,
-                              width: 1.5,
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        ProfileAvatar.forIdentity(
+                          state,
+                          size: 15,
+                          palette: palette,
+                          warningColor: widget.warningColor,
+                        ),
+                        // The dot rides the avatar's shoulder so a mismatched
+                        // identity is visible without reading the text.
+                        if (state.kind != CommitIdentityKind.profile)
+                          Positioned(
+                            top: -1,
+                            right: -2,
+                            child: Container(
+                              key: const Key('commit-profile-warning'),
+                              width: 7,
+                              height: 7,
+                              decoration: BoxDecoration(
+                                color: widget.warningColor,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: palette.surface,
+                                  width: 1.5,
+                                ),
+                              ),
                             ),
+                          ),
+                      ],
+                    ),
+                    if (showsLabel) ...[
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          state.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: missing ? widget.warningColor : palette.text,
+                            fontSize: 11,
                           ),
                         ),
                       ),
+                    ],
+                    if (showsEmail) ...[
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          email,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: palette.muted, fontSize: 11),
+                        ),
+                      ),
+                    ],
                   ],
-                ),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    state.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: missing ? widget.warningColor : palette.text,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-                if (widget.showEmail && email.isNotEmpty) ...[
-                  const SizedBox(width: 6),
-                  Flexible(
-                    child: Text(
-                      email,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: palette.muted, fontSize: 11),
-                    ),
-                  ),
-                ],
-              ],
+                );
+              },
             ),
           ),
         ),

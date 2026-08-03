@@ -51,6 +51,10 @@ const _tooltipDelay = Duration(milliseconds: 400);
 const _main = Color(0xFF8AD6A1);
 const _success = Color(0xFF34C759);
 const _behind = Color(0xFFF0A35E);
+
+/// The status bar's commit stamp: a fixed-width format in a monospace face, so
+/// its width can be measured from a sample rather than the live value.
+const _statusStampStyle = TextStyle(fontSize: 11, fontFamily: 'monospace');
 const _remoteBehind = Color(0xFFFF453A);
 const _previewPurple = Color(0xFFC69AFF);
 const _previewPurplePanel = Color(0xFF29243A);
@@ -4611,55 +4615,101 @@ class _TimelineScreenState extends State<TimelineScreen>
             ),
           ),
         ),
-        // The focused commit's exact moment, under the column it belongs to.
+        // The focused commit's moment under the column it belongs to, and the
+        // identity on the far right. They share one row so a narrow window
+        // cannot let the chip cover the date: the chip gives up its address
+        // first, and only then does the stamp slide left of it.
         Positioned(
-          left: _dateColumnLeft,
-          top: 0,
-          bottom: 0,
-          child: Align(
-            child: ValueListenableBuilder<int>(
-              valueListenable: _selectedIndex,
-              builder: (context, _, _) {
-                final commit = _selectedCommit;
-                return Text(
-                  key: const Key('status-timestamp'),
-                  commit == null || commit.isWorkingTree || !_showTime
-                      ? ''
-                      : exactCommitTime(commit.committerTimestamp),
-                  style: TextStyle(
-                    color: _palette.muted,
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
-        // The commit identity sits on the far right, out of the way of the
-        // legend and the selected commit's own readouts.
-        Positioned(
+          left: _statusReadoutLeft,
           right: 12,
           top: 0,
           bottom: 0,
-          child: Align(
-            child: KeyedSubtree(
-              key: _profileChipKey,
-              child: CommitProfileChip(
-                state: _commitIdentity,
-                // A narrow window keeps the name and drops the address,
-                // which the tooltip still carries.
-                showEmail: _statusBarWidth >= 900,
-                maxWidth: math.max(120, _statusBarWidth * 0.4),
-                warningColor: _behind,
-                onPressed: () => unawaited(_openCommitProfileMenu()),
+          child: Row(
+            children: [
+              ValueListenableBuilder<int>(
+                valueListenable: _selectedIndex,
+                builder: (context, _, _) {
+                  final commit = _selectedCommit;
+                  return Text(
+                    key: const Key('status-timestamp'),
+                    commit == null || commit.isWorkingTree || !_showTime
+                        ? ''
+                        : exactCommitTime(commit.committerTimestamp),
+                    maxLines: 1,
+                    style: _statusStampStyle.copyWith(color: _palette.muted),
+                  );
+                },
               ),
-            ),
+              const Spacer(),
+              KeyedSubtree(
+                key: _profileChipKey,
+                child: CommitProfileChip(
+                  state: _commitIdentity,
+                  // A narrow window keeps the name and drops the address,
+                  // which the tooltip still carries.
+                  showEmail: _statusChipShowsEmail,
+                  maxWidth: _statusChipWidth(),
+                  warningColor: _behind,
+                  onPressed: () => unawaited(_openCommitProfileMenu()),
+                ),
+              ),
+            ],
           ),
         ),
       ],
     ),
   );
+
+  /// A narrow window keeps the name and drops the address, which the chip's
+  /// tooltip still carries.
+  bool get _statusChipShowsEmail => _statusBarWidth >= 900;
+
+  /// The stamp's own width, measured from a sample: the format is fixed width
+  /// in a monospace face, so one sample stands for every value and the row
+  /// never jitters as the selection moves.
+  double get _statusStampWidth {
+    final painter = TextPainter(
+      text: const TextSpan(
+        text: '2026-08-04 00:00:00',
+        style: _statusStampStyle,
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+    )..layout();
+    return painter.width;
+  }
+
+  /// What the chip needs: its avatar, gaps, padding and border plus the text
+  /// it is showing, measured rather than guessed, and capped so one very long
+  /// address cannot take the whole bar. Measuring means the stamp yields only
+  /// the space the chip actually occupies.
+  double _statusChipWidth() {
+    double textWidth(String value) {
+      final painter = TextPainter(
+        text: TextSpan(text: value, style: const TextStyle(fontSize: 11)),
+        textDirection: TextDirection.ltr,
+        maxLines: 1,
+      )..layout();
+      return painter.width;
+    }
+
+    final email = _commitIdentity.identity.email.trim();
+    var width =
+        CommitProfileChip.minWidth + 6 + textWidth(_commitIdentity.label);
+    if (_statusChipShowsEmail && email.isNotEmpty) {
+      width += 6 + textWidth(email);
+    }
+    return math.min(width, math.max(120, _statusBarWidth * 0.4));
+  }
+
+  /// Where the stamp-and-identity row starts. Normally the DATE column, but
+  /// pulled left when there is not room for the whole stamp plus a usable chip
+  /// — the date is the thing that must stay readable, so the chip yields.
+  double get _statusReadoutLeft {
+    final rightmost =
+        _statusBarWidth - 12 - _statusChipWidth() - 8 - _statusStampWidth;
+    return math.max(0, math.min(_dateColumnLeft, rightmost));
+  }
 
   Widget _legend(String label, Widget dot) => Padding(
     padding: const EdgeInsets.only(right: 12),

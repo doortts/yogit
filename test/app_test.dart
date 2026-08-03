@@ -14337,6 +14337,46 @@ void main() {
   });
 
   // ------------------------------------------------------------------ C5/C6
+  testWidgets('the commit stamp gives way to the profile instead of hiding', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    // Narrow enough that the DATE column sits where the profile chip is.
+    tester.view.physicalSize = const Size(760, 700);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final stamp =
+        DateTime.now()
+            .subtract(const Duration(hours: 5))
+            .millisecondsSinceEpoch ~/
+        1000;
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit', timestamp: stamp)],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+
+    final stampRect = tester.getRect(find.byKey(const Key('status-timestamp')));
+    final chipRect = tester.getRect(
+      find.byKey(const Key('commit-profile-chip')),
+    );
+    expect(
+      tester.widget<Text>(find.byKey(const Key('status-timestamp'))).data,
+      exactCommitTime(stamp),
+    );
+    // The stamp ends before the chip starts, so nothing covers the date.
+    expect(stampRect.right, lessThanOrEqualTo(chipRect.left));
+    expect(stampRect.left, greaterThanOrEqualTo(0));
+  });
+
   testWidgets('the status bar stamps the focused commit under DATE', (
     tester,
   ) async {
@@ -14368,6 +14408,17 @@ void main() {
         tester.getRect(find.byKey(const Key('status-timestamp'))).left;
     double dateHeaderLeft() =>
         tester.getRect(find.byKey(const Key('time-header'))).left;
+    double chipLeft() =>
+        tester.getRect(find.byKey(const Key('commit-profile-chip'))).left;
+    // The stamp sits under DATE, or as close to it as the profile chip allows:
+    // the date must never end up beneath the chip.
+    void expectStampPlacedForDate() {
+      expect(statusLeft(), lessThanOrEqualTo(dateHeaderLeft()));
+      expect(
+        tester.getRect(find.byKey(const Key('status-timestamp'))).right,
+        lessThanOrEqualTo(chipLeft()),
+      );
+    }
 
     // The working tree leads the list, so nothing to stamp yet.
     expect(status().data, '');
@@ -14378,15 +14429,16 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
     expect(status().data, exactCommitTime(stamp));
-    expect(statusLeft(), dateHeaderLeft());
+    expectStampPlacedForDate();
 
-    // It follows the columns when they are resized.
+    // Resizing the columns keeps that relationship: the stamp tracks DATE
+    // until the chip stops it, and never crosses under the chip.
     await tester.drag(
       find.byKey(const Key('hash-resizer')),
       const Offset(30, 0),
     );
     await tester.pumpAndSettle();
-    expect(statusLeft(), dateHeaderLeft());
+    expectStampPlacedForDate();
 
     // The old right-hand rail label is gone.
     expect(find.textContaining('2px rail'), findsNothing);
