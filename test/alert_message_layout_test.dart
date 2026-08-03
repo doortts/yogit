@@ -6,7 +6,19 @@ import 'package:yogit/yogit_alert.dart';
 void main() {
   const style = TextStyle(fontSize: 11, height: 1.45);
 
-  testWidgets('alert buttons stack full width with the default on top', (
+  String laidOut(String text, double width) =>
+      layoutAlertMessage(text, style: style, maxWidth: width);
+
+  test('splits prose into sentences, keeping their punctuation', () {
+    expect(alertSentences('한 문장입니다.'), ['한 문장입니다.']);
+    expect(alertSentences('앞 문장입니다. 뒤 문장입니까?'), ['앞 문장입니다.', '뒤 문장입니까?']);
+    expect(alertSentences('경고! 계속할까요?'), ['경고!', '계속할까요?']);
+    // A trailing fragment with no closing mark is still a sentence.
+    expect(alertSentences('끝났습니다. 남은 말'), ['끝났습니다.', '남은 말']);
+    expect(alertSentences('  '), <String>[]);
+  });
+
+  testWidgets('two choices sit in a row, cancel left and equal widths', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -23,12 +35,15 @@ void main() {
 
     final confirm = tester.getRect(find.byKey(const Key('confirm')));
     final cancel = tester.getRect(find.byKey(const Key('cancel')));
-    // The anatomy's stack: both capsules span the alert, default above cancel.
-    expect(confirm.width, cancel.width);
-    expect(confirm.width, YogitAlert.width - 32);
-    expect(confirm.bottom, lessThan(cancel.top));
-    expect(confirm.height, 26);
-    expect(cancel.height, 26);
+    // The kit's two-choice anatomy: one row, cancel leading, same size.
+    expect(cancel.top, confirm.top);
+    expect(cancel.right, lessThan(confirm.left));
+    expect(confirm.width, closeTo(cancel.width, 0.01));
+    expect(confirm.height, 28);
+    expect(cancel.height, 28);
+    // 7px between the pair, 16px padding on both sides of a 280 dialog.
+    expect(confirm.left - cancel.right, 7);
+    expect(cancel.width + confirm.width, YogitAlert.width - 32 - 7);
     expect(
       tester
           .widget<TextButton>(
@@ -45,53 +60,125 @@ void main() {
     );
   });
 
-  testWidgets('a destructive alert colors only its default button red', (
+  testWidgets('a third choice turns the row into the kit stack', (
     tester,
   ) async {
-    Future<Set<Color?>> fillsFor(YogitAlertRole role) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: YogitAlert(
-            title: '삭제할까요?',
-            confirmLabel: '삭제',
-            confirmKey: const Key('confirm'),
-            cancelKey: const Key('cancel'),
-            role: role,
-          ),
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: YogitAlert(
+          title: '워크트리도 함께 삭제할까요?',
+          confirmLabel: '워크트리만 정리',
+          confirmKey: Key('confirm'),
+          destructiveLabel: '둘 다 삭제',
+          destructiveKey: Key('destructive'),
+          cancelKey: Key('cancel'),
         ),
-      );
-      // The key sits on the button shell; the fill lives on the button inside.
-      Color? fillOf(Key key) => tester
-          .widget<TextButton>(
-            find.descendant(
-              of: find.byKey(key),
-              matching: find.byType(TextButton),
-            ),
-          )
-          .style
-          ?.backgroundColor
-          ?.resolve({});
-      return {fillOf(const Key('confirm')), fillOf(const Key('cancel'))};
-    }
+      ),
+    );
 
-    final destructive = await fillsFor(YogitAlertRole.destructive);
-    expect(destructive, contains(const Color(0xFFFF453A)));
-    // The cancel button stays uncolored whichever role the alert carries.
-    final normal = await fillsFor(YogitAlertRole.normal);
-    expect(normal, isNot(contains(const Color(0xFFFF453A))));
-    expect(normal, contains(TimelineThemePalette.systemGraphite.interactive));
+    final confirm = tester.getRect(find.byKey(const Key('confirm')));
+    final destructive = tester.getRect(find.byKey(const Key('destructive')));
+    final cancel = tester.getRect(find.byKey(const Key('cancel')));
+    // Primary on top, the destructive action between it and the way out.
+    expect(confirm.bottom, lessThan(destructive.top));
+    expect(destructive.bottom, lessThan(cancel.top));
+    for (final rect in [confirm, destructive, cancel]) {
+      expect(rect.width, YogitAlert.width - 32);
+      expect(rect.height, 28);
+    }
+    expect(destructive.top - confirm.bottom, 7);
+    expect(cancel.top - destructive.bottom, 7);
   });
 
-  String laidOut(String text, double width) =>
-      layoutAlertMessage(text, style: style, maxWidth: width);
+  testWidgets('destructive actions carry the tint, not a solid red', (
+    tester,
+  ) async {
+    Color? fillOf(Key key) => tester
+        .widget<TextButton>(
+          find.descendant(
+            of: find.byKey(key),
+            matching: find.byType(TextButton),
+          ),
+        )
+        .style
+        ?.backgroundColor
+        ?.resolve({});
+    Color? textOf(Key key) => tester
+        .widget<TextButton>(
+          find.descendant(
+            of: find.byKey(key),
+            matching: find.byType(TextButton),
+          ),
+        )
+        .style
+        ?.foregroundColor
+        ?.resolve({});
 
-  test('splits prose into sentences, keeping their punctuation', () {
-    expect(alertSentences('한 문장입니다.'), ['한 문장입니다.']);
-    expect(alertSentences('앞 문장입니다. 뒤 문장입니까?'), ['앞 문장입니다.', '뒤 문장입니까?']);
-    expect(alertSentences('경고! 계속할까요?'), ['경고!', '계속할까요?']);
-    // A trailing fragment with no closing mark is still a sentence.
-    expect(alertSentences('끝났습니다. 남은 말'), ['끝났습니다.', '남은 말']);
-    expect(alertSentences('  '), <String>[]);
+    // A two-choice destructive alert tints its confirm button.
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: YogitAlert(
+          title: '브랜치를 삭제할까요?',
+          confirmLabel: '삭제',
+          confirmKey: Key('confirm'),
+          cancelKey: Key('cancel'),
+          role: YogitAlertRole.destructive,
+        ),
+      ),
+    );
+    expect(fillOf(const Key('confirm')), const Color(0xFF4A2528));
+    expect(textOf(const Key('confirm')), const Color(0xFFFF6B6B));
+
+    // A normal alert keeps the blue primary.
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: YogitAlert(
+          title: '적용할까요?',
+          confirmLabel: '적용',
+          confirmKey: Key('confirm'),
+          cancelKey: Key('cancel'),
+        ),
+      ),
+    );
+    expect(
+      fillOf(const Key('confirm')),
+      TimelineThemePalette.systemGraphite.interactive,
+    );
+  });
+
+  testWidgets('Return follows the safe default, never the destructive one', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: YogitAlert(
+          title: '브랜치를 삭제할까요?',
+          confirmLabel: '삭제',
+          confirmKey: Key('confirm'),
+          role: YogitAlertRole.destructive,
+        ),
+      ),
+    );
+    bool focused(Key key) => tester
+        .widget<TextButton>(
+          find.descendant(
+            of: find.byKey(key),
+            matching: find.byType(TextButton),
+          ),
+        )
+        .autofocus;
+    expect(focused(const Key('confirm')), isFalse);
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: YogitAlert(
+          title: '적용할까요?',
+          confirmLabel: '적용',
+          confirmKey: Key('confirm'),
+        ),
+      ),
+    );
+    expect(focused(const Key('confirm')), isTrue);
   });
 
   testWidgets('a message that fits stays on one line', (tester) async {

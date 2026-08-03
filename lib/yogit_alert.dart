@@ -69,10 +69,18 @@ class YogitAlert extends StatelessWidget {
     this.role = YogitAlertRole.normal,
     this.confirmKey,
     this.cancelKey,
+    this.destructiveLabel,
+    this.destructiveKey,
+    this.onDestructive,
     this.wide = false,
     this.onConfirm,
     super.key,
   });
+
+  /// The kit's destructive tint: a dark red wash under a red label, instead
+  /// of a solid red that would out-shout the primary action.
+  static const destructiveFill = Color(0xFF4A2528);
+  static const destructiveText = Color(0xFFFF6B6B);
 
   /// Apple's alert is 270pt; Flutter's Dialog floors its child at 280, so
   /// that floor is the width rather than fighting it for ten points. Long
@@ -95,6 +103,13 @@ class YogitAlert extends StatelessWidget {
   final YogitAlertRole role;
   final Key? confirmKey;
   final Key? cancelKey;
+
+  /// A third choice turns the two-button row into the kit's vertical stack:
+  /// the primary on top, this tinted action in the middle, cancel at the
+  /// bottom. Pops with [onDestructive]'s value, or `'destructive'`.
+  final String? destructiveLabel;
+  final Key? destructiveKey;
+  final Object? Function()? onDestructive;
   final bool wide;
 
   /// Returns what the dialog should pop with, or null to pop `true`. A form
@@ -104,8 +119,6 @@ class YogitAlert extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = TimelineThemePalette.of(context);
-    final destructive = role == YogitAlertRole.destructive;
-    final accent = destructive ? const Color(0xFFFF453A) : palette.interactive;
     final contentWidth = (wide ? wideWidth : width) - 32;
     const messageStyle = TextStyle(fontSize: 11, height: 1.45);
 
@@ -113,7 +126,7 @@ class YogitAlert extends StatelessWidget {
       backgroundColor: palette.raised,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(22),
         side: BorderSide(color: palette.border, width: 0.5),
       ),
       insetPadding: const EdgeInsets.all(24),
@@ -136,7 +149,7 @@ class YogitAlert extends StatelessWidget {
                 ),
               ),
               if (message case final message?) ...[
-                const SizedBox(height: 6),
+                const SizedBox(height: 5),
                 Text(
                   layoutAlertMessage(
                     message,
@@ -160,28 +173,59 @@ class YogitAlert extends StatelessWidget {
                   style: messageStyle.copyWith(color: palette.muted),
                 ),
               ],
-              const SizedBox(height: 14),
-              // A stack, not a row: the default action rides on top and the
-              // safe way out sits at the bottom, per the alert anatomy.
-              _AlertButton(
-                key: confirmKey,
-                label: confirmLabel,
-                fill: accent,
-                autofocus: true,
-                onPressed: () =>
-                    Navigator.pop(context, onConfirm?.call() ?? true),
-              ),
-              const SizedBox(height: 8),
-              _AlertButton(
-                key: cancelKey,
-                label: cancelLabel,
-                onPressed: () => Navigator.pop(context),
-              ),
+              const SizedBox(height: 13),
+              ..._actions(context, palette),
             ],
           ),
         ),
       ),
     );
+  }
+
+  /// Two choices sit in a row — cancel leading, primary trailing, equal
+  /// widths. A third choice switches to the kit's stack: primary, then the
+  /// tinted destructive action, then cancel. Return follows the safe default
+  /// only; a destructive confirm is never the Return target.
+  List<Widget> _actions(BuildContext context, TimelineThemePalette palette) {
+    final destructive = role == YogitAlertRole.destructive;
+    final confirm = _AlertButton(
+      key: confirmKey,
+      label: confirmLabel,
+      fill: destructive ? YogitAlert.destructiveFill : palette.interactive,
+      textColor: destructive ? YogitAlert.destructiveText : Colors.white,
+      autofocus: !destructive,
+      onPressed: () => Navigator.pop(context, onConfirm?.call() ?? true),
+    );
+    final cancel = _AlertButton(
+      key: cancelKey,
+      label: cancelLabel,
+      onPressed: () => Navigator.pop(context),
+    );
+    if (destructiveLabel case final label?) {
+      return [
+        confirm,
+        const SizedBox(height: 7),
+        _AlertButton(
+          key: destructiveKey,
+          label: label,
+          fill: YogitAlert.destructiveFill,
+          textColor: YogitAlert.destructiveText,
+          onPressed: () =>
+              Navigator.pop(context, onDestructive?.call() ?? 'destructive'),
+        ),
+        const SizedBox(height: 7),
+        cancel,
+      ];
+    }
+    return [
+      Row(
+        children: [
+          Expanded(child: cancel),
+          const SizedBox(width: 7),
+          Expanded(child: confirm),
+        ],
+      ),
+    ];
   }
 }
 
@@ -228,6 +272,7 @@ class _AlertButton extends StatelessWidget {
     required this.label,
     required this.onPressed,
     this.fill,
+    this.textColor,
     this.autofocus = false,
     super.key,
   });
@@ -235,25 +280,25 @@ class _AlertButton extends StatelessWidget {
   final String label;
   final VoidCallback onPressed;
   final Color? fill;
+  final Color? textColor;
   final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
     final palette = TimelineThemePalette.of(context);
     final filled = fill != null;
-    // The alert anatomy's capsule: full width, primary filled with color,
-    // secondary a quiet gray. No focus ring of our own — macOS marks the
-    // default button by filling it, and the button's focus overlay covers
-    // actual keyboard traversal.
+    // The kit's capsule: 28px tall, colored fill for the primary and the
+    // destructive tint, quiet gray for cancel. No focus ring of our own —
+    // the button's focus overlay covers actual keyboard traversal.
     return TextButton(
       autofocus: autofocus,
       onPressed: onPressed,
       style: TextButton.styleFrom(
-        minimumSize: const Size.fromHeight(26),
+        minimumSize: const Size.fromHeight(28),
         padding: const EdgeInsets.symmetric(horizontal: 14),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         backgroundColor: filled ? fill : palette.border,
-        foregroundColor: filled ? Colors.white : palette.text,
+        foregroundColor: textColor ?? (filled ? Colors.white : palette.text),
         textStyle: TextStyle(
           fontSize: 13,
           fontWeight: filled ? FontWeight.w600 : FontWeight.w400,
