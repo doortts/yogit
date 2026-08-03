@@ -283,6 +283,12 @@ class _AlertButton extends StatelessWidget {
     super.key,
   });
 
+  static const _radius = 6.0;
+
+  /// Breathing room around each button, so the pair does not sit flush against
+  /// the alert's padding or against each other's focus highlight.
+  static const _inset = 3.0;
+
   final String label;
   final VoidCallback onPressed;
   final Color? fill;
@@ -292,32 +298,29 @@ class _AlertButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = TimelineThemePalette.of(context);
     final filled = fill != null;
-    return DecoratedBox(
-      // The focus ring sits outside the button, as the default button's does.
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: autofocus && filled
-              ? fill!.withValues(alpha: 0.35)
-              : Colors.transparent,
-          width: 2,
-        ),
-      ),
+    // No focus ring of our own: macOS marks the default button by filling it
+    // and only draws a ring once the keyboard actually moves there, which the
+    // button's own focus overlay already handles.
+    return Padding(
+      padding: const EdgeInsets.all(_inset),
       child: TextButton(
         autofocus: autofocus,
         onPressed: onPressed,
         style: TextButton.styleFrom(
-          minimumSize: const Size(0, 22),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+          // macOS push button: the system control height, and wide enough
+          // that a two-syllable label does not read as a chip.
+          minimumSize: const Size(64, 22),
+          padding: const EdgeInsets.symmetric(horizontal: 14),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           backgroundColor: filled ? fill : palette.border,
           foregroundColor: filled ? Colors.white : palette.text,
           textStyle: TextStyle(
-            fontSize: 12.5,
+            // The macOS control font size, not a size down from it.
+            fontSize: 13,
             fontWeight: filled ? FontWeight.w500 : FontWeight.w400,
           ),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(_radius),
             side: BorderSide(
               color: filled ? Colors.transparent : palette.border,
               width: 0.5,

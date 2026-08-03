@@ -6,6 +6,53 @@ import 'package:yogit/yogit_alert.dart';
 void main() {
   const style = TextStyle(fontSize: 11, height: 1.45);
 
+  testWidgets('alert buttons keep the macOS control size and inset', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: YogitAlert(
+          title: '저장소가 바뀌었습니다',
+          cancelLabel: '나중에',
+          cancelKey: Key('cancel'),
+          confirmLabel: '새로고침',
+          confirmKey: Key('confirm'),
+        ),
+      ),
+    );
+
+    for (final key in ['cancel', 'confirm']) {
+      final shell = tester.getRect(find.byKey(Key(key)));
+      final button = tester.getRect(
+        find.descendant(
+          of: find.byKey(Key(key)),
+          matching: find.byType(TextButton),
+        ),
+      );
+      expect(button.height, 22, reason: key);
+      expect(button.width, greaterThanOrEqualTo(64), reason: key);
+      // The inset is space around the button, never paint over its edges.
+      expect(shell.height, button.height + 6, reason: key);
+      expect(shell.width, button.width + 6, reason: key);
+      // The label takes its size from the button, so read it there.
+      expect(
+        tester
+            .widget<TextButton>(
+              find.descendant(
+                of: find.byKey(Key(key)),
+                matching: find.byType(TextButton),
+              ),
+            )
+            .style
+            ?.textStyle
+            ?.resolve({})
+            ?.fontSize,
+        13,
+        reason: key,
+      );
+    }
+  });
+
   testWidgets('a destructive alert colors only its default button red', (
     tester,
   ) async {
