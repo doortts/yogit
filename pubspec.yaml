@@ -74,8 +74,6 @@ flutter:
   assets:
     - assets/fonts/D2Coding-OFL.txt
     - assets/fonts/DancingScript-OFL.txt
-    # macOS alerts carry the app icon, so the dialog shell needs it at runtime.
-    - assets/images/app_icon.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

@@ -6,7 +6,7 @@ import 'package:yogit/yogit_alert.dart';
 void main() {
   const style = TextStyle(fontSize: 11, height: 1.45);
 
-  testWidgets('alert buttons keep the macOS control size and inset', (
+  testWidgets('alert buttons stack full width with the default on top', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -21,36 +21,28 @@ void main() {
       ),
     );
 
-    for (final key in ['cancel', 'confirm']) {
-      final shell = tester.getRect(find.byKey(Key(key)));
-      final button = tester.getRect(
-        find.descendant(
-          of: find.byKey(Key(key)),
-          matching: find.byType(TextButton),
-        ),
-      );
-      expect(button.height, 22, reason: key);
-      expect(button.width, greaterThanOrEqualTo(64), reason: key);
-      // The inset is space around the button, never paint over its edges.
-      expect(shell.height, button.height + 6, reason: key);
-      expect(shell.width, button.width + 6, reason: key);
-      // The label takes its size from the button, so read it there.
-      expect(
-        tester
-            .widget<TextButton>(
-              find.descendant(
-                of: find.byKey(Key(key)),
-                matching: find.byType(TextButton),
-              ),
-            )
-            .style
-            ?.textStyle
-            ?.resolve({})
-            ?.fontSize,
-        13,
-        reason: key,
-      );
-    }
+    final confirm = tester.getRect(find.byKey(const Key('confirm')));
+    final cancel = tester.getRect(find.byKey(const Key('cancel')));
+    // The anatomy's stack: both capsules span the alert, default above cancel.
+    expect(confirm.width, cancel.width);
+    expect(confirm.width, YogitAlert.width - 32);
+    expect(confirm.bottom, lessThan(cancel.top));
+    expect(confirm.height, 26);
+    expect(cancel.height, 26);
+    expect(
+      tester
+          .widget<TextButton>(
+            find.descendant(
+              of: find.byKey(const Key('confirm')),
+              matching: find.byType(TextButton),
+            ),
+          )
+          .style
+          ?.textStyle
+          ?.resolve({})
+          ?.fontSize,
+      13,
+    );
   });
 
   testWidgets('a destructive alert colors only its default button red', (

@@ -74,8 +74,10 @@ class YogitAlert extends StatelessWidget {
     super.key,
   });
 
-  /// Apple's alert width. Long content grows downward, never sideways.
-  static const width = 270.0;
+  /// Apple's alert is 270pt; Flutter's Dialog floors its child at 280, so
+  /// that floor is the width rather than fighting it for ten points. Long
+  /// content grows downward, never sideways.
+  static const width = 280.0;
 
   /// For alerts whose body is a block rather than a sentence.
   static const wideWidth = 340.0;
@@ -111,23 +113,20 @@ class YogitAlert extends StatelessWidget {
       backgroundColor: palette.raised,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         side: BorderSide(color: palette.border, width: 0.5),
       ),
       insetPadding: const EdgeInsets.all(24),
       child: SizedBox(
         width: wide ? wideWidth : width,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+          padding: const EdgeInsets.all(16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _icon(palette, destructive),
-              const SizedBox(height: 10),
               Text(
                 title,
-                textAlign: TextAlign.center,
                 style: TextStyle(
                   color: palette.text,
                   fontSize: 13,
@@ -137,14 +136,13 @@ class YogitAlert extends StatelessWidget {
                 ),
               ),
               if (message case final message?) ...[
-                const SizedBox(height: 5),
+                const SizedBox(height: 6),
                 Text(
                   layoutAlertMessage(
                     message,
                     style: messageStyle,
                     maxWidth: contentWidth,
                   ),
-                  textAlign: TextAlign.center,
                   style: messageStyle.copyWith(
                     color: palette.text.withValues(alpha: 0.85),
                   ),
@@ -159,29 +157,25 @@ class YogitAlert extends StatelessWidget {
                     style: messageStyle,
                     maxWidth: contentWidth,
                   ),
-                  textAlign: TextAlign.center,
                   style: messageStyle.copyWith(color: palette.muted),
                 ),
               ],
               const SizedBox(height: 14),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  _AlertButton(
-                    key: cancelKey,
-                    label: cancelLabel,
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                  const SizedBox(width: 8),
-                  _AlertButton(
-                    key: confirmKey,
-                    label: confirmLabel,
-                    fill: accent,
-                    autofocus: true,
-                    onPressed: () =>
-                        Navigator.pop(context, onConfirm?.call() ?? true),
-                  ),
-                ],
+              // A stack, not a row: the default action rides on top and the
+              // safe way out sits at the bottom, per the alert anatomy.
+              _AlertButton(
+                key: confirmKey,
+                label: confirmLabel,
+                fill: accent,
+                autofocus: true,
+                onPressed: () =>
+                    Navigator.pop(context, onConfirm?.call() ?? true),
+              ),
+              const SizedBox(height: 8),
+              _AlertButton(
+                key: cancelKey,
+                label: cancelLabel,
+                onPressed: () => Navigator.pop(context),
               ),
             ],
           ),
@@ -189,51 +183,6 @@ class YogitAlert extends StatelessWidget {
       ),
     );
   }
-
-  /// The app icon says who is asking; the badge on its shoulder says how
-  /// serious the question is.
-  Widget _icon(TimelineThemePalette palette, bool destructive) => SizedBox(
-    height: 56,
-    child: Center(
-      child: SizedBox.square(
-        dimension: 56,
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(13),
-              child: Image.asset(
-                'assets/images/app_icon.png',
-                width: 56,
-                height: 56,
-                filterQuality: FilterQuality.medium,
-              ),
-            ),
-            Positioned(
-              right: -3,
-              bottom: -3,
-              child: Container(
-                width: 24,
-                height: 24,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: palette.raised,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  destructive ? Icons.cancel : Icons.error,
-                  size: 20,
-                  color: destructive
-                      ? const Color(0xFFFF453A)
-                      : const Color(0xFFFF9F0A),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
 }
 
 /// A left-aligned block for the parts of an alert that are not prose — a path,
@@ -283,12 +232,6 @@ class _AlertButton extends StatelessWidget {
     super.key,
   });
 
-  static const _radius = 6.0;
-
-  /// Breathing room around each button, so the pair does not sit flush against
-  /// the alert's padding or against each other's focus highlight.
-  static const _inset = 3.0;
-
   final String label;
   final VoidCallback onPressed;
   final Color? fill;
@@ -298,37 +241,26 @@ class _AlertButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = TimelineThemePalette.of(context);
     final filled = fill != null;
-    // No focus ring of our own: macOS marks the default button by filling it
-    // and only draws a ring once the keyboard actually moves there, which the
-    // button's own focus overlay already handles.
-    return Padding(
-      padding: const EdgeInsets.all(_inset),
-      child: TextButton(
-        autofocus: autofocus,
-        onPressed: onPressed,
-        style: TextButton.styleFrom(
-          // macOS push button: the system control height, and wide enough
-          // that a two-syllable label does not read as a chip.
-          minimumSize: const Size(64, 22),
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          backgroundColor: filled ? fill : palette.border,
-          foregroundColor: filled ? Colors.white : palette.text,
-          textStyle: TextStyle(
-            // The macOS control font size, not a size down from it.
-            fontSize: 13,
-            fontWeight: filled ? FontWeight.w500 : FontWeight.w400,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(_radius),
-            side: BorderSide(
-              color: filled ? Colors.transparent : palette.border,
-              width: 0.5,
-            ),
-          ),
+    // The alert anatomy's capsule: full width, primary filled with color,
+    // secondary a quiet gray. No focus ring of our own — macOS marks the
+    // default button by filling it, and the button's focus overlay covers
+    // actual keyboard traversal.
+    return TextButton(
+      autofocus: autofocus,
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        minimumSize: const Size.fromHeight(26),
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        backgroundColor: filled ? fill : palette.border,
+        foregroundColor: filled ? Colors.white : palette.text,
+        textStyle: TextStyle(
+          fontSize: 13,
+          fontWeight: filled ? FontWeight.w600 : FontWeight.w400,
         ),
-        child: Text(label),
+        shape: const StadiumBorder(),
       ),
+      child: Text(label),
     );
   }
 }
