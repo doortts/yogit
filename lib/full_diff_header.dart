@@ -5,6 +5,7 @@ import 'full_diff_model.dart';
 import 'full_diff_shortcut_hint.dart';
 import 'full_diff_theme.dart';
 import 'git.dart';
+import 'shortcut_modifier.dart';
 import 'typography.dart';
 
 export 'full_diff_algorithm_chooser.dart'
@@ -140,7 +141,7 @@ class GlobalFileBar extends StatelessWidget {
             children: [
               FullDiffShortcutHint(
                 visible: showShortcutHints,
-                label: '⌘⇧F',
+                label: shortcutLabel('⇧F'),
                 child: _HeaderToggle(
                   controlKey: const Key('focus-mode'),
                   label: focusMode ? '탐색 패널' : '집중 모드',
@@ -173,8 +174,8 @@ class GlobalFileBar extends StatelessWidget {
                 onSelected: onViewSelected,
                 showShortcutHints: showShortcutHints,
                 shortcutLabelFor: (value) => switch (value) {
-                  FullDiffView.diff => '⌘1',
-                  FullDiffView.blame => '⌘2',
+                  FullDiffView.diff => shortcutLabel('1'),
+                  FullDiffView.blame => shortcutLabel('2'),
                   FullDiffView.history => null,
                 },
                 semanticsHintFor: (value) =>
@@ -260,7 +261,7 @@ class GlobalDiffToolbar extends StatelessWidget {
         const Text('diff 알고리즘', key: Key('diff-algorithm-label')),
         FullDiffShortcutHint(
           visible: showShortcutHints,
-          label: '⌘⇧A',
+          label: shortcutLabel('⇧A'),
           child: FullDiffAlgorithmChooser(
             key: algorithmChooserKey,
             algorithm: algorithm,
@@ -273,7 +274,7 @@ class GlobalDiffToolbar extends StatelessWidget {
         ),
         FullDiffShortcutHint(
           visible: showShortcutHints,
-          label: '⌘⇧Space',
+          label: shortcutLabel('⇧Space'),
           child: _HeaderToggle(
             controlKey: const Key('ignore-whitespace'),
             label: '공백 무시',
@@ -286,7 +287,7 @@ class GlobalDiffToolbar extends StatelessWidget {
         ),
         FullDiffShortcutHint(
           visible: showShortcutHints,
-          label: '⌘⇧L',
+          label: shortcutLabel('⇧L'),
           child: _HeaderToggle(
             controlKey: const Key('wrap-lines'),
             label: '줄바꿈',
@@ -354,13 +355,13 @@ class GlobalDiffToolbar extends StatelessWidget {
     );
     final layoutHint = FullDiffShortcutHint(
       visible: showShortcutHints,
-      label: '⌘U',
+      label: shortcutLabel('U'),
       hintKey: const Key('shortcut-hint-layout'),
       child: layoutControls,
     );
     final hunkControl = FullDiffShortcutHint(
       visible: showShortcutHints,
-      label: '⌘⇧H',
+      label: shortcutLabel('⇧H'),
       child: _HeaderToggle(
         controlKey: Key(hunkEnabled ? 'hunk-toggle-on' : 'hunk-toggle-off'),
         label: 'Hunk',
@@ -373,7 +374,7 @@ class GlobalDiffToolbar extends StatelessWidget {
     );
     final historyControl = FullDiffShortcutHint(
       visible: showShortcutHints,
-      label: '⌘3',
+      label: shortcutLabel('3'),
       child: Tooltip(
         message: '파일의 변경 이력을 보여줍니다',
         waitDuration: const Duration(milliseconds: 500),

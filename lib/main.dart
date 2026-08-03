@@ -225,6 +225,7 @@ class _YogitAppState extends State<YogitApp> {
   /// it and every per-repository future reloads.
   void _openRepository(String root) {
     if (root == _repository.root) return;
+    final previous = _repository.root;
     setState(() {
       _repository =
           widget.repositoryFactory?.call(root) ??
@@ -233,6 +234,13 @@ class _YogitAppState extends State<YogitApp> {
     });
     if (widget.avatarService == null && widget.discoverAvatars) {
       unawaited(_discoverAvatarService());
+    }
+    // The repository being left is only worth remembering now that it is being
+    // left, so a launch never has to write to disk just to record itself.
+    if (_settingsLoaded) {
+      _changeSettings(
+        _settings.withRecentRepository(previous).withRecentRepository(root),
+      );
     }
   }
 
@@ -287,6 +295,13 @@ class _YogitAppState extends State<YogitApp> {
           repository: _repository,
           controller: widget.windowFrameController,
           onOpenRepository: _openRepository,
+          recentRepositories: _settings
+              .withRecentRepository(_repository.root)
+              .recentRepositories,
+          onForgetRecentRepository: _settingsLoaded
+              ? (root) =>
+                    _changeSettings(_settings.withoutRecentRepository(root))
+              : null,
           avatarService: _avatarService,
           deletedBranchNames:
               _settings.deletedBranchNames[_repository.root] ?? const {},
@@ -320,6 +335,12 @@ class _YogitAppState extends State<YogitApp> {
           previewDiffRightWidth: _settings.previewDiffRightWidth,
           previewDiffBottomHeight: _settings.previewDiffBottomHeight,
           onOpenSettings: _settingsLoaded ? () => _openSettings(context) : null,
+          commitProfiles: _settings.commitProfiles,
+          onCommitProfilesChanged: _settingsLoaded
+              ? (profiles) => _changeSettings(
+                  _settings.copyWith(commitProfiles: profiles),
+                )
+              : null,
           onPreviewPlacementChanged: _settingsLoaded
               ? (placement) => _changeSettings(
                   _settings.copyWith(previewPlacement: placement),

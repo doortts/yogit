@@ -20,6 +20,7 @@ import 'package:yogit/git.dart';
 import 'package:yogit/main.dart';
 import 'package:yogit/monaco_editor_screen.dart';
 import 'package:yogit/settings.dart';
+import 'package:yogit/shortcut_modifier.dart';
 import 'package:yogit/timeline.dart';
 import 'package:yogit/timeline_theme.dart';
 import 'package:yogit/typography.dart';
@@ -27,6 +28,8 @@ import 'package:yogit/window_frame.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  group('commit profiles', _commitProfileTests);
 
   late WindowFrameController controller;
 
@@ -296,10 +299,13 @@ void main() {
     await tester.pumpAndSettle();
 
     final item = find.byKey(const Key('base-branch-menu-release'));
-    final menuMaterial = tester.widget<Material>(
-      find.ancestor(of: item, matching: find.byType(Material)).last,
+    final menuMaterials = tester.widgetList<Material>(
+      find.ancestor(of: item, matching: find.byType(Material)),
     );
-    expect(menuMaterial.color, const Color(0xFF1C1C1E));
+    expect(
+      menuMaterials.map((material) => material.color),
+      contains(const Color(0xFF272729)),
+    );
 
     final text = find.descendant(of: item, matching: find.text('release'));
     expect(
@@ -398,8 +404,12 @@ void main() {
     expect(find.byKey(const Key('selected-row-3')), findsOneWidget);
     expect(find.text('Commit & Diff'), findsNothing);
 
-    // Space opens it just like Enter, on the clicked row, and closes it again.
+    // Space no longer opens the panel; Enter is the only toggle.
     await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    expect(find.text('Commit & Diff'), findsNothing);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     expect(find.text('Commit & Diff'), findsOneWidget);
     expect(
@@ -409,7 +419,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     expect(find.text('Commit & Diff'), findsNothing);
   });
@@ -2717,6 +2727,61 @@ void main() {
     );
   });
 
+  testWidgets('the ref filter shows a magnifier instead of a hint sentence', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(local: ['main'], current: 'main'),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final decoration = tester
+        .widget<TextField>(find.byKey(const Key('ref-filter')))
+        .decoration!;
+    expect(decoration.hintText, isNull);
+    expect(find.byKey(const Key('ref-filter-search-icon')), findsOneWidget);
+    // The wording survives for anyone reading the field by name.
+    expect(
+      find.ancestor(
+        of: find.byKey(const Key('ref-filter-search-icon')),
+        matching: find.byTooltip('브랜치와 태그 찾기'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('the ref filter matches loosely typed queries', (tester) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(
+            local: ['main', 'notes-split-pane', 'monaco-outline'],
+            current: 'main',
+          ),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const Key('ref-filter')), 'notsp');
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('sidebar-ref-notes-split-pane')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('sidebar-ref-monaco-outline')), findsNothing);
+    expect(find.byKey(const Key('sidebar-ref-main')), findsNothing);
+  });
+
   testWidgets('sidebar category headers use thin raised section bars', (
     tester,
   ) async {
@@ -3055,6 +3120,316 @@ void main() {
       );
     },
   );
+
+  group('remote branch pull menu', () {
+    const pullRefs = RepoRefs(
+      local: ['main', 'lane', 'split'],
+      remote: ['origin/lane', 'origin/new-lane', 'origin/split'],
+      remoteNames: ['origin'],
+      current: 'main',
+      tips: {'main': '1', 'lane': '1', 'split': '1'},
+      remoteAheadBehind: {
+        'origin/lane': BranchAheadBehind(ahead: 3, behind: 0),
+        'origin/split': BranchAheadBehind(ahead: 2, behind: 3),
+      },
+    );
+
+    Future<TestGesture> hoverRow(WidgetTester tester, String name) async {
+      final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(pointer.removePointer);
+      await pointer.addPointer(location: Offset.zero);
+      await pointer.moveTo(
+        tester.getCenter(find.byKey(Key('sidebar-ref-$name'))),
+      );
+      await tester.pump();
+      return pointer;
+    }
+
+    testWidgets('the pull affordance appears on hover and lists actions', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        app(
+          FakeGitRepository((_, _) async => [commit('1', 'c')], refs: pullRefs),
+          controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('sidebar-pull-origin/lane')), findsNothing);
+      await hoverRow(tester, 'origin/lane');
+      expect(find.byKey(const Key('sidebar-pull-origin/lane')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('sidebar-pull-origin/lane')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('remote-pull-header')), findsOneWidget);
+      expect(find.text('로컬 lane보다 3개 앞'), findsOneWidget);
+      expect(find.text('Pull — 3개 커밋'), findsOneWidget);
+      expect(find.text('체크아웃 전환 없이 로컬만 전진'), findsOneWidget);
+      expect(find.text('체크아웃'), findsOneWidget);
+      expect(find.text('lane으로 전환 후 pull'), findsOneWidget);
+      expect(find.text('브랜치 diff로 비교'), findsOneWidget);
+    });
+
+    testWidgets('pull fast-forwards without checkout and reports it', (
+      tester,
+    ) async {
+      final calls = <List<String>>[];
+      await tester.pumpWidget(
+        app(
+          FakeGitRepository(
+            (_, _) async => [commit('1', 'c')],
+            refs: pullRefs,
+            runner:
+                (executable, arguments, {workingDirectory, environment}) async {
+                  // The status bar chip reads the identity on load; this test
+                  // is about the pull commands.
+                  if (arguments.first != 'config') calls.add(arguments);
+                  return ProcessResult(1, 0, '', '');
+                },
+          ),
+          controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await hoverRow(tester, 'origin/lane');
+      await tester.tap(find.byKey(const Key('sidebar-pull-origin/lane')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('remote-pull-pull')));
+      await tester.pumpAndSettle();
+
+      expect(calls, [
+        ['-c', 'credential.interactive=never', 'fetch', 'origin', 'lane:lane'],
+      ]);
+      expect(find.text('lane ← origin/lane · 3개 커밋'), findsOneWidget);
+    });
+
+    testWidgets('a diverged remote leads with compare and disables pull', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        app(
+          FakeGitRepository((_, _) async => [commit('1', 'c')], refs: pullRefs),
+          controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await hoverRow(tester, 'origin/split');
+      await tester.tap(find.byKey(const Key('sidebar-pull-origin/split')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('브랜치 diff로 비교'), findsOneWidget);
+      expect(find.text('merge / rebase는 미리보기에서 결정'), findsOneWidget);
+      expect(find.text('fast-forward 불가'), findsOneWidget);
+      final pull = tester.widget<MenuItemButton>(
+        find.byKey(const Key('remote-pull-pull')),
+      );
+      expect(pull.onPressed, isNull);
+    });
+
+    testWidgets(
+      'a remote without a local branch checks out a tracking branch',
+      (tester) async {
+        final calls = <List<String>>[];
+        await tester.pumpWidget(
+          app(
+            FakeGitRepository(
+              (_, _) async => [commit('1', 'c')],
+              refs: pullRefs,
+              runner:
+                  (
+                    executable,
+                    arguments, {
+                    workingDirectory,
+                    environment,
+                  }) async {
+                    // The status bar chip reads the identity on load; this test
+                    // is about the pull commands.
+                    if (arguments.first != 'config') calls.add(arguments);
+                    return ProcessResult(1, 0, '', '');
+                  },
+            ),
+            controller,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await hoverRow(tester, 'origin/new-lane');
+        await tester.tap(find.byKey(const Key('sidebar-pull-origin/new-lane')));
+        await tester.pumpAndSettle();
+        expect(find.text('추적 브랜치 new-lane 생성'), findsOneWidget);
+        expect(find.byKey(const Key('remote-pull-pull')), findsNothing);
+
+        await tester.tap(find.byKey(const Key('remote-pull-checkout')));
+        await tester.pumpAndSettle();
+
+        expect(calls, [
+          ['switch', '-c', 'new-lane', '--track', 'origin/new-lane'],
+        ]);
+      },
+    );
+
+    testWidgets('double-clicking a fast-forward row asks before pulling', (
+      tester,
+    ) async {
+      final calls = <List<String>>[];
+      await tester.pumpWidget(
+        app(
+          FakeGitRepository(
+            (_, _) async => [commit('1', 'c')],
+            refs: pullRefs,
+            runner:
+                (executable, arguments, {workingDirectory, environment}) async {
+                  // The status bar chip reads the identity on load; this test
+                  // is about the pull commands.
+                  if (arguments.first != 'config') calls.add(arguments);
+                  return ProcessResult(1, 0, '', '');
+                },
+          ),
+          controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final row = find.byKey(const Key('sidebar-ref-origin/lane'));
+      await tester.tap(row);
+      await tester.pump(kDoubleTapMinTime);
+      await tester.tap(row);
+      await tester.pumpAndSettle();
+
+      // The state comes first; nothing has run yet.
+      expect(find.text('로컬 lane보다 3개 커밋 앞서 있습니다.'), findsOneWidget);
+      expect(find.text('fast-forward로 받아올 수 있습니다.'), findsOneWidget);
+      expect(calls, isEmpty);
+
+      // Cancelling leaves the repository untouched.
+      await tester.tap(find.text('취소'));
+      await tester.pumpAndSettle();
+      expect(calls, isEmpty);
+
+      // Confirming pulls.
+      await tester.tap(row);
+      await tester.pump(kDoubleTapMinTime);
+      await tester.tap(row);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('remote-pull-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(calls, [
+        ['-c', 'credential.interactive=never', 'fetch', 'origin', 'lane:lane'],
+      ]);
+    });
+
+    testWidgets('double-clicking any other state only opens the menu', (
+      tester,
+    ) async {
+      final calls = <List<String>>[];
+      await tester.pumpWidget(
+        app(
+          FakeGitRepository(
+            (_, _) async => [commit('1', 'c')],
+            refs: pullRefs,
+            runner:
+                (executable, arguments, {workingDirectory, environment}) async {
+                  // The status bar chip reads the identity on load; this test
+                  // is about the pull commands.
+                  if (arguments.first != 'config') calls.add(arguments);
+                  return ProcessResult(1, 0, '', '');
+                },
+          ),
+          controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final row = find.byKey(const Key('sidebar-ref-origin/split'));
+      await tester.tap(row);
+      await tester.pump(kDoubleTapMinTime);
+      await tester.tap(row);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('remote-pull-header')), findsOneWidget);
+      expect(find.text('fast-forward 불가'), findsOneWidget);
+      expect(calls, isEmpty);
+    });
+
+    testWidgets('the row shows a spinner while the pull runs', (tester) async {
+      final gate = Completer<void>();
+      await tester.pumpWidget(
+        app(
+          FakeGitRepository(
+            (_, _) async => [commit('1', 'c')],
+            refs: pullRefs,
+            runner:
+                (executable, arguments, {workingDirectory, environment}) async {
+                  await gate.future;
+                  return ProcessResult(1, 0, '', '');
+                },
+          ),
+          controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await hoverRow(tester, 'origin/lane');
+      await tester.tap(find.byKey(const Key('sidebar-pull-origin/lane')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('remote-pull-pull')));
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        find.byKey(const Key('sidebar-pull-busy-origin/lane')),
+        findsOneWidget,
+      );
+
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('sidebar-pull-busy-origin/lane')),
+        findsNothing,
+      );
+    });
+
+    testWidgets('a failed pull surfaces the git error', (tester) async {
+      await tester.pumpWidget(
+        app(
+          FakeGitRepository(
+            (_, _) async => [commit('1', 'c')],
+            refs: pullRefs,
+            runner:
+                (
+                  executable,
+                  arguments, {
+                  workingDirectory,
+                  environment,
+                }) async =>
+                    ProcessResult(1, 128, '', 'fatal: unable to access remote'),
+          ),
+          controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await hoverRow(tester, 'origin/lane');
+      await tester.tap(find.byKey(const Key('sidebar-pull-origin/lane')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('remote-pull-pull')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('fatal: unable to access remote'),
+        findsOneWidget,
+      );
+
+      // Let the notice expire so its timer does not outlive the test.
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+    });
+  });
 
   testWidgets(
     'matching remotes refresh once every three minutes while active',
@@ -5891,7 +6266,6 @@ void main() {
 
     await tester.tap(find.byKey(const Key('sidebar-tags-overflow')));
     await tester.pump();
-    expect(find.byKey(const Key('sidebar-ref-release/v1')), findsOneWidget);
     final sidebarList = find.descendant(
       of: find.byKey(const Key('sidebar')),
       matching: find.byType(ListView),
@@ -5900,6 +6274,12 @@ void main() {
       of: sidebarList,
       matching: find.byType(Scrollable),
     );
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('sidebar-ref-release/v1')),
+      80,
+      scrollable: sidebarScrollable,
+    );
+    expect(find.byKey(const Key('sidebar-ref-release/v1')), findsOneWidget);
     await tester.scrollUntilVisible(
       find.byKey(const Key('sidebar-tags-overflow')),
       80,
@@ -6303,6 +6683,41 @@ void main() {
       }).baseBranches,
       {'/repos/one': 'main'},
     );
+  });
+
+  test('recent repositories round-trip newest first, capped and deduped', () {
+    const settings = AppSettings(
+      recentRepositories: ['/repos/one', '/repos/two'],
+    );
+    expect(AppSettings.fromJson(settings.toJson()), settings);
+    expect(AppSettings.fromJson(const {}).recentRepositories, isEmpty);
+    expect(
+      AppSettings.fromJson({
+        'recentRepositories': ['/repos/one', 42, '  ', '/repos/one'],
+      }).recentRepositories,
+      ['/repos/one'],
+    );
+
+    // Reopening moves an entry back to the head instead of duplicating it.
+    expect(settings.withRecentRepository('/repos/two').recentRepositories, [
+      '/repos/two',
+      '/repos/one',
+    ]);
+    expect(settings.withoutRecentRepository('/repos/one').recentRepositories, [
+      '/repos/two',
+    ]);
+    expect(settings.withRecentRepository('  '), same(settings));
+
+    var capped = const AppSettings();
+    for (var i = 0; i <= AppSettings.maxRecentRepositories; i++) {
+      capped = capped.withRecentRepository('/repos/$i');
+    }
+    expect(
+      capped.recentRepositories,
+      hasLength(AppSettings.maxRecentRepositories),
+    );
+    expect(capped.recentRepositories.first, '/repos/10');
+    expect(capped.recentRepositories, isNot(contains('/repos/0')));
   });
 
   test('deleted branch names round-trip per repository', () {
@@ -9644,6 +10059,7 @@ void main() {
         : ProcessResult(1, 128, '', 'not a git repository');
 
     final opened = <String>[];
+    final store = MemorySettingsStore();
     await tester.pumpWidget(
       YogitApp(
         repository: FakeGitRepository(
@@ -9651,7 +10067,7 @@ void main() {
           root: '/Users/ada/first',
           runner: runner,
         ),
-        settingsStore: MemorySettingsStore(),
+        settingsStore: store,
         discoverAvatars: false,
         windowFrameController: controller,
         repositoryFactory: (root) {
@@ -9667,11 +10083,18 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('first'), findsOneWidget);
 
+    await tester.tap(find.byKey(const Key('repository-selector')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('pick-repository')));
     await tester.pumpAndSettle();
 
     expect(opened, ['/Users/ada/next']);
     expect(find.text('next'), findsOneWidget);
+    // Switching away is what commits the repository being left to the list.
+    expect(store.current.recentRepositories, [
+      '/Users/ada/next',
+      '/Users/ada/first',
+    ]);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     // Timeline row plus the preview title, and the old history is gone.
@@ -9679,6 +10102,8 @@ void main() {
     expect(find.text('first commit'), findsNothing);
 
     // A plain directory is reported inline and changes nothing.
+    await tester.tap(find.byKey(const Key('repository-selector')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('pick-repository')));
     await tester.pumpAndSettle();
     expect(find.text('Git 저장소가 아닙니다: /Users/ada/plain'), findsOneWidget);
@@ -9729,6 +10154,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(const Key('repository-selector')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('pick-repository')));
     await tester.pumpAndSettle();
     expect(
@@ -12116,6 +12543,47 @@ void main() {
     expect(find.byKey(const Key('ref-filter')), findsOneWidget);
   });
 
+  testWidgets('holding the command modifier labels the sidebar toggle', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(local: ['main'], current: 'main'),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final hint = find.byKey(const Key('sidebar-toggle-shortcut'));
+    expect(hint, findsNothing);
+
+    final modifier = usesMetaModifier
+        ? LogicalKeyboardKey.metaLeft
+        : LogicalKeyboardKey.controlLeft;
+    await tester.sendKeyDownEvent(modifier);
+    await tester.pumpAndSettle();
+
+    expect(hint, findsOneWidget);
+    expect(
+      find.descendant(of: hint, matching: find.text(shortcutLabel('1'))),
+      findsOneWidget,
+    );
+    // The badge hangs under the button instead of displacing it.
+    expect(
+      tester.getRect(hint).top,
+      greaterThanOrEqualTo(
+        tester.getRect(find.byKey(const Key('sidebar-collapse-icon'))).bottom,
+      ),
+    );
+
+    await tester.sendKeyUpEvent(modifier);
+    await tester.pumpAndSettle();
+    expect(hint, findsNothing);
+  });
+
   testWidgets('sidebar hover extends left without moving branch content', (
     tester,
   ) async {
@@ -12169,13 +12637,14 @@ void main() {
           tester.widget<DecoratedBox>(background).decoration as BoxDecoration;
       final border = decoration.border! as Border;
       expect(decoration.borderRadius, isNull, reason: name);
+      // A plain hover paints like the timeline's hover chip; the colored
+      // left border is reserved for the keyboard cursor's selection.
       expect(
         decoration.color,
-        TimelineThemePalette.systemGraphite.selectedRow,
+        TimelineThemePalette.systemGraphite.neutralChip.withValues(alpha: 0.48),
         reason: name,
       );
-      expect(border.left.width, 2, reason: name);
-      expect(border.left.color, isNot(Colors.transparent), reason: name);
+      expect(border.left.width, 0, reason: name);
       expect(border.top.width, 0, reason: name);
       expect(border.right.width, 0, reason: name);
       expect(border.bottom.width, 0, reason: name);
@@ -15521,7 +15990,9 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(
-      tester.widget<InkWell>(find.byKey(const Key('pick-repository'))).onTap,
+      tester
+          .widget<InkWell>(find.byKey(const Key('repository-selector')))
+          .onTap,
       isNotNull,
     );
   });
@@ -16276,3 +16747,144 @@ BranchComparisonResult branchComparison({
   ],
   merge: merge,
 );
+
+void _commitProfileTests() {
+  const profiles = [
+    CommitProfile(
+      label: '회사',
+      name: '채수원',
+      email: 'sw.chae@navercorp.com',
+      color: '#7C5CD6',
+    ),
+    CommitProfile(
+      label: '개인',
+      name: 'doortts',
+      email: 'doortts@gmail.com',
+      color: '#2EA043',
+    ),
+  ];
+
+  /// A repository whose config reports [name]/[email] and records writes.
+  FakeGitRepository profileRepository({
+    required String name,
+    required String email,
+    List<List<String>>? calls,
+  }) => FakeGitRepository(
+    (_, _) async => [commit('1', 'first commit')],
+    runner: (executable, arguments, {workingDirectory, environment}) async {
+      calls?.add(arguments);
+      if (arguments.length >= 3 && arguments.first == 'config') {
+        final key = arguments.last;
+        return ProcessResult(
+          1,
+          0,
+          key == 'user.name'
+              ? '$name\n'
+              : key == 'user.email'
+              ? '$email\n'
+              : '',
+          '',
+        );
+      }
+      return ProcessResult(1, 0, '', '');
+    },
+  );
+
+  Widget profileApp(
+    GitRepository repository,
+    WindowFrameController controller, {
+    List<CommitProfile> registered = profiles,
+    ValueChanged<List<CommitProfile>>? onChanged,
+  }) => MaterialApp(
+    home: TimelineScreen(
+      repository: repository,
+      controller: controller,
+      commitProfiles: registered,
+      onCommitProfilesChanged: onChanged,
+    ),
+  );
+
+  testWidgets('the status bar names the matching profile', (tester) async {
+    // Wide enough that the chip keeps the address beside the label.
+    await tester.binding.setSurfaceSize(const Size(1200, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      profileApp(
+        profileRepository(name: '채수원', email: 'sw.chae@navercorp.com'),
+        WindowFrameController(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final chip = find.byKey(const Key('commit-profile-chip'));
+    expect(chip, findsOneWidget);
+    expect(
+      find.descendant(of: chip, matching: find.text('회사')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: chip, matching: find.text('sw.chae@navercorp.com')),
+      findsOneWidget,
+    );
+    // A known profile carries no warning dot.
+    expect(find.byKey(const Key('commit-profile-warning')), findsNothing);
+  });
+
+  testWidgets('an identity set outside the app warns and can be saved', (
+    tester,
+  ) async {
+    List<CommitProfile>? saved;
+    await tester.pumpWidget(
+      profileApp(
+        profileRepository(name: 'Suwon Chae', email: 'other@company.com'),
+        WindowFrameController(),
+        onChanged: (value) => saved = value,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('commit-profile-warning')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('commit-profile-chip')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('commit-profile-current-custom')),
+      findsOneWidget,
+    );
+    expect(find.text('커스텀 (앱 밖에서 설정됨)'), findsOneWidget);
+    expect(find.textContaining('.git/config에 저장'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('commit-profile-register')));
+    await tester.pumpAndSettle();
+
+    expect(saved?.length, 3);
+    expect(saved?.last.email, 'other@company.com');
+  });
+
+  testWidgets('picking a profile writes the repository config', (tester) async {
+    final calls = <List<String>>[];
+    await tester.pumpWidget(
+      profileApp(
+        profileRepository(
+          name: '채수원',
+          email: 'sw.chae@navercorp.com',
+          calls: calls,
+        ),
+        WindowFrameController(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('commit-profile-chip')));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const Key('commit-profile-option-doortts@gmail.com')),
+    );
+    await tester.pumpAndSettle();
+
+    // Joined so the matcher compares contents rather than list identity.
+    final joined = [for (final call in calls) call.join(' ')];
+    expect(joined, contains('config --local user.name doortts'));
+    expect(joined, contains('config --local user.email doortts@gmail.com'));
+  });
+}

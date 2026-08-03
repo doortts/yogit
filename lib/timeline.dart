@@ -1,24 +1,32 @@
 import 'dart:async';
+import 'dart:io' show ProcessException;
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show kDoubleTapTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'avatars.dart';
+import 'commit_profile_chip.dart';
 import 'diff_screen.dart';
 import 'external_editor.dart';
 import 'full_diff_commit_message_cache.dart';
 import 'full_diff_model.dart';
+import 'full_diff_shortcut_hint.dart';
 import 'full_diff_side_by_side_view.dart';
 import 'full_diff_syntax.dart';
 import 'full_diff_unified_view.dart';
+import 'fuzzy_match.dart';
 import 'git.dart';
 import 'monaco_editor_screen.dart';
 import 'page_scroll_shortcuts.dart';
 import 'ref_tree.dart';
+import 'search_icon.dart';
+import 'remote_pull_menu.dart';
 import 'repository_branch_selector.dart';
 import 'settings.dart';
+import 'shortcut_modifier.dart';
 import 'timeline_theme.dart';
 import 'typography.dart';
 import 'vim_navigation.dart';
@@ -692,6 +700,10 @@ class TimelineScreen extends StatefulWidget {
     this.onOpenFullDiff,
     this.onOpenSettings,
     this.onOpenRepository,
+    this.recentRepositories = const [],
+    this.onForgetRecentRepository,
+    this.commitProfiles = const [],
+    this.onCommitProfilesChanged,
     this.preferredBranch,
     this.preferredBranchReady = true,
     this.onPreferredBranchChanged,
@@ -733,6 +745,14 @@ class TimelineScreen extends StatefulWidget {
 
   /// Called with the validated root of a repository the user picked.
   final ValueChanged<String>? onOpenRepository;
+
+  /// Repository roots, most recently opened first.
+  final List<String> recentRepositories;
+  final ValueChanged<String>? onForgetRecentRepository;
+
+  /// The commit identities the status bar chip offers.
+  final List<CommitProfile> commitProfiles;
+  final ValueChanged<List<CommitProfile>>? onCommitProfilesChanged;
   final String? preferredBranch;
 
   /// Whether [preferredBranch] has finished loading from persistent settings.
@@ -962,9 +982,15 @@ class _TimelineScreenState extends State<TimelineScreen>
     _deletedBranchNames = Map.of(widget.deletedBranchNames);
     _scrollController.addListener(_maybeLoadNextPage);
     _selectedIndex.addListener(_selectedCommitChanged);
+    // The sidebar cursor and the timeline selection dim whichever of the two
+    // panes does not hold the keyboard, so both repaint on focus flips.
+    _sidebarFocusNode.addListener(_onPaneFocusChanged);
+    _focusNode.addListener(_onPaneFocusChanged);
+    HardwareKeyboard.instance.addHandler(_handleModifierKeyEvent);
     // Refs load beside the first page, and neither blocks the first paint. The
     // detail pane stays hidden until Enter or Space asks for it.
     _loadNextPage();
+    unawaited(_loadCommitIdentity());
     unawaited(_restoreCherryPickThenRefresh());
     _fetchTimer = Timer.periodic(
       _fetchInterval,
@@ -1141,6 +1167,16 @@ class _TimelineScreenState extends State<TimelineScreen>
       _deletedBranchLookupAttempts.clear();
       _resolvingDeletedBranchTips.clear();
     }
+    // A new repository has its own identity; an edited profile list can rename
+    // the one already in force.
+    if (!identical(widget.repository, oldWidget.repository)) {
+      unawaited(_loadCommitIdentity());
+    } else if (!listEquals(widget.commitProfiles, oldWidget.commitProfiles)) {
+      _commitIdentity = resolveCommitIdentity(
+        _commitIdentity.identity,
+        widget.commitProfiles,
+      );
+    }
     if (deletedBranchNamesChanged) {
       _deletedBranchNames
         ..clear()
@@ -1233,6 +1269,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    HardwareKeyboard.instance.removeHandler(_handleModifierKeyEvent);
     _fetchTimer?.cancel();
     _dropMergePreview();
     _dropRebasePreview();
@@ -1255,6 +1292,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
     _filterController.dispose();
     _focusNode.dispose();
+    _sidebarFocusNode.dispose();
     super.dispose();
   }
 
@@ -1449,6 +1487,120 @@ class _TimelineScreenState extends State<TimelineScreen>
         context.findAncestorWidgetOfExactType<EditableText>() != null;
   }
 
+  // ------------------------------------------------------- commit identity
+
+  /// The repository's commit identity, re-read rather than remembered: the
+  /// CLI, an includeIf rule, or another GUI can change it behind the app.
+  var _commitIdentity = const CommitIdentityState.unknown();
+
+  Future<void> _loadCommitIdentity() async {
+    try {
+      final identity = await widget.repository.loadCommitIdentity();
+      if (!mounted) return;
+      setState(
+        () => _commitIdentity = resolveCommitIdentity(
+          identity,
+          widget.commitProfiles,
+        ),
+      );
+    } catch (_) {
+      // A repository that cannot answer keeps the chip on its last reading.
+    }
+  }
+
+  Future<void> _applyCommitProfile(CommitProfile profile) async {
+    try {
+      await widget.repository.setLocalCommitIdentity(
+        GitIdentity(name: profile.name, email: profile.email),
+      );
+      await _loadCommitIdentity();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('커밋 신원: ${profile.name} <${profile.email}>')),
+      );
+    } on ProcessException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('커밋 신원 변경 실패: ${error.message.trim()}')),
+        );
+      }
+    }
+  }
+
+  /// Saves the identity the repository already carries as a named profile, so
+  /// a setup made outside the app joins the list instead of fighting it.
+  void _registerCurrentIdentity() {
+    final identity = _commitIdentity.identity;
+    if (identity.email.trim().isEmpty) return;
+    final profiles = [
+      ...widget.commitProfiles,
+      CommitProfile(
+        label: identity.name.trim().isEmpty ? identity.email : identity.name,
+        name: identity.name,
+        email: identity.email,
+        color:
+            CommitProfile.paletteColors[widget.commitProfiles.length %
+                CommitProfile.paletteColors.length],
+      ),
+    ];
+    widget.onCommitProfilesChanged?.call(profiles);
+    setState(() => _commitIdentity = resolveCommitIdentity(identity, profiles));
+  }
+
+  /// Opens the profile menu above the chip, right-aligned with it.
+  Future<void> _openCommitProfileMenu() async {
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final chip =
+        _profileChipKey.currentContext?.findRenderObject() as RenderBox?;
+    if (chip == null) return;
+    final topLeft = chip.localToGlobal(Offset.zero, ancestor: overlay);
+    final right = overlay.size.width - (topLeft.dx + chip.size.width);
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.transparent,
+      builder: (context) => Stack(
+        children: [
+          Positioned(
+            right: right,
+            bottom: overlay.size.height - topLeft.dy + 7,
+            child: CommitProfileMenu(
+              repositoryName: repositoryNameOf(widget.repository.root),
+              state: _commitIdentity,
+              profiles: widget.commitProfiles,
+              onSelected: (profile) {
+                Navigator.pop(context);
+                unawaited(_applyCommitProfile(profile));
+              },
+              onRegisterCurrent: () {
+                Navigator.pop(context);
+                _registerCurrentIdentity();
+              },
+              onManage: () {
+                Navigator.pop(context);
+                widget.onOpenSettings?.call();
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  final _profileChipKey = GlobalKey();
+
+  /// Whether ⌘ (Ctrl off Apple platforms) is down right now: every on-screen
+  /// control with a shortcut shows its key combination while it is.
+  var _modifierHeld = false;
+
+  bool _handleModifierKeyEvent(KeyEvent event) {
+    if (!isShortcutModifierKey(event.logicalKey)) return false;
+    if (_modifierHeld != shortcutModifierHeld && mounted) {
+      setState(() => _modifierHeld = shortcutModifierHeld);
+    }
+    return false;
+  }
+
   KeyEventResult _onKeyEvent(FocusNode _, KeyEvent event) {
     // Holding an arrow keeps moving; everything else acts once per press.
     if (event is KeyDownEvent || event is KeyRepeatEvent) {
@@ -1504,16 +1656,34 @@ class _TimelineScreenState extends State<TimelineScreen>
         _moveSelection(step, animate: event is KeyDownEvent);
         return KeyEventResult.handled;
       }
+      // ← (or h) walks over to the sidebar while the pane is open.
+      if (key == LogicalKeyboardKey.arrowLeft &&
+          event is KeyDownEvent &&
+          !_sidebarCollapsed) {
+        _sidebarFocusNode.requestFocus();
+        if (_sidebarCursor == null) _moveSidebarCursor(1);
+        return KeyEventResult.handled;
+      }
     }
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
-    if (event.logicalKey == LogicalKeyboardKey.keyD &&
-        HardwareKeyboard.instance.isMetaPressed) {
+    if (event.logicalKey == LogicalKeyboardKey.keyD && shortcutModifierHeld) {
       if (_selectedCommit != null) _openFullDiff();
       return KeyEventResult.handled;
     }
-    if ((event.logicalKey == LogicalKeyboardKey.enter ||
-            event.logicalKey == LogicalKeyboardKey.space) &&
-        _commits.isNotEmpty) {
+    // ⌘1 hands the keyboard to the sidebar, expanding it when collapsed; a
+    // second ⌘1 while the sidebar holds the keyboard puts the pane away.
+    if (event.logicalKey == LogicalKeyboardKey.digit1 && shortcutModifierHeld) {
+      if (!_sidebarCollapsed && _sidebarFocusNode.hasFocus) {
+        setState(() => _sidebarCollapsed = true);
+        _focusNode.requestFocus();
+        return KeyEventResult.handled;
+      }
+      if (_sidebarCollapsed) setState(() => _sidebarCollapsed = false);
+      _sidebarFocusNode.requestFocus();
+      if (_sidebarCursor == null) _moveSidebarCursor(1);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.enter && _commits.isNotEmpty) {
       _togglePreview();
       return KeyEventResult.handled;
     }
@@ -1693,7 +1863,13 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   /// Sidebar click: jump to the newest commit decorated with [name]. Remote
   /// entries also match the branch name without their remote prefix.
-  void _selectRef(String name, {bool remote = false}) {
+  /// Keyboard navigation inside the sidebar keeps its own focus, so it asks
+  /// for the jump without stealing the timeline focus back.
+  void _selectRef(
+    String name, {
+    bool remote = false,
+    bool focusTimeline = true,
+  }) {
     final candidates = {
       name,
       if (remote && name.contains('/')) name.substring(name.indexOf('/') + 1),
@@ -1711,7 +1887,426 @@ class _TimelineScreenState extends State<TimelineScreen>
     _arrivedGoingDown = null;
     _selectedIndex.value = index;
     _scrollToSelection();
-    _focusNode.requestFocus();
+    if (focusTimeline) _focusNode.requestFocus();
+  }
+
+  // ------------------------------------------- sidebar keyboard navigation
+
+  final _sidebarFocusNode = FocusNode(debugLabel: 'sidebar');
+
+  void _onPaneFocusChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// The unfocused pane keeps its selection, drained of color: same
+  /// luminance, zero chroma, so only the focused pane reads as active.
+  static Color _achromatic(Color color) {
+    final gray = 0.299 * color.r + 0.587 * color.g + 0.114 * color.b;
+    return Color.from(alpha: color.a, red: gray, green: gray, blue: gray);
+  }
+
+  /// The timeline's selection color, gray while the sidebar has the keyboard.
+  Color get _timelineSelectionColor => _sidebarFocusNode.hasFocus
+      ? _achromatic(_palette.selectedRow)
+      : _palette.selectedRow;
+
+  /// The row the sidebar's keyboard cursor sits on, highlighted like a hover.
+  (_RefSection, String)? _sidebarCursor;
+
+  /// One key per named row so the cursor can be scrolled into view.
+  final _sidebarRowKeys = <String, GlobalKey>{};
+
+  /// The named rows currently on screen, in paint order: sections top-down,
+  /// minus collapsed sections, collapsed folders, and filtered-out names.
+  List<(_RefSection, String)> _visibleRefRows() {
+    final filtering = _filter.trim().isNotEmpty;
+    final rows = <(_RefSection, String)>[];
+    void walk(_RefSection section, List<RefTreeNode> nodes, String parentPath) {
+      for (final node in nodes) {
+        final path = parentPath.isEmpty
+            ? node.segment
+            : '$parentPath/${node.segment}';
+        if (node.fullName case final name?) rows.add((section, name));
+        final collapsed =
+            !filtering &&
+            _collapsedRefFolders.contains('${section.name}:$path');
+        if (node.children.isNotEmpty && !collapsed) {
+          walk(section, node.children, path);
+        }
+      }
+    }
+
+    for (final (section, names) in [
+      (_RefSection.local, _localBranches),
+      (_RefSection.remote, _refs.remote),
+      (_RefSection.tags, _refs.tags),
+    ]) {
+      if (!filtering && _collapsedRefSections.contains(section)) continue;
+      walk(section, buildRefTree(_visibleSectionNames(section, names)), '');
+    }
+    return rows;
+  }
+
+  KeyEventResult _onSidebarKeyEvent(FocusNode _, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.escape) {
+      setState(() => _sidebarCursor = null);
+      _focusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    final keyboard = HardwareKeyboard.instance;
+    final key = normalizeNavigationKey(
+      event.logicalKey,
+      hasModifier:
+          keyboard.isMetaPressed ||
+          keyboard.isAltPressed ||
+          keyboard.isShiftPressed ||
+          keyboard.isControlPressed,
+    );
+    // → (or l) hands the keyboard back to the timeline; the cursor stays so
+    // the gray selection marks where the sidebar left off.
+    if (key == LogicalKeyboardKey.arrowRight && event is KeyDownEvent) {
+      _focusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    final step = switch (key) {
+      LogicalKeyboardKey.arrowDown => 1,
+      LogicalKeyboardKey.arrowUp => -1,
+      _ => 0,
+    };
+    if (step == 0) return KeyEventResult.ignored;
+    _moveSidebarCursor(step);
+    return KeyEventResult.handled;
+  }
+
+  /// The strip under the search field: what the cursor's ref can do, with
+  /// impossible actions disabled in place so the layout never jumps.
+  Widget _sidebarActionStrip() {
+    final cursor = _sidebarCursor;
+    final section = cursor?.$1;
+    final name = cursor?.$2;
+    final isLocal = section == _RefSection.local && name != null;
+    final isRemote = section == _RefSection.remote && name != null;
+    final current = isLocal && name == _refs.current;
+    final pullState = isRemote ? remotePullState(_refs, name) : null;
+    final busy = _pullingRemote != null || _branchApplyBusy;
+
+    Widget button({
+      required Key key,
+      required IconData icon,
+      required String tooltip,
+      VoidCallback? onPressed,
+      Color? color,
+    }) => IconButton(
+      key: key,
+      icon: Icon(icon, size: 15),
+      tooltip: tooltip,
+      onPressed: onPressed,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+      style: IconButton.styleFrom(
+        foregroundColor: color ?? _palette.text,
+        disabledForegroundColor: _palette.muted.withValues(alpha: 0.4),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
+      child: Container(
+        key: const Key('sidebar-action-strip'),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: _palette.raised,
+          border: Border.all(color: _palette.border),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        // Focus stays on the list: the buttons act without taking the
+        // keyboard, so the cursor keeps moving from where it was.
+        child: ExcludeFocus(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final buttons = Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  button(
+                    key: const Key('sidebar-action-base'),
+                    icon: Icons.anchor,
+                    tooltip: '기준 브랜치로',
+                    onPressed: isLocal && name != _baseBranch
+                        ? () => _selectBaseBranch(name)
+                        : null,
+                  ),
+                  button(
+                    key: const Key('sidebar-action-compare'),
+                    icon: Icons.compare_arrows,
+                    tooltip: '브랜치 diff로 비교',
+                    onPressed: name != null && name != _baseBranch && !busy
+                        ? () => unawaited(_selectComparison(name))
+                        : null,
+                  ),
+                  button(
+                    key: const Key('sidebar-action-pull'),
+                    icon: Icons.arrow_downward,
+                    tooltip: 'Pull',
+                    onPressed:
+                        pullState?.kind == RemotePullKind.fastForward && !busy
+                        ? () => unawaited(_confirmRemotePull(name!, pullState!))
+                        : null,
+                  ),
+                  button(
+                    key: const Key('sidebar-action-checkout'),
+                    icon: Icons.logout,
+                    tooltip: '체크아웃',
+                    onPressed: busy
+                        ? null
+                        : isLocal && !current
+                        ? () => unawaited(_runLocalCheckout(name))
+                        : pullState != null && !pullState.checkedOut
+                        ? () => unawaited(_runRemoteCheckout(name!, pullState))
+                        : null,
+                  ),
+                  SizedBox(
+                    height: 16,
+                    child: VerticalDivider(width: 9, color: _palette.border),
+                  ),
+                  button(
+                    key: const Key('sidebar-action-delete'),
+                    icon: Icons.delete_outline,
+                    tooltip: '브랜치 삭제',
+                    color: _remoteBehind,
+                    onPressed: isLocal && !current && !busy
+                        ? () => unawaited(_confirmDeleteBranch(name))
+                        : null,
+                  ),
+                ],
+              );
+              // 26px per button plus the divider; below that plus a readable
+              // name, the name yields and the buttons scale to the pane.
+              const buttonsWidth = 26.0 * 5 + 9;
+              if (constraints.maxWidth < buttonsWidth + 48) {
+                return FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: buttons,
+                );
+              }
+              return Row(
+                children: [
+                  // Nothing selected leaves the slot empty; the disabled
+                  // buttons already say the strip is waiting.
+                  Expanded(
+                    child: Text(
+                      name ?? '',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11, color: _palette.text),
+                    ),
+                  ),
+                  buttons,
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Switches HEAD to a local branch from the sidebar strip.
+  Future<void> _runLocalCheckout(String branch) async {
+    if (_pullingRemote != null || _branchApplyBusy) return;
+    try {
+      await widget.repository.checkoutLocalBranch(branch);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('$branch 체크아웃')));
+      await _reloadTimelineAfterCherryPick(null);
+    } on ProcessException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('체크아웃 실패: ${error.message.trim()}')),
+        );
+      }
+    }
+  }
+
+  /// Moves the cursor and mirrors it on the timeline, like clicking the row.
+  void _moveSidebarCursor(int step) {
+    final rows = _visibleRefRows();
+    if (rows.isEmpty) return;
+    final cursor = _sidebarCursor;
+    final index = cursor == null ? -1 : rows.indexOf(cursor);
+    final next = index < 0
+        ? (step > 0 ? 0 : rows.length - 1)
+        : (index + step).clamp(0, rows.length - 1);
+    final (section, name) = rows[next];
+    setState(() => _sidebarCursor = rows[next]);
+    _selectRef(
+      name,
+      remote: section == _RefSection.remote,
+      focusTimeline: false,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = _sidebarRowKeys['${section.name}:$name']?.currentContext;
+      if (context != null) {
+        unawaited(Scrollable.ensureVisible(context, alignment: 0.5));
+      }
+    });
+  }
+
+  /// The remote branch a pull or checkout is currently running for. One at a
+  /// time: the sidebar shows a spinner on this row and ignores further asks.
+  String? _pullingRemote;
+
+  String? _lastRemoteRowTap;
+  int _lastRemoteRowTapMs = 0;
+
+  /// The first click jumps the timeline like any ref row; a second click on
+  /// the same row within the double-click window runs the default pull action.
+  void _tapRemoteRow(String name) {
+    _selectRef(name, remote: true, focusTimeline: false);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (_lastRemoteRowTap == name &&
+        now - _lastRemoteRowTapMs <= kDoubleTapTimeout.inMilliseconds) {
+      _lastRemoteRowTap = null;
+      _runRemotePullDefault(name);
+      return;
+    }
+    _lastRemoteRowTap = name;
+    _lastRemoteRowTapMs = now;
+  }
+
+  /// One controller per remote row so a double-click can open the same menu
+  /// the ↓ button anchors.
+  final _pullMenuControllers = <String, MenuController>{};
+
+  /// Double-click: the one state where the outcome is safe and obvious asks
+  /// for a fast-forward pull; every other state just opens the menu, which
+  /// names the state instead of mutating anything.
+  void _runRemotePullDefault(String remoteBranch) {
+    final state = remotePullState(_refs, remoteBranch);
+    if (state == null) return;
+    if (state.kind == RemotePullKind.fastForward) {
+      unawaited(_confirmRemotePull(remoteBranch, state));
+      return;
+    }
+    _pullMenuControllers[remoteBranch]?.open();
+  }
+
+  Future<void> _confirmRemotePull(
+    String remoteBranch,
+    RemotePullState state,
+  ) async {
+    if (_pullingRemote != null || _branchApplyBusy) return;
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('로컬로 Pull'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(remoteBranch),
+            const SizedBox(height: 6),
+            Text('로컬 ${state.localBranch}보다 ${state.ahead}개 커밋 앞서 있습니다.'),
+            const Text('fast-forward로 받아올 수 있습니다.'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            key: const Key('remote-pull-confirm'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Pull'),
+          ),
+        ],
+      ),
+    );
+    if (approved == true) await _runRemotePull(remoteBranch, state);
+  }
+
+  Future<void> _runRemotePull(
+    String remoteBranch,
+    RemotePullState state,
+  ) async {
+    if (_pullingRemote != null || _branchApplyBusy) return;
+    setState(() => _pullingRemote = remoteBranch);
+    try {
+      await widget.repository.pullRemoteBranch(
+        state.remote,
+        state.localBranch,
+        checkedOut: state.checkedOut,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${state.localBranch} ← $remoteBranch · ${state.ahead}개 커밋',
+          ),
+        ),
+      );
+      await _reloadTimelineAfterCherryPick(null);
+    } on ProcessException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Pull 실패: ${error.message.trim()}')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _pullingRemote = null);
+      } else {
+        _pullingRemote = null;
+      }
+    }
+  }
+
+  Future<void> _runRemoteCheckout(
+    String remoteBranch,
+    RemotePullState state,
+  ) async {
+    if (_pullingRemote != null || _branchApplyBusy) return;
+    setState(() => _pullingRemote = remoteBranch);
+    try {
+      await widget.repository.checkoutRemoteBranch(
+        state.remote,
+        state.localBranch,
+        createLocal: state.kind == RemotePullKind.noLocal,
+      );
+      // The menu promised "switch, then pull" when the remote was ahead.
+      if (state.kind == RemotePullKind.fastForward) {
+        await widget.repository.pullRemoteBranch(
+          state.remote,
+          state.localBranch,
+          checkedOut: true,
+        );
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('${state.localBranch} 체크아웃')));
+      await _reloadTimelineAfterCherryPick(null);
+    } on ProcessException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('체크아웃 실패: ${error.message.trim()}')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _pullingRemote = null);
+      } else {
+        _pullingRemote = null;
+      }
+    }
   }
 
   @override
@@ -1875,6 +2470,13 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (_branchApplyBusy) return;
     final path = await _previewController.pickRepository();
     if (path == null || !mounted) return;
+    await _openRepositoryPath(path);
+  }
+
+  /// A remembered path can have been moved or deleted since it was stored, so
+  /// it goes through the same validation as a freshly picked folder.
+  Future<void> _openRepositoryPath(String path) async {
+    if (_branchApplyBusy) return;
     try {
       final root = await resolveRepositoryRoot(
         path,
@@ -1969,6 +2571,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                       repositoryName: _repositoryName,
                       repositoryPath: widget.repository.root,
                       localBranches: _recentLocalBranches,
+                      branchTimes: _refs.branchActivityTimes,
                       remoteBranches: sortRefsNewestFirst(
                         _refs.remote,
                         _refs.branchActivityTimes,
@@ -1977,11 +2580,17 @@ class _TimelineScreenState extends State<TimelineScreen>
                         _refs.tags,
                         _refs.tagCreatorTimes,
                       ),
+                      tagTimes: _refs.tagCreatorTimes,
                       selectedBranch: _baseBranch,
                       comparedBranch: _compareRef,
                       refsLoading: _refsLoading,
                       refsLoadFailed: _refsLoadFailed,
                       onRepositoryPressed: () => unawaited(_pickRepository()),
+                      recentRepositories: widget.recentRepositories,
+                      onRecentRepositorySelected: (path) =>
+                          unawaited(_openRepositoryPath(path)),
+                      onRecentRepositoryRemoved:
+                          widget.onForgetRecentRepository,
                       onBranchSelected: _selectBaseBranch,
                       onComparisonSelected: (branch) =>
                           unawaited(_selectComparison(branch)),
@@ -2758,6 +3367,154 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
   }
 
+  /// The local branch whose context menu is open; its row keeps the hover
+  /// highlight while the popup covers the pointer.
+  String? _contextMenuRef;
+
+  /// Right-click on a local branch row: the delete menu at the pointer.
+  Future<void> _showLocalBranchMenu(Offset position, String branch) async {
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    setState(() => _contextMenuRef = branch);
+    final action = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        position & Size.zero,
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        PopupMenuItem(
+          key: Key('sidebar-delete-branch-$branch'),
+          value: 'delete',
+          height: 34,
+          child: const Text('브랜치 삭제', style: TextStyle(fontSize: 13)),
+        ),
+      ],
+    );
+    if (mounted) {
+      setState(() => _contextMenuRef = null);
+    } else {
+      _contextMenuRef = null;
+    }
+    if (action == 'delete' && mounted) await _confirmDeleteBranch(branch);
+  }
+
+  Future<void> _confirmDeleteBranch(String branch) async {
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('브랜치 삭제'),
+        content: Text('$branch 브랜치를 삭제합니다. 병합되지 않은 커밋도 함께 사라집니다.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            key: const Key('delete-branch-confirm'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+    if (approved != true || !mounted) return;
+    try {
+      await widget.repository.deleteLocalBranch(branch);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('$branch 브랜치 삭제됨')));
+      // The deleted ref may be the timeline's base or decorate loaded rows, so
+      // the whole page reloads rather than patching refs in place.
+      await _reloadTimelineAfterCherryPick(null);
+    } on ProcessException catch (error) {
+      if (!mounted) return;
+      if (error.message.contains('used by worktree')) {
+        await _confirmDeleteWorktreeAndBranch(branch);
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('브랜치 삭제 실패: ${error.message.trim()}')),
+      );
+    }
+  }
+
+  /// The branch lives in a worktree, so deleting it means deleting that
+  /// checkout too. A second dialog says which directory dies and how much
+  /// space that frees.
+  Future<void> _confirmDeleteWorktreeAndBranch(String branch) async {
+    String? path;
+    int? size;
+    try {
+      path = await widget.repository.branchWorktreePath(branch);
+      if (path != null) size = await directorySizeBytes(path);
+    } catch (_) {
+      // A half-broken worktree still gets the dialog; only the size line goes.
+    }
+    if (!mounted) return;
+    if (path == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$branch: 워크트리를 찾지 못해 삭제하지 않았습니다.')),
+      );
+      return;
+    }
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('워크트리 함께 삭제'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('$branch 브랜치는 아래 워크트리에 체크아웃되어 있습니다.'),
+            const SizedBox(height: 6),
+            Text(shortenHomePath(path!)),
+            const SizedBox(height: 6),
+            Text(
+              size == null
+                  ? '워크트리와 브랜치를 모두 삭제할까요?'
+                  : '함께 삭제하면 ${byteSizeLabel(size)}를 확보합니다.',
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            key: const Key('delete-worktree-confirm'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('워크트리와 브랜치 삭제'),
+          ),
+        ],
+      ),
+    );
+    if (approved != true || !mounted) return;
+    try {
+      await widget.repository.removeWorktree(path);
+      await widget.repository.deleteLocalBranch(branch);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            size == null
+                ? '$branch 브랜치와 워크트리 삭제됨'
+                : '$branch 브랜치와 워크트리 삭제됨 · ${byteSizeLabel(size)} 확보',
+          ),
+        ),
+      );
+      await _reloadTimelineAfterCherryPick(null);
+    } on ProcessException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('삭제 실패: ${error.message.trim()}')),
+        );
+      }
+    }
+  }
+
   Future<void> _reloadTimelineAfterCherryPick(String? headSha) async {
     widget.repository.invalidateHistory();
     setState(() {
@@ -2953,32 +3710,51 @@ class _TimelineScreenState extends State<TimelineScreen>
           child: Row(
             children: [
               Expanded(
-                child: TextField(
-                  key: const Key('ref-filter'),
-                  controller: _filterController,
-                  onChanged: (value) => setState(() => _filter = value),
-                  style: TextStyle(color: _palette.text, fontSize: 13),
-                  decoration: InputDecoration(
-                    isDense: true,
-                    hintText: '브랜치와 태그 찾기',
-                    hintStyle: TextStyle(color: _palette.muted, fontSize: 13),
-                    filled: true,
-                    fillColor: _palette.raised,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 7,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(5),
-                      borderSide: BorderSide(color: _palette.border),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(5),
-                      borderSide: BorderSide(color: _palette.border),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(5),
-                      borderSide: BorderSide(color: _palette.interactive),
+                child: Semantics(
+                  label: '브랜치와 태그 찾기',
+                  textField: true,
+                  child: TextField(
+                    key: const Key('ref-filter'),
+                    controller: _filterController,
+                    onChanged: (value) => setState(() => _filter = value),
+                    style: TextStyle(color: _palette.text, fontSize: 13),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      // The magnifier replaces the hint sentence; the wording
+                      // lives on in the semantics label and the tooltip.
+                      prefixIcon: Tooltip(
+                        message: '브랜치와 태그 찾기',
+                        child: Center(
+                          widthFactor: 1,
+                          child: SearchIcon(
+                            key: const Key('ref-filter-search-icon'),
+                            color: _palette.muted,
+                          ),
+                        ),
+                      ),
+                      prefixIconConstraints: const BoxConstraints(
+                        minWidth: 30,
+                        minHeight: 30,
+                      ),
+                      filled: true,
+                      fillColor: _palette.raised,
+                      contentPadding: const EdgeInsets.only(
+                        right: 8,
+                        top: 7,
+                        bottom: 7,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(5),
+                        borderSide: BorderSide(color: _palette.border),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(5),
+                        borderSide: BorderSide(color: _palette.border),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(5),
+                        borderSide: BorderSide(color: _palette.interactive),
+                      ),
                     ),
                   ),
                 ),
@@ -2988,15 +3764,20 @@ class _TimelineScreenState extends State<TimelineScreen>
             ],
           ),
         ),
+        _sidebarActionStrip(),
         Expanded(
-          child: ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            children: [
-              // The checked-out branch leads the local list.
-              ..._refSection(_RefSection.local, _localBranches),
-              ..._refSection(_RefSection.remote, _refs.remote),
-              ..._refSection(_RefSection.tags, _refs.tags),
-            ],
+          child: Focus(
+            focusNode: _sidebarFocusNode,
+            onKeyEvent: _onSidebarKeyEvent,
+            child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              children: [
+                // The checked-out branch leads the local list.
+                ..._refSection(_RefSection.local, _localBranches),
+                ..._refSection(_RefSection.remote, _refs.remote),
+                ..._refSection(_RefSection.tags, _refs.tags),
+              ],
+            ),
           ),
         ),
       ],
@@ -3021,24 +3802,47 @@ class _TimelineScreenState extends State<TimelineScreen>
     ),
   );
 
-  Widget _sidebarToggleButton({required bool opens}) => Tooltip(
-    message: opens ? '왼쪽 패널 열기' : '왼쪽 패널 닫기',
-    waitDuration: Duration.zero,
-    child: SizedBox(
-      width: 28,
-      height: 28,
-      child: IconButton(
-        key: Key(opens ? 'sidebar-expand-button' : 'sidebar-collapse-button'),
-        padding: EdgeInsets.zero,
-        constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-        onPressed: () => setState(() => _sidebarCollapsed = !opens),
-        icon: CustomPaint(
-          key: Key(opens ? 'sidebar-expand-icon' : 'sidebar-collapse-icon'),
-          size: const Size(14.4, 14.4),
-          painter: _PaneToggleIconPainter(opens: opens, color: _palette.muted),
+  Widget _sidebarToggleButton({required bool opens}) => _shortcutBadge(
+    label: shortcutLabel('1'),
+    hintKey: const Key('sidebar-toggle-shortcut'),
+    child: Tooltip(
+      message: opens ? '왼쪽 패널 열기' : '왼쪽 패널 닫기',
+      waitDuration: Duration.zero,
+      child: SizedBox(
+        width: 28,
+        height: 28,
+        child: IconButton(
+          key: Key(opens ? 'sidebar-expand-button' : 'sidebar-collapse-button'),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+          onPressed: () => setState(() => _sidebarCollapsed = !opens),
+          icon: CustomPaint(
+            key: Key(opens ? 'sidebar-expand-icon' : 'sidebar-collapse-icon'),
+            size: const Size(14.4, 14.4),
+            painter: _PaneToggleIconPainter(
+              opens: opens,
+              color: _palette.muted,
+            ),
+          ),
         ),
       ),
     ),
+  );
+
+  /// Hangs a key-combination badge under [child] while the command modifier
+  /// is held, in the timeline's own palette.
+  Widget _shortcutBadge({
+    required String label,
+    required Widget child,
+    Key? hintKey,
+  }) => FullDiffShortcutHint(
+    visible: _modifierHeld,
+    label: label,
+    hintKey: hintKey,
+    background: _palette.raised,
+    borderColor: _palette.border,
+    textColor: _palette.text,
+    child: child,
   );
 
   Widget _compactSidebarSection(_RefSection section, int count) => Semantics(
@@ -3095,8 +3899,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   Iterable<Widget> _refSection(_RefSection section, List<String> names) sync* {
-    final query = _filter.trim().toLowerCase();
-    final filtering = query.isNotEmpty;
+    final filtering = _filter.trim().isNotEmpty;
     final collapsed = !filtering && _collapsedRefSections.contains(section);
     final headerColor = _palette.text.withValues(alpha: 0.82);
     yield GestureDetector(
@@ -3167,25 +3970,34 @@ class _TimelineScreenState extends State<TimelineScreen>
     );
     if (collapsed) return;
 
+    final hiddenTagCount = section == _RefSection.tags
+        ? math.max(0, names.length - _collapsedTagLimit)
+        : 0;
+    yield* _refTreeRows(
+      section,
+      buildRefTree(_visibleSectionNames(section, names)),
+    );
+    if (section == _RefSection.tags && !filtering && hiddenTagCount > 0) {
+      yield _tagOverflowRow(hiddenTagCount);
+    }
+  }
+
+  /// The names a section shows, after tag ordering/projection and the filter.
+  /// Shared with [_visibleRefRows] so keyboard navigation walks exactly the
+  /// rows on screen.
+  List<String> _visibleSectionNames(_RefSection section, List<String> names) {
+    final query = _filter.trim().toLowerCase();
+    final filtering = query.isNotEmpty;
     final orderedNames = section == _RefSection.tags
         ? sortRefsNewestFirst(names, _refs.tagCreatorTimes)
         : names;
-    final hiddenTagCount = section == _RefSection.tags
-        ? math.max(0, orderedNames.length - _collapsedTagLimit)
-        : 0;
     final projectedNames =
         section == _RefSection.tags && !filtering && !_showAllTags
         ? orderedNames.take(_collapsedTagLimit).toList()
         : orderedNames;
-    final visibleNames = filtering
-        ? orderedNames
-              .where((name) => name.toLowerCase().contains(query))
-              .toList()
+    return filtering
+        ? orderedNames.where((name) => fuzzyMatch(name, query)).toList()
         : projectedNames;
-    yield* _refTreeRows(section, buildRefTree(visibleNames));
-    if (section == _RefSection.tags && !filtering && hiddenTagCount > 0) {
-      yield _tagOverflowRow(hiddenTagCount);
-    }
   }
 
   Widget _tagOverflowRow(int hiddenTagCount) => GestureDetector(
@@ -3286,6 +4098,9 @@ class _TimelineScreenState extends State<TimelineScreen>
         : null;
     final remoteAhead = remoteDifference?.ahead ?? 0;
     final remoteBehind = remoteDifference?.behind ?? 0;
+    final pullState = section == _RefSection.remote && name != null
+        ? remotePullState(_refs, name)
+        : null;
     final inFolderTree = name == null || depth > 0;
 
     void toggleFolder() => setState(() {
@@ -3359,7 +4174,11 @@ class _TimelineScreenState extends State<TimelineScreen>
                     ),
                   ),
                 ),
-              if (remoteAhead > 0 || remoteBehind > 0) ...[
+              // On hover the ↓ button takes this slot; the menu header
+              // repeats the divergence, so the badge can yield to it.
+              if ((remoteAhead > 0 || remoteBehind > 0) &&
+                  !(pullState != null &&
+                      (hovered || _pullingRemote == name))) ...[
                 const SizedBox(width: 4),
                 Tooltip(
                   message: [
@@ -3458,52 +4277,144 @@ class _TimelineScreenState extends State<TimelineScreen>
             ] else
               Expanded(
                 child: _HoverBuilder(
-                  builder: (hovered) => GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () =>
-                        _selectRef(name, remote: section == _RefSection.remote),
-                    child: Stack(
-                      key: Key('sidebar-ref-hover-$name'),
-                      clipBehavior: Clip.none,
-                      fit: StackFit.expand,
-                      children: [
-                        Positioned(
-                          left: -5,
-                          top: 0,
-                          right: 0,
-                          bottom: 0,
-                          child: DecoratedBox(
-                            key: Key('sidebar-ref-hover-background-$name'),
-                            decoration: BoxDecoration(
-                              color: hovered
-                                  ? _palette.selectedRow
-                                  : Colors.transparent,
-                              border: Border(
-                                left: BorderSide(
-                                  color: hovered
-                                      ? iconColor
-                                      : Colors.transparent,
-                                  width: hovered ? 2 : 0,
+                  // The row keeps its hover look while its context menu is
+                  // open or the keyboard cursor sits on it, so the highlight
+                  // doesn't die under the popup or between key presses.
+                  builder: (pointerHovered) {
+                    final pointerActive =
+                        pointerHovered || _contextMenuRef == name;
+                    final cursorHere = _sidebarCursor == (section, name);
+                    final hovered = pointerActive || cursorHere;
+                    // The cursor keeps its shape but drains to gray while the
+                    // keyboard lives in the timeline, so only one pane's
+                    // selection carries color at a time.
+                    final sidebarFocused = _sidebarFocusNode.hasFocus;
+                    final cursorFill = sidebarFocused
+                        ? _palette.selectedRow
+                        : _achromatic(_palette.selectedRow);
+                    final cursorEdge = sidebarFocused
+                        ? iconColor
+                        : _achromatic(iconColor);
+                    return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      // Double-clicks are detected by hand: an onDoubleTap
+                      // recognizer would hold the gesture arena and delay every
+                      // single click on the row and its pull button by 300 ms.
+                      onTap: () {
+                        // A click moves the keyboard cursor here too, so the
+                        // arrows continue from the clicked row.
+                        setState(() => _sidebarCursor = (section, name));
+                        _sidebarFocusNode.requestFocus();
+                        if (pullState == null) {
+                          _selectRef(
+                            name,
+                            remote: section == _RefSection.remote,
+                            focusTimeline: false,
+                          );
+                        } else {
+                          _tapRemoteRow(name);
+                        }
+                      },
+                      // HEAD is excluded: git refuses to delete the checked-out
+                      // branch, so the menu never offers it.
+                      onSecondaryTapDown:
+                          section == _RefSection.local && !current
+                          ? (details) => unawaited(
+                              _showLocalBranchMenu(
+                                details.globalPosition,
+                                name,
+                              ),
+                            )
+                          : null,
+                      child: Stack(
+                        key: Key('sidebar-ref-hover-$name'),
+                        clipBehavior: Clip.none,
+                        fit: StackFit.expand,
+                        children: [
+                          Positioned(
+                            left: -5,
+                            top: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: DecoratedBox(
+                              key: Key('sidebar-ref-hover-background-$name'),
+                              decoration: BoxDecoration(
+                                // Selection paints like the timeline's
+                                // selected row, a plain hover like the
+                                // timeline's hover chip.
+                                color: cursorHere
+                                    ? cursorFill
+                                    : pointerActive
+                                    ? _palette.neutralChip.withValues(
+                                        alpha: 0.48,
+                                      )
+                                    : Colors.transparent,
+                                border: Border(
+                                  left: BorderSide(
+                                    color: cursorHere
+                                        ? cursorEdge
+                                        : Colors.transparent,
+                                    width: cursorHere ? 2 : 0,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                        Row(
-                          children: [
-                            Icon(icon, size: 13, color: iconColor),
-                            const SizedBox(width: 7),
-                            Expanded(
-                              child: KeyedSubtree(
-                                key: Key('sidebar-ref-$name'),
-                                child: buildContent(hovered),
+                          Row(
+                            children: [
+                              Icon(icon, size: 13, color: iconColor),
+                              const SizedBox(width: 7),
+                              Expanded(
+                                child: KeyedSubtree(
+                                  key: Key('sidebar-ref-$name'),
+                                  child: buildContent(hovered),
+                                ),
+                              ),
+                            ],
+                          ),
+                          // Overlaid on the row's right edge so the ↓ button
+                          // never widens the row when it appears on hover.
+                          if (pullState != null)
+                            Positioned(
+                              right: 2,
+                              top: 0,
+                              bottom: 0,
+                              child: Center(
+                                child: _pullingRemote == name
+                                    ? SizedBox(
+                                        key: Key('sidebar-pull-busy-$name'),
+                                        width: 22,
+                                        height: 22,
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(4),
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: _palette.interactive,
+                                          ),
+                                        ),
+                                      )
+                                    : RemotePullMenuButton(
+                                        remoteBranch: name,
+                                        state: pullState,
+                                        controller:
+                                            _pullMenuControllers[name] ??=
+                                                MenuController(),
+                                        visible: hovered,
+                                        onPull: () => unawaited(
+                                          _runRemotePull(name, pullState),
+                                        ),
+                                        onCheckout: () => unawaited(
+                                          _runRemoteCheckout(name, pullState),
+                                        ),
+                                        onCompare: () =>
+                                            unawaited(_selectComparison(name)),
+                                      ),
                               ),
                             ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
+                        ],
+                      ),
+                    );
+                  },
                 ),
               ),
           ],
@@ -3511,7 +4422,13 @@ class _TimelineScreenState extends State<TimelineScreen>
       ),
     );
 
-    final row = buildRow();
+    // Named rows carry a GlobalKey so the keyboard cursor can scroll to them.
+    final row = name == null
+        ? buildRow()
+        : KeyedSubtree(
+            key: _sidebarRowKeys['${section.name}:$name'] ??= GlobalKey(),
+            child: buildRow(),
+          );
     if (!current) return row;
     return DragTarget<GitCommit>(
       onWillAcceptWithDetails: (details) => _canCherryPick(details.data),
@@ -3533,7 +4450,18 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   Widget _statusBar() => _normalStatusBar();
 
-  Widget _normalStatusBar() => Container(
+  Widget _normalStatusBar() => LayoutBuilder(
+    builder: (context, constraints) {
+      _statusBarWidth = constraints.maxWidth;
+      return _normalStatusBarContent();
+    },
+  );
+
+  /// The status bar's own width, so the profile chip can shed its email on a
+  /// narrow window without a LayoutBuilder between Stack and Positioned.
+  double _statusBarWidth = 0;
+
+  Widget _normalStatusBarContent() => Container(
     height: 29,
     decoration: BoxDecoration(
       color: _palette.surface,
@@ -3641,6 +4569,27 @@ class _TimelineScreenState extends State<TimelineScreen>
                   ),
                 );
               },
+            ),
+          ),
+        ),
+        // The commit identity sits on the far right, out of the way of the
+        // legend and the selected commit's own readouts.
+        Positioned(
+          right: 12,
+          top: 0,
+          bottom: 0,
+          child: Align(
+            child: KeyedSubtree(
+              key: _profileChipKey,
+              child: CommitProfileChip(
+                state: _commitIdentity,
+                // A narrow window keeps the name and drops the address,
+                // which the tooltip still carries.
+                showEmail: _statusBarWidth >= 900,
+                maxWidth: math.max(120, _statusBarWidth * 0.4),
+                warningColor: _behind,
+                onPressed: () => unawaited(_openCommitProfileMenu()),
+              ),
             ),
           ),
         ),
@@ -5016,7 +5965,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           behavior: HitTestBehavior.opaque,
           onTap: () => _select(index),
           child: ColoredBox(
-            color: selected ? _palette.selectedRow : _palette.background,
+            color: selected ? _timelineSelectionColor : _palette.background,
             child: _dateRowContent(index, entry, graphWidth),
           ),
         ),
@@ -5131,7 +6080,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         : _previewPurple,
     outgoingRailColor: outgoingRailColor,
     backgroundColor: _palette.background,
-    selectedRowColor: _palette.selectedRow,
+    selectedRowColor: _timelineSelectionColor,
   );
 
   Widget _rowContent(
@@ -5337,7 +6286,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                   bottom: 0,
                   child: ColoredBox(
                     key: Key('selection-band-${commit.sha}'),
-                    color: _palette.selectedRow,
+                    color: _timelineSelectionColor,
                   ),
                 ),
               Row(
@@ -8402,7 +9351,7 @@ class _ShowDiffButton extends StatelessWidget {
                 ),
               ),
               Text(
-                '⌘D',
+                shortcutLabel('D'),
                 style: TextStyle(
                   color: ink.withValues(alpha: 0.75),
                   fontSize: shortcutSize,

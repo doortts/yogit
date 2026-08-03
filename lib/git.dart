@@ -130,6 +130,31 @@ Future<File> resolveWorkingTreeFile(
   return File(resolved);
 }
 
+/// Total size of the regular files under [path] — what deleting the directory
+/// would free.
+Future<int> directorySizeBytes(String path) async {
+  var total = 0;
+  await for (final entity in Directory(
+    path,
+  ).list(recursive: true, followLinks: false)) {
+    if (entity is File) total += (await entity.stat()).size;
+  }
+  return total;
+}
+
+/// `1536` reads as `1.5 KB`.
+String byteSizeLabel(int bytes) {
+  if (bytes < 1024) return '$bytes B';
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  var value = bytes / 1024;
+  var unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return '${value.toStringAsFixed(value >= 10 ? 0 : 1)} ${units[unit]}';
+}
+
 class GitRepositoryException implements Exception {
   const GitRepositoryException(this.path, this.message);
 
@@ -1677,6 +1702,60 @@ class BranchAheadBehind {
 
 enum FetchOriginResult { updated, unchanged, noOrigin }
 
+enum RemotePullKind { noLocal, fastForward, diverged, upToDate }
+
+/// What selecting a remote branch can do to its local counterpart.
+class RemotePullState {
+  const RemotePullState({
+    required this.remote,
+    required this.localBranch,
+    required this.kind,
+    this.ahead = 0,
+    this.behind = 0,
+    this.checkedOut = false,
+  });
+
+  final String remote;
+  final String localBranch;
+  final RemotePullKind kind;
+
+  /// Commits only the remote has — what a pull would bring in.
+  final int ahead;
+
+  /// Commits only the local branch has.
+  final int behind;
+  final bool checkedOut;
+}
+
+/// Null when [remoteBranch] does not belong to a known remote.
+RemotePullState? remotePullState(RepoRefs refs, String remoteBranch) {
+  final split = splitRemoteBranchName(remoteBranch, refs.remoteNames);
+  if (split == null) return null;
+  final localBranch = split.branch;
+  if (!refs.local.contains(localBranch)) {
+    return RemotePullState(
+      remote: split.remote,
+      localBranch: localBranch,
+      kind: RemotePullKind.noLocal,
+    );
+  }
+  final divergence = refs.remoteAheadBehind[remoteBranch];
+  final ahead = divergence?.ahead ?? 0;
+  final behind = divergence?.behind ?? 0;
+  return RemotePullState(
+    remote: split.remote,
+    localBranch: localBranch,
+    kind: ahead == 0
+        ? RemotePullKind.upToDate
+        : behind == 0
+        ? RemotePullKind.fastForward
+        : RemotePullKind.diverged,
+    ahead: ahead,
+    behind: behind,
+    checkedOut: refs.current == localBranch,
+  );
+}
+
 String? resolveBaseBranch(RepoRefs refs, String? savedBranch) {
   if (savedBranch != null && refs.local.contains(savedBranch)) {
     return savedBranch;
@@ -2275,7 +2354,8 @@ class GitRepository implements FullDiffRepository {
     await _run(['branch', '-D', branch]);
   }
 
-  Future<String?> _branchWorktreePath(String branch) async {
+  /// The worktree that has [branch] checked out, or null.
+  Future<String?> branchWorktreePath(String branch) async {
     final output = await _run(['worktree', 'list', '--porcelain']);
     String? path;
     for (final line in output.split('\n')) {
@@ -2309,7 +2389,7 @@ class GitRepository implements FullDiffRepository {
       await _run(['reset', '--hard', next]);
       return;
     }
-    final worktreePath = await _branchWorktreePath(branch);
+    final worktreePath = await branchWorktreePath(branch);
     if (worktreePath != null) {
       throw GitRepositoryException(
         branch,
@@ -3301,6 +3381,103 @@ class GitRepository implements FullDiffRepository {
     return result.stdout.toString().trim().isEmpty
         ? FetchOriginResult.unchanged
         : FetchOriginResult.updated;
+  }
+
+  /// Fast-forwards the local counterpart of `remote/branch`. The checked-out
+  /// branch needs a real pull; any other branch fast-forwards in place with a
+  /// fetch refspec, without touching the working tree.
+  Future<void> pullRemoteBranch(
+    String remote,
+    String branch, {
+    required bool checkedOut,
+  }) => _runWithoutPrompts([
+    '-c',
+    'credential.interactive=never',
+    if (checkedOut) ...[
+      'pull',
+      '--ff-only',
+      remote,
+      branch,
+    ] else ...[
+      'fetch',
+      remote,
+      '$branch:$branch',
+    ],
+  ]);
+
+  Future<void> checkoutRemoteBranch(
+    String remote,
+    String branch, {
+    required bool createLocal,
+  }) => _runWithoutPrompts([
+    'switch',
+    if (createLocal) ...[
+      '-c',
+      branch,
+      '--track',
+      '$remote/$branch',
+    ] else
+      branch,
+  ]);
+
+  /// Deletes a local branch outright. Git itself refuses while the branch is
+  /// checked out here or in another worktree, so that guard lives with it.
+  Future<void> deleteLocalBranch(String branch) =>
+      _run(['branch', '-D', branch]);
+
+  /// Switches the checkout to an existing local branch.
+  Future<void> checkoutLocalBranch(String branch) => _run(['switch', branch]);
+
+  /// Who this repository commits as right now, global config included. Empty
+  /// strings where Git has nothing, so the caller can warn instead of guessing.
+  Future<GitIdentity> loadCommitIdentity() async {
+    Future<String> read(String key) async {
+      final result = await runner(gitExecutable, [
+        'config',
+        '--get',
+        key,
+      ], workingDirectory: root);
+      return result.exitCode == 0 ? result.stdout.toString().trim() : '';
+    }
+
+    return GitIdentity(
+      name: await read('user.name'),
+      email: await read('user.email'),
+    );
+  }
+
+  /// Writes the identity into this repository's own config, so the CLI and
+  /// every other Git tool see the same author the app shows.
+  Future<void> setLocalCommitIdentity(GitIdentity identity) async {
+    await _run(['config', '--local', 'user.name', identity.name]);
+    await _run(['config', '--local', 'user.email', identity.email]);
+  }
+
+  /// Removes a worktree along with its directory, even when dirty.
+  Future<void> removeWorktree(String path) =>
+      _run(['worktree', 'remove', '--force', path]);
+
+  /// Like [_run], but with every interactive credential prompt disabled so a
+  /// network command fails instead of hanging the app on a hidden prompt.
+  Future<void> _runWithoutPrompts(List<String> arguments) async {
+    final result = await runner(
+      gitExecutable,
+      arguments,
+      workingDirectory: root,
+      environment: {
+        ...Platform.environment,
+        'GIT_TERMINAL_PROMPT': '0',
+        'GCM_INTERACTIVE': 'Never',
+      },
+    );
+    if (result.exitCode != 0) {
+      throw ProcessException(
+        gitExecutable,
+        arguments,
+        result.stderr.toString(),
+        result.exitCode,
+      );
+    }
   }
 
   /// The working tree row compares its base against the checkout, so it passes
