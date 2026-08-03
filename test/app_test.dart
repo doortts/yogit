@@ -13107,25 +13107,86 @@ void main() {
       ),
     );
   });
-  test('the exact commit time pads every field', () {
+  test('the exact commit time pads every field and drops this year', () {
     int stamp(DateTime time) => time.millisecondsSinceEpoch ~/ 1000;
+    final now = DateTime(2026, 8, 4, 3, 0, 0);
 
+    // This year needs no year: the month and day are enough.
     expect(
-      exactCommitTime(stamp(DateTime(2026, 7, 26, 14, 5, 9))),
-      '2026-07-26 14:05:09',
+      exactCommitTime(stamp(DateTime(2026, 7, 26, 14, 5, 9)), now: now),
+      '07-26 14:05:09',
     );
     // Single digits everywhere, and midnight stays 00 rather than 24 or 12.
     expect(
-      exactCommitTime(stamp(DateTime(2026, 1, 2, 0, 0, 0))),
-      '2026-01-02 00:00:00',
+      exactCommitTime(stamp(DateTime(2026, 1, 2, 0, 0, 0)), now: now),
+      '01-02 00:00:00',
     );
+    // Any other year keeps it, so the two never read as the same day.
     expect(
-      exactCommitTime(stamp(DateTime(2025, 12, 31, 23, 59, 59))),
+      exactCommitTime(stamp(DateTime(2025, 12, 31, 23, 59, 59)), now: now),
       '2025-12-31 23:59:59',
     );
     expect(
-      exactCommitTime(stamp(DateTime(2026, 3, 4, 9, 8, 7))),
-      '2026-03-04 09:08:07',
+      exactCommitTime(stamp(DateTime(2027, 3, 4, 9, 8, 7)), now: now),
+      '2027-03-04 09:08:07',
+    );
+  });
+
+  testWidgets('the status bar never truncates the profile address', (
+    tester,
+  ) async {
+    // Narrow enough that the chip and the stamp compete for the row.
+    await tester.binding.setSurfaceSize(const Size(900, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    const email = 'a-rather-long-address@example.navercorp.com';
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          runner:
+              (executable, arguments, {workingDirectory, environment}) async =>
+                  ProcessResult(
+                    1,
+                    0,
+                    arguments.contains('--symbolic-full-name')
+                        ? 'aaa\nrefs/heads/main\n'
+                        : arguments.first == 'config'
+                        ? (arguments.last == 'user.email' ? email : '채수원')
+                        : '',
+                    '',
+                  ),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // The whole address is laid out, not an ellipsis of it.
+    final rendered = tester.widgetList<Text>(
+      find.descendant(
+        of: find.byKey(const Key('commit-profile-chip')),
+        matching: find.byType(Text),
+      ),
+    );
+    expect(rendered.map((text) => text.data), contains(email));
+    for (final text in rendered) {
+      final painter = TextPainter(
+        text: TextSpan(text: text.data, style: text.style),
+        textDirection: TextDirection.ltr,
+        maxLines: 1,
+      )..layout();
+      expect(
+        painter.didExceedMaxLines,
+        isFalse,
+        reason: 'the chip must not clip ${text.data}',
+      );
+    }
+    final chipRect = tester.getRect(
+      find.byKey(const Key('commit-profile-chip')),
+    );
+    expect(
+      tester.getRect(find.byKey(const Key('status-timestamp'))).right,
+      lessThanOrEqualTo(chipRect.left),
     );
   });
 
@@ -14377,7 +14438,7 @@ void main() {
     expect(stampRect.left, greaterThanOrEqualTo(0));
   });
 
-  testWidgets('the status bar stamps the focused commit under DATE', (
+  testWidgets('the status bar stamps the focused commit under HASH', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -14394,8 +14455,8 @@ void main() {
     await tester.pumpWidget(
       app(
         FakeGitRepository(
-          (_, _) async => [commit('1', 'first commit', timestamp: stamp)],
-          workingTree: () async => workingTreeCommit('1'),
+          (_, _) async => [commit('1234567', 'first commit', timestamp: stamp)],
+          workingTree: () async => workingTreeCommit('1234567'),
         ),
         controller,
       ),
@@ -14406,14 +14467,13 @@ void main() {
         tester.widget<Text>(find.byKey(const Key('status-timestamp')));
     double statusLeft() =>
         tester.getRect(find.byKey(const Key('status-timestamp'))).left;
-    double dateHeaderLeft() =>
-        tester.getRect(find.byKey(const Key('time-header'))).left;
+    double shaLeft() => tester.getRect(find.text('1234567')).left;
     double chipLeft() =>
         tester.getRect(find.byKey(const Key('commit-profile-chip'))).left;
-    // The stamp sits under DATE, or as close to it as the profile chip allows:
-    // the date must never end up beneath the chip.
-    void expectStampPlacedForDate() {
-      expect(statusLeft(), lessThanOrEqualTo(dateHeaderLeft()));
+    // The stamp lines up with the sha it belongs to, and never ends up beneath
+    // the chip.
+    void expectStampPlacedForHash() {
+      expect(statusLeft(), moreOrLessEquals(shaLeft(), epsilon: 0.5));
       expect(
         tester.getRect(find.byKey(const Key('status-timestamp'))).right,
         lessThanOrEqualTo(chipLeft()),
@@ -14429,16 +14489,16 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
     expect(status().data, exactCommitTime(stamp));
-    expectStampPlacedForDate();
+    expectStampPlacedForHash();
 
-    // Resizing the columns keeps that relationship: the stamp tracks DATE
-    // until the chip stops it, and never crosses under the chip.
+    // Resizing the columns keeps that relationship: HASH does not move when it
+    // widens, so the stamp holds its column.
     await tester.drag(
       find.byKey(const Key('hash-resizer')),
       const Offset(30, 0),
     );
     await tester.pumpAndSettle();
-    expectStampPlacedForDate();
+    expectStampPlacedForHash();
 
     // The old right-hand rail label is gone.
     expect(find.textContaining('2px rail'), findsNothing);

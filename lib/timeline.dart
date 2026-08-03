@@ -976,7 +976,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// Where the Date column starts, so the status bar can line its stamp up with
   /// it. Written while the timeline lays out, read by the status bar built right
   /// after it in the same frame.
-  var _dateColumnLeft = 0.0;
+  var _hashColumnLeft = 0.0;
   var _commitAvailableWidth = 0.0;
   late double _previewWidth = widget.previewWidth;
   late double _previewHeight = widget.previewHeight;
@@ -4581,7 +4581,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           left: _sidebarWidth,
           top: 0,
           bottom: 0,
-          width: math.max(0, _dateColumnLeft - _sidebarWidth - 12),
+          width: math.max(0, _statusReadoutLeft - _sidebarWidth - 12),
           child: Align(
             alignment: Alignment.centerLeft,
             child: ValueListenableBuilder<int>(
@@ -4664,9 +4664,10 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// tooltip still carries.
   bool get _statusChipShowsEmail => _statusBarWidth >= 900;
 
-  /// The stamp's own width, measured from a sample: the format is fixed width
-  /// in a monospace face, so one sample stands for every value and the row
-  /// never jitters as the selection moves.
+  /// The stamp's own width, measured from the widest form it can take — a
+  /// commit from another year, which keeps its year. Measuring the widest form
+  /// rather than the live value keeps the row from jittering as the selection
+  /// moves between years.
   double get _statusStampWidth {
     final painter = TextPainter(
       text: const TextSpan(
@@ -4684,10 +4685,17 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// address cannot take the whole bar. Measuring means the stamp yields only
   /// the space the chip actually occupies.
   double _statusChipWidth() {
+    // Measured in the style the chip actually renders — inheriting the app's
+    // font, not the default one. Measuring in a narrower font made the chip's
+    // box too small and clipped the very address it was meant to show.
+    final chipTextStyle = DefaultTextStyle.of(
+      context,
+    ).style.copyWith(fontSize: 11);
     double textWidth(String value) {
       final painter = TextPainter(
-        text: TextSpan(text: value, style: const TextStyle(fontSize: 11)),
+        text: TextSpan(text: value, style: chipTextStyle),
         textDirection: TextDirection.ltr,
+        textScaler: MediaQuery.textScalerOf(context),
         maxLines: 1,
       )..layout();
       return painter.width;
@@ -4699,16 +4707,25 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (_statusChipShowsEmail && email.isNotEmpty) {
       width += 6 + textWidth(email);
     }
-    return math.min(width, math.max(120, _statusBarWidth * 0.4));
+    // No cap: an address the user needs to read is worth more than the stamp's
+    // preferred column, and clipping it to a share of the bar hid the very
+    // thing the chip exists to show. A few pixels of slack because a box
+    // measured to the exact glyph advance still ellipsizes when rounding goes
+    // the wrong way.
+    return width + 4;
   }
 
-  /// Where the stamp-and-identity row starts. Normally the DATE column, but
-  /// pulled left when there is not room for the whole stamp plus a usable chip
-  /// — the date is the thing that must stay readable, so the chip yields.
+  /// Where the stamp-and-identity row starts: under the sha the stamp belongs
+  /// to, indented by the same 9px the column pads its text by. It is pulled
+  /// left only when there is no room for the whole stamp plus a usable chip —
+  /// the date is the thing that must stay readable, so the chip yields.
   double get _statusReadoutLeft {
     final rightmost =
         _statusBarWidth - 12 - _statusChipWidth() - 8 - _statusStampWidth;
-    return math.max(0, math.min(_dateColumnLeft, rightmost));
+    return math.max(
+      0,
+      math.min(_hashColumnLeft + _railedColumnTextInset, rightmost),
+    );
   }
 
   Widget _legend(String label, Widget dot) => Padding(
@@ -4747,8 +4764,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         'graph' => graphWidth,
         _ => _w(column),
       };
-      _dateColumnLeft =
-          _sidebarWidth + _w('refs') + graphWidth + _w('hash') + commitWidth;
+      _hashColumnLeft = _sidebarWidth + _w('refs') + graphWidth;
       return ColoredBox(
         color: _palette.background,
         child: Column(
@@ -5716,6 +5732,12 @@ class _TimelineScreenState extends State<TimelineScreen>
     await rebaseSession?.dispose();
   }
 
+  /// The horizontal padding a timeline column pads its text by, shared so the
+  /// status bar can line up under a column's text instead of its edge. A cell
+  /// with a branch rail down its left edge indents by two more.
+  static const _columnTextInset = 9.0;
+  static const _railedColumnTextInset = 11.0;
+
   Widget _header(String column, double width) => SizedBox(
     key: Key('$column-header'),
     width: width,
@@ -5730,7 +5752,9 @@ class _TimelineScreenState extends State<TimelineScreen>
                   ? () => _hideColumn(column)
                   : null,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: _columnTextInset,
+                ),
                 decoration: BoxDecoration(
                   color: _palette.panel,
                   border: Border(
@@ -7003,7 +7027,10 @@ class _TimelineScreenState extends State<TimelineScreen>
   Widget _cell(double width, Widget child, {Color? leftBorder, Key? ruleKey}) {
     final cell = Container(
       width: width,
-      padding: EdgeInsets.only(left: leftBorder == null ? 9 : 11, right: 9),
+      padding: EdgeInsets.only(
+        left: leftBorder == null ? _columnTextInset : _railedColumnTextInset,
+        right: _columnTextInset,
+      ),
       alignment: Alignment.centerLeft,
       child: child,
     );
@@ -10408,11 +10435,14 @@ class _LegendDotPainter extends CustomPainter {
 };
 
 /// The commit's own moment, local and zero-padded, for the places where "2 hours
-/// ago" is not precise enough.
-String exactCommitTime(int timestamp) {
+/// ago" is not precise enough. `07-26 14:05:09` this year, and
+/// `2025-12-31 23:59:59` any other — the year only earns its space when it is
+/// not the obvious one.
+String exactCommitTime(int timestamp, {DateTime? now}) {
   final time = DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
   String pad(int value) => value.toString().padLeft(2, '0');
-  return '${time.year}-${pad(time.month)}-${pad(time.day)} '
+  final year = time.year == (now ?? DateTime.now()).year ? '' : '${time.year}-';
+  return '$year${pad(time.month)}-${pad(time.day)} '
       '${pad(time.hour)}:${pad(time.minute)}:${pad(time.second)}';
 }
 

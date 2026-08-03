@@ -442,7 +442,12 @@ class _CommitProfileChipState extends State<CommitProfileChip> {
                     ),
                     if (showsLabel) ...[
                       const SizedBox(width: 6),
-                      Flexible(
+                      // Bounded rather than flexible: two Flexible children
+                      // split the row's spare width evenly, which left the
+                      // address with half of it and clipped the part the chip
+                      // exists to show.
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 120),
                         child: Text(
                           state.label,
                           maxLines: 1,
