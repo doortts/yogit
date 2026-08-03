@@ -11,6 +11,7 @@ import 'full_diff_model.dart';
 import 'git.dart';
 import 'timeline_theme.dart';
 import 'window_frame.dart';
+import 'yogit_alert.dart';
 
 enum BranchPreviewMode {
   merge,
@@ -1534,14 +1535,23 @@ class _CommitProfileDialogState extends State<_CommitProfileDialog> {
   );
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    backgroundColor: const Color(0xFF1D2029),
-    title: Text(
-      widget.isNew ? '프로필 추가' : '프로필 수정',
-      style: const TextStyle(color: Color(0xFFE8EAF2), fontSize: 15),
-    ),
-    content: SizedBox(
-      width: 360,
+  Widget build(BuildContext context) => YogitAlert(
+    wide: true,
+    title: widget.isNew ? '프로필을 추가할까요?' : '프로필을 수정할까요?',
+    confirmLabel: '저장',
+    confirmKey: const Key('commit-profile-save'),
+    // The form is the alert's body, so an input dialog keeps the same shell
+    // and the same button row as every confirmation.
+    onConfirm: _email.text.trim().isEmpty
+        ? null
+        : () => CommitProfile(
+            label: _label.text.trim(),
+            name: _name.text.trim(),
+            email: _email.text.trim(),
+            color: _color,
+          ),
+    body: SizedBox(
+      width: double.infinity,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1605,27 +1615,6 @@ class _CommitProfileDialogState extends State<_CommitProfileDialog> {
         ],
       ),
     ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('취소'),
-      ),
-      FilledButton(
-        key: const Key('commit-profile-save'),
-        onPressed: _email.text.trim().isEmpty
-            ? null
-            : () => Navigator.pop(
-                context,
-                CommitProfile(
-                  label: _label.text.trim(),
-                  name: _name.text.trim(),
-                  email: _email.text.trim(),
-                  color: _color,
-                ),
-              ),
-        child: const Text('저장'),
-      ),
-    ],
   );
 }
 

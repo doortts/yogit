@@ -32,6 +32,7 @@ import 'timeline_theme.dart';
 import 'typography.dart';
 import 'vim_navigation.dart';
 import 'window_frame.dart';
+import 'yogit_alert.dart';
 
 const _hash = Color(0xFFEF6C63);
 const _deleted = Color(0xFFF29AB2);
@@ -1133,23 +1134,15 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
     if (signature == _localSignature || signature == _declinedSignature) return;
     _localChangePromptOpen = true;
-    final accepted = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('저장소가 바뀌었습니다'),
-        content: const Text('앱 밖에서 HEAD나 브랜치가 변경되었습니다. 새로 읽어올까요?'),
-        actions: [
-          TextButton(
-            key: const Key('local-change-dismiss'),
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('나중에'),
-          ),
-          FilledButton(
-            key: const Key('local-change-refresh'),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('새로고침'),
-          ),
-        ],
+    final accepted = await showYogitAlert<bool>(
+      context,
+      const YogitAlert(
+        title: '저장소가 바뀌었습니다',
+        message: '앱 밖에서 HEAD나 브랜치가 변경되었습니다. 새로 읽어올까요?',
+        cancelLabel: '나중에',
+        cancelKey: Key('local-change-dismiss'),
+        confirmLabel: '새로고침',
+        confirmKey: Key('local-change-refresh'),
       ),
     );
     if (!mounted) return;
@@ -2326,31 +2319,16 @@ class _TimelineScreenState extends State<TimelineScreen>
     RemotePullState state,
   ) async {
     if (_pullingRemote != null || _branchApplyBusy) return;
-    final approved = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('로컬로 Pull'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(remoteBranch),
-            const SizedBox(height: 6),
-            Text('로컬 ${state.localBranch}보다 ${state.ahead}개 커밋 앞서 있습니다.'),
-            const Text('fast-forward로 받아올 수 있습니다.'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('취소'),
-          ),
-          FilledButton(
-            key: const Key('remote-pull-confirm'),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Pull'),
-          ),
-        ],
+    final approved = await showYogitAlert<bool>(
+      context,
+      YogitAlert(
+        title: '로컬로 Pull할까요?',
+        message: remoteBranch,
+        detail:
+            '로컬 ${state.localBranch}보다 ${state.ahead}개 커밋 앞서 있습니다. '
+            'fast-forward로 받아올 수 있습니다.',
+        confirmLabel: 'Pull',
+        confirmKey: const Key('remote-pull-confirm'),
       ),
     );
     if (approved == true) await _runRemotePull(remoteBranch, state);
@@ -3358,31 +3336,14 @@ class _TimelineScreenState extends State<TimelineScreen>
   Future<void> _confirmCherryPick(GitCommit commit) async {
     final current = _refs.current;
     if (current == null || !_canCherryPick(commit)) return;
-    final approved = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('현재 브랜치로 체리픽'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(commit.sha),
-            const SizedBox(height: 6),
-            Text(commit.subject),
-            const SizedBox(height: 6),
-            Text('→ $current'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('취소'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('체리픽'),
-          ),
-        ],
+    final approved = await showYogitAlert<bool>(
+      context,
+      YogitAlert(
+        title: '이 커밋을 체리픽할까요?',
+        message: commit.subject,
+        body: YogitAlertBlock([commit.sha, '→ $current']),
+        confirmLabel: '체리픽',
+        confirmKey: const Key('cherry-pick-confirm'),
       ),
     );
     if (approved == true) await _runCherryPick(commit.sha);
@@ -3455,21 +3416,14 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   Future<void> _confirmAbortCherryPick() async {
-    final approved = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('체리픽을 중단할까요?'),
-        content: const Text('체리픽을 시작하기 전 상태로 되돌립니다.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('취소'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('체리픽 중단'),
-          ),
-        ],
+    final approved = await showYogitAlert<bool>(
+      context,
+      const YogitAlert(
+        title: '체리픽을 중단할까요?',
+        message: '체리픽을 시작하기 전 상태로 되돌립니다.',
+        role: YogitAlertRole.destructive,
+        confirmLabel: '중단',
+        confirmKey: Key('abort-cherry-pick-confirm'),
       ),
     );
     if (approved != true || !mounted) return;
@@ -3523,22 +3477,15 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   Future<void> _confirmDeleteBranch(String branch) async {
-    final approved = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('브랜치 삭제'),
-        content: Text('$branch 브랜치를 삭제합니다. 병합되지 않은 커밋도 함께 사라집니다.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('취소'),
-          ),
-          FilledButton(
-            key: const Key('delete-branch-confirm'),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('삭제'),
-          ),
-        ],
+    final approved = await showYogitAlert<bool>(
+      context,
+      YogitAlert(
+        title: '브랜치를 삭제할까요?',
+        message: branch,
+        detail: '병합되지 않은 커밋도 함께 사라집니다.',
+        role: YogitAlertRole.destructive,
+        confirmLabel: '삭제',
+        confirmKey: const Key('delete-branch-confirm'),
       ),
     );
     if (approved != true || !mounted) return;
@@ -3582,36 +3529,16 @@ class _TimelineScreenState extends State<TimelineScreen>
       );
       return;
     }
-    final approved = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('워크트리 함께 삭제'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('$branch 브랜치는 아래 워크트리에 체크아웃되어 있습니다.'),
-            const SizedBox(height: 6),
-            Text(shortenHomePath(path!)),
-            const SizedBox(height: 6),
-            Text(
-              size == null
-                  ? '워크트리와 브랜치를 모두 삭제할까요?'
-                  : '함께 삭제하면 ${byteSizeLabel(size)}를 확보합니다.',
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('취소'),
-          ),
-          FilledButton(
-            key: const Key('delete-worktree-confirm'),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('워크트리와 브랜치 삭제'),
-          ),
-        ],
+    final approved = await showYogitAlert<bool>(
+      context,
+      YogitAlert(
+        title: '워크트리도 함께 삭제할까요?',
+        message: '$branch 브랜치는 아래 워크트리에 체크아웃되어 있습니다.',
+        body: YogitAlertBlock([shortenHomePath(path)]),
+        detail: size == null ? null : '함께 삭제하면 ${byteSizeLabel(size)}를 확보합니다.',
+        role: YogitAlertRole.destructive,
+        confirmLabel: '둘 다 삭제',
+        confirmKey: const Key('delete-worktree-confirm'),
       ),
     );
     if (approved != true || !mounted) return;
@@ -5059,28 +4986,19 @@ class _TimelineScreenState extends State<TimelineScreen>
     final merge = _branchPreviewMode == BranchPreviewMode.merge;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('${merge ? 'Merge' : 'Rebase'} 실제 적용'),
-        content: Text(
-          '기준 브랜치 ${comparison.baseRef}\n'
-          '${comparison.baseTip}\n\n'
-          '대상 브랜치 ${comparison.compareRef}\n'
-          '${comparison.compareTip}\n\n'
-          '로컬 ${target.localBranch} 브랜치만 변경합니다. '
-          '원격 추적 브랜치와 원격 저장소는 변경하지 않습니다.\n'
-          '완료 뒤 적용 전 SHA로 되돌릴 수 있습니다.',
-        ),
-        actions: [
-          TextButton(
-            autofocus: true,
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('취소'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text('${merge ? 'Merge' : 'Rebase'} 실제 적용'),
-          ),
-        ],
+      builder: (context) => YogitAlert(
+        wide: true,
+        title: '${merge ? 'Merge' : 'Rebase'}를 실제로 적용할까요?',
+        message:
+            '로컬 ${target.localBranch} 브랜치만 변경합니다. '
+            '원격 추적 브랜치와 원격 저장소는 그대로입니다.',
+        body: YogitAlertBlock([
+          '기준 ${comparison.baseRef}  ${comparison.baseTip}',
+          '대상 ${comparison.compareRef}  ${comparison.compareTip}',
+        ]),
+        detail: '완료 뒤 적용 전 SHA로 되돌릴 수 있습니다.',
+        confirmLabel: '적용',
+        confirmKey: const Key('branch-apply-confirm'),
       ),
     );
     if (confirmed == true && mounted) {
@@ -5193,22 +5111,16 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          '${result.mode == BranchApplyMode.merge ? 'Merge' : 'Rebase'} 이전 시점으로 되돌리기',
+      builder: (context) => YogitAlert(
+        wide: true,
+        title:
+            '${result.mode == BranchApplyMode.merge ? 'Merge' : 'Rebase'} 이전 시점으로 되돌릴까요?',
+        body: YogitAlertBlock(
+          _branchPreviewRollbackMessage(result).split('\n'),
         ),
-        content: Text(_branchPreviewRollbackMessage(result)),
-        actions: [
-          TextButton(
-            autofocus: true,
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('취소'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('되돌리기'),
-          ),
-        ],
+        role: YogitAlertRole.destructive,
+        confirmLabel: '되돌리기',
+        confirmKey: const Key('branch-rollback-confirm'),
       ),
     );
     if (confirmed != true || !mounted) return;

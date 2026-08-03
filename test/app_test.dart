@@ -3441,8 +3441,9 @@ void main() {
       await tester.pumpAndSettle();
 
       // The state comes first; nothing has run yet.
-      expect(find.text('로컬 lane보다 3개 커밋 앞서 있습니다.'), findsOneWidget);
-      expect(find.text('fast-forward로 받아올 수 있습니다.'), findsOneWidget);
+      // One paragraph now, laid out one sentence per line.
+      expect(find.textContaining('로컬 lane보다 3개 커밋 앞서 있습니다.'), findsOneWidget);
+      expect(find.textContaining('fast-forward로 받아올 수 있습니다.'), findsOneWidget);
       expect(calls, isEmpty);
 
       // Cancelling leaves the repository untouched.
@@ -4922,7 +4923,7 @@ void main() {
     await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
     await tester.tap(find.byKey(const Key('branch-preview-apply')));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Merge 실제 적용'));
+    await tester.tap(find.byKey(const Key('branch-apply-confirm')));
     await tester.pump();
     expect(
       tester
@@ -5280,12 +5281,12 @@ void main() {
     await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
     await tester.tap(find.byKey(const Key('branch-preview-apply')));
     await tester.pumpAndSettle();
-    expect(find.text('Merge 실제 적용'), findsWidgets);
-    expect(find.textContaining('원격 추적 브랜치와 원격 저장소는 변경하지 않습니다'), findsOneWidget);
+    expect(find.text('Merge를 실제로 적용할까요?'), findsOneWidget);
+    expect(find.textContaining('원격 추적 브랜치와 원격 저장소는 그대로입니다'), findsOneWidget);
     expect(find.textContaining('적용 전 SHA로 되돌릴 수'), findsOneWidget);
     expect(find.textContaining('main-tip'), findsWidgets);
     expect(find.textContaining('feature-tip'), findsWidgets);
-    await tester.tap(find.widgetWithText(FilledButton, 'Merge 실제 적용'));
+    await tester.tap(find.byKey(const Key('branch-apply-confirm')));
     await tester.pumpAndSettle();
 
     expect(find.text('Merge 이전 시점으로 되돌리기'), findsOneWidget);
@@ -5300,7 +5301,7 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('branch-preview-rollback')));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, '되돌리기'));
+    await tester.tap(find.byKey(const Key('branch-rollback-confirm')));
     await tester.pumpAndSettle();
 
     expect(restored, same(applied));
@@ -5380,7 +5381,7 @@ void main() {
     await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
     await tester.tap(find.byKey(const Key('branch-preview-apply')));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Rebase 실제 적용'));
+    await tester.tap(find.byKey(const Key('branch-apply-confirm')));
     await tester.pump();
 
     expect(find.byKey(const Key('rebase-apply-current-row')), findsOneWidget);
@@ -5621,8 +5622,8 @@ void main() {
     await tester.tap(find.byKey(const Key('branch-preview-apply')));
     await tester.pumpAndSettle();
     expect(find.textContaining('로컬 main 브랜치만 변경합니다'), findsOneWidget);
-    expect(find.textContaining('원격 추적 브랜치와 원격 저장소는 변경하지 않습니다'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilledButton, 'Merge 실제 적용'));
+    expect(find.textContaining('원격 추적 브랜치와 원격 저장소는 그대로입니다'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('branch-apply-confirm')));
     await tester.pumpAndSettle();
 
     expect(applied, isTrue);
@@ -5633,7 +5634,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('로컬 main을 main-tip으로 되돌립니다'), findsOneWidget);
     expect(find.textContaining('origin/feature는 변경하지 않습니다'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilledButton, '되돌리기'));
+    await tester.tap(find.byKey(const Key('branch-rollback-confirm')));
     await tester.pumpAndSettle();
     expect(restored, isTrue);
   });
@@ -5713,7 +5714,7 @@ void main() {
     await tester.tap(find.byKey(const Key('branch-preview-apply')));
     await tester.pumpAndSettle();
     expect(find.textContaining('로컬 feature 브랜치만 변경합니다'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilledButton, 'Rebase 실제 적용'));
+    await tester.tap(find.byKey(const Key('branch-apply-confirm')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 220));
     await tester.pumpAndSettle();
@@ -5727,7 +5728,7 @@ void main() {
     await tester.tap(find.byKey(const Key('branch-preview-rollback')));
     await tester.pumpAndSettle();
     expect(find.textContaining('적용 과정에서 만든 로컬 feature를 삭제합니다'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilledButton, '되돌리기'));
+    await tester.tap(find.byKey(const Key('branch-rollback-confirm')));
     await tester.pumpAndSettle();
     expect(restored, isTrue);
   });
