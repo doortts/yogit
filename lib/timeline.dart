@@ -864,6 +864,9 @@ class _TimelineScreenState extends State<TimelineScreen>
   var _mergePreviewBusy = false;
   Object? _mergePreviewError;
   final _mergeResolvedFiles = <String>{};
+  PreviewVerificationSession? _verificationSession;
+  PreviewVerification? _verification;
+  var _verificationSerial = 0;
   RebasePreviewSession? _rebasePreviewSession;
   RebasePreviewResult? _rebasePreview;
   var _rebasePreviewSerial = 0;
@@ -2861,8 +2864,11 @@ class _TimelineScreenState extends State<TimelineScreen>
       unawaited(_startRebasePreview());
     } else {
       _dropRebasePreview();
-      if (_comparison?.merge.status == MergeConflictStatus.conflicts) {
+      final comparison = _comparison;
+      if (comparison?.merge.status == MergeConflictStatus.conflicts) {
         unawaited(_startMergePreview());
+      } else if (comparison != null) {
+        _verifyMergePreview(comparison);
       }
     }
   }
@@ -2959,6 +2965,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       } else if (result.merge.status == MergeConflictStatus.conflicts) {
         unawaited(_startMergePreview());
       } else {
+        _verifyMergePreview(result);
         unawaited(_checkRebase(baseRef, compareRef, serial));
       }
     } catch (error) {
@@ -3075,6 +3082,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   void _dropMergePreview() {
+    _dropPreviewVerification();
     _mergePreviewSerial++;
     final session = _mergePreviewSession;
     _mergePreviewSession = null;
@@ -3083,6 +3091,81 @@ class _TimelineScreenState extends State<TimelineScreen>
     _mergePreviewError = null;
     _mergeResolvedFiles.clear();
     if (session != null) unawaited(session.dispose());
+  }
+
+  void _dropPreviewVerification() {
+    _verificationSerial++;
+    final session = _verificationSession;
+    _verificationSession = null;
+    _verification = null;
+    if (session != null) unawaited(session.dispose());
+  }
+
+  /// Runs the project's own analyzer over a clean preview result and shows the
+  /// outcome as a badge. [worktreePath] is a preview worktree that already holds
+  /// the result; without one the merge tree is materialized on its own.
+  Future<void> _startPreviewVerification({
+    String? worktreePath,
+    String? treeSha,
+    String? baseTip,
+  }) async {
+    _dropPreviewVerification();
+    if (!mounted) return;
+    final request = _verificationSerial;
+    final session = worktreePath != null
+        ? PreviewVerificationSession.worktree(
+            repository: widget.repository,
+            worktreePath: worktreePath,
+          )
+        : PreviewVerificationSession.tree(
+            repository: widget.repository,
+            treeSha: treeSha!,
+            baseTip: baseTip!,
+          );
+    _verificationSession = session;
+    setState(
+      () => _verification = const PreviewVerification(
+        status: PreviewVerificationStatus.running,
+      ),
+    );
+    try {
+      final result = await session.run();
+      if (mounted && request == _verificationSerial) {
+        setState(() => _verification = result);
+      }
+    } catch (error) {
+      if (mounted && request == _verificationSerial) {
+        setState(
+          // 세션 자체가 던진 예외는 병합 결과가 아니라 검증 환경의 문제다.
+          () => _verification = PreviewVerification(
+            status: PreviewVerificationStatus.unavailable,
+            errorLines: [error.toString()],
+          ),
+        );
+      }
+    } finally {
+      if (identical(session, _verificationSession)) _verificationSession = null;
+      await session.dispose();
+    }
+  }
+
+  /// Verifies a textually clean merge result. Nothing runs while the compared
+  /// branches only merge on paper, i.e. without a tree to check out.
+  void _verifyMergePreview(BranchComparisonResult comparison) {
+    final treeSha = _mergePreview?.treeSha ?? comparison.merge.treeSha;
+    if (_effectiveMergeStatus != MergeConflictStatus.clean || treeSha == null) {
+      return;
+    }
+    unawaited(
+      _startPreviewVerification(
+        // The resolved merge already sits in the preview worktree.
+        worktreePath: _mergePreview?.status == MergePreviewStatus.clean
+            ? _mergePreviewSession?.worktreePath
+            : null,
+        treeSha: treeSha,
+        baseTip: comparison.baseTip,
+      ),
+    );
   }
 
   Future<void> _startRebasePreview() async {
@@ -3223,6 +3306,10 @@ class _TimelineScreenState extends State<TimelineScreen>
     _scheduleRatchetUpdate();
     if (result.status == RebasePreviewStatus.clean) {
       _showFirstComparisonRow();
+      // The rebase already ran for real in the session's worktree.
+      if (session?.worktreePath case final worktreePath?) {
+        unawaited(_startPreviewVerification(worktreePath: worktreePath));
+      }
     } else if (result.status == RebasePreviewStatus.conflict) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final rowContext = _rebaseConflictRowContextKey.currentContext;
@@ -3263,6 +3350,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   void _dropRebasePreview() {
+    _dropPreviewVerification();
     _rebasePreviewSerial++;
     final session = _rebasePreviewSession;
     _rebasePreviewSession = null;
@@ -4842,6 +4930,37 @@ class _TimelineScreenState extends State<TimelineScreen>
         null => _comparison?.merge.status,
       };
 
+  /// The project check's outcome beside the conflict badge, or nothing at all
+  /// when there is no project to check. It informs; it never gates the apply.
+  Widget? _verificationBadge(
+    Widget Function(String value, {Color? color}) detail,
+  ) {
+    final verification = _verification;
+    final (label, color) = switch (verification?.status) {
+      null || PreviewVerificationStatus.skipped => (null, null),
+      PreviewVerificationStatus.running => ('검증 중', null),
+      PreviewVerificationStatus.passed => ('검증 통과', _success),
+      PreviewVerificationStatus.timedOut => ('검증 시간 초과', _behind),
+      // The check never ran, so this says nothing about the merge: no warning
+      // color, just the reason in the tooltip.
+      PreviewVerificationStatus.unavailable => ('검증 불가', null),
+      PreviewVerificationStatus.failed => (
+        [
+          '검증 실패',
+          ?verificationErrorLocation(verification!.firstError ?? ''),
+        ].join(' · '),
+        _behind,
+      ),
+    };
+    if (label == null) return null;
+    final badge = KeyedSubtree(
+      key: const Key('branch-preview-verification'),
+      child: detail(label, color: color),
+    );
+    final excerpt = verification!.errorLines.join('\n');
+    return excerpt.isEmpty ? badge : Tooltip(message: excerpt, child: badge);
+  }
+
   Widget _branchPreviewSummary() {
     final comparison = _comparison;
     final mergeMode = _branchPreviewMode == BranchPreviewMode.merge;
@@ -4888,6 +5007,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           details.addAll([
             detail('가상 커밋 1', color: _previewPurple),
             detail('충돌 없음', color: _success),
+            ?_verificationBadge(detail),
           ]);
         } else if (mergeStatus == MergeConflictStatus.conflicts) {
           final conflicts =
@@ -4914,6 +5034,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         details.addAll([
           detail('점선 이동 경로', color: _previewPurple),
           detail('실제 브랜치 변경 없음'),
+          ?_verificationBadge(detail),
         ]);
       }
     }
@@ -5129,6 +5250,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       if (!mounted || request != _branchApplySerial) return;
       final mergeSession = _mergePreviewSession;
       final rebaseSession = _rebasePreviewSession;
+      // The worktrees the verification reads go away with the sessions below.
+      _dropPreviewVerification();
       setState(() {
         _branchApplyStatus = BranchApplyStatus.applied;
         _branchApplyResult = result;
@@ -5162,9 +5285,13 @@ class _TimelineScreenState extends State<TimelineScreen>
         ? '${result.compareBranch}: 새 브랜치 → ${result.compareAfter}'
         : '${result.compareBranch}: ${result.compareBefore} → ${result.compareAfter}';
     final compareRef = _comparison?.compareRef;
-    return compareRef != null && _refs.remote.contains(compareRef)
-        ? '$local\n$compareRef: 변경 없음'
-        : local;
+    final remote = compareRef != null && _refs.remote.contains(compareRef)
+        ? '\n$compareRef: 변경 없음'
+        : '';
+    final head = result.headSwitched
+        ? '\n${result.baseBranch} 체크아웃 · 작업 트리가 Merge 결과입니다'
+        : '';
+    return '$local$remote$head';
   }
 
   String _branchPreviewRollbackMessage(BranchApplyResult result) {
@@ -5177,7 +5304,10 @@ class _TimelineScreenState extends State<TimelineScreen>
     final remote = compareRef != null && _refs.remote.contains(compareRef)
         ? '\n$compareRef는 변경하지 않습니다.'
         : '';
-    return '$local$remote\n원격 저장소는 변경하지 않습니다.';
+    final head = result.headSwitched
+        ? '\n되돌린 뒤에도 ${result.baseBranch}에 체크아웃된 상태로 남습니다.'
+        : '';
+    return '$local$remote$head\n원격 저장소는 변경하지 않습니다.';
   }
 
   Future<void> _confirmBranchPreviewRollback() async {
@@ -8310,6 +8440,8 @@ class _TimelineScreenState extends State<TimelineScreen>
         _previewDiffs.clear();
       });
       _showPreviewTop();
+      final comparison = _comparison;
+      if (comparison != null) _verifyMergePreview(comparison);
     } catch (error) {
       if (mounted) setState(() => _mergePreviewError = error);
     } finally {
@@ -8629,6 +8761,62 @@ class _TimelineScreenState extends State<TimelineScreen>
           ),
   );
 
+  /// Which side of a clean merge brought this result file in. Null outside the
+  /// clean merge preview, and without a merge base to measure our side against.
+  ({String label, bool bothSides})? _previewProvenance(
+    GitCommit commit,
+    GitFileChange file,
+  ) {
+    final comparison = _comparison;
+    if (comparison == null ||
+        _branchPreviewMode != BranchPreviewMode.merge ||
+        _effectiveMergeStatus != MergeConflictStatus.clean ||
+        !_usesBranchPreviewResult(commit)) {
+      return null;
+    }
+    final ours = comparison.merge.baseChangedFiles;
+    if (ours.isEmpty) return null;
+    if (ours.contains(file.path) || ours.contains(file.oldPath)) {
+      return (label: '양쪽 수정', bothSides: true);
+    }
+    return (
+      label: switch (file.status.isEmpty ? '' : file.status[0]) {
+        'D' => '브랜치에서 삭제',
+        'A' => '브랜치에서 추가',
+        'R' || 'C' => '브랜치에서 이름 변경',
+        _ => '브랜치에서 수정',
+      },
+      bothSides: false,
+    );
+  }
+
+  Widget _previewProvenanceChip(
+    String path,
+    ({String label, bool bothSides}) provenance,
+  ) {
+    final color = provenance.bothSides ? _previewConflict : _palette.muted;
+    return Container(
+      key: Key('preview-provenance-$path'),
+      margin: const EdgeInsets.only(left: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: provenance.bothSides
+            ? color.withValues(alpha: 0.16)
+            : _palette.raised,
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        provenance.label,
+        maxLines: 1,
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: provenance.bothSides ? FontWeight.w700 : FontWeight.w500,
+        ),
+      ),
+    );
+  }
+
   Widget _previewFileRow(GitCommit commit, GitFileChange file, bool selected) {
     final stats = [
       if ((file.additions ?? 0) > 0) '+${file.additions}',
@@ -8672,6 +8860,8 @@ class _TimelineScreenState extends State<TimelineScreen>
                   style: TextStyle(color: _palette.text, fontSize: 12),
                 ),
               ),
+              if (_previewProvenance(commit, file) case final provenance?)
+                _previewProvenanceChip(file.path, provenance),
               if (stats.isNotEmpty) ...[
                 const SizedBox(width: 8),
                 Text(

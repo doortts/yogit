@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -1250,6 +1251,130 @@ void main() {
     );
   });
 
+  test('merge apply checks the base branch out and undo keeps it', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    await _git(fixture.root, ['switch', 'feature']);
+    final repository = GitRepository(fixture.root.path);
+
+    final applied = await repository.applyMergePreview(
+      comparison: fixture.comparison,
+      treeSha: fixture.comparison.merge.treeSha!,
+    );
+
+    expect(applied.headSwitched, isTrue);
+    expect(
+      (await _git(fixture.root, ['branch', '--show-current'])).trim(),
+      'main',
+    );
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+      applied.baseAfter,
+    );
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'HEAD'])).trim(),
+      applied.baseAfter,
+    );
+    // The disk holds the merge result, the way `git merge` would have left it.
+    expect(File('${fixture.root.path}/feature.txt').existsSync(), isTrue);
+    expect(File('${fixture.root.path}/main.txt').existsSync(), isTrue);
+    expect(
+      (await _git(fixture.root, ['status', '--porcelain'])).trim(),
+      isEmpty,
+    );
+
+    await repository.restoreBranchApply(applied);
+
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+      fixture.comparison.baseTip,
+    );
+    expect(
+      (await _git(fixture.root, ['branch', '--show-current'])).trim(),
+      'main',
+    );
+    expect(File('${fixture.root.path}/feature.txt').existsSync(), isFalse);
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
+      fixture.comparison.compareTip,
+    );
+  });
+
+  test('merge apply refuses a dirty tree before it moves anything', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    await _git(fixture.root, ['switch', 'feature']);
+    await File('${fixture.root.path}/feature.txt').writeAsString('dirty\n');
+    final repository = GitRepository(fixture.root.path);
+
+    await expectLater(
+      repository.applyMergePreview(
+        comparison: fixture.comparison,
+        treeSha: fixture.comparison.merge.treeSha!,
+      ),
+      throwsA(
+        isA<GitRepositoryException>().having(
+          (error) => error.message,
+          'message',
+          contains('작업 트리와 인덱스가 깨끗해야'),
+        ),
+      ),
+    );
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+      fixture.comparison.baseTip,
+    );
+    expect(
+      (await _git(fixture.root, ['branch', '--show-current'])).trim(),
+      'feature',
+    );
+    expect(
+      await File('${fixture.root.path}/feature.txt').readAsString(),
+      'dirty\n',
+    );
+  });
+
+  test('merge apply rejects a base branch held by another worktree', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    await _git(fixture.root, ['switch', 'feature']);
+    final temporary = await Directory.systemTemp.createTemp(
+      'yogit_merge_apply_worktree_',
+    );
+    final worktreePath = temporary.path;
+    await temporary.delete();
+    await _git(fixture.root, ['worktree', 'add', worktreePath, 'main']);
+    addTearDown(() async {
+      await Process.run('git', [
+        'worktree',
+        'remove',
+        '--force',
+        worktreePath,
+      ], workingDirectory: fixture.root.path);
+      final directory = Directory(worktreePath);
+      if (await directory.exists()) await directory.delete(recursive: true);
+    });
+    final repository = GitRepository(fixture.root.path);
+
+    await expectLater(
+      repository.applyMergePreview(
+        comparison: fixture.comparison,
+        treeSha: fixture.comparison.merge.treeSha!,
+      ),
+      throwsA(
+        isA<GitRepositoryException>().having(
+          (error) => error.message,
+          'message',
+          contains('다른 worktree에서 체크아웃한 브랜치'),
+        ),
+      ),
+    );
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+      fixture.comparison.baseTip,
+    );
+  });
+
   test('remote merge preview updates only the local base', () async {
     final fixture = await _remoteBranchPreviewFixture();
     addTearDown(() => fixture.root.delete(recursive: true));
@@ -1673,6 +1798,279 @@ void main() {
       );
     },
   );
+
+  test('a clean merge names the files the base branch also changed', () async {
+    final root = await Directory.systemTemp.createTemp('yogit_provenance_');
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    final shared = [for (var line = 1; line <= 20; line++) 'line $line'];
+    await File(
+      '${root.path}/shared.txt',
+    ).writeAsString('${shared.join('\n')}\n');
+    await File('${root.path}/moved.txt').writeAsString('moved\n');
+    await File('${root.path}/gone.txt').writeAsString('gone\n');
+    await _git(root, ['add', '.']);
+    await _git(root, ['commit', '-m', 'base']);
+    await _git(root, ['switch', '-c', 'feature']);
+    await File(
+      '${root.path}/shared.txt',
+    ).writeAsString('${[...shared.take(19), 'feature tail'].join('\n')}\n');
+    await File('${root.path}/added.txt').writeAsString('added\n');
+    await _git(root, ['rm', '--quiet', 'gone.txt']);
+    await _git(root, ['add', '.']);
+    await _git(root, ['commit', '-m', 'feature']);
+    await _git(root, ['switch', 'main']);
+    await File(
+      '${root.path}/shared.txt',
+    ).writeAsString('${['main head', ...shared.skip(1)].join('\n')}\n');
+    await _git(root, ['mv', 'moved.txt', 'renamed.txt']);
+    await _git(root, ['commit', '-am', 'main']);
+
+    final comparison = await GitRepository(
+      root.path,
+    ).compareBranches('main', 'feature');
+
+    expect(comparison.merge.status, MergeConflictStatus.clean);
+    // A rename counts on both of its paths, so either end flags the file.
+    expect(comparison.merge.baseChangedFiles, {
+      'shared.txt',
+      'moved.txt',
+      'renamed.txt',
+    });
+    expect(
+      {
+        for (final file in comparison.merge.resultFiles)
+          file.path: file.status.substring(0, 1),
+      },
+      {'shared.txt': 'M', 'added.txt': 'A', 'gone.txt': 'D'},
+    );
+  });
+
+  test('a criss-cross merge counts every common ancestor', () async {
+    final root = await Directory.systemTemp.createTemp('yogit_crisscross_');
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    await File('${root.path}/x.txt').writeAsString('0\n');
+    await File('${root.path}/y.txt').writeAsString('0\n');
+    await _git(root, ['add', '.']);
+    await _git(root, ['commit', '-m', 'root']);
+    await _git(root, ['switch', '-c', 'feature']);
+    await File('${root.path}/y.txt').writeAsString('1\n');
+    await _git(root, ['commit', '-am', 'feature y']);
+    await _git(root, ['switch', 'main']);
+    await File('${root.path}/x.txt').writeAsString('1\n');
+    await _git(root, ['commit', '-am', 'main x']);
+    final mainX = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+    // Both sides merge the other, so they end up sharing two common ancestors.
+    await _git(root, ['merge', '--no-edit', 'feature']);
+    await _git(root, ['switch', 'feature']);
+    await _git(root, ['merge', '--no-edit', mainX]);
+
+    final comparison = await GitRepository(
+      root.path,
+    ).compareBranches('main', 'feature');
+
+    expect(comparison.mergeBases, hasLength(2));
+    expect(comparison.merge.status, MergeConflictStatus.clean);
+    // y.txt changed since one base, x.txt since the other; either base alone
+    // would name half of what main touched.
+    expect(comparison.merge.baseChangedFiles, {'x.txt', 'y.txt'});
+  });
+
+  test('preview verification analyzes the merge result worktree', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    await File('${fixture.root.path}/pubspec.yaml').writeAsString(
+      'name: sample\ndependencies:\n  flutter:\n    sdk: flutter\n',
+    );
+    final commands = <List<String>>[];
+    final trees = <List<String>>[];
+    final repository = GitRepository(
+      fixture.root.path,
+      processStarter: (executable, arguments, {workingDirectory}) async {
+        commands.add([executable, ...arguments]);
+        trees.add(
+          Directory(
+            workingDirectory!,
+          ).listSync().map((e) => e.uri.pathSegments.last).toList(),
+        );
+        return _FakeProcess();
+      },
+    );
+    final session = PreviewVerificationSession.tree(
+      repository: repository,
+      treeSha: fixture.comparison.merge.treeSha!,
+      baseTip: fixture.comparison.baseTip,
+    );
+    final worktree = await session.run().then((result) {
+      expect(result.status, PreviewVerificationStatus.passed);
+      return session.worktreePath!;
+    });
+    await session.dispose();
+
+    expect(commands, [
+      ['flutter', 'pub', 'get'],
+      ['flutter', 'analyze', '--no-pub'],
+    ]);
+    // Both branches' files, so the preview tree was checked out, not main's.
+    expect(trees.first, containsAll(['base.txt', 'main.txt', 'feature.txt']));
+    expect(Directory(worktree).existsSync(), isFalse);
+    expect(
+      (await _git(fixture.root, ['worktree', 'list'])).trim().split('\n'),
+      hasLength(1),
+    );
+  });
+
+  test('preview verification reports the analyzer findings it saw', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    await File(
+      '${fixture.root.path}/pubspec.yaml',
+    ).writeAsString('name: sample\n');
+    const output =
+        'Analyzing sample...\n\n'
+        "  error • Undefined name 'gone' • lib/settings.dart:780:12 • undefined_identifier\n"
+        '  error • Expected an identifier • lib/timeline.dart:12:3 • missing_identifier\n\n'
+        '2 issues found.\n';
+    final commands = <List<String>>[];
+    final repository = GitRepository(
+      fixture.root.path,
+      processStarter: (executable, arguments, {workingDirectory}) async {
+        commands.add([executable, ...arguments]);
+        return _FakeProcess(
+          exit: commands.length == 1 ? 0 : 1,
+          out: commands.length == 1 ? '' : output,
+        );
+      },
+    );
+    final session = PreviewVerificationSession.tree(
+      repository: repository,
+      treeSha: fixture.comparison.merge.treeSha!,
+      baseTip: fixture.comparison.baseTip,
+    );
+    addTearDown(session.dispose);
+
+    final result = await session.run();
+
+    expect(commands.first, ['dart', 'pub', 'get']);
+    expect(commands.last, ['dart', 'analyze']);
+    expect(result.status, PreviewVerificationStatus.failed);
+    expect(result.errorLines, hasLength(2));
+    expect(result.firstError, contains('settings.dart:780'));
+    expect(verificationErrorLocation(result.firstError!), 'settings.dart:780');
+  });
+
+  test('a failed pub get leaves the verification undecided', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    await File(
+      '${fixture.root.path}/pubspec.yaml',
+    ).writeAsString('name: sample\n');
+    final commands = <List<String>>[];
+    final repository = GitRepository(
+      fixture.root.path,
+      processStarter: (executable, arguments, {workingDirectory}) async {
+        commands.add([executable, ...arguments]);
+        return _FakeProcess(
+          exit: 69,
+          out: 'Got socket error trying to find package sample.\n',
+        );
+      },
+    );
+    final session = PreviewVerificationSession.tree(
+      repository: repository,
+      treeSha: fixture.comparison.merge.treeSha!,
+      baseTip: fixture.comparison.baseTip,
+    );
+    addTearDown(session.dispose);
+
+    final result = await session.run();
+
+    // The analyzer never got to say anything, so neither does the badge.
+    expect(commands, [
+      ['dart', 'pub', 'get'],
+    ]);
+    expect(result.status, PreviewVerificationStatus.unavailable);
+    expect(result.firstError, contains('socket error'));
+  });
+
+  test('preview verification skips a repository without a pubspec', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    var started = false;
+    final session = PreviewVerificationSession.tree(
+      repository: GitRepository(
+        fixture.root.path,
+        processStarter: (executable, arguments, {workingDirectory}) async {
+          started = true;
+          return _FakeProcess();
+        },
+      ),
+      treeSha: fixture.comparison.merge.treeSha!,
+      baseTip: fixture.comparison.baseTip,
+    );
+    addTearDown(session.dispose);
+
+    expect((await session.run()).status, PreviewVerificationStatus.skipped);
+    expect(started, isFalse);
+    expect(session.worktreePath, isNull);
+  });
+
+  test(
+    'cancelling preview verification kills it and drops its worktree',
+    () async {
+      final fixture = await _branchPreviewFixture();
+      addTearDown(() => fixture.root.delete(recursive: true));
+      await File(
+        '${fixture.root.path}/pubspec.yaml',
+      ).writeAsString('name: sample\n');
+      late PreviewVerificationSession session;
+      final processes = <_FakeProcess>[];
+      session = PreviewVerificationSession.tree(
+        repository: GitRepository(
+          fixture.root.path,
+          processStarter: (executable, arguments, {workingDirectory}) async {
+            final process = _FakeProcess();
+            processes.add(process);
+            // The pane closing mid-run: cancel while the first command is out.
+            await session.dispose();
+            return process;
+          },
+        ),
+        treeSha: fixture.comparison.merge.treeSha!,
+        baseTip: fixture.comparison.baseTip,
+      );
+      final worktree = await session.run().then((result) {
+        expect(result.status, PreviewVerificationStatus.skipped);
+        return session.worktreePath!;
+      });
+
+      expect(processes, hasLength(1));
+      expect(processes.single.killed, isTrue);
+      expect(Directory(worktree).existsSync(), isFalse);
+      expect(
+        (await _git(fixture.root, ['worktree', 'list'])).trim().split('\n'),
+        hasLength(1),
+      );
+    },
+  );
+
+  test('preview verification reports running out of time on its own', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    await File(
+      '${fixture.root.path}/pubspec.yaml',
+    ).writeAsString('name: sample\n');
+    final session = PreviewVerificationSession.tree(
+      repository: GitRepository(fixture.root.path),
+      treeSha: fixture.comparison.merge.treeSha!,
+      baseTip: fixture.comparison.baseTip,
+      timeout: Duration.zero,
+    );
+    addTearDown(session.dispose);
+
+    expect((await session.run()).status, PreviewVerificationStatus.timedOut);
+  });
 
   test('cherry-pick applies one commit and rejects a dirty worktree', () async {
     final root = await Directory.systemTemp.createTemp('yogit_cherrypick_');
@@ -3082,6 +3480,33 @@ Future<Color> _paintPixel(
     bytes.getUint8(offset + 1),
     bytes.getUint8(offset + 2),
   );
+}
+
+/// A finished process, so verification tests never spawn a real analyzer.
+class _FakeProcess implements Process {
+  _FakeProcess({this.exit = 0, this.out = ''});
+
+  final int exit;
+  final String out;
+  var killed = false;
+
+  @override
+  Future<int> get exitCode async => exit;
+
+  @override
+  Stream<List<int>> get stdout => Stream.value(utf8.encode(out));
+
+  @override
+  Stream<List<int>> get stderr => const Stream.empty();
+
+  @override
+  IOSink get stdin => throw UnsupportedError('stdin');
+
+  @override
+  int get pid => 1;
+
+  @override
+  bool kill([ProcessSignal signal = ProcessSignal.sigterm]) => killed = true;
 }
 
 Future<String> _git(Directory root, List<String> args) async {

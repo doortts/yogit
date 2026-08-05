@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -31,6 +32,25 @@ typedef RawCommandRunner =
       List<String> arguments, {
       String? workingDirectory,
     });
+
+/// Starts a long-running command whose output streams in and which may have to
+/// be killed, unlike the one-shot [CommandRunner] calls.
+typedef ProcessStarter =
+    Future<Process> Function(
+      String executable,
+      List<String> arguments, {
+      String? workingDirectory,
+    });
+
+Future<Process> startProcess(
+  String executable,
+  List<String> arguments, {
+  String? workingDirectory,
+}) => Process.start(
+  resolveExecutable(executable),
+  arguments,
+  workingDirectory: workingDirectory,
+);
 
 Future<ProcessResult> runRawProcess(
   String executable,
@@ -355,6 +375,7 @@ class MergeConflictCheck {
     this.files = const [],
     this.treeSha,
     this.resultFiles = const [],
+    this.baseChangedFiles = const {},
     this.error,
   });
 
@@ -362,7 +383,204 @@ class MergeConflictCheck {
   final List<String> files;
   final String? treeSha;
   final List<GitFileChange> resultFiles;
+
+  /// Paths the base branch itself changed since a merge base, so a result file
+  /// both sides touched can say so. Empty without a merge base, and for
+  /// conflicting or failed checks. [resultFiles] is a base tip → result diff, so
+  /// every file in it was touched by the compared branch already.
+  final Set<String> baseChangedFiles;
   final String? error;
+}
+
+enum PreviewVerificationStatus {
+  running,
+  passed,
+  failed,
+
+  /// The check never got to run — a preparation step such as `pub get` failed,
+  /// which says nothing about the merge itself.
+  unavailable,
+  timedOut,
+  skipped,
+}
+
+class PreviewVerification {
+  const PreviewVerification({required this.status, this.errorLines = const []});
+
+  final PreviewVerificationStatus status;
+  final List<String> errorLines;
+
+  String? get firstError => errorLines.isEmpty ? null : errorLines.first;
+}
+
+/// The analyzer's own findings, or the raw first lines when the output is not
+/// the usual `severity • message • file:line • rule` list.
+List<String> verificationErrorLines(String output) {
+  final lines = output
+      .split('\n')
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty);
+  final findings = lines.where((line) => line.contains('•'));
+  return (findings.isEmpty ? lines : findings).take(10).toList();
+}
+
+/// The `file:line` of an analyzer finding, for a one-line badge label.
+String? verificationErrorLocation(String line) {
+  final match = RegExp(r'([^\s•/\\]+\.[A-Za-z0-9]+):(\d+)').firstMatch(line);
+  return match == null ? null : '${match.group(1)}:${match.group(2)}';
+}
+
+/// Runs the project's own analyzer over a preview result, so a textually clean
+/// merge that no longer compiles says so. Information only: the caller shows the
+/// outcome and never blocks on it.
+class PreviewVerificationSession {
+  /// Verifies [treeSha] in a throwaway worktree this session owns.
+  PreviewVerificationSession.tree({
+    required GitRepository repository,
+    required String treeSha,
+    required String baseTip,
+    this.timeout = const Duration(minutes: 5),
+  }) : _repository = repository,
+       _treeSha = treeSha,
+       _baseTip = baseTip;
+
+  /// Verifies what [worktreePath] already holds; its owner keeps cleaning it up.
+  PreviewVerificationSession.worktree({
+    required GitRepository repository,
+    required String worktreePath,
+    this.timeout = const Duration(minutes: 5),
+  }) : _repository = repository,
+       _treeSha = null,
+       _baseTip = null,
+       _path = worktreePath;
+
+  final GitRepository _repository;
+  final String? _treeSha;
+  final String? _baseTip;
+  final Duration timeout;
+  String? _path;
+  bool _owned = false;
+  bool _disposed = false;
+  Process? _process;
+
+  String? get worktreePath => _path;
+
+  Future<PreviewVerification> run() async {
+    const skipped = PreviewVerification(
+      status: PreviewVerificationStatus.skipped,
+    );
+    final commands = await _repository.verificationCommands();
+    if (_disposed ||
+        commands == null ||
+        (_path == null && !await _materialize())) {
+      return skipped;
+    }
+    final until = DateTime.now().add(timeout);
+    try {
+      for (final (index, command) in commands.indexed) {
+        if (_disposed) return skipped;
+        final result = await _runCommand(
+          command,
+          until.difference(DateTime.now()),
+        );
+        if (result == null) {
+          return const PreviewVerification(
+            status: PreviewVerificationStatus.timedOut,
+          );
+        }
+        if (_disposed) return skipped;
+        if (result.exitCode != 0) {
+          return PreviewVerification(
+            // Only the analyzer itself judges the merge; a preparation step
+            // failing (pub get on an offline machine) judges nothing.
+            status: index == commands.length - 1
+                ? PreviewVerificationStatus.failed
+                : PreviewVerificationStatus.unavailable,
+            errorLines: verificationErrorLines(result.output),
+          );
+        }
+      }
+    } on ProcessException {
+      // No analyzer to run on this machine says nothing about the merge.
+      return skipped;
+    }
+    return const PreviewVerification(status: PreviewVerificationStatus.passed);
+  }
+
+  Future<bool> _materialize() async {
+    final commit = await _repository.runner(_repository.gitExecutable, [
+      '-c',
+      'commit.gpgSign=false',
+      'commit-tree',
+      _treeSha!,
+      '-p',
+      _baseTip!,
+      '-m',
+      'yogit preview verification',
+    ], workingDirectory: _repository.root);
+    if (commit.exitCode != 0) return false;
+    // Deliberately outside the stale-preview sweep's naming, so a sweep running
+    // alongside a live verification cannot delete this worktree mid-analysis.
+    final temporary = await Directory.systemTemp.createTemp('yogit_verify_');
+    final path = temporary.path;
+    await temporary.delete();
+    final add = await _repository.runner(_repository.gitExecutable, [
+      'worktree',
+      'add',
+      '--detach',
+      path,
+      commit.stdout.toString().trim(),
+    ], workingDirectory: _repository.root);
+    _path = path;
+    _owned = true;
+    if (add.exitCode != 0 || _disposed) {
+      await dispose();
+      return false;
+    }
+    return true;
+  }
+
+  /// The command's exit code and merged output, or null once [remaining] is up.
+  Future<({int exitCode, String output})?> _runCommand(
+    List<String> command,
+    Duration remaining,
+  ) async {
+    if (remaining <= Duration.zero) return null;
+    final process = await _repository.processStarter(
+      command.first,
+      command.skip(1).toList(),
+      workingDirectory: _path,
+    );
+    _process = process;
+    // Cancelled while this command was starting up, so it never saw the kill.
+    if (_disposed) process.kill();
+    var expired = false;
+    final timer = Timer(remaining, () {
+      expired = true;
+      process.kill();
+    });
+    const decoder = Utf8Decoder(allowMalformed: true);
+    final output = StringBuffer();
+    try {
+      await Future.wait([
+        process.stdout.transform(decoder).forEach(output.write),
+        process.stderr.transform(decoder).forEach(output.write),
+      ]);
+      final exitCode = await process.exitCode;
+      return expired ? null : (exitCode: exitCode, output: output.toString());
+    } finally {
+      timer.cancel();
+      _process = null;
+    }
+  }
+
+  Future<void> dispose() async {
+    _disposed = true;
+    _process?.kill();
+    final path = _owned ? _path : null;
+    _owned = false;
+    if (path != null) await _repository._removePreviewWorktree(path);
+  }
 }
 
 enum RebaseCheckStatus { clean, conflicts, failed }
@@ -579,20 +797,7 @@ class MergePreviewSession {
       'merge',
       '--abort',
     ], workingDirectory: path);
-    await _repository._ignoreCommand([
-      'worktree',
-      'remove',
-      '--force',
-      path,
-    ], workingDirectory: _repository.root);
-    final directory = Directory(path);
-    if (await directory.exists()) {
-      await directory.delete(recursive: true);
-    }
-    await _repository._ignoreCommand(const [
-      'worktree',
-      'prune',
-    ], workingDirectory: _repository.root);
+    await _repository._removePreviewWorktree(path);
   }
 }
 
@@ -896,20 +1101,7 @@ class RebasePreviewSession {
       'rebase',
       '--abort',
     ], workingDirectory: path);
-    await _repository._ignoreCommand([
-      'worktree',
-      'remove',
-      '--force',
-      path,
-    ], workingDirectory: _repository.root);
-    final directory = Directory(path);
-    if (await directory.exists()) {
-      await directory.delete(recursive: true);
-    }
-    await _repository._ignoreCommand(const [
-      'worktree',
-      'prune',
-    ], workingDirectory: _repository.root);
+    await _repository._removePreviewWorktree(path);
   }
 }
 
@@ -1026,6 +1218,7 @@ class BranchApplyResult {
     required this.compareBefore,
     required this.compareAfter,
     this.compareBranchCreated = false,
+    this.headSwitched = false,
   });
 
   final BranchApplyMode mode;
@@ -1036,6 +1229,10 @@ class BranchApplyResult {
   final String compareBefore;
   final String compareAfter;
   final bool compareBranchCreated;
+
+  /// Whether applying checked [baseBranch] out, so the working tree now holds
+  /// the merge result the way `git merge` would have left it.
+  final bool headSwitched;
 }
 
 class GraphRow {
@@ -1831,8 +2028,10 @@ class GitRepository implements FullDiffRepository {
     this.gitExecutable = 'git',
     CommandRunner? runner,
     RawCommandRunner? rawRunner,
+    ProcessStarter? processStarter,
   }) : runner = runner ?? runProcess,
        rawRunner = rawRunner ?? runRawProcess,
+       processStarter = processStarter ?? startProcess,
        _diffRunner = rawRunner ?? runRawProcess;
 
   @override
@@ -1840,6 +2039,7 @@ class GitRepository implements FullDiffRepository {
   final String gitExecutable;
   final CommandRunner runner;
   final RawCommandRunner rawRunner;
+  final ProcessStarter processStarter;
   final RawCommandRunner _diffRunner;
   Future<String>? _emptyTree;
   Future<List<String>>? _startingRevisions;
@@ -1920,7 +2120,7 @@ class GitRepository implements FullDiffRepository {
     final mergeBases = await _mergeBases(baseTip, compareTip);
     final commits = await _comparisonCommits(baseTip, compareTip, mergeBases);
     final files = await _loadFilesBetween(baseTip, compareTip);
-    final merge = await _checkMerge(baseTip, compareTip);
+    final merge = await _checkMerge(baseTip, compareTip, mergeBases);
     return BranchComparisonResult(
       baseRef: baseRef,
       compareRef: compareRef,
@@ -2018,6 +2218,7 @@ class GitRepository implements FullDiffRepository {
   Future<MergeConflictCheck> _checkMerge(
     String baseTip,
     String compareTip,
+    List<String> mergeBases,
   ) async {
     final arguments = [
       'merge-tree',
@@ -2038,6 +2239,11 @@ class GitRepository implements FullDiffRepository {
         status: MergeConflictStatus.clean,
         treeSha: treeSha,
         resultFiles: await _loadFilesBetween(baseTip, treeSha),
+        // Criss-cross histories have several common ancestors in no set order,
+        // so a file counts as ours once it changed since any one of them.
+        baseChangedFiles: {
+          for (final base in mergeBases) ...await _changedPaths(base, baseTip),
+        },
       );
     }
     if (result.exitCode != 1) {
@@ -2140,6 +2346,55 @@ class GitRepository implements FullDiffRepository {
     );
   }
 
+  /// Paths [to] changed since [from], both ends of a rename, so a merge result
+  /// can name the files the base branch touched as well.
+  Future<Set<String>> _changedPaths(String from, String to) async => {
+    for (final status in _parseNameStatus(
+      await _run([
+        'diff',
+        ...safeDiffArguments,
+        '--name-status',
+        '-z',
+        from,
+        to,
+        '--',
+      ]),
+    )) ...[status.path, ?status.oldPath],
+  };
+
+  /// The project's own check, run in a preview worktree, or null when this
+  /// repository has no pubspec.yaml to check. The last command is the analyzer
+  /// whose verdict counts; every command before it only prepares the worktree.
+  Future<List<List<String>>?> verificationCommands() async {
+    final pubspec = File('$root${Platform.pathSeparator}pubspec.yaml');
+    if (!await pubspec.exists()) return null;
+    // ponytail: the sdk key is the marker every Flutter package carries; parsing
+    // the dependency graph would not tell us more about which analyzer to run.
+    return RegExp(r'sdk:\s*flutter').hasMatch(await pubspec.readAsString())
+        ? const [
+            ['flutter', 'pub', 'get'],
+            ['flutter', 'analyze', '--no-pub'],
+          ]
+        : const [
+            ['dart', 'pub', 'get'],
+            ['dart', 'analyze'],
+          ];
+  }
+
+  Future<void> _removePreviewWorktree(String path) async {
+    await _ignoreCommand([
+      'worktree',
+      'remove',
+      '--force',
+      path,
+    ], workingDirectory: root);
+    final directory = Directory(path);
+    if (await directory.exists()) {
+      await directory.delete(recursive: true);
+    }
+    await _ignoreCommand(const ['worktree', 'prune'], workingDirectory: root);
+  }
+
   Future<void> cleanupStalePreviewWorktrees() async {
     final result = await runner(gitExecutable, const [
       'worktree',
@@ -2188,6 +2443,20 @@ class GitRepository implements FullDiffRepository {
     if (target == null || target.needsRecalculation) {
       throw GitRepositoryException(root, '로컬 기준 브랜치로 미리보기를 다시 계산해야 합니다.');
     }
+    // `git merge` leaves the base branch checked out with the result on disk, so
+    // a base branch sitting somewhere else gets checked out here first. The
+    // guards run before anything moves; commit-tree below has no side effects.
+    final checkout =
+        (await _run(['branch', '--show-current'])).trim() != target.localBranch;
+    if (checkout) {
+      if (await branchWorktreePath(target.localBranch) != null) {
+        throw GitRepositoryException(
+          target.localBranch,
+          '다른 worktree에서 체크아웃한 브랜치라 적용할 수 없습니다.',
+        );
+      }
+      await _requireCleanWorktree();
+    }
     final tree = (await _run([
       'rev-parse',
       '--verify',
@@ -2205,6 +2474,7 @@ class GitRepository implements FullDiffRepository {
       '-m',
       "Merge branch '${comparison.compareRef}' into ${comparison.baseRef}",
     ])).trim();
+    if (checkout) await _run(['checkout', target.localBranch]);
     await _moveLocalBranch(
       branch: target.localBranch,
       expected: target.selectedTip,
@@ -2218,6 +2488,7 @@ class GitRepository implements FullDiffRepository {
       baseAfter: await _localBranchTip(target.localBranch),
       compareBefore: comparison.compareTip,
       compareAfter: comparison.compareTip,
+      headSwitched: checkout,
     );
   }
 
@@ -2384,6 +2655,15 @@ class GitRepository implements FullDiffRepository {
     return null;
   }
 
+  Future<void> _requireCleanWorktree() async {
+    if (await _gitOperationInProgress()) {
+      throw GitRepositoryException(root, '다른 Git 작업이 진행 중입니다.');
+    }
+    if ((await _run(['status', '--porcelain=v1', '-z'])).isNotEmpty) {
+      throw GitRepositoryException(root, '작업 트리와 인덱스가 깨끗해야 실제 적용할 수 있습니다.');
+    }
+  }
+
   Future<void> _moveLocalBranch({
     required String branch,
     required String expected,
@@ -2394,12 +2674,7 @@ class GitRepository implements FullDiffRepository {
     }
     final current = (await _run(['branch', '--show-current'])).trim();
     if (current == branch) {
-      if (await _gitOperationInProgress()) {
-        throw GitRepositoryException(root, '다른 Git 작업이 진행 중입니다.');
-      }
-      if ((await _run(['status', '--porcelain=v1', '-z'])).isNotEmpty) {
-        throw GitRepositoryException(root, '작업 트리와 인덱스가 깨끗해야 합니다.');
-      }
+      await _requireCleanWorktree();
       await _run(['reset', '--hard', next]);
       return;
     }

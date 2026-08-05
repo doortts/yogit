@@ -5279,6 +5279,7 @@ void main() {
       baseAfter: 'merge-commit',
       compareBefore: comparison.compareTip,
       compareAfter: comparison.compareTip,
+      headSwitched: true,
     );
     BranchApplyResult? restored;
     await tester.pumpWidget(
@@ -5342,6 +5343,10 @@ void main() {
 
     expect(find.text('Merge 이전 시점으로 되돌리기'), findsOneWidget);
     expect(find.textContaining('merge-commit'), findsOneWidget);
+    expect(
+      find.textContaining('main 체크아웃 · 작업 트리가 Merge 결과입니다'),
+      findsOneWidget,
+    );
     await tester.drag(
       find.byKey(const Key('preview-content-scroll')),
       const Offset(0, 300),
@@ -5352,11 +5357,301 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('branch-preview-rollback')));
     await tester.pumpAndSettle();
+    expect(
+      find.textContaining('되돌린 뒤에도 main에 체크아웃된 상태로 남습니다.'),
+      findsOneWidget,
+    );
     await tester.tap(find.byKey(const Key('branch-rollback-confirm')));
     await tester.pumpAndSettle();
 
     expect(restored, same(applied));
     expect(find.text('SHA 일치 확인'), findsOneWidget);
+  });
+
+  /// A repository whose clean merge preview can be verified: the git plumbing is
+  /// faked so no real worktree is needed, and [processes] hands out the analyzer.
+  FakeGitRepository verifiableRepository({
+    required BranchComparisonResult comparison,
+    required List<FakeVerificationProcess> processes,
+    List<String>? worktreePaths,
+  }) => FakeGitRepository(
+    (_, _) async => [commit('normal', 'normal history')],
+    refs: const RepoRefs(
+      local: ['main', 'feature'],
+      current: 'main',
+      tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+    ),
+    compareBranchesCallback: (_, _) async => comparison,
+    verificationCommandsCallback: () async => const [
+      ['dart', 'analyze'],
+    ],
+    processStarter: (executable, arguments, {workingDirectory}) async =>
+        processes.removeAt(0),
+    runner: (executable, arguments, {workingDirectory, environment}) async {
+      if (arguments.contains('commit-tree')) {
+        return ProcessResult(1, 0, 'verify-commit\n', '');
+      }
+      if (arguments case ['worktree', 'add', '--detach', final path, ...]) {
+        // git makes the directory; the fake has to, so cleanup is observable.
+        await Directory(path).create(recursive: true);
+        // The rebase check opens a worktree of its own; only ours is watched.
+        if (path.contains('_verify_')) worktreePaths?.add(path);
+      }
+      if (arguments case ['worktree', 'remove', '--force', final path]) {
+        final directory = Directory(path);
+        if (await directory.exists()) await directory.delete(recursive: true);
+      }
+      return ProcessResult(1, 0, '', '');
+    },
+  );
+
+  Future<void> openCleanMergePreview(WidgetTester tester) async {
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+  }
+
+  /// Lets the real event loop run until [ready]. The verification materializes a
+  /// temp worktree, which is file I/O that fake async never completes on its own.
+  Future<void> waitForIo(WidgetTester tester, bool Function() ready) async {
+    // Alternating: runAsync lets the I/O land, the pump then drains the fake
+    // async microtasks that carry the awaiting session one step further.
+    for (var tick = 0; tick < 200 && !ready(); tick++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 2)),
+      );
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(ready(), isTrue, reason: 'the verification never got that far');
+  }
+
+  testWidgets('a clean merge preview reports its own project check', (
+    tester,
+  ) async {
+    final comparison = branchComparison(
+      merge: const MergeConflictCheck(
+        status: MergeConflictStatus.clean,
+        treeSha: 'merge-tree',
+      ),
+    );
+    final analyzer = FakeVerificationProcess();
+    final pending = [analyzer];
+    final worktrees = <String>[];
+    await tester.pumpWidget(
+      app(
+        verifiableRepository(
+          comparison: comparison,
+          processes: pending,
+          worktreePaths: worktrees,
+        ),
+        controller,
+      ),
+    );
+    await openCleanMergePreview(tester);
+
+    expect(find.text('검증 중'), findsOneWidget);
+    // The badge informs; applying never waits on it.
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('branch-preview-apply')))
+          .onPressed,
+      isNotNull,
+    );
+
+    await waitForIo(tester, () => pending.isEmpty);
+    expect(find.text('검증 중'), findsOneWidget);
+    analyzer.finish();
+    await tester.pumpAndSettle();
+
+    expect(find.text('검증 통과'), findsOneWidget);
+    // The worktree it materialized goes away with the result.
+    await waitForIo(
+      tester,
+      () => worktrees.length == 1 && !Directory(worktrees.single).existsSync(),
+    );
+  });
+
+  testWidgets('a failed project check names the first error', (tester) async {
+    final comparison = branchComparison(
+      merge: const MergeConflictCheck(
+        status: MergeConflictStatus.clean,
+        treeSha: 'merge-tree',
+      ),
+    );
+    final analyzer = FakeVerificationProcess(
+      exit: 1,
+      output:
+          "  error • Undefined name 'gone' • lib/settings.dart:780:12 • x\n"
+          '  error • Expected an identifier • lib/timeline.dart:12:3 • y\n',
+    );
+    final pending = [analyzer];
+    await tester.pumpWidget(
+      app(
+        verifiableRepository(comparison: comparison, processes: pending),
+        controller,
+      ),
+    );
+    await openCleanMergePreview(tester);
+    await waitForIo(tester, () => pending.isEmpty);
+    analyzer.finish();
+    await tester.pumpAndSettle();
+
+    expect(find.text('검증 실패 · settings.dart:780'), findsOneWidget);
+    final tooltip = tester.widget<Tooltip>(
+      find.ancestor(
+        of: find.byKey(const Key('branch-preview-verification')),
+        matching: find.byType(Tooltip),
+      ),
+    );
+    expect(tooltip.message, contains('timeline.dart:12'));
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('branch-preview-apply')))
+          .onPressed,
+      isNotNull,
+    );
+  });
+
+  testWidgets('closing the timeline cancels a running project check', (
+    tester,
+  ) async {
+    final comparison = branchComparison(
+      merge: const MergeConflictCheck(
+        status: MergeConflictStatus.clean,
+        treeSha: 'merge-tree',
+      ),
+    );
+    final analyzer = FakeVerificationProcess();
+    final pending = [analyzer];
+    final worktrees = <String>[];
+    await tester.pumpWidget(
+      app(
+        verifiableRepository(
+          comparison: comparison,
+          processes: pending,
+          worktreePaths: worktrees,
+        ),
+        controller,
+      ),
+    );
+    await openCleanMergePreview(tester);
+    await waitForIo(tester, () => pending.isEmpty);
+    expect(find.text('검증 중'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+
+    expect(analyzer.killed, isTrue);
+    await waitForIo(tester, () => !Directory(worktrees.single).existsSync());
+  });
+
+  testWidgets('the clean merge file list says where each change came from', (
+    tester,
+  ) async {
+    final comparison = branchComparison(
+      merge: const MergeConflictCheck(
+        status: MergeConflictStatus.clean,
+        treeSha: 'merge-tree',
+        resultFiles: [
+          GitFileChange(
+            path: 'lib/shared.dart',
+            status: 'M',
+            additions: 2,
+            deletions: 1,
+          ),
+          GitFileChange(
+            path: 'lib/renamed.dart',
+            oldPath: 'lib/old.dart',
+            status: 'R100',
+            additions: 0,
+            deletions: 0,
+          ),
+          GitFileChange(
+            path: 'lib/gone.dart',
+            status: 'D',
+            additions: 0,
+            deletions: 3,
+          ),
+          GitFileChange(
+            path: 'lib/added.dart',
+            status: 'A',
+            additions: 4,
+            deletions: 0,
+          ),
+        ],
+        baseChangedFiles: {'lib/shared.dart', 'lib/old.dart'},
+      ),
+    );
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            current: 'main',
+            tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async => comparison,
+        ),
+        controller,
+      ),
+    );
+    await openCleanMergePreview(tester);
+
+    String labelOf(String path) => tester
+        .widget<Text>(
+          find.descendant(
+            of: find.byKey(Key('preview-provenance-$path')),
+            matching: find.byType(Text),
+          ),
+        )
+        .data!;
+    expect(labelOf('lib/shared.dart'), '양쪽 수정');
+    // The rename's old path is ours, so this file is a both-sides candidate too.
+    expect(labelOf('lib/renamed.dart'), '양쪽 수정');
+    expect(labelOf('lib/gone.dart'), '브랜치에서 삭제');
+    expect(labelOf('lib/added.dart'), '브랜치에서 추가');
+  });
+
+  testWidgets('a comparison without a merge base carries no source labels', (
+    tester,
+  ) async {
+    final comparison = branchComparison(
+      merge: const MergeConflictCheck(
+        status: MergeConflictStatus.clean,
+        treeSha: 'merge-tree',
+        resultFiles: [
+          GitFileChange(
+            path: 'lib/shared.dart',
+            status: 'M',
+            additions: 1,
+            deletions: 1,
+          ),
+        ],
+      ),
+    );
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            current: 'main',
+            tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async => comparison,
+        ),
+        controller,
+      ),
+    );
+    await openCleanMergePreview(tester);
+
+    expect(find.byKey(const Key('branch-preview-file-list')), findsOneWidget);
+    expect(find.textContaining('양쪽'), findsNothing);
+    expect(find.textContaining('브랜치에서'), findsNothing);
   });
 
   testWidgets('branch preview applies rebase with a focused commit', (
@@ -16459,6 +16754,47 @@ Widget app(
   ),
 );
 
+/// An analyzer run the test finishes by hand, so the badge can be read while it
+/// is still going.
+class FakeVerificationProcess implements Process {
+  FakeVerificationProcess({this.exit = 0, this.output = ''});
+
+  final int exit;
+  final String output;
+  final _done = Completer<void>();
+  var killed = false;
+
+  void finish() {
+    if (!_done.isCompleted) _done.complete();
+  }
+
+  @override
+  Future<int> get exitCode async {
+    await _done.future;
+    return exit;
+  }
+
+  @override
+  Stream<List<int>> get stdout =>
+      Stream.fromFuture(_done.future.then((_) => utf8.encode(output)));
+
+  @override
+  Stream<List<int>> get stderr => const Stream.empty();
+
+  @override
+  IOSink get stdin => throw UnsupportedError('stdin');
+
+  @override
+  int get pid => 1;
+
+  @override
+  bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
+    killed = true;
+    finish();
+    return true;
+  }
+}
+
 class FakeGitRepository extends GitRepository {
   FakeGitRepository(
     this.loader, {
@@ -16490,9 +16826,11 @@ class FakeGitRepository extends GitRepository {
     this.stageResolvedFileCallback,
     this.commitMessage,
     this.deletedBranchNameCallback,
+    this.verificationCommandsCallback,
     String root = '.',
     CommandRunner runner = runProcess,
-  }) : super(root, runner: runner);
+    ProcessStarter? processStarter,
+  }) : super(root, runner: runner, processStarter: processStarter);
 
   final RepoRefs refs;
   final GitDiffAlgorithmSetting gitDiffAlgorithmSetting;
@@ -16545,6 +16883,7 @@ class FakeGitRepository extends GitRepository {
   final Future<String> Function(String sha)? commitMessage;
   final Future<String?> Function(String tipSha, Iterable<GitCommit> commits)?
   deletedBranchNameCallback;
+  final Future<List<List<String>>?> Function()? verificationCommandsCallback;
   final Future<List<GitCommit>> Function(int skip, int limit) loader;
   final Future<GitCommit?> Function()? workingTree;
   final Future<List<GitFileChange>> Function(GitCommit commit, String? parent)?
@@ -16715,6 +17054,14 @@ class FakeGitRepository extends GitRepository {
 
   @override
   Future<void> cleanupStalePreviewWorktrees() async {}
+
+  /// No project to check unless a test asks for one, so widget tests never wait
+  /// on a real analyzer.
+  @override
+  Future<List<List<String>>?> verificationCommands() async =>
+      verificationCommandsCallback == null
+      ? null
+      : verificationCommandsCallback!();
 
   @override
   Future<CherryPickState?> loadCherryPickState() =>
