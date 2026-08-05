@@ -5466,47 +5466,6 @@ void main() {
     expect(find.textContaining('되돌릴 때도 작업 트리는 건드리지 않습니다'), findsNothing);
   });
 
-  /// A repository whose clean merge preview can be verified: the git plumbing is
-  /// faked so no real worktree is needed, and [processes] hands out the analyzer.
-  FakeGitRepository verifiableRepository({
-    required BranchComparisonResult comparison,
-    required List<FakeVerificationProcess> processes,
-    List<String>? worktreePaths,
-    List<String?>? requestedCommands,
-  }) => FakeGitRepository(
-    (_, _) async => [commit('normal', 'normal history')],
-    refs: const RepoRefs(
-      local: ['main', 'feature'],
-      current: 'main',
-      tips: {'main': 'main-tip', 'feature': 'feature-tip'},
-    ),
-    compareBranchesCallback: (_, _) async => comparison,
-    verificationCommandsCallback: (command) async {
-      requestedCommands?.add(command);
-      return const [
-        ['dart', 'analyze'],
-      ];
-    },
-    processStarter: (executable, arguments, {workingDirectory}) async =>
-        processes.removeAt(0),
-    runner: (executable, arguments, {workingDirectory, environment}) async {
-      if (arguments.contains('commit-tree')) {
-        return ProcessResult(1, 0, 'verify-commit\n', '');
-      }
-      if (arguments case ['worktree', 'add', '--detach', final path, ...]) {
-        // git makes the directory; the fake has to, so cleanup is observable.
-        await Directory(path).create(recursive: true);
-        // The rebase check opens a worktree of its own; only ours is watched.
-        if (path.contains('_verify_')) worktreePaths?.add(path);
-      }
-      if (arguments case ['worktree', 'remove', '--force', final path]) {
-        final directory = Directory(path);
-        if (await directory.exists()) await directory.delete(recursive: true);
-      }
-      return ProcessResult(1, 0, '', '');
-    },
-  );
-
   Future<void> openCleanMergePreview(WidgetTester tester) async {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('branch-diff-selector')));
@@ -5514,147 +5473,6 @@ void main() {
     await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
     await tester.pumpAndSettle();
   }
-
-  /// Lets the real event loop run until [ready]. The verification materializes a
-  /// temp worktree, which is file I/O that fake async never completes on its own.
-  Future<void> waitForIo(WidgetTester tester, bool Function() ready) async {
-    // Alternating: runAsync lets the I/O land, the pump then drains the fake
-    // async microtasks that carry the awaiting session one step further.
-    for (var tick = 0; tick < 200 && !ready(); tick++) {
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 2)),
-      );
-      await tester.pump();
-    }
-    await tester.pumpAndSettle();
-    expect(ready(), isTrue, reason: 'the verification never got that far');
-  }
-
-  testWidgets('a clean merge preview reports its own project check', (
-    tester,
-  ) async {
-    final comparison = branchComparison(
-      merge: const MergeConflictCheck(
-        status: MergeConflictStatus.clean,
-        treeSha: 'merge-tree',
-      ),
-    );
-    final analyzer = FakeVerificationProcess();
-    final pending = [analyzer];
-    final worktrees = <String>[];
-    final requested = <String?>[];
-    await tester.pumpWidget(
-      app(
-        verifiableRepository(
-          comparison: comparison,
-          processes: pending,
-          worktreePaths: worktrees,
-          requestedCommands: requested,
-        ),
-        controller,
-        verificationCommand: 'make check',
-      ),
-    );
-    await openCleanMergePreview(tester);
-
-    // The repository's own command from the settings file reaches the check.
-    expect(requested, ['make check']);
-    expect(find.text('검증 중'), findsOneWidget);
-    // The badge informs; applying never waits on it.
-    expect(
-      tester
-          .widget<FilledButton>(find.byKey(const Key('branch-preview-apply')))
-          .onPressed,
-      isNotNull,
-    );
-
-    await waitForIo(tester, () => pending.isEmpty);
-    expect(find.text('검증 중'), findsOneWidget);
-    analyzer.finish();
-    await tester.pumpAndSettle();
-
-    expect(find.text('검증 통과'), findsOneWidget);
-    // The worktree it materialized goes away with the result.
-    await waitForIo(
-      tester,
-      () => worktrees.length == 1 && !Directory(worktrees.single).existsSync(),
-    );
-  });
-
-  testWidgets('a failed project check names the first error', (tester) async {
-    final comparison = branchComparison(
-      merge: const MergeConflictCheck(
-        status: MergeConflictStatus.clean,
-        treeSha: 'merge-tree',
-      ),
-    );
-    final analyzer = FakeVerificationProcess(
-      exit: 1,
-      output:
-          "  error • Undefined name 'gone' • lib/settings.dart:780:12 • x\n"
-          '  error • Expected an identifier • lib/timeline.dart:12:3 • y\n',
-    );
-    final pending = [analyzer];
-    await tester.pumpWidget(
-      app(
-        verifiableRepository(comparison: comparison, processes: pending),
-        controller,
-      ),
-    );
-    await openCleanMergePreview(tester);
-    await waitForIo(tester, () => pending.isEmpty);
-    analyzer.finish();
-    await tester.pumpAndSettle();
-
-    expect(find.text('검증 실패 · settings.dart:780'), findsOneWidget);
-    final tooltip = tester.widget<Tooltip>(
-      find.ancestor(
-        of: find.byKey(const Key('branch-preview-verification')),
-        matching: find.byType(Tooltip),
-      ),
-    );
-    expect(tooltip.message, contains('timeline.dart:12'));
-    expect(
-      tester
-          .widget<FilledButton>(find.byKey(const Key('branch-preview-apply')))
-          .onPressed,
-      isNotNull,
-    );
-  });
-
-  testWidgets('closing the timeline cancels a running project check', (
-    tester,
-  ) async {
-    final comparison = branchComparison(
-      merge: const MergeConflictCheck(
-        status: MergeConflictStatus.clean,
-        treeSha: 'merge-tree',
-      ),
-    );
-    final analyzer = FakeVerificationProcess();
-    final pending = [analyzer];
-    final worktrees = <String>[];
-    await tester.pumpWidget(
-      app(
-        verifiableRepository(
-          comparison: comparison,
-          processes: pending,
-          worktreePaths: worktrees,
-        ),
-        controller,
-      ),
-    );
-    await openCleanMergePreview(tester);
-    await waitForIo(tester, () => pending.isEmpty);
-    expect(find.text('검증 중'), findsOneWidget);
-
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pumpAndSettle();
-
-    // The kill walks the process tree first, which is real I/O of its own.
-    await waitForIo(tester, () => analyzer.killed);
-    await waitForIo(tester, () => !Directory(worktrees.single).existsSync());
-  });
 
   testWidgets('the clean merge file list says where each change came from', (
     tester,
@@ -7284,18 +7102,15 @@ void main() {
     );
   });
 
-  test('verification commands round-trip per repository', () {
-    const settings = AppSettings(
-      verificationCommands: {'/repos/a': 'make check'},
-    );
-    expect(AppSettings.fromJson(settings.toJson()), settings);
-    expect(AppSettings.fromJson(const {}).verificationCommands, isEmpty);
-    // A damaged entry is dropped rather than taken as a command to run.
+  test('a settings file with retired keys still loads', () {
+    // Settings files written before a feature was removed keep its key, so an
+    // unknown key is ignored rather than fatal.
     expect(
       AppSettings.fromJson({
-        'verificationCommands': {'/repos/a': 1, '/repos/b': 'ok'},
-      }).verificationCommands,
-      {'/repos/b': 'ok'},
+        'verificationCommands': {'/repos/a': 'make check'},
+        'baseBranches': {'/repos/one': 'main'},
+      }),
+      const AppSettings(baseBranches: {'/repos/one': 'main'}),
     );
   });
 
@@ -8119,39 +7934,6 @@ void main() {
           ?.text,
       '#FF2D95',
     );
-  });
-
-  testWidgets('the verification command is kept per repository', (
-    tester,
-  ) async {
-    final saved = <AppSettings>[];
-    await tester.pumpWidget(
-      MaterialApp(
-        home: SettingsScreen(
-          settings: const AppSettings(),
-          repositoryRoot: '/repos/yogit',
-          onChanged: saved.add,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('검증 명령'), findsOneWidget);
-    expect(find.textContaining('비어 있으면 미리보기를 검증하지 않습니다'), findsOneWidget);
-    await tester.enterText(
-      find.byKey(const Key('verification-command-field')),
-      'make check',
-    );
-    await tester.pumpAndSettle();
-    expect(saved.last.verificationCommands, {'/repos/yogit': 'make check'});
-
-    // Emptied again, the built-in detection is back in charge.
-    await tester.enterText(
-      find.byKey(const Key('verification-command-field')),
-      '  ',
-    );
-    await tester.pumpAndSettle();
-    expect(saved.last.verificationCommands, isEmpty);
   });
 
   testWidgets('branch tag palette editor applies Base and Text and resets', (
@@ -16919,60 +16701,15 @@ Widget app(
   BranchPreviewMode branchPreviewMode = BranchPreviewMode.merge,
   ValueChanged<BranchPreviewMode>? onBranchPreviewModeChanged,
   VoidCallback? onOpenSettings,
-  String? verificationCommand,
 }) => MaterialApp(
   home: TimelineScreen(
     repository: repository,
     controller: controller,
     branchPreviewMode: branchPreviewMode,
-    verificationCommand: verificationCommand,
     onBranchPreviewModeChanged: onBranchPreviewModeChanged,
     onOpenSettings: onOpenSettings,
   ),
 );
-
-/// An analyzer run the test finishes by hand, so the badge can be read while it
-/// is still going.
-class FakeVerificationProcess implements Process {
-  FakeVerificationProcess({this.exit = 0, this.output = ''});
-
-  final int exit;
-  final String output;
-  final _done = Completer<void>();
-  var killed = false;
-
-  void finish() {
-    if (!_done.isCompleted) _done.complete();
-  }
-
-  @override
-  Future<int> get exitCode async {
-    await _done.future;
-    return exit;
-  }
-
-  @override
-  Stream<List<int>> get stdout =>
-      Stream.fromFuture(_done.future.then((_) => utf8.encode(output)));
-
-  @override
-  Stream<List<int>> get stderr => const Stream.empty();
-
-  @override
-  IOSink get stdin => throw UnsupportedError('stdin');
-
-  /// A pid nothing is a child of, so walking the tree finds no descendants and
-  /// no real process on this machine is ever signalled.
-  @override
-  int get pid => 999999;
-
-  @override
-  bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
-    killed = true;
-    finish();
-    return true;
-  }
-}
 
 class FakeGitRepository extends GitRepository {
   FakeGitRepository(
@@ -17005,11 +16742,9 @@ class FakeGitRepository extends GitRepository {
     this.stageResolvedFileCallback,
     this.commitMessage,
     this.deletedBranchNameCallback,
-    this.verificationCommandsCallback,
     String root = '.',
     CommandRunner runner = runProcess,
-    ProcessStarter? processStarter,
-  }) : super(root, runner: runner, processStarter: processStarter);
+  }) : super(root, runner: runner);
 
   final RepoRefs refs;
   final GitDiffAlgorithmSetting gitDiffAlgorithmSetting;
@@ -17062,8 +16797,6 @@ class FakeGitRepository extends GitRepository {
   final Future<String> Function(String sha)? commitMessage;
   final Future<String?> Function(String tipSha, Iterable<GitCommit> commits)?
   deletedBranchNameCallback;
-  final Future<List<List<String>>?> Function(String? command)?
-  verificationCommandsCallback;
   final Future<List<GitCommit>> Function(int skip, int limit) loader;
   final Future<GitCommit?> Function()? workingTree;
   final Future<List<GitFileChange>> Function(GitCommit commit, String? parent)?
@@ -17234,14 +16967,6 @@ class FakeGitRepository extends GitRepository {
 
   @override
   Future<void> cleanupStalePreviewWorktrees() async {}
-
-  /// No project to check unless a test asks for one, so widget tests never wait
-  /// on a real analyzer.
-  @override
-  Future<List<List<String>>?> verificationCommands({String? command}) async =>
-      verificationCommandsCallback == null
-      ? null
-      : verificationCommandsCallback!(command);
 
   @override
   Future<CherryPickState?> loadCherryPickState() =>
