@@ -724,6 +724,7 @@ class TimelineScreen extends StatefulWidget {
     this.fullDiffPreferences = const FullDiffPreferences(),
     this.refPalette = AppSettings.defaultRefPalette,
     this.branchPreviewMode = BranchPreviewMode.merge,
+    this.verificationCommand,
     this.previewWidth = 288,
     this.previewHeight = 280,
     this.previewDiffLeftWidth,
@@ -775,6 +776,10 @@ class TimelineScreen extends StatefulWidget {
   final FullDiffPreferences fullDiffPreferences;
   final List<RefPaletteEntry> refPalette;
   final BranchPreviewMode branchPreviewMode;
+
+  /// This repository's own verification command from the settings file; without
+  /// one only a Dart/Flutter repository verifies itself.
+  final String? verificationCommand;
   final double previewWidth;
   final double previewHeight;
   final double? previewDiffLeftWidth;
@@ -3116,11 +3121,13 @@ class _TimelineScreenState extends State<TimelineScreen>
         ? PreviewVerificationSession.worktree(
             repository: widget.repository,
             worktreePath: worktreePath,
+            command: widget.verificationCommand,
           )
         : PreviewVerificationSession.tree(
             repository: widget.repository,
             treeSha: treeSha!,
             baseTip: baseTip!,
+            command: widget.verificationCommand,
           );
     _verificationSession = session;
     setState(
@@ -5288,9 +5295,12 @@ class _TimelineScreenState extends State<TimelineScreen>
     final remote = compareRef != null && _refs.remote.contains(compareRef)
         ? '\n$compareRef: 변경 없음'
         : '';
-    final head = result.headSwitched
-        ? '\n${result.baseBranch} 체크아웃 · 작업 트리가 Merge 결과입니다'
-        : '';
+    final merge = result.mode == BranchApplyMode.merge;
+    final moved = merge ? result.baseBranch : result.compareBranch;
+    final head = result.workingTreeUpdated
+        ? '\n$moved 체크아웃 · 작업 트리가 ${merge ? 'Merge' : 'Rebase'} 결과입니다'
+        : '\n$moved 브랜치는 새 커밋을 가리키고 작업 트리는 그대로입니다'
+              '\n$moved 브랜치를 체크아웃하면 결과가 작업 트리에 반영됩니다';
     return '$local$remote$head';
   }
 
@@ -5304,9 +5314,14 @@ class _TimelineScreenState extends State<TimelineScreen>
     final remote = compareRef != null && _refs.remote.contains(compareRef)
         ? '\n$compareRef는 변경하지 않습니다.'
         : '';
-    final head = result.headSwitched
-        ? '\n되돌린 뒤에도 ${result.baseBranch}에 체크아웃된 상태로 남습니다.'
-        : '';
+    final moved = result.mode == BranchApplyMode.merge
+        ? result.baseBranch
+        : result.compareBranch;
+    // 되돌리기는 그 시점의 체크아웃을 다시 확인하니, 적용 당시가 아니라 지금 상태로
+    // 안내합니다. 적용은 ref만 옮겼어도 그 사이 체크아웃했다면 작업 트리까지 바뀝니다.
+    final head = _refs.current == moved
+        ? '\n되돌린 뒤에도 $moved에 체크아웃된 상태로 남고 작업 트리도 이전 상태로 돌아갑니다.'
+        : '\n되돌릴 때도 작업 트리는 건드리지 않습니다.';
     return '$local$remote$head\n원격 저장소는 변경하지 않습니다.';
   }
 

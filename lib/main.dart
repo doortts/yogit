@@ -276,6 +276,7 @@ class _YogitAppState extends State<YogitApp> {
         builder: (context) => SettingsScreen(
           settings: _settings,
           avatarService: _avatarService,
+          repositoryRoot: _repository.root,
           onChanged: _changeSettings,
         ),
       ),
@@ -329,6 +330,7 @@ class _YogitAppState extends State<YogitApp> {
           fullDiffPreferences: _settings.fullDiffPreferences,
           refPalette: _settings.refPalette,
           branchPreviewMode: _settings.branchPreviewMode,
+          verificationCommand: _settings.verificationCommands[_repository.root],
           previewWidth: _settings.previewWidth,
           previewHeight: _settings.previewHeight,
           previewDiffLeftWidth: _settings.previewDiffLeftWidth,

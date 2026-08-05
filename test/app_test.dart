@@ -5279,7 +5279,7 @@ void main() {
       baseAfter: 'merge-commit',
       compareBefore: comparison.compareTip,
       compareAfter: comparison.compareTip,
-      headSwitched: true,
+      workingTreeUpdated: true,
     );
     BranchApplyResult? restored;
     await tester.pumpWidget(
@@ -5358,7 +5358,7 @@ void main() {
     await tester.tap(find.byKey(const Key('branch-preview-rollback')));
     await tester.pumpAndSettle();
     expect(
-      find.textContaining('되돌린 뒤에도 main에 체크아웃된 상태로 남습니다.'),
+      find.textContaining('되돌린 뒤에도 main에 체크아웃된 상태로 남고 작업 트리도 이전 상태로 돌아갑니다.'),
       findsOneWidget,
     );
     await tester.tap(find.byKey(const Key('branch-rollback-confirm')));
@@ -5368,12 +5368,111 @@ void main() {
     expect(find.text('SHA 일치 확인'), findsOneWidget);
   });
 
+  /// Applies a merge that moved main's ref only, with main checked out wherever
+  /// [current] says, and leaves the preview showing the applied state.
+  Future<void> applyRefOnlyMerge(WidgetTester tester, String? current) async {
+    final comparison = branchComparison(
+      compareRef: 'fix/docs',
+      merge: const MergeConflictCheck(
+        status: MergeConflictStatus.clean,
+        treeSha: 'merge-tree',
+      ),
+    );
+    final applied = BranchApplyResult(
+      mode: BranchApplyMode.merge,
+      baseBranch: 'main',
+      compareBranch: 'fix/docs',
+      baseBefore: comparison.baseTip,
+      baseAfter: 'merge-commit',
+      compareBefore: comparison.compareTip,
+      compareAfter: comparison.compareTip,
+    );
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: RepoRefs(
+            local: const ['main', 'fix/docs'],
+            current: current,
+            tips: const {'main': 'main-tip', 'fix/docs': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async => comparison,
+          // The apply moved main's ref only, leaving the working tree alone.
+          applyMergePreviewCallback:
+              ({required comparison, required treeSha}) async => applied,
+          restoreBranchApplyCallback: (result) async {},
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-fix/docs')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
+    await tester.tap(find.byKey(const Key('branch-preview-apply')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-apply-confirm')));
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> openBranchRollbackDialog(WidgetTester tester) async {
+    await tester.drag(
+      find.byKey(const Key('preview-content-scroll')),
+      const Offset(0, 300),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(const Key('branch-preview-rollback')),
+    );
+    await tester.tap(find.byKey(const Key('branch-preview-rollback')));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('a merge applied to a branch checked out nowhere says so', (
+    tester,
+  ) async {
+    await applyRefOnlyMerge(tester, null);
+
+    expect(find.textContaining('main 체크아웃'), findsNothing);
+    expect(
+      find.textContaining('main 브랜치는 새 커밋을 가리키고 작업 트리는 그대로입니다'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('main 브랜치를 체크아웃하면 결과가 작업 트리에 반영됩니다'),
+      findsOneWidget,
+    );
+    await openBranchRollbackDialog(tester);
+
+    // Nothing was on disk to undo, and the dialog may not claim otherwise.
+    expect(find.textContaining('되돌릴 때도 작업 트리는 건드리지 않습니다.'), findsOneWidget);
+    expect(find.textContaining('체크아웃된 상태로 남'), findsNothing);
+  });
+
+  testWidgets('rolling back onto the branch checked out now warns about it', (
+    tester,
+  ) async {
+    // 적용은 ref만 옮겼지만 지금은 main이 체크아웃돼 있으니 되돌리기가 작업 트리까지
+    // 바꿉니다. 되돌리기는 그 시점의 체크아웃을 다시 확인하기 때문입니다.
+    await applyRefOnlyMerge(tester, 'main');
+    await openBranchRollbackDialog(tester);
+
+    expect(
+      find.textContaining('되돌린 뒤에도 main에 체크아웃된 상태로 남고 작업 트리도 이전 상태로 돌아갑니다.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('되돌릴 때도 작업 트리는 건드리지 않습니다'), findsNothing);
+  });
+
   /// A repository whose clean merge preview can be verified: the git plumbing is
   /// faked so no real worktree is needed, and [processes] hands out the analyzer.
   FakeGitRepository verifiableRepository({
     required BranchComparisonResult comparison,
     required List<FakeVerificationProcess> processes,
     List<String>? worktreePaths,
+    List<String?>? requestedCommands,
   }) => FakeGitRepository(
     (_, _) async => [commit('normal', 'normal history')],
     refs: const RepoRefs(
@@ -5382,9 +5481,12 @@ void main() {
       tips: {'main': 'main-tip', 'feature': 'feature-tip'},
     ),
     compareBranchesCallback: (_, _) async => comparison,
-    verificationCommandsCallback: () async => const [
-      ['dart', 'analyze'],
-    ],
+    verificationCommandsCallback: (command) async {
+      requestedCommands?.add(command);
+      return const [
+        ['dart', 'analyze'],
+      ];
+    },
     processStarter: (executable, arguments, {workingDirectory}) async =>
         processes.removeAt(0),
     runner: (executable, arguments, {workingDirectory, environment}) async {
@@ -5440,18 +5542,23 @@ void main() {
     final analyzer = FakeVerificationProcess();
     final pending = [analyzer];
     final worktrees = <String>[];
+    final requested = <String?>[];
     await tester.pumpWidget(
       app(
         verifiableRepository(
           comparison: comparison,
           processes: pending,
           worktreePaths: worktrees,
+          requestedCommands: requested,
         ),
         controller,
+        verificationCommand: 'make check',
       ),
     );
     await openCleanMergePreview(tester);
 
+    // The repository's own command from the settings file reaches the check.
+    expect(requested, ['make check']);
     expect(find.text('검증 중'), findsOneWidget);
     // The badge informs; applying never waits on it.
     expect(
@@ -5544,7 +5651,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
 
-    expect(analyzer.killed, isTrue);
+    // The kill walks the process tree first, which is real I/O of its own.
+    await waitForIo(tester, () => analyzer.killed);
     await waitForIo(tester, () => !Directory(worktrees.single).existsSync());
   });
 
@@ -7176,6 +7284,21 @@ void main() {
     );
   });
 
+  test('verification commands round-trip per repository', () {
+    const settings = AppSettings(
+      verificationCommands: {'/repos/a': 'make check'},
+    );
+    expect(AppSettings.fromJson(settings.toJson()), settings);
+    expect(AppSettings.fromJson(const {}).verificationCommands, isEmpty);
+    // A damaged entry is dropped rather than taken as a command to run.
+    expect(
+      AppSettings.fromJson({
+        'verificationCommands': {'/repos/a': 1, '/repos/b': 'ok'},
+      }).verificationCommands,
+      {'/repos/b': 'ok'},
+    );
+  });
+
   test('recent repositories round-trip newest first, capped and deduped', () {
     const settings = AppSettings(
       recentRepositories: ['/repos/one', '/repos/two'],
@@ -7996,6 +8119,39 @@ void main() {
           ?.text,
       '#FF2D95',
     );
+  });
+
+  testWidgets('the verification command is kept per repository', (
+    tester,
+  ) async {
+    final saved = <AppSettings>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          settings: const AppSettings(),
+          repositoryRoot: '/repos/yogit',
+          onChanged: saved.add,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('검증 명령'), findsOneWidget);
+    expect(find.textContaining('비어 있으면 Dart/Flutter 저장소만'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const Key('verification-command-field')),
+      'make check',
+    );
+    await tester.pumpAndSettle();
+    expect(saved.last.verificationCommands, {'/repos/yogit': 'make check'});
+
+    // Emptied again, the built-in detection is back in charge.
+    await tester.enterText(
+      find.byKey(const Key('verification-command-field')),
+      '  ',
+    );
+    await tester.pumpAndSettle();
+    expect(saved.last.verificationCommands, isEmpty);
   });
 
   testWidgets('branch tag palette editor applies Base and Text and resets', (
@@ -10731,6 +10887,25 @@ void main() {
       const AppSettings(previewPlacement: PreviewPlacement.left),
     );
     expect((await store.load()).previewPlacement, PreviewPlacement.left);
+  });
+
+  test('the settings path never comes from the working directory', () {
+    expect(
+      SettingsStore.pathForHome('/Users/tester'),
+      '/Users/tester/Library/Application Support/yogit/settings.json',
+    );
+    // With no HOME the fallback stays out of the working directory: inside the
+    // opened repository it would let the repository set the command we run. It
+    // is a fresh directory every time, so no other local user can plant the
+    // file we would read at a path they can guess.
+    final fallbacks = <String>{};
+    for (final home in [null, '']) {
+      final path = SettingsStore.pathForHome(home);
+      addTearDown(() => File(path).parent.delete(recursive: true));
+      expect(path, startsWith(Directory.systemTemp.path));
+      expect(path, isNot(contains(Directory.current.path)));
+      expect(fallbacks.add(path), isTrue);
+    }
   });
 
   test('repository argument and executable lookup avoid a shell', () async {
@@ -16744,11 +16919,13 @@ Widget app(
   BranchPreviewMode branchPreviewMode = BranchPreviewMode.merge,
   ValueChanged<BranchPreviewMode>? onBranchPreviewModeChanged,
   VoidCallback? onOpenSettings,
+  String? verificationCommand,
 }) => MaterialApp(
   home: TimelineScreen(
     repository: repository,
     controller: controller,
     branchPreviewMode: branchPreviewMode,
+    verificationCommand: verificationCommand,
     onBranchPreviewModeChanged: onBranchPreviewModeChanged,
     onOpenSettings: onOpenSettings,
   ),
@@ -16784,8 +16961,10 @@ class FakeVerificationProcess implements Process {
   @override
   IOSink get stdin => throw UnsupportedError('stdin');
 
+  /// A pid nothing is a child of, so walking the tree finds no descendants and
+  /// no real process on this machine is ever signalled.
   @override
-  int get pid => 1;
+  int get pid => 999999;
 
   @override
   bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
@@ -16883,7 +17062,8 @@ class FakeGitRepository extends GitRepository {
   final Future<String> Function(String sha)? commitMessage;
   final Future<String?> Function(String tipSha, Iterable<GitCommit> commits)?
   deletedBranchNameCallback;
-  final Future<List<List<String>>?> Function()? verificationCommandsCallback;
+  final Future<List<List<String>>?> Function(String? command)?
+  verificationCommandsCallback;
   final Future<List<GitCommit>> Function(int skip, int limit) loader;
   final Future<GitCommit?> Function()? workingTree;
   final Future<List<GitFileChange>> Function(GitCommit commit, String? parent)?
@@ -17058,10 +17238,10 @@ class FakeGitRepository extends GitRepository {
   /// No project to check unless a test asks for one, so widget tests never wait
   /// on a real analyzer.
   @override
-  Future<List<List<String>>?> verificationCommands() async =>
+  Future<List<List<String>>?> verificationCommands({String? command}) async =>
       verificationCommandsCallback == null
       ? null
-      : verificationCommandsCallback!();
+      : verificationCommandsCallback!(command);
 
   @override
   Future<CherryPickState?> loadCherryPickState() =>

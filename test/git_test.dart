@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -1218,6 +1219,8 @@ void main() {
     );
 
     expect(applied.mode, BranchApplyMode.merge);
+    // main is the checked-out branch, so the result lands on disk as well.
+    expect(applied.workingTreeUpdated, isTrue);
     expect(applied.baseBefore, fixture.comparison.baseTip);
     expect(applied.baseAfter, isNot(fixture.comparison.baseTip));
     expect(
@@ -1251,33 +1254,48 @@ void main() {
     );
   });
 
-  test('merge apply checks the base branch out and undo keeps it', () async {
+  test('merge apply moves a base branch that is checked out nowhere', () async {
     final fixture = await _branchPreviewFixture();
     addTearDown(() => fixture.root.delete(recursive: true));
     await _git(fixture.root, ['switch', 'feature']);
-    final repository = GitRepository(fixture.root.path);
+    final head = (await _git(fixture.root, ['rev-parse', 'HEAD'])).trim();
+    final commands = <List<String>>[];
+    final repository = GitRepository(
+      fixture.root.path,
+      runner: (executable, arguments, {workingDirectory, environment}) async {
+        commands.add(List<String>.of(arguments));
+        return runProcess(
+          executable,
+          arguments,
+          workingDirectory: workingDirectory,
+          environment: environment,
+        );
+      },
+    );
 
     final applied = await repository.applyMergePreview(
       comparison: fixture.comparison,
       treeSha: fixture.comparison.merge.treeSha!,
     );
 
-    expect(applied.headSwitched, isTrue);
+    expect(applied.workingTreeUpdated, isFalse);
+    // The user's working directory is never yanked: nothing checks main out.
+    expect(
+      commands.map((command) => command.first),
+      isNot(contains('checkout')),
+    );
+    expect(commands.map((command) => command.first), isNot(contains('reset')));
     expect(
       (await _git(fixture.root, ['branch', '--show-current'])).trim(),
-      'main',
+      'feature',
     );
     expect(
       (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
       applied.baseAfter,
     );
-    expect(
-      (await _git(fixture.root, ['rev-parse', 'HEAD'])).trim(),
-      applied.baseAfter,
-    );
-    // The disk holds the merge result, the way `git merge` would have left it.
-    expect(File('${fixture.root.path}/feature.txt').existsSync(), isTrue);
-    expect(File('${fixture.root.path}/main.txt').existsSync(), isTrue);
+    expect((await _git(fixture.root, ['rev-parse', 'HEAD'])).trim(), head);
+    // The merge result stays off disk until main is checked out.
+    expect(File('${fixture.root.path}/main.txt').existsSync(), isFalse);
     expect(
       (await _git(fixture.root, ['status', '--porcelain'])).trim(),
       isEmpty,
@@ -1291,20 +1309,50 @@ void main() {
     );
     expect(
       (await _git(fixture.root, ['branch', '--show-current'])).trim(),
-      'main',
+      'feature',
     );
-    expect(File('${fixture.root.path}/feature.txt').existsSync(), isFalse);
+    expect((await _git(fixture.root, ['rev-parse', 'HEAD'])).trim(), head);
+    expect(File('${fixture.root.path}/main.txt').existsSync(), isFalse);
     expect(
       (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
       fixture.comparison.compareTip,
     );
   });
 
-  test('merge apply refuses a dirty tree before it moves anything', () async {
+  test('a dirty tree does not block moving another branch', () async {
     final fixture = await _branchPreviewFixture();
     addTearDown(() => fixture.root.delete(recursive: true));
     await _git(fixture.root, ['switch', 'feature']);
     await File('${fixture.root.path}/feature.txt').writeAsString('dirty\n');
+    final head = (await _git(fixture.root, ['rev-parse', 'HEAD'])).trim();
+    final repository = GitRepository(fixture.root.path);
+
+    final applied = await repository.applyMergePreview(
+      comparison: fixture.comparison,
+      treeSha: fixture.comparison.merge.treeSha!,
+    );
+
+    expect(applied.workingTreeUpdated, isFalse);
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+      applied.baseAfter,
+    );
+    expect(
+      (await _git(fixture.root, ['branch', '--show-current'])).trim(),
+      'feature',
+    );
+    expect((await _git(fixture.root, ['rev-parse', 'HEAD'])).trim(), head);
+    expect(
+      await File('${fixture.root.path}/feature.txt').readAsString(),
+      'dirty\n',
+    );
+  });
+
+  test('merge apply refuses a dirty tree on the base branch itself', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    // main is the checked-out branch here, so applying resets the disk.
+    await File('${fixture.root.path}/main.txt').writeAsString('dirty\n');
     final repository = GitRepository(fixture.root.path);
 
     await expectLater(
@@ -1325,11 +1373,7 @@ void main() {
       fixture.comparison.baseTip,
     );
     expect(
-      (await _git(fixture.root, ['branch', '--show-current'])).trim(),
-      'feature',
-    );
-    expect(
-      await File('${fixture.root.path}/feature.txt').readAsString(),
+      await File('${fixture.root.path}/main.txt').readAsString(),
       'dirty\n',
     );
   });
@@ -1479,6 +1523,8 @@ void main() {
       );
 
       expect(applied.mode, BranchApplyMode.rebase);
+      // main is checked out, so feature only has its ref moved.
+      expect(applied.workingTreeUpdated, isFalse);
       expect(
         (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
         fixture.comparison.baseTip,
@@ -1500,6 +1546,32 @@ void main() {
       );
     },
   );
+
+  test('rebase apply onto the checked-out branch updates the tree', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    await _git(fixture.root, ['switch', 'feature']);
+    final repository = GitRepository(fixture.root.path);
+    final session = await repository.openRebasePreview(
+      baseRef: 'main',
+      compareRef: 'feature',
+    );
+    addTearDown(session.dispose);
+    final preview = await session.start();
+
+    final applied = await repository.applyRebasePreview(
+      comparison: fixture.comparison,
+      virtualTip: preview.virtualTip!,
+    );
+
+    expect(applied.workingTreeUpdated, isTrue);
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'HEAD'])).trim(),
+      preview.virtualTip,
+    );
+    // Rebased onto main, so main's file is on disk now too.
+    expect(File('${fixture.root.path}/main.txt').existsSync(), isTrue);
+  });
 
   test(
     'remote rebase preview creates a local tracking branch and undo removes it',
@@ -1994,6 +2066,46 @@ void main() {
     expect(result.firstError, contains('socket error'));
   });
 
+  test('a repository verification command runs as the analyzer', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    // No pubspec: only the repository's own command can be verifying anything.
+    final commands = <List<String>>[];
+    final trees = <List<String>>[];
+    final repository = GitRepository(
+      fixture.root.path,
+      processStarter: (executable, arguments, {workingDirectory}) async {
+        commands.add([executable, ...arguments]);
+        trees.add(
+          Directory(
+            workingDirectory!,
+          ).listSync().map((e) => e.uri.pathSegments.last).toList(),
+        );
+        return _FakeProcess(exit: 2, out: 'make: *** [check] Error 1\n');
+      },
+    );
+    final session = PreviewVerificationSession.tree(
+      repository: repository,
+      treeSha: fixture.comparison.merge.treeSha!,
+      baseTip: fixture.comparison.baseTip,
+      command: 'make check',
+    );
+    addTearDown(session.dispose);
+
+    final result = await session.run();
+
+    expect(commands, [
+      ['/bin/sh', '-c', 'make check'],
+    ]);
+    // The preview result is what the command sees, not the repository itself.
+    expect(trees.single, containsAll(['base.txt', 'main.txt', 'feature.txt']));
+    // The command is the analyzer, so its exit code is the verdict.
+    expect(result.status, PreviewVerificationStatus.failed);
+    expect(result.firstError, contains('Error 1'));
+    // A blank command is no command, so the built-in detection decides again.
+    expect(await repository.verificationCommands(command: '   '), isNull);
+  });
+
   test('preview verification skips a repository without a pubspec', () async {
     final fixture = await _branchPreviewFixture();
     addTearDown(() => fixture.root.delete(recursive: true));
@@ -2070,6 +2182,55 @@ void main() {
     addTearDown(session.dispose);
 
     expect((await session.run()).status, PreviewVerificationStatus.timedOut);
+  });
+
+  test('a timed-out command stops waiting on the pipes it orphaned', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    await File(
+      '${fixture.root.path}/pubspec.yaml',
+    ).writeAsString('name: sample\n');
+    late _FakeProcess analyzer;
+    final session = PreviewVerificationSession.tree(
+      repository: GitRepository(
+        fixture.root.path,
+        processStarter: (executable, arguments, {workingDirectory}) async =>
+            analyzer = _FakeProcess(holdPipes: true),
+      ),
+      treeSha: fixture.comparison.merge.treeSha!,
+      baseTip: fixture.comparison.baseTip,
+      timeout: const Duration(milliseconds: 50),
+    );
+    addTearDown(session.dispose);
+
+    // The orphan holding stdout open must not hold the verdict with it, so the
+    // timeout is reported when it happens instead of whenever the orphan dies.
+    final result = await session.run().timeout(const Duration(seconds: 5));
+
+    expect(result.status, PreviewVerificationStatus.timedOut);
+    expect(analyzer.killed, isTrue);
+  });
+
+  test('a finished command does not wait on the pipes its orphan holds', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final session = PreviewVerificationSession.tree(
+      repository: GitRepository(
+        fixture.root.path,
+        processStarter: (executable, arguments, {workingDirectory}) async =>
+            _FakeProcess(holdPipes: true, exitsFirst: true),
+      ),
+      treeSha: fixture.comparison.merge.treeSha!,
+      baseTip: fixture.comparison.baseTip,
+      command: 'run-checks',
+    );
+    addTearDown(session.dispose);
+
+    // The command exited cleanly; a background child it left on stdout must not
+    // hold the verdict, which would otherwise never arrive at all for a daemon.
+    final result = await session.run().timeout(const Duration(seconds: 5));
+
+    expect(result.status, PreviewVerificationStatus.passed);
   });
 
   test('cherry-pick applies one commit and rejects a dirty worktree', () async {
@@ -3482,19 +3643,33 @@ Future<Color> _paintPixel(
   );
 }
 
-/// A finished process, so verification tests never spawn a real analyzer.
+/// A finished process, so verification tests never spawn a real analyzer. With
+/// [holdPipes] it instead models a `/bin/sh` whose orphan keeps stdout open: the
+/// stream never ends, and the exit code arrives only on the kill — or right
+/// away with [exitsFirst], the shell that exited on its own and left the orphan.
 class _FakeProcess implements Process {
-  _FakeProcess({this.exit = 0, this.out = ''});
+  _FakeProcess({
+    this.exit = 0,
+    this.out = '',
+    this.holdPipes = false,
+    this.exitsFirst = false,
+  });
 
   final int exit;
   final String out;
+  final bool holdPipes;
+  final bool exitsFirst;
+  final _held = StreamController<List<int>>();
+  final _exited = Completer<int>();
   var killed = false;
 
   @override
-  Future<int> get exitCode async => exit;
+  Future<int> get exitCode =>
+      holdPipes && !exitsFirst ? _exited.future : Future.value(exit);
 
   @override
-  Stream<List<int>> get stdout => Stream.value(utf8.encode(out));
+  Stream<List<int>> get stdout =>
+      holdPipes ? _held.stream : Stream.value(utf8.encode(out));
 
   @override
   Stream<List<int>> get stderr => const Stream.empty();
@@ -3502,11 +3677,17 @@ class _FakeProcess implements Process {
   @override
   IOSink get stdin => throw UnsupportedError('stdin');
 
+  /// A pid nothing is a child of, so walking the tree finds no descendants and
+  /// no real process on this machine is ever signalled.
   @override
-  int get pid => 1;
+  int get pid => 999999;
 
   @override
-  bool kill([ProcessSignal signal = ProcessSignal.sigterm]) => killed = true;
+  bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
+    killed = true;
+    if (holdPipes && !_exited.isCompleted) _exited.complete(-15);
+    return true;
+  }
 }
 
 Future<String> _git(Directory root, List<String> args) async {

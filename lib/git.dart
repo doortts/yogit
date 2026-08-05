@@ -439,24 +439,31 @@ class PreviewVerificationSession {
     required GitRepository repository,
     required String treeSha,
     required String baseTip,
+    String? command,
     this.timeout = const Duration(minutes: 5),
   }) : _repository = repository,
        _treeSha = treeSha,
-       _baseTip = baseTip;
+       _baseTip = baseTip,
+       _command = command;
 
   /// Verifies what [worktreePath] already holds; its owner keeps cleaning it up.
   PreviewVerificationSession.worktree({
     required GitRepository repository,
     required String worktreePath,
+    String? command,
     this.timeout = const Duration(minutes: 5),
   }) : _repository = repository,
        _treeSha = null,
        _baseTip = null,
+       _command = command,
        _path = worktreePath;
 
   final GitRepository _repository;
   final String? _treeSha;
   final String? _baseTip;
+
+  /// This repository's verification command from yogit's own settings, if set.
+  final String? _command;
   final Duration timeout;
   String? _path;
   bool _owned = false;
@@ -469,7 +476,7 @@ class PreviewVerificationSession {
     const skipped = PreviewVerification(
       status: PreviewVerificationStatus.skipped,
     );
-    final commands = await _repository.verificationCommands();
+    final commands = await _repository.verificationCommands(command: _command);
     if (_disposed ||
         commands == null ||
         (_path == null && !await _materialize())) {
@@ -483,12 +490,12 @@ class PreviewVerificationSession {
           command,
           until.difference(DateTime.now()),
         );
+        if (_disposed) return skipped;
         if (result == null) {
           return const PreviewVerification(
             status: PreviewVerificationStatus.timedOut,
           );
         }
-        if (_disposed) return skipped;
         if (result.exitCode != 0) {
           return PreviewVerification(
             // Only the analyzer itself judges the merge; a preparation step
@@ -553,30 +560,80 @@ class PreviewVerificationSession {
     );
     _process = process;
     // Cancelled while this command was starting up, so it never saw the kill.
-    if (_disposed) process.kill();
+    if (_disposed) await _killTree(process);
     var expired = false;
     final timer = Timer(remaining, () {
       expired = true;
-      process.kill();
+      unawaited(_killTree(process));
     });
     const decoder = Utf8Decoder(allowMalformed: true);
     final output = StringBuffer();
     try {
-      await Future.wait([
-        process.stdout.transform(decoder).forEach(output.write),
-        process.stderr.transform(decoder).forEach(output.write),
-      ]);
+      final stdoutDone = process.stdout
+          .transform(decoder)
+          .forEach(output.write);
+      final stderrDone = process.stderr
+          .transform(decoder)
+          .forEach(output.write);
+      // A grandchild that outlives the killed shell keeps these pipes open, so
+      // waiting for them would report the timeout only once that grandchild
+      // finished. The exit code is what says this command is over.
+      unawaited(stdoutDone.catchError((_) {}));
+      unawaited(stderrDone.catchError((_) {}));
       final exitCode = await process.exitCode;
-      return expired ? null : (exitCode: exitCode, output: output.toString());
+      if (expired || _disposed) return null;
+      // Same orphan, other direction: the command exited on its own, so the
+      // exit code already decides the verdict and a couple of seconds is all
+      // the grace trailing output gets. The timer cannot rescue this wait —
+      // the shell is gone, so its reparented children are unreachable.
+      await Future.wait([
+        stdoutDone,
+        stderrDone,
+      ]).timeout(const Duration(seconds: 2), onTimeout: () => const <void>[]);
+      return (exitCode: exitCode, output: output.toString());
     } finally {
       timer.cancel();
       _process = null;
     }
   }
 
+  /// SIGTERMs [process] and everything it spawned. `/bin/sh -c` forks for any
+  /// compound command, so signalling the shell alone leaves the real work
+  /// running — burning CPU past the timeout, and still writing into the preview
+  /// worktree a cancel is about to delete.
+  Future<void> _killTree(Process process) async {
+    // Walked before anything dies: once the shell is gone its children reparent
+    // to init and no walk can find them any more.
+    final descendants = <int>[];
+    try {
+      for (var generation = [process.pid]; generation.isNotEmpty;) {
+        final children = <int>[];
+        for (final parent in generation) {
+          final listed = await Process.run('pgrep', ['-P', '$parent']);
+          for (final line in listed.stdout.toString().split('\n')) {
+            final child = int.tryParse(line.trim());
+            if (child != null) children.add(child);
+          }
+        }
+        descendants.addAll(children);
+        generation = children;
+      }
+    } on ProcessException {
+      // No pgrep here, so signalling the shell is all this platform allows.
+    }
+    // The shell dies first, so no parent is left alive to spawn a replacement
+    // while its children are being signalled; then the pids captured above,
+    // which stay valid once the dead shell's children reparent.
+    process.kill();
+    for (final pid in descendants.reversed) {
+      Process.killPid(pid);
+    }
+  }
+
   Future<void> dispose() async {
     _disposed = true;
-    _process?.kill();
+    final process = _process;
+    if (process != null) await _killTree(process);
     final path = _owned ? _path : null;
     _owned = false;
     if (path != null) await _repository._removePreviewWorktree(path);
@@ -1218,7 +1275,7 @@ class BranchApplyResult {
     required this.compareBefore,
     required this.compareAfter,
     this.compareBranchCreated = false,
-    this.headSwitched = false,
+    this.workingTreeUpdated = false,
   });
 
   final BranchApplyMode mode;
@@ -1230,9 +1287,9 @@ class BranchApplyResult {
   final String compareAfter;
   final bool compareBranchCreated;
 
-  /// Whether applying checked [baseBranch] out, so the working tree now holds
-  /// the merge result the way `git merge` would have left it.
-  final bool headSwitched;
+  /// Whether the moved branch was the checked-out one, so the working tree holds
+  /// the result on disk. False means only the branch ref moved.
+  final bool workingTreeUpdated;
 }
 
 class GraphRow {
@@ -2362,10 +2419,22 @@ class GitRepository implements FullDiffRepository {
     )) ...[status.path, ?status.oldPath],
   };
 
-  /// The project's own check, run in a preview worktree, or null when this
-  /// repository has no pubspec.yaml to check. The last command is the analyzer
-  /// whose verdict counts; every command before it only prepares the worktree.
-  Future<List<List<String>>?> verificationCommands() async {
+  /// The project's own check, run in a preview worktree, or null when there is
+  /// nothing to check. The last command is the analyzer whose verdict counts;
+  /// every command before it only prepares the worktree.
+  ///
+  /// [command] is this repository's verification command from yogit's settings.
+  /// Security invariant: a command may come only from yogit's own settings or
+  /// from the built-in detection below — never from a file inside the opened
+  /// repository (package.json scripts, Makefile, …), because auto-running a
+  /// repository-defined command is arbitrary code execution on this machine.
+  Future<List<List<String>>?> verificationCommands({String? command}) async {
+    final configured = command?.trim() ?? '';
+    if (configured.isNotEmpty) {
+      return [
+        ['/bin/sh', '-c', configured],
+      ];
+    }
     final pubspec = File('$root${Platform.pathSeparator}pubspec.yaml');
     if (!await pubspec.exists()) return null;
     // ponytail: the sdk key is the marker every Flutter package carries; parsing
@@ -2443,20 +2512,6 @@ class GitRepository implements FullDiffRepository {
     if (target == null || target.needsRecalculation) {
       throw GitRepositoryException(root, '로컬 기준 브랜치로 미리보기를 다시 계산해야 합니다.');
     }
-    // `git merge` leaves the base branch checked out with the result on disk, so
-    // a base branch sitting somewhere else gets checked out here first. The
-    // guards run before anything moves; commit-tree below has no side effects.
-    final checkout =
-        (await _run(['branch', '--show-current'])).trim() != target.localBranch;
-    if (checkout) {
-      if (await branchWorktreePath(target.localBranch) != null) {
-        throw GitRepositoryException(
-          target.localBranch,
-          '다른 worktree에서 체크아웃한 브랜치라 적용할 수 없습니다.',
-        );
-      }
-      await _requireCleanWorktree();
-    }
     final tree = (await _run([
       'rev-parse',
       '--verify',
@@ -2474,8 +2529,9 @@ class GitRepository implements FullDiffRepository {
       '-m',
       "Merge branch '${comparison.compareRef}' into ${comparison.baseRef}",
     ])).trim();
-    if (checkout) await _run(['checkout', target.localBranch]);
-    await _moveLocalBranch(
+    // A base branch that is not the checked-out one only has its ref moved, so
+    // the user's working directory is never yanked from under them.
+    final workingTreeUpdated = await _moveLocalBranch(
       branch: target.localBranch,
       expected: target.selectedTip,
       next: mergeCommit,
@@ -2488,7 +2544,7 @@ class GitRepository implements FullDiffRepository {
       baseAfter: await _localBranchTip(target.localBranch),
       compareBefore: comparison.compareTip,
       compareAfter: comparison.compareTip,
-      headSwitched: checkout,
+      workingTreeUpdated: workingTreeUpdated,
     );
   }
 
@@ -2536,7 +2592,7 @@ class GitRepository implements FullDiffRepository {
           );
         }
       }
-      await _moveLocalBranch(
+      final workingTreeUpdated = await _moveLocalBranch(
         branch: target.localBranch,
         expected: target.selectedTip,
         next: rewrittenTip,
@@ -2550,6 +2606,7 @@ class GitRepository implements FullDiffRepository {
         compareBefore: comparison.compareTip,
         compareAfter: await _localBranchTip(target.localBranch),
         compareBranchCreated: created,
+        workingTreeUpdated: workingTreeUpdated,
       );
     } catch (_) {
       if (created) {
@@ -2664,7 +2721,10 @@ class GitRepository implements FullDiffRepository {
     }
   }
 
-  Future<void> _moveLocalBranch({
+  /// Whether the working tree was updated too, i.e. [branch] was the checked-out
+  /// one and the reset brought [next] to disk. A branch checked out nowhere only
+  /// has its ref moved, so a dirty working tree is none of its business.
+  Future<bool> _moveLocalBranch({
     required String branch,
     required String expected,
     required String next,
@@ -2676,7 +2736,7 @@ class GitRepository implements FullDiffRepository {
     if (current == branch) {
       await _requireCleanWorktree();
       await _run(['reset', '--hard', next]);
-      return;
+      return true;
     }
     final worktreePath = await branchWorktreePath(branch);
     if (worktreePath != null) {
@@ -2686,6 +2746,7 @@ class GitRepository implements FullDiffRepository {
       );
     }
     await _run(['update-ref', 'refs/heads/$branch', next, expected]);
+    return false;
   }
 
   Future<CherryPickResult> cherryPick(String sha) async {

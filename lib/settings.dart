@@ -380,6 +380,7 @@ class AppSettings {
     this.previewDiffBottomHeight,
     this.baseBranches = const {},
     this.deletedBranchNames = const {},
+    this.verificationCommands = const {},
     this.recentRepositories = const [],
     this.commitProfiles = const [],
   });
@@ -437,6 +438,10 @@ class AppSettings {
   final List<RefPaletteEntry> refPalette;
   final Map<String, String> baseBranches;
   final Map<String, Map<String, String>> deletedBranchNames;
+
+  /// The command a preview verification runs, per repository root. Empty or
+  /// absent leaves the built-in Dart/Flutter detection in charge.
+  final Map<String, String> verificationCommands;
 
   /// Repository roots, most recently opened first.
   final List<String> recentRepositories;
@@ -548,6 +553,7 @@ class AppSettings {
     double? previewDiffBottomHeight,
     Map<String, String>? baseBranches,
     Map<String, Map<String, String>>? deletedBranchNames,
+    Map<String, String>? verificationCommands,
     List<String>? recentRepositories,
     List<CommitProfile>? commitProfiles,
   }) => AppSettings(
@@ -570,6 +576,7 @@ class AppSettings {
         previewDiffBottomHeight ?? this.previewDiffBottomHeight,
     baseBranches: baseBranches ?? this.baseBranches,
     deletedBranchNames: deletedBranchNames ?? this.deletedBranchNames,
+    verificationCommands: verificationCommands ?? this.verificationCommands,
     recentRepositories: recentRepositories ?? this.recentRepositories,
     commitProfiles: commitProfiles ?? this.commitProfiles,
   );
@@ -581,6 +588,13 @@ class AppSettings {
     final baseBranches = <String, String>{
       if (storedBaseBranches is Map)
         for (final entry in storedBaseBranches.entries)
+          if (entry.key is String && entry.value is String)
+            entry.key as String: entry.value as String,
+    };
+    final storedVerificationCommands = value['verificationCommands'];
+    final verificationCommands = <String, String>{
+      if (storedVerificationCommands is Map)
+        for (final entry in storedVerificationCommands.entries)
           if (entry.key is String && entry.value is String)
             entry.key as String: entry.value as String,
     };
@@ -650,6 +664,7 @@ class AppSettings {
       ),
       baseBranches: baseBranches,
       deletedBranchNames: _parseNestedStringMap(value['deletedBranchNames']),
+      verificationCommands: verificationCommands,
       recentRepositories: _parseRecentRepositories(value['recentRepositories']),
       commitProfiles: _parseCommitProfiles(value['commitProfiles']),
     );
@@ -696,6 +711,7 @@ class AppSettings {
     'previewDiffBottomHeight': ?previewDiffBottomHeight,
     'baseBranches': baseBranches,
     'deletedBranchNames': deletedBranchNames,
+    'verificationCommands': verificationCommands,
     'recentRepositories': recentRepositories,
     'commitProfiles': [for (final profile in commitProfiles) profile.toJson()],
   };
@@ -721,6 +737,7 @@ class AppSettings {
       previewDiffBottomHeight == other.previewDiffBottomHeight &&
       mapEquals(baseBranches, other.baseBranches) &&
       _nestedStringMapEquals(deletedBranchNames, other.deletedBranchNames) &&
+      mapEquals(verificationCommands, other.verificationCommands) &&
       listEquals(recentRepositories, other.recentRepositories) &&
       listEquals(commitProfiles, other.commitProfiles);
 
@@ -762,7 +779,15 @@ class AppSettings {
       ),
     ),
     Object.hashAll(recentRepositories),
-    Object.hashAll(commitProfiles),
+    // Paired, because Object.hash takes twenty arguments at most.
+    Object.hash(
+      Object.hashAll(commitProfiles),
+      Object.hashAllUnordered(
+        verificationCommands.entries.map(
+          (entry) => Object.hash(entry.key, entry.value),
+        ),
+      ),
+    ),
   );
 }
 
@@ -771,10 +796,19 @@ class SettingsStore {
 
   final File file;
 
-  static String _defaultPath() {
-    final home = Platform.environment['HOME'] ?? Directory.current.path;
-    return '$home/Library/Application Support/yogit/settings.json';
-  }
+  static String _defaultPath() => pathForHome(Platform.environment['HOME']);
+
+  /// The settings file under [home]. With no HOME there is no home directory to
+  /// read, and the working directory is not a substitute: it can be the opened
+  /// repository, whose own settings file would then hand us the verification
+  /// command we run — arbitrary code execution from inside the repository. A
+  /// fixed temp path is no substitute either, since any other local user can
+  /// plant that file first, so the fallback is a fresh random directory nobody
+  /// can pre-create: settings simply do not persist without a home directory.
+  @visibleForTesting
+  static String pathForHome(String? home) => home == null || home.isEmpty
+      ? '${Directory.systemTemp.createTempSync('yogit_').path}/settings.json'
+      : '$home/Library/Application Support/yogit/settings.json';
 
   Future<AppSettings> load() async {
     try {
@@ -801,12 +835,17 @@ class SettingsScreen extends StatefulWidget {
     required this.settings,
     required this.onChanged,
     this.avatarService,
+    this.repositoryRoot,
     super.key,
   });
 
   final AppSettings settings;
   final ValueChanged<AppSettings> onChanged;
   final AvatarService? avatarService;
+
+  /// The opened repository, for the settings kept per repository. Without one
+  /// there is no repository to edit them for.
+  final String? repositoryRoot;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -839,10 +878,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final _laneFields = [
     for (final hex in _settings.laneColors) TextEditingController(text: hex),
   ];
+  late final _verificationCommandField = TextEditingController(
+    text: _settings.verificationCommands[widget.repositoryRoot] ?? '',
+  );
 
   @override
   void dispose() {
     _baseBranchColorField.dispose();
+    _verificationCommandField.dispose();
     for (final fields in _refPaletteFields) {
       fields.base.dispose();
       fields.text.dispose();
@@ -1263,6 +1306,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: (value) =>
                 _change(_settings.copyWith(showAvatars: value)),
           ),
+          if (widget.repositoryRoot != null) ...[
+            const SizedBox(height: 24),
+            _verificationCommand(widget.repositoryRoot!),
+          ],
           const SizedBox(height: 24),
           _laneColors(),
           const SizedBox(height: 24),
@@ -1292,6 +1339,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
       ),
+    ),
+  );
+
+  /// The opened repository's own verification command. Empty leaves the built-in
+  /// Dart/Flutter detection in charge.
+  Widget _verificationCommand(String root) => TextField(
+    key: const Key('verification-command-field'),
+    controller: _verificationCommandField,
+    onChanged: (value) {
+      final commands = {..._settings.verificationCommands};
+      if (value.trim().isEmpty) {
+        commands.remove(root);
+      } else {
+        commands[root] = value.trim();
+      }
+      _change(_settings.copyWith(verificationCommands: commands));
+    },
+    style: const TextStyle(color: Color(0xFFE8EAF2), fontSize: 12),
+    decoration: const InputDecoration(
+      isDense: true,
+      labelText: '검증 명령',
+      labelStyle: TextStyle(color: Color(0xFF8D94A8), fontSize: 12),
+      helperText:
+          '비어 있으면 Dart/Flutter 저장소만 자동으로 검증합니다. '
+          '명령은 미리보기 결과를 담은 임시 worktree에서 실행됩니다.',
+      helperStyle: TextStyle(color: Color(0xFF8D94A8), fontSize: 11),
+      helperMaxLines: 3,
+      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+      border: OutlineInputBorder(),
     ),
   );
 
