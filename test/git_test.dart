@@ -1952,9 +1952,6 @@ void main() {
   test('preview verification analyzes the merge result worktree', () async {
     final fixture = await _branchPreviewFixture();
     addTearDown(() => fixture.root.delete(recursive: true));
-    await File('${fixture.root.path}/pubspec.yaml').writeAsString(
-      'name: sample\ndependencies:\n  flutter:\n    sdk: flutter\n',
-    );
     final commands = <List<String>>[];
     final trees = <List<String>>[];
     final repository = GitRepository(
@@ -1973,6 +1970,7 @@ void main() {
       repository: repository,
       treeSha: fixture.comparison.merge.treeSha!,
       baseTip: fixture.comparison.baseTip,
+      command: 'make check',
     );
     final worktree = await session.run().then((result) {
       expect(result.status, PreviewVerificationStatus.passed);
@@ -1981,8 +1979,7 @@ void main() {
     await session.dispose();
 
     expect(commands, [
-      ['flutter', 'pub', 'get'],
-      ['flutter', 'analyze', '--no-pub'],
+      ['/bin/sh', '-c', 'make check'],
     ]);
     // Both branches' files, so the preview tree was checked out, not main's.
     expect(trees.first, containsAll(['base.txt', 'main.txt', 'feature.txt']));
@@ -1996,9 +1993,6 @@ void main() {
   test('preview verification reports the analyzer findings it saw', () async {
     final fixture = await _branchPreviewFixture();
     addTearDown(() => fixture.root.delete(recursive: true));
-    await File(
-      '${fixture.root.path}/pubspec.yaml',
-    ).writeAsString('name: sample\n');
     const output =
         'Analyzing sample...\n\n'
         "  error • Undefined name 'gone' • lib/settings.dart:780:12 • undefined_identifier\n"
@@ -2009,67 +2003,30 @@ void main() {
       fixture.root.path,
       processStarter: (executable, arguments, {workingDirectory}) async {
         commands.add([executable, ...arguments]);
-        return _FakeProcess(
-          exit: commands.length == 1 ? 0 : 1,
-          out: commands.length == 1 ? '' : output,
-        );
+        return _FakeProcess(exit: 1, out: output);
       },
     );
     final session = PreviewVerificationSession.tree(
       repository: repository,
       treeSha: fixture.comparison.merge.treeSha!,
       baseTip: fixture.comparison.baseTip,
+      command: 'dart analyze',
     );
     addTearDown(session.dispose);
 
     final result = await session.run();
 
-    expect(commands.first, ['dart', 'pub', 'get']);
-    expect(commands.last, ['dart', 'analyze']);
+    expect(commands.single, ['/bin/sh', '-c', 'dart analyze']);
     expect(result.status, PreviewVerificationStatus.failed);
     expect(result.errorLines, hasLength(2));
     expect(result.firstError, contains('settings.dart:780'));
     expect(verificationErrorLocation(result.firstError!), 'settings.dart:780');
   });
 
-  test('a failed pub get leaves the verification undecided', () async {
-    final fixture = await _branchPreviewFixture();
-    addTearDown(() => fixture.root.delete(recursive: true));
-    await File(
-      '${fixture.root.path}/pubspec.yaml',
-    ).writeAsString('name: sample\n');
-    final commands = <List<String>>[];
-    final repository = GitRepository(
-      fixture.root.path,
-      processStarter: (executable, arguments, {workingDirectory}) async {
-        commands.add([executable, ...arguments]);
-        return _FakeProcess(
-          exit: 69,
-          out: 'Got socket error trying to find package sample.\n',
-        );
-      },
-    );
-    final session = PreviewVerificationSession.tree(
-      repository: repository,
-      treeSha: fixture.comparison.merge.treeSha!,
-      baseTip: fixture.comparison.baseTip,
-    );
-    addTearDown(session.dispose);
-
-    final result = await session.run();
-
-    // The analyzer never got to say anything, so neither does the badge.
-    expect(commands, [
-      ['dart', 'pub', 'get'],
-    ]);
-    expect(result.status, PreviewVerificationStatus.unavailable);
-    expect(result.firstError, contains('socket error'));
-  });
-
   test('a repository verification command runs as the analyzer', () async {
     final fixture = await _branchPreviewFixture();
     addTearDown(() => fixture.root.delete(recursive: true));
-    // No pubspec: only the repository's own command can be verifying anything.
+    // The repository's own configured command is the only thing yogit runs.
     final commands = <List<String>>[];
     final trees = <List<String>>[];
     final repository = GitRepository(
@@ -2102,13 +2059,18 @@ void main() {
     // The command is the analyzer, so its exit code is the verdict.
     expect(result.status, PreviewVerificationStatus.failed);
     expect(result.firstError, contains('Error 1'));
-    // A blank command is no command, so the built-in detection decides again.
+    // A blank command is no command at all.
     expect(await repository.verificationCommands(command: '   '), isNull);
   });
 
-  test('preview verification skips a repository without a pubspec', () async {
+  test('preview verification skips a repository without a command', () async {
     final fixture = await _branchPreviewFixture();
     addTearDown(() => fixture.root.delete(recursive: true));
+    // Even a recognizable stack is not guessed at: yogit is repository-neutral,
+    // so without a configured command there is no verification.
+    await File('${fixture.root.path}/pubspec.yaml').writeAsString(
+      'name: sample\ndependencies:\n  flutter:\n    sdk: flutter\n',
+    );
     var started = false;
     final session = PreviewVerificationSession.tree(
       repository: GitRepository(
@@ -2133,9 +2095,6 @@ void main() {
     () async {
       final fixture = await _branchPreviewFixture();
       addTearDown(() => fixture.root.delete(recursive: true));
-      await File(
-        '${fixture.root.path}/pubspec.yaml',
-      ).writeAsString('name: sample\n');
       late PreviewVerificationSession session;
       final processes = <_FakeProcess>[];
       session = PreviewVerificationSession.tree(
@@ -2144,13 +2103,14 @@ void main() {
           processStarter: (executable, arguments, {workingDirectory}) async {
             final process = _FakeProcess();
             processes.add(process);
-            // The pane closing mid-run: cancel while the first command is out.
+            // The pane closing mid-run: cancel while the command is out.
             await session.dispose();
             return process;
           },
         ),
         treeSha: fixture.comparison.merge.treeSha!,
         baseTip: fixture.comparison.baseTip,
+        command: 'make check',
       );
       final worktree = await session.run().then((result) {
         expect(result.status, PreviewVerificationStatus.skipped);
@@ -2170,13 +2130,11 @@ void main() {
   test('preview verification reports running out of time on its own', () async {
     final fixture = await _branchPreviewFixture();
     addTearDown(() => fixture.root.delete(recursive: true));
-    await File(
-      '${fixture.root.path}/pubspec.yaml',
-    ).writeAsString('name: sample\n');
     final session = PreviewVerificationSession.tree(
       repository: GitRepository(fixture.root.path),
       treeSha: fixture.comparison.merge.treeSha!,
       baseTip: fixture.comparison.baseTip,
+      command: 'make check',
       timeout: Duration.zero,
     );
     addTearDown(session.dispose);
@@ -2187,9 +2145,6 @@ void main() {
   test('a timed-out command stops waiting on the pipes it orphaned', () async {
     final fixture = await _branchPreviewFixture();
     addTearDown(() => fixture.root.delete(recursive: true));
-    await File(
-      '${fixture.root.path}/pubspec.yaml',
-    ).writeAsString('name: sample\n');
     late _FakeProcess analyzer;
     final session = PreviewVerificationSession.tree(
       repository: GitRepository(
@@ -2199,6 +2154,7 @@ void main() {
       ),
       treeSha: fixture.comparison.merge.treeSha!,
       baseTip: fixture.comparison.baseTip,
+      command: 'make check',
       timeout: const Duration(milliseconds: 50),
     );
     addTearDown(session.dispose);

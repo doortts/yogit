@@ -8137,7 +8137,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('검증 명령'), findsOneWidget);
-    expect(find.textContaining('비어 있으면 Dart/Flutter 저장소만'), findsOneWidget);
+    expect(find.textContaining('비어 있으면 미리보기를 검증하지 않습니다'), findsOneWidget);
     await tester.enterText(
       find.byKey(const Key('verification-command-field')),
       'make check',

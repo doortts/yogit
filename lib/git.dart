@@ -397,8 +397,8 @@ enum PreviewVerificationStatus {
   passed,
   failed,
 
-  /// The check never got to run — a preparation step such as `pub get` failed,
-  /// which says nothing about the merge itself.
+  /// The check never got to run — the verification environment itself broke,
+  /// which says nothing about the merge.
   unavailable,
   timedOut,
   skipped,
@@ -484,7 +484,7 @@ class PreviewVerificationSession {
     }
     final until = DateTime.now().add(timeout);
     try {
-      for (final (index, command) in commands.indexed) {
+      for (final command in commands) {
         if (_disposed) return skipped;
         final result = await _runCommand(
           command,
@@ -497,18 +497,15 @@ class PreviewVerificationSession {
           );
         }
         if (result.exitCode != 0) {
+          // The user's command is the check, so its exit code is the verdict.
           return PreviewVerification(
-            // Only the analyzer itself judges the merge; a preparation step
-            // failing (pub get on an offline machine) judges nothing.
-            status: index == commands.length - 1
-                ? PreviewVerificationStatus.failed
-                : PreviewVerificationStatus.unavailable,
+            status: PreviewVerificationStatus.failed,
             errorLines: verificationErrorLines(result.output),
           );
         }
       }
     } on ProcessException {
-      // No analyzer to run on this machine says nothing about the merge.
+      // A shell that cannot even start says nothing about the merge.
       return skipped;
     }
     return const PreviewVerification(status: PreviewVerificationStatus.passed);
@@ -2419,35 +2416,21 @@ class GitRepository implements FullDiffRepository {
     )) ...[status.path, ?status.oldPath],
   };
 
-  /// The project's own check, run in a preview worktree, or null when there is
-  /// nothing to check. The last command is the analyzer whose verdict counts;
-  /// every command before it only prepares the worktree.
+  /// The repository's own check, run in a preview worktree, or null when the
+  /// user configured none. yogit is repository-neutral: it never guesses a
+  /// toolchain from the repository's contents.
   ///
   /// [command] is this repository's verification command from yogit's settings.
-  /// Security invariant: a command may come only from yogit's own settings or
-  /// from the built-in detection below — never from a file inside the opened
-  /// repository (package.json scripts, Makefile, …), because auto-running a
-  /// repository-defined command is arbitrary code execution on this machine.
+  /// Security invariant: a command may come only from yogit's own settings —
+  /// never from a file inside the opened repository (package.json scripts,
+  /// Makefile, …), because auto-running a repository-defined command is
+  /// arbitrary code execution on this machine.
   Future<List<List<String>>?> verificationCommands({String? command}) async {
     final configured = command?.trim() ?? '';
-    if (configured.isNotEmpty) {
-      return [
-        ['/bin/sh', '-c', configured],
-      ];
-    }
-    final pubspec = File('$root${Platform.pathSeparator}pubspec.yaml');
-    if (!await pubspec.exists()) return null;
-    // ponytail: the sdk key is the marker every Flutter package carries; parsing
-    // the dependency graph would not tell us more about which analyzer to run.
-    return RegExp(r'sdk:\s*flutter').hasMatch(await pubspec.readAsString())
-        ? const [
-            ['flutter', 'pub', 'get'],
-            ['flutter', 'analyze', '--no-pub'],
-          ]
-        : const [
-            ['dart', 'pub', 'get'],
-            ['dart', 'analyze'],
-          ];
+    if (configured.isEmpty) return null;
+    return [
+      ['/bin/sh', '-c', configured],
+    ];
   }
 
   Future<void> _removePreviewWorktree(String path) async {

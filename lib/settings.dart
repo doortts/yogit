@@ -1362,7 +1362,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       labelText: '검증 명령',
       labelStyle: TextStyle(color: Color(0xFF8D94A8), fontSize: 12),
       helperText:
-          '비어 있으면 Dart/Flutter 저장소만 자동으로 검증합니다. '
+          '비어 있으면 미리보기를 검증하지 않습니다. '
           '명령은 미리보기 결과를 담은 임시 worktree에서 실행됩니다.',
       helperStyle: TextStyle(color: Color(0xFF8D94A8), fontSize: 11),
       helperMaxLines: 3,
