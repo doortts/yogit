@@ -5580,6 +5580,271 @@ void main() {
     expect(find.textContaining('브랜치에서'), findsNothing);
   });
 
+  testWidgets('proximity regions sit under the file both sides edited', (
+    tester,
+  ) async {
+    final comparison = branchComparison(
+      merge: const MergeConflictCheck(
+        status: MergeConflictStatus.clean,
+        treeSha: 'merge-tree',
+        resultFiles: [
+          GitFileChange(
+            path: 'lib/settings.dart',
+            status: 'M',
+            additions: 4,
+            deletions: 2,
+          ),
+          GitFileChange(
+            path: 'lib/timeline.dart',
+            status: 'M',
+            additions: 1,
+            deletions: 1,
+          ),
+        ],
+        baseChangedFiles: {'lib/settings.dart', 'lib/timeline.dart'},
+        proximity: {
+          'lib/settings.dart': [
+            (startLine: 556, endLine: 568),
+            (startLine: 1412, endLine: 1420),
+          ],
+        },
+      ),
+    );
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            current: 'main',
+            tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async => comparison,
+          diffBetween: (_, _, file) async => [
+            const DiffLine(
+              kind: DiffLineKind.hunk,
+              text: '@@ -556,1 +556,2 @@',
+            ),
+            const DiffLine(
+              kind: DiffLineKind.add,
+              text: 'both sides here',
+              newNumber: 556,
+            ),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await openCleanMergePreview(tester);
+
+    String labelOf(String path) => tester
+        .widget<Text>(
+          find.descendant(
+            of: find.byKey(Key('preview-provenance-$path')),
+            matching: find.byType(Text),
+          ),
+        )
+        .data!;
+    expect(labelOf('lib/settings.dart'), '양쪽 수정 · 근접 2곳');
+    // 근접 구역이 없는 파일은 지금 그대로다.
+    expect(labelOf('lib/timeline.dart'), '양쪽 수정');
+    expect(
+      find.byKey(const Key('preview-proximity-lib/settings.dart')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('preview-proximity-lib/timeline.dart')),
+      findsNothing,
+    );
+    expect(find.text('양쪽 편집이 10줄 안에서 겹침'), findsOneWidget);
+    expect(find.text('556~568줄'), findsOneWidget);
+    expect(find.text('1,412~1,420줄'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const Key('preview-proximity-lib/settings.dart-556')),
+    );
+    await tester.pumpAndSettle();
+
+    // 파일 줄 클릭과 같은 경로로 그 파일의 결과 diff가 열리고, 스크롤 목표가 구역
+    // 첫 줄에 놓인다.
+    expect(
+      find.byKey(const Key('branch-preview-diff-toolbar')),
+      findsOneWidget,
+    );
+    final view = tester.widget<UnifiedPresentationView>(
+      find.byType(UnifiedPresentationView),
+    );
+    expect(view.path, 'lib/settings.dart');
+    expect(view.scrollTarget, (oldLine: null, newLine: 556));
+  });
+
+  testWidgets('a region the result diff never shows still scrolls', (
+    tester,
+  ) async {
+    final comparison = branchComparison(
+      merge: const MergeConflictCheck(
+        status: MergeConflictStatus.clean,
+        treeSha: 'merge-tree',
+        resultFiles: [
+          GitFileChange(
+            path: 'lib/settings.dart',
+            status: 'M',
+            additions: 1,
+            deletions: 0,
+          ),
+        ],
+        baseChangedFiles: {'lib/settings.dart'},
+        // 구역 첫 줄은 기준 쪽 편집이라 결과 diff에 그 줄이 없다.
+        proximity: {
+          'lib/settings.dart': [(startLine: 400, endLine: 405)],
+        },
+      ),
+    );
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            current: 'main',
+            tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async => comparison,
+          // 한 화면에 안 들어가는 diff라 목표 줄은 게으른 목록 밖에서 시작한다.
+          diffBetween: (_, _, file) async => [
+            const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,300 +1,300 @@'),
+            for (var at = 1; at <= 300; at++)
+              DiffLine(
+                kind: at == 300 ? DiffLineKind.add : DiffLineKind.context,
+                text: 'line $at',
+                oldNumber: at == 300 ? null : at,
+                newNumber: at,
+              ),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await openCleanMergePreview(tester);
+
+    await tester.tap(
+      find.byKey(const Key('preview-proximity-lib/settings.dart-400')),
+    );
+    await tester.pumpAndSettle();
+
+    final view = tester.widget<UnifiedPresentationView>(
+      find.byType(UnifiedPresentationView),
+    );
+    // 없는 줄 대신 실제로 그려진 가장 가까운 줄을 노린다.
+    expect(view.scrollTarget, (oldLine: null, newLine: 300));
+    // 그 줄이 첫 화면 밖이어도 한 화면씩 내려가며 데려다준다.
+    expect(view.controller!.offset, greaterThan(0));
+  });
+
+  testWidgets('the recommendation chip opens its measured reasons', (
+    tester,
+  ) async {
+    final comparison = branchComparison(
+      merge: const MergeConflictCheck(
+        status: MergeConflictStatus.clean,
+        treeSha: 'merge-tree',
+      ),
+    );
+    RebaseCheckResult? passedCheck;
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            current: 'main',
+            tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async => comparison,
+          simulateRebaseCallback:
+              ({required baseRef, required compareRef}) async =>
+                  const RebaseCheckResult(status: RebaseCheckStatus.clean),
+          recommendationCallback: (_, check) async {
+            passedCheck = check;
+            return const BranchRecommendation(
+              verdict: BranchIntegrationVerdict.rebaseThenMerge,
+              summary: '근거 3',
+              reasons: [
+                '브랜치가 로컬 전용이라 히스토리를 다시 써도 아무도 안 다칩니다',
+                'Rebase 미리보기 6개 커밋 전부 충돌 없이 재생됐습니다',
+                '최근 main 커밋 50개 중 21개가 머지 커밋 — 이 저장소의 관례입니다',
+              ],
+            );
+          },
+        ),
+        controller,
+      ),
+    );
+    await openCleanMergePreview(tester);
+
+    // 이미 돌린 재배치 실측을 넘겨받아 두 번 계산하지 않는다.
+    expect(passedCheck?.status, RebaseCheckStatus.clean);
+    expect(find.text('추천: Rebase 후 Merge'), findsOneWidget);
+    expect(find.text('근거 3'), findsOneWidget);
+    expect(
+      find.byKey(const Key('branch-preview-recommendation-reasons')),
+      findsNothing,
+    );
+
+    // 요약 바는 가로로 스크롤되니 칩을 화면 안으로 들인 뒤 누른다.
+    await tester.ensureVisible(
+      find.byKey(const Key('branch-preview-recommendation')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-preview-recommendation')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('branch-preview-recommendation-reasons')),
+      findsOneWidget,
+    );
+    expect(find.text('왜 Rebase 후 Merge인가'), findsOneWidget);
+    expect(find.text('브랜치가 로컬 전용이라 히스토리를 다시 써도 아무도 안 다칩니다'), findsOneWidget);
+    expect(
+      find.text('최근 main 커밋 50개 중 21개가 머지 커밋 — 이 저장소의 관례입니다'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('signals too weak for a verdict show no chip', (tester) async {
+    final comparison = branchComparison(
+      merge: const MergeConflictCheck(
+        status: MergeConflictStatus.clean,
+        treeSha: 'merge-tree',
+      ),
+    );
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            current: 'main',
+            tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async => comparison,
+          simulateRebaseCallback:
+              ({required baseRef, required compareRef}) async =>
+                  const RebaseCheckResult(status: RebaseCheckStatus.clean),
+          recommendationCallback: (_, _) async => null,
+        ),
+        controller,
+      ),
+    );
+    await openCleanMergePreview(tester);
+
+    expect(
+      find.byKey(const Key('branch-preview-recommendation')),
+      findsNothing,
+    );
+    expect(find.textContaining('추천:'), findsNothing);
+  });
+
   testWidgets('branch preview applies rebase with a focused commit', (
     tester,
   ) async {
@@ -5660,6 +5925,236 @@ void main() {
     await tester.pump(const Duration(milliseconds: 220));
     await tester.pumpAndSettle();
     expect(find.text('Rebase 이전 시점으로 되돌리기'), findsOneWidget);
+  });
+
+  testWidgets('a clean rebase preview offers the merge commit landing', (
+    tester,
+  ) async {
+    const compareRef = 'fix/docs';
+    final comparison = branchComparison(compareRef: compareRef);
+    final original = comparison.commits
+        .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
+        .commit;
+    final preview = RebasePreviewResult(
+      status: RebasePreviewStatus.clean,
+      baseTip: comparison.baseTip,
+      compareTip: comparison.compareTip,
+      rewritten: [(original: original, rewrittenSha: 'rewritten-feature')],
+      completed: 1,
+      total: 1,
+      virtualTip: 'rewritten-feature',
+    );
+    final applied = BranchApplyResult(
+      mode: BranchApplyMode.rebaseMerge,
+      baseBranch: 'main',
+      compareBranch: compareRef,
+      baseBefore: comparison.baseTip,
+      baseAfter: 'merge-commit',
+      compareBefore: comparison.compareTip,
+      compareAfter: 'rewritten-feature',
+      workingTreeUpdated: true,
+    );
+    BranchApplyResult? restored;
+    late FakeGitRepository repository;
+    repository = FakeGitRepository(
+      (_, _) async => [commit('normal', 'normal history')],
+      refs: const RepoRefs(
+        local: ['main', compareRef],
+        current: 'main',
+        tips: {'main': 'main-tip', compareRef: 'feature-tip'},
+      ),
+      compareBranchesCallback: (_, _) async => comparison,
+      openRebasePreviewCallback:
+          ({required baseRef, required compareRef}) async =>
+              FakeRebasePreviewSession(repository, preview),
+      applyRebaseThenMergeCallback:
+          ({required comparison, required virtualTip}) async {
+            expect(virtualTip, 'rewritten-feature');
+            return applied;
+          },
+      restoreBranchApplyCallback: (result) async => restored = result,
+      filesBetween: (_, _) async => const [],
+    );
+    await tester.pumpWidget(
+      app(repository, controller, branchPreviewMode: BranchPreviewMode.rebase),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-$compareRef')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('branch-preview-rebase-merge-graph')),
+      findsOneWidget,
+    );
+    final painter =
+        tester
+                .widget<CustomPaint>(
+                  find.descendant(
+                    of: find.byKey(
+                      const Key('branch-preview-rebase-merge-graph'),
+                    ),
+                    matching: find.byType(CustomPaint),
+                  ),
+                )
+                .painter!
+            as RebaseMergeResultPainter;
+    expect(painter.commitCount, 1);
+    expect(painter.baseLabel, 'main');
+    final secondary = find.byKey(
+      const Key('branch-preview-apply-rebase-merge'),
+    );
+    expect(
+      tester
+          .widget<Text>(
+            find.descendant(of: secondary, matching: find.byType(Text)),
+          )
+          .data,
+      'Rebase 후 Merge 커밋으로 병합',
+    );
+    final style = tester.widget<OutlinedButton>(secondary).style!;
+    expect(style.backgroundColor!.resolve({}), Colors.transparent);
+    expect(style.side!.resolve({})!.color, const Color(0xFF695786));
+    expect(style.foregroundColor!.resolve({}), const Color(0xFFC69AFF));
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const Key('branch-preview-rebase-merge-caption')),
+          )
+          .data,
+      '재배치한 커밋 위에 머지 커밋 하나를 만들어 main을 옮깁니다. '
+      'main이 체크아웃돼 있지 않으면 포인터만 이동합니다.',
+    );
+
+    await tester.ensureVisible(secondary);
+    await tester.tap(secondary);
+    await tester.pumpAndSettle();
+    expect(find.text('Rebase 후 Merge를 실제로 적용할까요?'), findsOneWidget);
+    expect(
+      find.textContaining('로컬 $compareRef와 main 브랜치를 변경합니다'),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const Key('branch-apply-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Rebase 후 Merge 적용 완료'), findsOneWidget);
+    expect(
+      find.textContaining('$compareRef: feature-tip → rewritten-feature'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('main: main-tip → merge-commit'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('main 체크아웃 · 작업 트리가 병합 결과입니다'), findsOneWidget);
+    expect(find.text('Rebase 후 Merge 이전 시점으로 되돌리기'), findsOneWidget);
+
+    await tester.ensureVisible(
+      find.byKey(const Key('branch-preview-rollback')),
+    );
+    await tester.tap(find.byKey(const Key('branch-preview-rollback')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Rebase 후 Merge 이전 시점으로 되돌릴까요?'), findsOneWidget);
+    expect(find.textContaining('로컬 main을 main-tip으로 되돌립니다.'), findsOneWidget);
+    expect(
+      find.textContaining('로컬 $compareRef를 feature-tip으로 되돌립니다.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('되돌린 뒤에도 main에 체크아웃된 상태로 남고'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('branch-rollback-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(restored, same(applied));
+  });
+
+  testWidgets('a rebase preview with nothing to replay hides the option', (
+    tester,
+  ) async {
+    const compareRef = 'fix/docs';
+    final comparison = branchComparison(compareRef: compareRef);
+    // 옮길 커밋이 없으면 그 위에 얹을 머지 커밋도 없다.
+    final preview = RebasePreviewResult(
+      status: RebasePreviewStatus.clean,
+      baseTip: comparison.baseTip,
+      compareTip: comparison.compareTip,
+      rewritten: const [],
+      completed: 0,
+      total: 0,
+      virtualTip: comparison.baseTip,
+    );
+    late FakeGitRepository repository;
+    repository = FakeGitRepository(
+      (_, _) async => [commit('normal', 'normal history')],
+      refs: const RepoRefs(
+        local: ['main', compareRef],
+        current: 'main',
+        tips: {'main': 'main-tip', compareRef: 'feature-tip'},
+      ),
+      compareBranchesCallback: (_, _) async => comparison,
+      openRebasePreviewCallback:
+          ({required baseRef, required compareRef}) async =>
+              FakeRebasePreviewSession(repository, preview),
+      filesBetween: (_, _) async => const [],
+    );
+    await tester.pumpWidget(
+      app(repository, controller, branchPreviewMode: BranchPreviewMode.rebase),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-$compareRef')));
+    await tester.pumpAndSettle();
+
+    // 재배치할 커밋이 없으면 가상 노드가 없어 결과 패널도, 그 안의 두 번째 버튼도
+    // 뜨지 않는다 — 만들 머지 커밋이 없는 적용을 제안하지 않는다.
+    expect(find.byKey(const Key('branch-preview-apply-card')), findsNothing);
+    expect(
+      find.byKey(const Key('branch-preview-apply-rebase-merge')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const Key('branch-preview-rebase-merge-caption')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('the merge preview keeps the rebase-then-merge option away', (
+    tester,
+  ) async {
+    final comparison = branchComparison(
+      merge: const MergeConflictCheck(
+        status: MergeConflictStatus.clean,
+        treeSha: 'merge-tree',
+      ),
+    );
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('normal', 'normal history')],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            current: 'main',
+            tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+          ),
+          compareBranchesCallback: (_, _) async => comparison,
+        ),
+        controller,
+      ),
+    );
+    await openCleanMergePreview(tester);
+
+    expect(find.byKey(const Key('branch-preview-apply-card')), findsOneWidget);
+    expect(
+      find.byKey(const Key('branch-preview-apply-rebase-merge')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const Key('branch-preview-rebase-merge-graph')),
+      findsNothing,
+    );
+    expect(find.textContaining('머지 커밋 하나를 만들어'), findsNothing);
   });
 
   testWidgets('stale merge preview tips are discarded', (tester) async {
@@ -16731,6 +17226,8 @@ class FakeGitRepository extends GitRepository {
     this.openRebasePreviewCallback,
     this.applyMergePreviewCallback,
     this.applyRebasePreviewCallback,
+    this.applyRebaseThenMergeCallback,
+    this.recommendationCallback,
     this.restoreBranchApplyCallback,
     this.operationInProgressCallback,
     this.filesBetween,
@@ -16778,6 +17275,19 @@ class FakeGitRepository extends GitRepository {
     required String virtualTip,
   })?
   applyRebasePreviewCallback;
+  final Future<BranchApplyResult> Function({
+    required BranchComparisonResult comparison,
+    required String virtualTip,
+  })?
+  applyRebaseThenMergeCallback;
+
+  /// Recommendations stay off unless a test asks for one: the engine would
+  /// otherwise measure whatever repository the test happens to run in.
+  final Future<BranchRecommendation?> Function(
+    BranchComparisonResult comparison,
+    RebaseCheckResult? rebaseCheck,
+  )?
+  recommendationCallback;
   final Future<void> Function(BranchApplyResult result)?
   restoreBranchApplyCallback;
   final Future<bool> Function()? operationInProgressCallback;
@@ -16955,6 +17465,28 @@ class FakeGitRepository extends GitRepository {
         virtualTip: virtualTip,
       ) ??
       super.applyRebasePreview(comparison: comparison, virtualTip: virtualTip);
+
+  @override
+  Future<BranchApplyResult> applyRebaseThenMerge({
+    required BranchComparisonResult comparison,
+    required String virtualTip,
+  }) =>
+      applyRebaseThenMergeCallback?.call(
+        comparison: comparison,
+        virtualTip: virtualTip,
+      ) ??
+      super.applyRebaseThenMerge(
+        comparison: comparison,
+        virtualTip: virtualTip,
+      );
+
+  @override
+  Future<BranchRecommendation?> recommendBranchIntegration({
+    required BranchComparisonResult comparison,
+    RebaseCheckResult? rebaseCheck,
+  }) =>
+      recommendationCallback?.call(comparison, rebaseCheck) ??
+      Future.value(null);
 
   @override
   Future<void> restoreBranchApply(BranchApplyResult result) =>

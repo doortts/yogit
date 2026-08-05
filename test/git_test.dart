@@ -3237,6 +3237,727 @@ void main() {
 
     expect(await repository.loadWorkingTree(), isNull);
   });
+
+  test('both sides editing within ten lines reads as one region', () async {
+    // 기준은 20번째 줄을, 브랜치는 26번째 줄을 고친다 — 6줄 차이라 한 구역이다.
+    final fixture = await _proximityFixture(
+      baseEdit: 20,
+      compareEdit: 26,
+      compareInsertAt: 5,
+    );
+    addTearDown(() => fixture.delete(recursive: true));
+
+    final comparison = await GitRepository(
+      fixture.path,
+    ).compareBranches('main', 'feature');
+
+    expect(comparison.merge.status, MergeConflictStatus.clean);
+    // 멀리 떨어져 편집한 far.txt는 목록에 없다 — 파일별로 따로 잰다.
+    expect(comparison.merge.proximity.keys, ['shared.txt']);
+    final regions = comparison.merge.proximity['shared.txt'];
+    expect(regions, hasLength(1));
+    // 브랜치가 앞쪽에 3줄을 끼워 넣었으니 결과 좌표는 그만큼 밀린다.
+    expect(regions!.single, (startLine: 23, endLine: 29));
+  });
+
+  test('edits further apart than the threshold form no region', () async {
+    final fixture = await _proximityFixture(baseEdit: 20, compareEdit: 40);
+    addTearDown(() => fixture.delete(recursive: true));
+
+    final comparison = await GitRepository(
+      fixture.path,
+    ).compareBranches('main', 'feature');
+
+    expect(comparison.merge.status, MergeConflictStatus.clean);
+    expect(comparison.merge.baseChangedFiles, contains('shared.txt'));
+    expect(comparison.merge.proximity, isEmpty);
+  });
+
+  test('a spaced or Korean filename still gets its region', () async {
+    for (final name in ['my file.txt', '설정.txt']) {
+      final fixture = await _proximityFixture(
+        baseEdit: 20,
+        compareEdit: 26,
+        sharedName: name,
+      );
+      addTearDown(() => fixture.delete(recursive: true));
+
+      final comparison = await GitRepository(
+        fixture.path,
+      ).compareBranches('main', 'feature');
+
+      expect(comparison.merge.proximity[name]?.single, (
+        startLine: 20,
+        endLine: 26,
+      ), reason: name);
+    }
+  });
+
+  test('an insertion at the top of the file starts the region at 1', () async {
+    // 브랜치가 첫 줄 앞에 3줄을 끼워 넣고 기준은 8번째 줄을 고친다. 삽입 hunk의
+    // oldStart는 0이지만 0번째 줄을 가리키는 구역은 없다.
+    final fixture = await _proximityFixture(
+      baseEdit: 8,
+      compareEdit: 40,
+      compareInsertAt: 0,
+    );
+    addTearDown(() => fixture.delete(recursive: true));
+
+    final comparison = await GitRepository(
+      fixture.path,
+    ).compareBranches('main', 'feature');
+
+    expect(comparison.merge.proximity['shared.txt']!.single, (
+      startLine: 1,
+      endLine: 11,
+    ));
+  });
+
+  test('an insertion is as close to a later edit as an edit is', () async {
+    // 20번째 줄 뒤에 끼워 넣은 줄은 21번째 줄 자리에 앉으니, 31번째 줄 편집과는
+    // 10줄 차이로 한 구역이 되고 32번째 줄과는 안 된다.
+    for (final (baseEdit, expected) in [(31, 34), (32, null)]) {
+      final fixture = await _proximityFixture(
+        baseEdit: baseEdit,
+        compareEdit: 5,
+        compareInsertAt: 20,
+      );
+      addTearDown(() => fixture.delete(recursive: true));
+
+      final comparison = await GitRepository(
+        fixture.path,
+      ).compareBranches('main', 'feature');
+
+      expect(
+        comparison.merge.proximity['shared.txt']?.single,
+        expected == null ? isNull : (startLine: 20, endLine: expected),
+        reason: 'base edit at $baseEdit',
+      );
+    }
+  });
+
+  test('a user who turned off diff prefixes still gets regions', () async {
+    final fixture = await _proximityFixture(baseEdit: 20, compareEdit: 26);
+    addTearDown(() => fixture.delete(recursive: true));
+    await _git(fixture, ['config', 'diff.noprefix', 'true']);
+
+    final comparison = await GitRepository(
+      fixture.path,
+    ).compareBranches('main', 'feature');
+
+    expect(comparison.merge.proximity['shared.txt']!.single, (
+      startLine: 20,
+      endLine: 26,
+    ));
+  });
+
+  test('a renamed file measures proximity under its old path', () async {
+    final fixture = await _proximityFixture(
+      baseEdit: 20,
+      compareEdit: 26,
+      compareRenameTo: 'moved.txt',
+    );
+    addTearDown(() => fixture.delete(recursive: true));
+
+    final comparison = await GitRepository(
+      fixture.path,
+    ).compareBranches('main', 'feature');
+
+    expect(comparison.merge.status, MergeConflictStatus.clean);
+    expect(comparison.merge.proximity.keys, ['moved.txt']);
+    expect(comparison.merge.proximity['moved.txt']!.single, (
+      startLine: 20,
+      endLine: 26,
+    ));
+  });
+
+  test('a shared branch is recommended for a merge commit', () async {
+    final fixture = await _remoteBranchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    final comparison = await repository.compareBranches(
+      'main',
+      'origin/feature',
+    );
+
+    final recommendation = await repository.recommendBranchIntegration(
+      comparison: comparison,
+      rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
+    );
+
+    expect(recommendation!.verdict, BranchIntegrationVerdict.merge);
+    expect(recommendation.label, 'Merge');
+    expect(recommendation.summary, '원격에 공유된 브랜치');
+    expect(recommendation.reasons.first, contains('origin/feature'));
+  });
+
+  test('a local branch over linear history leans Rebase', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    await _padLinearHistory(fixture.root, conventionSampleFloor);
+
+    final recommendation = await repository.recommendBranchIntegration(
+      comparison: await repository.compareBranches('main', 'feature'),
+      rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
+    );
+
+    expect(recommendation!.verdict, BranchIntegrationVerdict.rebase);
+    expect(recommendation.summary, '커밋 1개 · 선형 유지');
+    expect(recommendation.reasons.first, '브랜치가 로컬 전용이라 히스토리를 다시 써도 아무도 안 다칩니다');
+    expect(recommendation.reasons.last, contains('선형 히스토리가 관례입니다'));
+  });
+
+  test('a history too short to hold a convention gets no chip', () async {
+    // main의 first-parent 커밋은 둘뿐이다 — 이 표본으로 '관례'를 말할 수는 없다.
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+
+    expect(
+      await GitRepository(fixture.root.path).recommendBranchIntegration(
+        comparison: fixture.comparison,
+        rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
+      ),
+      isNull,
+    );
+  });
+
+  test('a same-named but unrelated remote branch gets no chip', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    await _padLinearHistory(fixture.root, conventionSampleFloor);
+    // 남이 같은 이름으로 만든 브랜치가 원격에 있을 뿐, feature는 올라간 적이 없다.
+    await _git(fixture.root, ['remote', 'add', 'origin', '.']);
+    await _git(fixture.root, [
+      'update-ref',
+      'refs/remotes/origin/feature',
+      'main',
+    ]);
+
+    expect(
+      await repository.recommendBranchIntegration(
+        comparison: await repository.compareBranches('main', 'feature'),
+        rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
+      ),
+      isNull,
+    );
+  });
+
+  test('a remote tip the local branch grew from still reads as shared', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    await _git(fixture.root, ['remote', 'add', 'origin', '.']);
+    await _git(fixture.root, [
+      'update-ref',
+      'refs/remotes/origin/feature',
+      fixture.comparison.compareParent!,
+    ]);
+
+    final recommendation = await repository.recommendBranchIntegration(
+      comparison: fixture.comparison,
+      rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
+    );
+
+    expect(recommendation!.verdict, BranchIntegrationVerdict.merge);
+    expect(recommendation.reasons.last, contains('커밋 1개가 로컬에 남아 있어도'));
+  });
+
+  test('a branch tracking a local branch is not shared with anyone', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    await _padLinearHistory(fixture.root, conventionSampleFloor);
+    // 원격이 하나도 없는 저장소에서도 upstream은 로컬 브랜치일 수 있다.
+    await _git(fixture.root, ['branch', '--set-upstream-to=main', 'feature']);
+
+    final recommendation = await repository.recommendBranchIntegration(
+      comparison: await repository.compareBranches('main', 'feature'),
+      rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
+    );
+
+    expect(recommendation!.verdict, BranchIntegrationVerdict.rebase);
+    expect(recommendation.reasons.first, contains('로컬 전용'));
+  });
+
+  test('a branch tracking a remote ref of another name reads as shared', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    await _git(fixture.root, ['remote', 'add', 'origin', '.']);
+    await _git(fixture.root, [
+      'update-ref',
+      'refs/remotes/origin/other',
+      fixture.comparison.compareTip,
+    ]);
+    await _git(fixture.root, [
+      'branch',
+      '--set-upstream-to=origin/other',
+      'feature',
+    ]);
+
+    final recommendation = await repository.recommendBranchIntegration(
+      comparison: fixture.comparison,
+      rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
+    );
+
+    expect(recommendation!.verdict, BranchIntegrationVerdict.merge);
+    expect(recommendation.summary, '원격에 공유된 브랜치');
+    expect(recommendation.reasons.first, contains('origin/other'));
+  });
+
+  test('an upstream of another name is measured, not assumed', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    await _git(fixture.root, ['remote', 'add', 'origin', '.']);
+    // 이름이 다른 upstream도 tip을 직접 재야 안 올라간 커밋을 셀 수 있다.
+    await _git(fixture.root, [
+      'update-ref',
+      'refs/remotes/origin/other',
+      fixture.comparison.compareParent!,
+    ]);
+    await _git(fixture.root, [
+      'branch',
+      '--set-upstream-to=origin/other',
+      'feature',
+    ]);
+
+    final recommendation = await repository.recommendBranchIntegration(
+      comparison: fixture.comparison,
+      rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
+    );
+
+    expect(recommendation!.verdict, BranchIntegrationVerdict.merge);
+    expect(recommendation.reasons.last, contains('커밋 1개가 로컬에 남아 있어도'));
+  });
+
+  test('a merge-bubble repository leans Rebase 후 Merge', () async {
+    final fixture = await _mergeBubbleFixture();
+    addTearDown(() => fixture.delete(recursive: true));
+    final repository = GitRepository(fixture.path);
+    final comparison = await repository.compareBranches('main', 'feature');
+
+    final recommendation = await repository.recommendBranchIntegration(
+      comparison: comparison,
+      rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
+    );
+
+    expect(recommendation!.verdict, BranchIntegrationVerdict.rebaseThenMerge);
+    expect(recommendation.label, 'Rebase 후 Merge');
+    expect(recommendation.summary, '근거 3');
+    expect(recommendation.reasons.last, contains('이 저장소의 관례입니다'));
+  });
+
+  test('a base branch that never moved gets no recommendation', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    // main을 병합 기점으로 되돌리면 fast-forward라 추천할 게 없다.
+    await _git(fixture.root, [
+      'reset',
+      '--hard',
+      fixture.comparison.baseParent!,
+    ]);
+
+    expect(
+      await repository.recommendBranchIntegration(
+        comparison: await repository.compareBranches('main', 'feature'),
+        rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
+      ),
+      isNull,
+    );
+  });
+
+  test('both previews stopping leaves no recommendation', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    final comparison = await repository.compareBranches('main', 'feature');
+
+    expect(
+      await repository.recommendBranchIntegration(
+        comparison: _withMerge(
+          comparison,
+          const MergeConflictCheck(
+            status: MergeConflictStatus.conflicts,
+            files: ['shared.txt'],
+          ),
+        ),
+        rebaseCheck: const RebaseCheckResult(
+          status: RebaseCheckStatus.conflicts,
+          files: ['shared.txt'],
+        ),
+      ),
+      isNull,
+    );
+  });
+
+  test('a failed check on either side leaves no recommendation', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+
+    expect(
+      await repository.recommendBranchIntegration(
+        comparison: fixture.comparison,
+        rebaseCheck: const RebaseCheckResult(
+          status: RebaseCheckStatus.failed,
+          error: 'boom',
+        ),
+      ),
+      isNull,
+    );
+    // 머지 검사가 실패했으면 멈춘 파일 수를 말할 수 없으니 추천도 없다.
+    expect(
+      await repository.recommendBranchIntegration(
+        comparison: _withMerge(
+          fixture.comparison,
+          const MergeConflictCheck(
+            status: MergeConflictStatus.failed,
+            error: 'boom',
+          ),
+        ),
+        rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
+      ),
+      isNull,
+    );
+  });
+
+  test(
+    'rebase then merge moves both refs and builds the merge commit',
+    () async {
+      final fixture = await _branchPreviewFixture();
+      addTearDown(() => fixture.root.delete(recursive: true));
+      final repository = GitRepository(fixture.root.path);
+      final virtualTip = await _rebasedTip(fixture.root, repository);
+
+      final applied = await repository.applyRebaseThenMerge(
+        comparison: fixture.comparison,
+        virtualTip: virtualTip,
+      );
+
+      expect(applied.mode, BranchApplyMode.rebaseMerge);
+      // main만 체크아웃돼 있으니 디스크에 반영되는 쪽도 main뿐이다.
+      expect(applied.workingTreeUpdated, isTrue);
+      expect(applied.compareWorkingTreeUpdated, isFalse);
+      expect(applied.compareAfter, virtualTip);
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
+        virtualTip,
+      );
+      expect(
+        (await _git(fixture.root, [
+          'rev-list',
+          '--parents',
+          '-n',
+          '1',
+          'main',
+        ])).trim().split(' '),
+        [applied.baseAfter, fixture.comparison.baseTip, virtualTip],
+      );
+      // 트리는 재배치 결과 그대로다 — 미리보기 트리 == 적용 트리.
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'main^{tree}'])).trim(),
+        (await _git(fixture.root, ['rev-parse', '$virtualTip^{tree}'])).trim(),
+      );
+      expect(
+        (await _git(fixture.root, ['log', '-1', '--format=%s', 'main'])).trim(),
+        "Merge branch 'feature' into main",
+      );
+      expect(File('${fixture.root.path}/feature.txt').existsSync(), isTrue);
+
+      await repository.restoreBranchApply(applied);
+
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+        fixture.comparison.baseTip,
+      );
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
+        fixture.comparison.compareTip,
+      );
+      expect(File('${fixture.root.path}/feature.txt').existsSync(), isFalse);
+    },
+  );
+
+  test(
+    'rebase then merge onto a branch checked out nowhere only moves refs',
+    () async {
+      final fixture = await _branchPreviewFixture();
+      addTearDown(() => fixture.root.delete(recursive: true));
+      final repository = GitRepository(fixture.root.path);
+      final virtualTip = await _rebasedTip(fixture.root, repository);
+      await _git(fixture.root, ['switch', '--detach', 'HEAD']);
+      final head = (await _git(fixture.root, ['rev-parse', 'HEAD'])).trim();
+
+      final applied = await repository.applyRebaseThenMerge(
+        comparison: fixture.comparison,
+        virtualTip: virtualTip,
+      );
+
+      expect(applied.workingTreeUpdated, isFalse);
+      expect(applied.compareWorkingTreeUpdated, isFalse);
+      expect((await _git(fixture.root, ['rev-parse', 'HEAD'])).trim(), head);
+      expect(File('${fixture.root.path}/feature.txt').existsSync(), isFalse);
+    },
+  );
+
+  test(
+    'a rebased tip off the base tip is refused before anything moves',
+    () async {
+      final fixture = await _branchPreviewFixture();
+      addTearDown(() => fixture.root.delete(recursive: true));
+      final repository = GitRepository(fixture.root.path);
+
+      await expectLater(
+        repository.applyRebaseThenMerge(
+          comparison: fixture.comparison,
+          // 재배치하지 않은 브랜치는 기준 위에 얹혀 있지 않다.
+          virtualTip: fixture.comparison.compareTip,
+        ),
+        throwsA(
+          isA<GitRepositoryException>().having(
+            (error) => error.message,
+            'message',
+            contains('기준 브랜치 위에 없어'),
+          ),
+        ),
+      );
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
+        fixture.comparison.compareTip,
+      );
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+        fixture.comparison.baseTip,
+      );
+    },
+  );
+
+  test('a rebase with nothing left to replay makes no merge commit', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    // feature의 커밋이 이미 main에 들어가 있으면 재배치 결과가 곧 main이다.
+    await _git(fixture.root, ['cherry-pick', 'feature']);
+    final comparison = await repository.compareBranches('main', 'feature');
+    final session = await repository.openRebasePreview(
+      baseRef: 'main',
+      compareRef: 'feature',
+    );
+    final preview = await session.start();
+    await session.dispose();
+    expect(preview.status, RebasePreviewStatus.clean);
+    expect(preview.rewritten, isEmpty);
+    expect(preview.virtualTip, comparison.baseTip);
+
+    await expectLater(
+      repository.applyRebaseThenMerge(
+        comparison: comparison,
+        virtualTip: preview.virtualTip!,
+      ),
+      throwsA(
+        isA<GitRepositoryException>().having(
+          (error) => error.message,
+          'message',
+          contains('만들 머지 커밋이 없습니다'),
+        ),
+      ),
+    );
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+      comparison.baseTip,
+    );
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
+      comparison.compareTip,
+    );
+  });
+
+  test('a branch held by another worktree stops rebase then merge', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    final virtualTip = await _rebasedTip(fixture.root, repository);
+    final other = await Directory.systemTemp.createTemp('yogit_worktree_');
+    await other.delete();
+    await _git(fixture.root, ['worktree', 'add', other.path, 'feature']);
+    addTearDown(
+      () => _git(fixture.root, ['worktree', 'remove', '--force', other.path]),
+    );
+
+    await expectLater(
+      repository.applyRebaseThenMerge(
+        comparison: fixture.comparison,
+        virtualTip: virtualTip,
+      ),
+      throwsA(isA<GitRepositoryException>()),
+    );
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
+      fixture.comparison.compareTip,
+    );
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+      fixture.comparison.baseTip,
+    );
+  });
+
+  test('a base branch that cannot move rolls the rebase back', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    final virtualTip = await _rebasedTip(fixture.root, repository);
+    // main이 체크아웃된 채 작업 트리가 더러우면 2단계에서 막힌다.
+    await File('${fixture.root.path}/base.txt').writeAsString('dirty\n');
+
+    await expectLater(
+      repository.applyRebaseThenMerge(
+        comparison: fixture.comparison,
+        virtualTip: virtualTip,
+      ),
+      throwsA(isA<GitRepositoryException>()),
+    );
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+      fixture.comparison.baseTip,
+    );
+    // 1단계로 옮긴 브랜치를 되돌려 두 ref 모두 적용 전 상태다.
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
+      fixture.comparison.compareTip,
+    );
+  });
+
+  test('a dirty tree leaves the two-ref undo entirely undone', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    final virtualTip = await _rebasedTip(fixture.root, repository);
+    // feature를 체크아웃해 두면 되돌릴 때 작업 트리를 건드리는 쪽이 feature다.
+    await _git(fixture.root, ['switch', 'feature']);
+    final applied = await repository.applyRebaseThenMerge(
+      comparison: fixture.comparison,
+      virtualTip: virtualTip,
+    );
+    expect(applied.compareWorkingTreeUpdated, isTrue);
+    expect(applied.workingTreeUpdated, isFalse);
+    await File('${fixture.root.path}/feature.txt').writeAsString('dirty\n');
+
+    await expectLater(
+      repository.restoreBranchApply(applied),
+      throwsA(
+        isA<GitRepositoryException>().having(
+          (error) => error.message,
+          'message',
+          contains('작업 트리와 인덱스가 깨끗해야'),
+        ),
+      ),
+    );
+    // 막힐 수 있는 쪽을 먼저 옮기니 한쪽만 되돌아간 상태가 남지 않는다.
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+      applied.baseAfter,
+    );
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
+      applied.compareAfter,
+    );
+
+    // 그래서 트리를 정리하면 다시 시도해 두 ref가 함께 돌아온다.
+    await _git(fixture.root, ['checkout', '--', 'feature.txt']);
+    await repository.restoreBranchApply(applied);
+
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+      fixture.comparison.baseTip,
+    );
+    expect(
+      (await _git(fixture.root, ['rev-parse', 'feature'])).trim(),
+      fixture.comparison.compareTip,
+    );
+  });
+
+  test('a half-done undo says which ref moved and where both sit', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    final virtualTip = await _rebasedTip(fixture.root, repository);
+    final applied = await repository.applyRebaseThenMerge(
+      comparison: fixture.comparison,
+      virtualTip: virtualTip,
+    );
+    // 적용한 뒤 다른 worktree가 feature를 잡으면 두 번째 이동만 막힌다.
+    final other = await Directory.systemTemp.createTemp('yogit_worktree_');
+    await other.delete();
+    await _git(fixture.root, ['worktree', 'add', other.path, 'feature']);
+    addTearDown(
+      () => _git(fixture.root, ['worktree', 'remove', '--force', other.path]),
+    );
+
+    await expectLater(
+      repository.restoreBranchApply(applied),
+      throwsA(
+        isA<GitRepositoryException>().having(
+          (error) => error.message,
+          'message',
+          allOf(
+            contains('main 브랜치는 ${fixture.comparison.baseTip}으로 되돌렸지만'),
+            contains('feature 브랜치는 ${applied.compareAfter}에 그대로 있습니다'),
+          ),
+        ),
+      ),
+    );
+  });
+
+  test('the convention reason outlives a duplicate commit note', () async {
+    final fixture = await _mergeBubbleFixture();
+    addTearDown(() => fixture.delete(recursive: true));
+    final repository = GitRepository(fixture.path);
+    // feature의 커밋을 main에 cherry-pick해 두면 중복 근거가 하나 더 붙는다.
+    await _git(fixture, ['cherry-pick', 'feature']);
+
+    final recommendation = await repository.recommendBranchIntegration(
+      comparison: await repository.compareBranches('main', 'feature'),
+      rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
+    );
+
+    expect(recommendation!.verdict, BranchIntegrationVerdict.rebaseThenMerge);
+    // 판정을 그냥 Rebase와 갈라놓는 근거가 세 개 안에 남는다.
+    expect(recommendation.reasons, hasLength(3));
+    expect(recommendation.reasons.last, contains('이 저장소의 관례입니다'));
+    expect(
+      recommendation.reasons.where((reason) => reason.contains('알아서 빠집니다')),
+      isEmpty,
+    );
+  });
+
+  test('a duplicate commit tips a history with no clear convention', () async {
+    final fixture = await _mergeBubbleFixture(merges: 2, linear: 8);
+    addTearDown(() => fixture.delete(recursive: true));
+    final repository = GitRepository(fixture.path);
+    const clean = RebaseCheckResult(status: RebaseCheckStatus.clean);
+    // 머지 커밋 비율이 어느 쪽 관례도 아니라 이대로는 고를 수 없다.
+    expect(
+      await repository.recommendBranchIntegration(
+        comparison: await repository.compareBranches('main', 'feature'),
+        rebaseCheck: clean,
+      ),
+      isNull,
+    );
+
+    await _git(fixture, ['cherry-pick', 'feature']);
+    final recommendation = await repository.recommendBranchIntegration(
+      comparison: await repository.compareBranches('main', 'feature'),
+      rebaseCheck: clean,
+    );
+
+    // 재배치가 알아서 떨궈 주는 중복 커밋이 판정을 가른다.
+    expect(recommendation!.verdict, BranchIntegrationVerdict.rebase);
+    expect(recommendation.reasons.last, contains('알아서 빠집니다'));
+  });
 }
 
 /// The layout invariants every fixture has to satisfy: a column index means the
@@ -3363,6 +4084,16 @@ Future<String> _git(Directory root, List<String> args) async {
   return result.stdout.toString();
 }
 
+/// [count] more first-parent commits on the checked-out branch, so a convention
+/// measured from this history clears the sample floor.
+Future<void> _padLinearHistory(Directory root, int count) async {
+  for (var at = 0; at < count; at++) {
+    await File('${root.path}/pad$at.txt').writeAsString('pad $at\n');
+    await _git(root, ['add', 'pad$at.txt']);
+    await _git(root, ['commit', '-m', 'pad $at']);
+  }
+}
+
 Future<void> _initRepository(Directory root) async {
   await _git(root, ['init', '-b', 'main']);
   await _git(root, ['config', 'user.name', 'Test User']);
@@ -3392,6 +4123,133 @@ _branchPreviewFixture() async {
       root.path,
     ).compareBranches('main', 'feature'),
   );
+}
+
+/// A 60 line file both branches edit: the base at [baseEdit], the branch at
+/// [compareEdit]. [compareInsertAt] lets the branch also insert three lines
+/// higher up, so result coordinates differ from merge-base coordinates. A second
+/// both-sides file, far.txt, is always edited far apart, so a scan that leaked
+/// one file's hunks into another would show up.
+Future<Directory> _proximityFixture({
+  required int baseEdit,
+  required int compareEdit,
+  int? compareInsertAt,
+  String? compareRenameTo,
+  String sharedName = 'shared.txt',
+}) async {
+  final root = await Directory.systemTemp.createTemp('yogit_proximity_');
+  await _initRepository(root);
+  final shared = File('${root.path}/$sharedName');
+  final far = File('${root.path}/far.txt');
+  String numbered() =>
+      '${[for (var at = 1; at <= 60; at++) 'line $at'].join('\n')}\n';
+  await shared.writeAsString(numbered());
+  await far.writeAsString(numbered());
+  await File('${root.path}/base-only.txt').writeAsString('base only\n');
+  await _git(root, ['add', '.']);
+  await _git(root, ['commit', '-m', 'shared file']);
+
+  await _git(root, ['switch', '-c', 'feature']);
+  final branchLines = shared.readAsLinesSync();
+  branchLines[compareEdit - 1] = 'branch edit at $compareEdit';
+  if (compareInsertAt != null) {
+    branchLines.insertAll(compareInsertAt, [
+      'inserted a',
+      'inserted b',
+      'inserted c',
+    ]);
+  }
+  await shared.writeAsString('${branchLines.join('\n')}\n');
+  final branchFar = far.readAsLinesSync();
+  branchFar[9] = 'branch edit at 10';
+  await far.writeAsString('${branchFar.join('\n')}\n');
+  if (compareRenameTo != null) {
+    await _git(root, ['mv', sharedName, compareRenameTo]);
+  }
+  await _git(root, ['add', '.']);
+  await _git(root, ['commit', '-m', 'branch edit']);
+
+  await _git(root, ['switch', 'main']);
+  final baseLines = shared.readAsLinesSync();
+  baseLines[baseEdit - 1] = 'base edit at $baseEdit';
+  await shared.writeAsString('${baseLines.join('\n')}\n');
+  final baseFar = far.readAsLinesSync();
+  baseFar[49] = 'base edit at 50';
+  await far.writeAsString('${baseFar.join('\n')}\n');
+  await File('${root.path}/base-only.txt').writeAsString('base touched it\n');
+  await _git(root, ['add', '.']);
+  await _git(root, ['commit', '-m', 'base edit']);
+  return root;
+}
+
+/// A base branch whose recent first-parent history is mostly merge commits, so
+/// the measured convention comes out as merge bubbles. [merges] merge bubbles and
+/// [linear] plain commits set the measured ratio.
+Future<Directory> _mergeBubbleFixture({int merges = 8, int linear = 0}) async {
+  final root = await Directory.systemTemp.createTemp('yogit_merge_bubble_');
+  await _initRepository(root);
+  await File('${root.path}/base.txt').writeAsString('base\n');
+  await _git(root, ['add', 'base.txt']);
+  await _git(root, ['commit', '-m', 'base']);
+  // 관례 판정에는 최소 표본이 있어야 하니 first-parent 커밋이 열 개는 되게 쌓는다.
+  for (var round = 0; round < merges; round++) {
+    await _git(root, ['switch', '-c', 'topic$round']);
+    await File('${root.path}/topic$round.txt').writeAsString('topic $round\n');
+    await _git(root, ['add', 'topic$round.txt']);
+    await _git(root, ['commit', '-m', 'topic $round']);
+    await _git(root, ['switch', 'main']);
+    await _git(root, [
+      'merge',
+      '--no-ff',
+      '-m',
+      'Merge topic $round',
+      'topic$round',
+    ]);
+    await _git(root, ['branch', '-D', 'topic$round']);
+  }
+  await _padLinearHistory(root, linear);
+  await _git(root, ['switch', '-c', 'feature']);
+  await File('${root.path}/feature.txt').writeAsString('feature\n');
+  await _git(root, ['add', 'feature.txt']);
+  await _git(root, ['commit', '-m', 'feature']);
+  await _git(root, ['switch', 'main']);
+  await File('${root.path}/main.txt').writeAsString('main\n');
+  await _git(root, ['add', 'main.txt']);
+  await _git(root, ['commit', '-m', 'main']);
+  return root;
+}
+
+/// The same comparison with a different merge check, for decision-table cases a
+/// fixture cannot produce on its own.
+BranchComparisonResult _withMerge(
+  BranchComparisonResult comparison,
+  MergeConflictCheck merge,
+) => BranchComparisonResult(
+  baseRef: comparison.baseRef,
+  compareRef: comparison.compareRef,
+  baseTip: comparison.baseTip,
+  compareTip: comparison.compareTip,
+  baseParent: comparison.baseParent,
+  compareParent: comparison.compareParent,
+  mergeBases: comparison.mergeBases,
+  commits: comparison.commits,
+  files: comparison.files,
+  merge: merge,
+);
+
+/// The tip a real rebase preview produces for the fixture's branch.
+Future<String> _rebasedTip(Directory root, GitRepository repository) async {
+  final session = await repository.openRebasePreview(
+    baseRef: 'main',
+    compareRef: 'feature',
+  );
+  try {
+    final result = await session.start();
+    expect(result.status, RebasePreviewStatus.clean);
+    return result.virtualTip!;
+  } finally {
+    await session.dispose();
+  }
 }
 
 Future<({Directory root, BranchComparisonResult comparison, String remoteTip})>

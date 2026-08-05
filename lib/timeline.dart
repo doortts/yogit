@@ -328,6 +328,12 @@ String _commitMessageBody(String? message) {
   return newline < 0 ? '' : message.substring(newline + 1).trim();
 }
 
+/// Line numbers read as line numbers once they pass a thousand: 1,412.
+String _groupedNumber(int value) => value.toString().replaceAllMapped(
+  RegExp(r'\d(?=(\d{3})+$)'),
+  (match) => '${match[0]},',
+);
+
 /// Whole local calendar days from [day] to [now]. Counted in hours and rounded,
 /// so a DST shift cannot turn yesterday into today. Every relative label in the
 /// timeline measures with this, which is what keeps the Date column and the group
@@ -858,6 +864,8 @@ class _TimelineScreenState extends State<TimelineScreen>
   var _comparisonEntries = <TimelineEntry>[];
   BranchPreviewGraph? _previewGraph;
   RebaseCheckResult? _rebaseCheck;
+  BranchRecommendation? _recommendation;
+  var _recommendationSerial = 0;
   MergePreviewSession? _mergePreviewSession;
   MergePreviewResult? _mergePreview;
   var _mergePreviewSerial = 0;
@@ -912,6 +920,13 @@ class _TimelineScreenState extends State<TimelineScreen>
   final _previewDiffs = <({String sha, String path}), Future<List<DiffLine>>>{};
   final _previewPaths = <String, String>{};
   var _previewDiffOpen = false;
+
+  /// The line a proximity pill asked for, and the one already scrolled to, so a
+  /// region is revealed once and the scroll is the user's again afterwards.
+  ({String path, int line})? _previewDiffLineTarget;
+  ({String path, int line})? _previewDiffLineRevealed;
+  var _previewDiffRevealScheduled = false;
+  final _previewDiffTargetKey = GlobalKey(debugLabel: 'preview diff line');
   late final Map<String, String> _deletedBranchNames;
   final _deletedBranchLookupAttempts = <String>{};
   final _deletedBranchRevision = ValueNotifier(0);
@@ -2915,6 +2930,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         _comparisonEntries = [];
         _previewGraph = null;
         _rebaseCheck = null;
+        _dropRecommendation();
         _comparisonError = null;
         _selectedIndex.value = 0;
       });
@@ -2948,6 +2964,7 @@ class _TimelineScreenState extends State<TimelineScreen>
             (rowIndex: index, label: null, row: _comparisonRows[index]),
         ];
         _rebaseCheck = null;
+        _dropRecommendation();
         _comparisonError = null;
         _selectedIndex.value = 0;
       });
@@ -2958,6 +2975,8 @@ class _TimelineScreenState extends State<TimelineScreen>
         unawaited(_startRebasePreview());
       } else if (result.merge.status == MergeConflictStatus.conflicts) {
         unawaited(_startMergePreview());
+        // 이 경로에는 재배치 실측이 없으니 추천 엔진이 직접 시뮬레이션한다.
+        unawaited(_loadRecommendation(result, serial));
       } else {
         unawaited(_checkRebase(baseRef, compareRef, serial));
       }
@@ -2989,6 +3008,10 @@ class _TimelineScreenState extends State<TimelineScreen>
         return;
       }
       setState(() => _rebaseCheck = result);
+      final comparison = _comparison;
+      if (comparison != null) {
+        await _loadRecommendation(comparison, serial, rebaseCheck: result);
+      }
     } catch (error) {
       if (!mounted ||
           serial != _comparisonSerial ||
@@ -3001,6 +3024,36 @@ class _TimelineScreenState extends State<TimelineScreen>
           error: error.toString(),
         ),
       );
+    }
+  }
+
+  void _dropRecommendation() {
+    _recommendationSerial++;
+    _recommendation = null;
+  }
+
+  /// Asks the engine what the git facts lean towards. Nothing waits on this: the
+  /// chip shows up whenever it lands, and a comparison change drops the answer.
+  Future<void> _loadRecommendation(
+    BranchComparisonResult comparison,
+    int serial, {
+    RebaseCheckResult? rebaseCheck,
+  }) async {
+    final request = ++_recommendationSerial;
+    try {
+      final recommendation = await widget.repository.recommendBranchIntegration(
+        comparison: comparison,
+        rebaseCheck: rebaseCheck,
+      );
+      if (!mounted ||
+          request != _recommendationSerial ||
+          serial != _comparisonSerial ||
+          _comparison != comparison) {
+        return;
+      }
+      setState(() => _recommendation = recommendation);
+    } catch (_) {
+      // 추천은 부가 정보라 실패하면 칩을 띄우지 않고 넘어간다.
     }
   }
 
@@ -3216,6 +3269,11 @@ class _TimelineScreenState extends State<TimelineScreen>
           : 0;
     });
     _showPreviewTop();
+    if (_rebaseCheck case final check?) {
+      unawaited(
+        _loadRecommendation(comparison, _comparisonSerial, rebaseCheck: check),
+      );
+    }
     if (result.status == RebasePreviewStatus.conflict &&
         _previewController.previewPlacement == PreviewPlacement.closed) {
       await _previewController.setPreview(widget.preferredPreviewPlacement);
@@ -3298,6 +3356,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       _comparisonEntries = [];
       _previewGraph = null;
       _rebaseCheck = null;
+      _dropRecommendation();
       _comparisonError = null;
       if (_normalEntries.isNotEmpty) {
         _selectedIndex.value = _selectedIndex.value.clamp(
@@ -4916,6 +4975,10 @@ class _TimelineScreenState extends State<TimelineScreen>
           detail('실제 브랜치 변경 없음'),
         ]);
       }
+      // 칩은 두 모드 모두에서 상세 줄 끝에 붙는다. 계산이 끝나기 전에는 없다.
+      if (_recommendation case final recommendation?) {
+        details.add(_branchPreviewRecommendationChip(recommendation));
+      }
     }
     final resultColor = comparisonFailed
         ? _behind
@@ -4975,6 +5038,102 @@ class _TimelineScreenState extends State<TimelineScreen>
       ),
     );
   }
+
+  /// The verdict chip, with the measured reasons a hover or a click away. It
+  /// says what the facts lean towards and asks nothing.
+  Widget _branchPreviewRecommendationChip(
+    BranchRecommendation recommendation,
+  ) => MenuAnchor(
+    style: MenuStyle(
+      backgroundColor: const WidgetStatePropertyAll(Color(0xFF202022)),
+      padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+      shape: WidgetStatePropertyAll(
+        RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(color: _palette.border),
+        ),
+      ),
+    ),
+    menuChildren: [
+      Container(
+        key: const Key('branch-preview-recommendation-reasons'),
+        width: 430,
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '왜 ${recommendation.label}인가',
+              style: const TextStyle(
+                color: _previewPurple,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            for (final reason in recommendation.reasons)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '·',
+                      style: TextStyle(color: _palette.muted, fontSize: 11),
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        reason,
+                        style: TextStyle(color: _palette.text, fontSize: 11),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    ],
+    builder: (context, controller, child) => MouseRegion(
+      onEnter: (_) => controller.open(),
+      child: InkWell(
+        key: const Key('branch-preview-recommendation'),
+        borderRadius: BorderRadius.circular(20),
+        onTap: () => controller.isOpen ? controller.close() : controller.open(),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+          decoration: BoxDecoration(
+            color: _previewPurple.withValues(alpha: 0.10),
+            border: Border.all(color: const Color(0xFF695786)),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '추천: ${recommendation.label}',
+                style: const TextStyle(
+                  color: _previewPurple,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(width: 5),
+              Text(
+                recommendation.summary,
+                style: TextStyle(
+                  color: _palette.muted,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 
   bool get _branchPreviewReady {
     final comparison = _comparison;
@@ -5036,7 +5195,9 @@ class _TimelineScreenState extends State<TimelineScreen>
     return '가상 결과를 로컬 ${target.localBranch}에 적용할 수 있습니다.';
   }
 
-  Future<void> _prepareBranchPreviewApply() async {
+  Future<void> _prepareBranchPreviewApply({
+    bool rebaseThenMerge = false,
+  }) async {
     final target = _branchPreviewTarget;
     if (target == null || !_branchPreviewReady || _branchApplyBusy) return;
     if (target.needsRecalculation) {
@@ -5048,10 +5209,12 @@ class _TimelineScreenState extends State<TimelineScreen>
       await _selectComparison(target.localBranch);
       return;
     }
-    await _confirmBranchPreviewApply();
+    await _confirmBranchPreviewApply(rebaseThenMerge: rebaseThenMerge);
   }
 
-  Future<void> _confirmBranchPreviewApply() async {
+  Future<void> _confirmBranchPreviewApply({
+    bool rebaseThenMerge = false,
+  }) async {
     final comparison = _comparison;
     final target = _branchPreviewTarget;
     if (comparison == null ||
@@ -5061,13 +5224,20 @@ class _TimelineScreenState extends State<TimelineScreen>
       return;
     }
     final merge = _branchPreviewMode == BranchPreviewMode.merge;
+    final label = rebaseThenMerge
+        ? 'Rebase 후 Merge'
+        : merge
+        ? 'Merge'
+        : 'Rebase';
     final confirmed = await showYogitAlert<bool>(
       context,
       YogitAlert(
-        title: '${merge ? 'Merge' : 'Rebase'}를 실제로 적용할까요?',
-        message:
-            '로컬 ${target.localBranch} 브랜치만 변경합니다. '
-            '원격 추적 브랜치와 원격 저장소는 그대로입니다.',
+        title: '$label를 실제로 적용할까요?',
+        message: rebaseThenMerge
+            ? '로컬 ${target.localBranch}와 ${comparison.baseRef} 브랜치를 변경합니다. '
+                  '원격 추적 브랜치와 원격 저장소는 그대로입니다.'
+            : '로컬 ${target.localBranch} 브랜치만 변경합니다. '
+                  '원격 추적 브랜치와 원격 저장소는 그대로입니다.',
         body: YogitAlertBlock([
           '기준 ${comparison.baseRef}  ${comparison.baseTip}',
           '대상 ${comparison.compareRef}  ${comparison.compareTip}',
@@ -5078,11 +5248,17 @@ class _TimelineScreenState extends State<TimelineScreen>
       ),
     );
     if (confirmed == true && mounted) {
-      await _runBranchPreviewApply(comparison);
+      await _runBranchPreviewApply(
+        comparison,
+        rebaseThenMerge: rebaseThenMerge,
+      );
     }
   }
 
-  Future<void> _runBranchPreviewApply(BranchComparisonResult comparison) async {
+  Future<void> _runBranchPreviewApply(
+    BranchComparisonResult comparison, {
+    bool rebaseThenMerge = false,
+  }) async {
     final mode = _branchPreviewMode;
     final request = ++_branchApplySerial;
     setState(() {
@@ -5121,10 +5297,15 @@ class _TimelineScreenState extends State<TimelineScreen>
           });
           if (duration > Duration.zero) await Future<void>.delayed(duration);
         }
-        result = await widget.repository.applyRebasePreview(
-          comparison: comparison,
-          virtualTip: preview.virtualTip!,
-        );
+        result = rebaseThenMerge
+            ? await widget.repository.applyRebaseThenMerge(
+                comparison: comparison,
+                virtualTip: preview.virtualTip!,
+              )
+            : await widget.repository.applyRebasePreview(
+                comparison: comparison,
+                virtualTip: preview.virtualTip!,
+              );
       }
       if (!mounted || request != _branchApplySerial) return;
       final mergeSession = _mergePreviewSession;
@@ -5139,6 +5320,8 @@ class _TimelineScreenState extends State<TimelineScreen>
           _rebasePreviewSession = null;
         }
       });
+      // 카드가 짧아지면서 스크롤이 내용 밖에 남을 수 있으니 결과를 위에서 보여준다.
+      _showPreviewTop();
       if (mode == BranchPreviewMode.merge && mergeSession != null) {
         unawaited(mergeSession.dispose());
       } else if (mode == BranchPreviewMode.rebase && rebaseSession != null) {
@@ -5154,18 +5337,37 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
   }
 
+  static String _applyModeLabel(BranchApplyMode mode) => switch (mode) {
+    BranchApplyMode.merge => 'Merge',
+    BranchApplyMode.rebase => 'Rebase',
+    BranchApplyMode.rebaseMerge => 'Rebase 후 Merge',
+  };
+
   String get _branchPreviewAppliedSummary {
     final result = _branchApplyResult!;
-    final local = result.mode == BranchApplyMode.merge
-        ? '${result.baseBranch}: ${result.baseBefore} → ${result.baseAfter}'
-        : result.compareBranchCreated
+    final compareLine = result.compareBranchCreated
         ? '${result.compareBranch}: 새 브랜치 → ${result.compareAfter}'
         : '${result.compareBranch}: ${result.compareBefore} → ${result.compareAfter}';
     final compareRef = _comparison?.compareRef;
     final remote = compareRef != null && _refs.remote.contains(compareRef)
         ? '\n$compareRef: 변경 없음'
         : '';
+    if (result.mode == BranchApplyMode.rebaseMerge) {
+      final head = result.workingTreeUpdated
+          ? '\n${result.baseBranch} 체크아웃 · 작업 트리가 병합 결과입니다'
+          : result.compareWorkingTreeUpdated
+          ? '\n${result.compareBranch} 체크아웃 · 작업 트리가 재배치 결과입니다'
+                '\n${result.baseBranch} 브랜치는 머지 커밋을 가리키고 작업 트리는 그대로입니다'
+          : '\n두 브랜치 모두 새 커밋을 가리키고 작업 트리는 그대로입니다'
+                '\n브랜치를 체크아웃하면 결과가 작업 트리에 반영됩니다';
+      return '$compareLine\n'
+          '${result.baseBranch}: ${result.baseBefore} → ${result.baseAfter}'
+          '$remote$head';
+    }
     final merge = result.mode == BranchApplyMode.merge;
+    final local = merge
+        ? '${result.baseBranch}: ${result.baseBefore} → ${result.baseAfter}'
+        : compareLine;
     final moved = merge ? result.baseBranch : result.compareBranch;
     final head = result.workingTreeUpdated
         ? '\n$moved 체크아웃 · 작업 트리가 ${merge ? 'Merge' : 'Rebase'} 결과입니다'
@@ -5175,22 +5377,30 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   String _branchPreviewRollbackMessage(BranchApplyResult result) {
-    final local = result.mode == BranchApplyMode.merge
-        ? '로컬 ${result.baseBranch}을 ${result.baseBefore}으로 되돌립니다.'
-        : result.compareBranchCreated
+    final compareLine = result.compareBranchCreated
         ? '적용 과정에서 만든 로컬 ${result.compareBranch}를 삭제합니다.'
         : '로컬 ${result.compareBranch}를 ${result.compareBefore}으로 되돌립니다.';
+    final local = switch (result.mode) {
+      BranchApplyMode.merge =>
+        '로컬 ${result.baseBranch}을 ${result.baseBefore}으로 되돌립니다.',
+      BranchApplyMode.rebase => compareLine,
+      BranchApplyMode.rebaseMerge =>
+        '로컬 ${result.baseBranch}을 ${result.baseBefore}으로 되돌립니다.\n'
+            '$compareLine',
+    };
     final compareRef = _comparison?.compareRef;
     final remote = compareRef != null && _refs.remote.contains(compareRef)
         ? '\n$compareRef는 변경하지 않습니다.'
         : '';
-    final moved = result.mode == BranchApplyMode.merge
-        ? result.baseBranch
-        : result.compareBranch;
+    final moved = switch (result.mode) {
+      BranchApplyMode.merge => {result.baseBranch},
+      BranchApplyMode.rebase => {result.compareBranch},
+      BranchApplyMode.rebaseMerge => {result.baseBranch, result.compareBranch},
+    };
     // 되돌리기는 그 시점의 체크아웃을 다시 확인하니, 적용 당시가 아니라 지금 상태로
     // 안내합니다. 적용은 ref만 옮겼어도 그 사이 체크아웃했다면 작업 트리까지 바뀝니다.
-    final head = _refs.current == moved
-        ? '\n되돌린 뒤에도 $moved에 체크아웃된 상태로 남고 작업 트리도 이전 상태로 돌아갑니다.'
+    final head = moved.contains(_refs.current)
+        ? '\n되돌린 뒤에도 ${_refs.current}에 체크아웃된 상태로 남고 작업 트리도 이전 상태로 돌아갑니다.'
         : '\n되돌릴 때도 작업 트리는 건드리지 않습니다.';
     return '$local$remote$head\n원격 저장소는 변경하지 않습니다.';
   }
@@ -5203,8 +5413,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     final confirmed = await showYogitAlert<bool>(
       context,
       YogitAlert(
-        title:
-            '${result.mode == BranchApplyMode.merge ? 'Merge' : 'Rebase'} 이전 시점으로 되돌릴까요?',
+        title: '${_applyModeLabel(result.mode)} 이전 시점으로 되돌릴까요?',
         body: YogitAlertBlock(
           _branchPreviewRollbackMessage(result).split('\n'),
         ),
@@ -5255,6 +5464,63 @@ class _TimelineScreenState extends State<TimelineScreen>
     ),
   );
 
+  /// The second way to land a clean rebase preview: replay the commits, then put
+  /// one merge commit over them. One more option, nothing to decide first.
+  List<Widget> _branchPreviewRebaseMergeOption() {
+    final comparison = _comparison;
+    if (comparison == null) return const [];
+    // 옮길 커밋이 하나도 없으면 재배치 결과가 곧 기준 브랜치라 얹을 머지 커밋이
+    // 없다. 누르면 엔진이 거절할 버튼은 아예 내보내지 않는다.
+    if (_rebasePreview?.rewritten.isEmpty ?? true) return const [];
+    return [
+      const SizedBox(height: 7),
+      OutlinedButton(
+        key: const Key('branch-preview-apply-rebase-merge'),
+        onPressed: _branchApplyBusy || !_branchPreviewCanPrepare
+            ? null
+            : () =>
+                  unawaited(_prepareBranchPreviewApply(rebaseThenMerge: true)),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: _previewPurple,
+          backgroundColor: Colors.transparent,
+          side: const BorderSide(color: Color(0xFF695786)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+        ),
+        child: const Text(
+          'Rebase 후 Merge 커밋으로 병합',
+          textAlign: TextAlign.center,
+          softWrap: true,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+      const SizedBox(height: 3),
+      Text(
+        key: const Key('branch-preview-rebase-merge-caption'),
+        '재배치한 커밋 위에 머지 커밋 하나를 만들어 ${comparison.baseRef}을 옮깁니다. '
+        '${comparison.baseRef}이 체크아웃돼 있지 않으면 포인터만 이동합니다.',
+        style: TextStyle(color: _palette.muted, fontSize: 10),
+      ),
+    ];
+  }
+
+  /// What the two steps leave behind: the replayed commits on a dashed arc and
+  /// the merge commit the base branch ends on.
+  Widget _branchPreviewRebaseMergeGraph(BranchComparisonResult comparison) =>
+      SizedBox(
+        key: const Key('branch-preview-rebase-merge-graph'),
+        height: 86,
+        child: CustomPaint(
+          painter: RebaseMergeResultPainter(
+            commitCount: _rebasePreview?.rewritten.length ?? 0,
+            baseLabel: comparison.baseRef,
+            railColor: _palette.border,
+            mutedColor: _palette.muted,
+          ),
+        ),
+      );
+
   Widget _branchPreviewApplyCard() {
     final merge = _branchPreviewMode == BranchPreviewMode.merge;
     final result = _branchApplyResult;
@@ -5304,7 +5570,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                       ? merge
                             ? 'Merge 미리보기 성공'
                             : 'Rebase 미리보기 성공'
-                      : '${merge ? 'Merge' : 'Rebase'} 적용 완료',
+                      : '${_applyModeLabel(result.mode)} 적용 완료',
                   style: TextStyle(
                     color: _palette.text,
                     fontSize: 12,
@@ -5376,6 +5642,8 @@ class _TimelineScreenState extends State<TimelineScreen>
                 metric('0', '충돌', 'branch-preview-conflict-count'),
               ],
             ),
+            if (_comparison case final comparison? when !merge)
+              _branchPreviewRebaseMergeGraph(comparison),
           ],
           if (result != null) ...[
             const SizedBox(height: 8),
@@ -5404,7 +5672,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                 onPressed: _branchApplyStatus == BranchApplyStatus.applied
                     ? () => unawaited(_confirmBranchPreviewRollback())
                     : null,
-                child: Text('${merge ? 'Merge' : 'Rebase'} 이전 시점으로 되돌리기'),
+                child: Text('${_applyModeLabel(result.mode)} 이전 시점으로 되돌리기'),
               ),
             )
           else
@@ -5420,6 +5688,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                   width: double.infinity,
                   child: _branchPreviewApplyButton(),
                 ),
+                if (!merge) ..._branchPreviewRebaseMergeOption(),
               ],
             ),
         ],
@@ -7626,10 +7895,15 @@ class _TimelineScreenState extends State<TimelineScreen>
     String path, {
     int? revealDirection,
     bool animateReveal = true,
+    int? line,
   }) {
     setState(() {
       _previewPaths[_previewKey(commit)] = path;
       _previewDiffOpen = true;
+      // 파일 줄을 그냥 누르면 위에서부터, 근접 구역을 누르면 그 줄에서 시작한다.
+      _previewDiffLineTarget = line == null ? null : (path: path, line: line);
+      // 같은 구역을 다시 누르면 diff가 맨 위로 돌아가니 한 번 더 데려다줘야 한다.
+      if (line != null) _previewDiffLineRevealed = null;
     });
     _focusNode.requestFocus();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -8638,8 +8912,10 @@ class _TimelineScreenState extends State<TimelineScreen>
         : Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              for (final file in changes)
+              for (final file in changes) ...[
                 _previewFileRow(commit, file, file.path == selectedPath),
+                ?_previewProximityLine(commit, file),
+              ],
             ],
           ),
   );
@@ -8660,7 +8936,11 @@ class _TimelineScreenState extends State<TimelineScreen>
     final ours = comparison.merge.baseChangedFiles;
     if (ours.isEmpty) return null;
     if (ours.contains(file.path) || ours.contains(file.oldPath)) {
-      return (label: '양쪽 수정', bothSides: true);
+      final regions = _previewProximity(commit, file);
+      return (
+        label: regions.isEmpty ? '양쪽 수정' : '양쪽 수정 · 근접 ${regions.length}곳',
+        bothSides: true,
+      );
     }
     return (
       label: switch (file.status.isEmpty ? '' : file.status[0]) {
@@ -8670,6 +8950,119 @@ class _TimelineScreenState extends State<TimelineScreen>
         _ => '브랜치에서 수정',
       },
       bothSides: false,
+    );
+  }
+
+  /// Merge-result line spans where both sides edited within ten lines of each
+  /// other. Empty outside the clean merge preview, and for files only one side
+  /// touched.
+  List<LineSpan> _previewProximity(GitCommit commit, GitFileChange file) {
+    final comparison = _comparison;
+    if (comparison == null ||
+        _branchPreviewMode != BranchPreviewMode.merge ||
+        _effectiveMergeStatus != MergeConflictStatus.clean ||
+        !_usesBranchPreviewResult(commit)) {
+      return const [];
+    }
+    return comparison.merge.proximity[file.path] ?? const [];
+  }
+
+  /// The regions themselves, under the file they belong to. Clicking one opens
+  /// the same result diff a file row opens, positioned on the region.
+  Widget? _previewProximityLine(GitCommit commit, GitFileChange file) {
+    final regions = _previewProximity(commit, file);
+    if (regions.isEmpty) return null;
+    return Padding(
+      key: Key('preview-proximity-${file.path}'),
+      padding: const EdgeInsets.only(left: 34, right: 14, bottom: 7),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(
+            '양쪽 편집이 10줄 안에서 겹침',
+            style: TextStyle(color: _palette.muted, fontSize: 10),
+          ),
+          for (final region in regions)
+            InkWell(
+              key: Key('preview-proximity-${file.path}-${region.startLine}'),
+              borderRadius: BorderRadius.circular(4),
+              onTap: () =>
+                  _selectPreviewFile(commit, file.path, line: region.startLine),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: _previewConflict.withValues(alpha: 0.10),
+                  border: Border.all(
+                    color: _previewConflict.withValues(alpha: 0.35),
+                  ),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  '${_groupedNumber(region.startLine)}~'
+                  '${_groupedNumber(region.endLine)}줄',
+                  style: const TextStyle(
+                    color: Color(0xFFFF9AA2),
+                    fontSize: 10,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// The nearest line the loaded result diff actually draws. A region's first
+  /// line is often a base-side edit the result diff never shows, and a number no
+  /// row carries would leave the scroll target attached nowhere.
+  static int? _nearestPreviewDiffLine(DiffDocument document, int line) {
+    int? nearest;
+    for (final hunk in document.hunks) {
+      for (final diffLine in hunk.lines) {
+        final number = diffLine.newNumber;
+        if (number == null) continue;
+        if (nearest == null || (number - line).abs() < (nearest - line).abs()) {
+          nearest = number;
+        }
+      }
+    }
+    return nearest;
+  }
+
+  /// Scrolls the open result diff onto the line a pill asked for, once the diff
+  /// itself has rendered. The diff builds its rows lazily, so a target below the
+  /// first viewport only exists after paging down to it.
+  void _revealPreviewDiffTarget(({String path, int line}) line) {
+    final target = _previewDiffTargetKey.currentContext;
+    if (target == null) {
+      if (!_previewDiffScrollController.hasClients) return;
+      final position = _previewDiffScrollController.position;
+      final next = (position.pixels + position.viewportDimension).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      );
+      if ((next - position.pixels).abs() < 0.5) return;
+      position.jumpTo(next);
+      _previewDiffRevealScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _previewDiffRevealScheduled = false;
+        if (mounted) _revealPreviewDiffTarget(line);
+      });
+      return;
+    }
+    _previewDiffLineRevealed = line;
+    unawaited(
+      Scrollable.ensureVisible(
+        target,
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        alignment: 0.2,
+      ),
     );
   }
 
@@ -8972,6 +9365,25 @@ class _TimelineScreenState extends State<TimelineScreen>
                   for (final hunk in document.hunks)
                     hunk.anchor.id: GlobalKey(),
                 };
+                final line = _previewDiffLineTarget?.path == path
+                    ? _previewDiffLineTarget
+                    : null;
+                final nearest = line == null
+                    ? null
+                    : _nearestPreviewDiffLine(document, line.line);
+                final lineTarget = nearest == null
+                    ? null
+                    : (oldLine: null, newLine: nearest);
+                if (line != null &&
+                    nearest != null &&
+                    line != _previewDiffLineRevealed &&
+                    !_previewDiffRevealScheduled) {
+                  _previewDiffRevealScheduled = true;
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    _previewDiffRevealScheduled = false;
+                    if (mounted) _revealPreviewDiffTarget(line);
+                  });
+                }
                 final activeAnchor = conflict && document.hunks.isNotEmpty
                     ? document.hunks.first.anchor
                     : null;
@@ -8993,6 +9405,8 @@ class _TimelineScreenState extends State<TimelineScreen>
                         highlighter: _previewDiffHighlighter,
                         anchorKeys: anchors,
                         controller: _previewDiffScrollController,
+                        scrollTarget: lineTarget,
+                        scrollTargetKey: _previewDiffTargetKey,
                         showHunkHeaders: false,
                         compactRows: true,
                         currentMarkerColor: _previewConflict,
@@ -9008,6 +9422,8 @@ class _TimelineScreenState extends State<TimelineScreen>
                         highlighter: _previewDiffHighlighter,
                         anchorKeys: anchors,
                         controller: _previewDiffScrollController,
+                        scrollTarget: lineTarget,
+                        scrollTargetKey: _previewDiffTargetKey,
                         showHunkHeaders: false,
                         compactRows: true,
                         currentMarkerColor: _previewConflict,
@@ -9724,6 +10140,110 @@ class _RowStateScopeState extends State<_RowStateScope> {
 
   @override
   Widget build(BuildContext context) => widget.builder(_selected, _hovered);
+}
+
+/// The result of a rebase-then-merge: the base rail, a dashed arc carrying the
+/// replayed commits, and the merge commit the base branch lands on. Drawn in a
+/// 560 wide design space and stretched to whatever the pane gives it.
+class RebaseMergeResultPainter extends CustomPainter {
+  const RebaseMergeResultPainter({
+    required this.commitCount,
+    required this.baseLabel,
+    required this.railColor,
+    required this.mutedColor,
+  });
+
+  final int commitCount;
+  final String baseLabel;
+  final Color railColor;
+  final Color mutedColor;
+
+  /// Past a dozen the dots would touch, so the label carries the exact count.
+  static const maxDots = 12;
+  static const _designWidth = 560.0;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+    double x(double design) => design / _designWidth * size.width;
+    void label(String text, double centerX, double top, Color color) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: text,
+          style: TextStyle(color: color, fontSize: 10, fontFamily: 'monospace'),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: size.width);
+      painter.paint(
+        canvas,
+        Offset(
+          (centerX - painter.width / 2).clamp(0, size.width - painter.width),
+          top,
+        ),
+      );
+    }
+
+    canvas.drawLine(
+      Offset(x(20), 58),
+      Offset(x(540), 58),
+      Paint()
+        ..color = railColor
+        ..strokeWidth = 2,
+    );
+    final dot = Paint()..color = mutedColor;
+    canvas.drawCircle(Offset(x(60), 58), 5, dot);
+    canvas.drawCircle(Offset(x(130), 58), 5, dot);
+    label(baseLabel, x(95), 68, mutedColor);
+
+    final arc = Path()
+      ..moveTo(x(130), 58)
+      ..cubicTo(x(170), 58, x(170), 26, x(210), 26)
+      ..lineTo(x(400), 26)
+      ..cubicTo(x(450), 26, x(450), 58, x(490), 58);
+    final rail = Paint()
+      ..color = _previewPurple
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.8
+      ..strokeCap = StrokeCap.round;
+    for (final metric in arc.computeMetrics()) {
+      for (var start = 0.0; start < metric.length; start += 9) {
+        canvas.drawPath(
+          metric.extractPath(start, math.min(start + 5, metric.length)),
+          rail,
+        );
+      }
+    }
+
+    final dots = math.min(commitCount, maxDots);
+    final replayed = Paint()..color = _previewPurple;
+    for (var index = 0; index < dots; index++) {
+      final at = 210 + (400 - 210) * (index + 1) / (dots + 1);
+      canvas.drawCircle(Offset(x(at), 26), 4.5, replayed);
+    }
+    label('재배치된 커밋 $commitCount개', x(305), 2, _previewPurple);
+
+    canvas.drawCircle(
+      Offset(x(490), 58),
+      6,
+      Paint()..color = _previewPurplePanel,
+    );
+    canvas.drawCircle(
+      Offset(x(490), 58),
+      6,
+      Paint()
+        ..color = _previewPurple
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
+    );
+    label('머지 커밋', x(490), 70, _previewPurple);
+  }
+
+  @override
+  bool shouldRepaint(covariant RebaseMergeResultPainter oldDelegate) =>
+      oldDelegate.commitCount != commitCount ||
+      oldDelegate.baseLabel != baseLabel ||
+      oldDelegate.railColor != railColor ||
+      oldDelegate.mutedColor != mutedColor;
 }
 
 class RebaseMappingPainter extends CustomPainter {

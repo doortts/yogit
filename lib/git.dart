@@ -350,6 +350,16 @@ class BranchComparisonCommit {
 
 enum MergeConflictStatus { clean, conflicts, failed }
 
+/// An inclusive line span, in whichever coordinates its producer names.
+typedef LineSpan = ({int startLine, int endLine});
+
+/// How close two opposite-side edits have to be to count as one region.
+const proximityLineGap = 10;
+
+/// How many first-parent commits the base branch needs before its merge-commit
+/// ratio counts as this repository's convention.
+const conventionSampleFloor = 10;
+
 class MergeConflictCheck {
   const MergeConflictCheck({
     required this.status,
@@ -357,6 +367,7 @@ class MergeConflictCheck {
     this.treeSha,
     this.resultFiles = const [],
     this.baseChangedFiles = const {},
+    this.proximity = const {},
     this.error,
   });
 
@@ -370,6 +381,11 @@ class MergeConflictCheck {
   /// conflicting or failed checks. [resultFiles] is a base tip → result diff, so
   /// every file in it was touched by the compared branch already.
   final Set<String> baseChangedFiles;
+
+  /// Merge-result line spans where the two sides edited within
+  /// [proximityLineGap] lines of each other, keyed by result path. Only clean
+  /// merges, and only files both sides touched, are measured.
+  final Map<String, List<LineSpan>> proximity;
   final String? error;
 }
 
@@ -945,7 +961,33 @@ class BranchComparisonResult {
       baseParent == compareParent;
 }
 
-enum BranchApplyMode { merge, rebase }
+enum BranchApplyMode { merge, rebase, rebaseMerge }
+
+enum BranchIntegrationVerdict { merge, rebase, rebaseThenMerge }
+
+/// What the measured git facts lean towards, and why. The engine hands the UI
+/// finished text so nothing has to be decided twice.
+class BranchRecommendation {
+  const BranchRecommendation({
+    required this.verdict,
+    required this.summary,
+    required this.reasons,
+  });
+
+  final BranchIntegrationVerdict verdict;
+
+  /// The short why-text the chip shows beside the verdict.
+  final String summary;
+
+  /// At most three measured facts, strongest first.
+  final List<String> reasons;
+
+  String get label => switch (verdict) {
+    BranchIntegrationVerdict.merge => 'Merge',
+    BranchIntegrationVerdict.rebase => 'Rebase',
+    BranchIntegrationVerdict.rebaseThenMerge => 'Rebase 후 Merge',
+  };
+}
 
 class BranchApplyTarget {
   const BranchApplyTarget({
@@ -1009,6 +1051,7 @@ class BranchApplyResult {
     required this.compareAfter,
     this.compareBranchCreated = false,
     this.workingTreeUpdated = false,
+    this.compareWorkingTreeUpdated = false,
   });
 
   final BranchApplyMode mode;
@@ -1021,8 +1064,12 @@ class BranchApplyResult {
   final bool compareBranchCreated;
 
   /// Whether the moved branch was the checked-out one, so the working tree holds
-  /// the result on disk. False means only the branch ref moved.
+  /// the result on disk. False means only the branch ref moved. In
+  /// [BranchApplyMode.rebaseMerge] this is the base branch's move; the compare
+  /// branch has its own [compareWorkingTreeUpdated]. Only one of the two can be
+  /// true, since a branch checked out elsewhere is refused before anything moves.
   final bool workingTreeUpdated;
+  final bool compareWorkingTreeUpdated;
 }
 
 class GraphRow {
@@ -2022,15 +2069,25 @@ class GitRepository implements FullDiffRepository {
     );
     if (result.exitCode == 0) {
       final treeSha = result.stdout.toString().split('\x00').first.trim();
+      final resultFiles = await _loadFilesBetween(baseTip, treeSha);
+      // Criss-cross histories have several common ancestors in no set order,
+      // so a file counts as ours once it changed since any one of them.
+      final baseChangedFiles = {
+        for (final base in mergeBases) ...await _changedPaths(base, baseTip),
+      };
       return MergeConflictCheck(
         status: MergeConflictStatus.clean,
         treeSha: treeSha,
-        resultFiles: await _loadFilesBetween(baseTip, treeSha),
-        // Criss-cross histories have several common ancestors in no set order,
-        // so a file counts as ours once it changed since any one of them.
-        baseChangedFiles: {
-          for (final base in mergeBases) ...await _changedPaths(base, baseTip),
-        },
+        resultFiles: resultFiles,
+        baseChangedFiles: baseChangedFiles,
+        proximity: await _proximityRegions(
+          baseTip: baseTip,
+          compareTip: compareTip,
+          treeSha: treeSha,
+          mergeBases: mergeBases,
+          resultFiles: resultFiles,
+          baseChangedFiles: baseChangedFiles,
+        ),
       );
     }
     if (result.exitCode != 1) {
@@ -2055,6 +2112,129 @@ class GitRepository implements FullDiffRepository {
       status: MergeConflictStatus.conflicts,
       files: files.toList(),
     );
+  }
+
+  /// Where the two sides edited close enough to read each other's work, for the
+  /// files both of them touched. Line spans come back in merge-result
+  /// coordinates so a click can land on the result diff.
+  Future<Map<String, List<LineSpan>>> _proximityRegions({
+    required String baseTip,
+    required String compareTip,
+    required String treeSha,
+    required List<String> mergeBases,
+    required List<GitFileChange> resultFiles,
+    required Set<String> baseChangedFiles,
+  }) async {
+    final candidates = [
+      for (final file in resultFiles)
+        if (baseChangedFiles.contains(file.path) ||
+            baseChangedFiles.contains(file.oldPath))
+          file,
+    ];
+    // ponytail: 수백 개를 넘는 병합은 인자 길이 한계에 가까워지니 신호를 접는다.
+    // 그런 병합이 실제로 나오면 경로를 나눠 여러 번 돌리면 된다.
+    if (candidates.isEmpty || candidates.length > 500) return const {};
+    final paths = [for (final file in candidates) ...pathspecsFor(file)];
+    final spans = <String, List<LineSpan>>{};
+    for (final base in mergeBases) {
+      final ours = await _hunkRangesByFile(base, baseTip, paths);
+      final theirs = await _hunkRangesByFile(base, compareTip, paths);
+      final result = await _hunkRangesByFile(base, treeSha, paths);
+      for (final file in candidates) {
+        final ourSpans = _editedSpans(ours, file);
+        final theirSpans = _editedSpans(theirs, file);
+        if (ourSpans.isEmpty || theirSpans.isEmpty) continue;
+        final near = _nearSpans(ourSpans, theirSpans);
+        if (near.isEmpty) continue;
+        final toResult = _lineMapper(_rangesFor(result, file));
+        (spans[file.path] ??= []).addAll(
+          near.map(
+            // 파일 맨 위에 줄을 끼워 넣으면 hunk의 oldStart가 0이라 결과 좌표도
+            // 0이 되는데 0번째 줄은 없으니 첫 줄로 당긴다.
+            (span) => (
+              startLine: max(1, toResult(span.startLine)),
+              endLine: toResult(span.endLine),
+            ),
+          ),
+        );
+      }
+    }
+    return {
+      for (final file in spans.entries) file.key: _mergeSpans(file.value),
+    };
+  }
+
+  /// Lines one side rewrote, in merge-base coordinates. 끼워 넣기만 한 hunk는 지운
+  /// 줄이 없어서 새 줄이 oldStart와 그 다음 줄 사이에 들어가니, 양쪽 이웃에 다 닿는
+  /// 구간으로 잡아야 고친 줄과 같은 거리로 재진다.
+  List<LineSpan> _editedSpans(
+    Map<String, List<_HunkRange>> ranges,
+    GitFileChange file,
+  ) => [
+    for (final hunk in _rangesFor(ranges, file))
+      (
+        startLine: hunk.oldStart,
+        endLine: hunk.oldCount == 0
+            ? hunk.oldStart + 1
+            : hunk.oldStart + hunk.oldCount - 1,
+      ),
+  ];
+
+  List<_HunkRange> _rangesFor(
+    Map<String, List<_HunkRange>> ranges,
+    GitFileChange file,
+  ) => ranges[file.path] ?? ranges[file.oldPath] ?? const [];
+
+  /// Every file's hunk ranges from one diff, keyed by both of its paths so a
+  /// rename answers under either name. `-U0` keeps a hunk per edit instead of
+  /// gluing neighbours together with context, and the indicator overrides stop a
+  /// removed `--- a/x` line inside a patch file from reading as a file header.
+  Future<Map<String, List<_HunkRange>>> _hunkRangesByFile(
+    String from,
+    String to,
+    List<String> paths,
+  ) async {
+    final output = await _run([
+      // 기본 설정은 한글 같은 non-ASCII 경로를 따옴표로 감싸 escape하니, 헤더에서
+      // 뽑은 이름이 GitFileChange.path와 안 맞게 된다.
+      '-c',
+      'core.quotePath=false',
+      'diff',
+      ...safeDiffArguments,
+      '-U0',
+      // diff.noprefix 같은 설정을 쓰는 사용자에게도 헤더가 'a/'·'b/'로 시작해야
+      // 아래에서 두 글자를 떼는 계산이 맞는다.
+      '--src-prefix=a/',
+      '--dst-prefix=b/',
+      '--output-indicator-old=<',
+      '--output-indicator-new=>',
+      from,
+      to,
+      '--',
+      ...paths,
+    ]);
+    final ranges = <String, List<_HunkRange>>{};
+    var current = <_HunkRange>[];
+    for (final line in output.split('\n')) {
+      if (line.startsWith('diff --git ')) {
+        current = <_HunkRange>[];
+      } else if (line.startsWith('--- ') || line.startsWith('+++ ')) {
+        var path = line.substring(4);
+        // 공백이 든 경로는 git이 헤더 끝에 탭을 붙여 이름의 끝을 표시한다.
+        if (path.endsWith('\t')) path = path.substring(0, path.length - 1);
+        // 'a/'·'b/' 접두사를 떼면 저장소 기준 경로가 남고 두 이름이 같은 목록을
+        // 가리키니 이름이 바뀐 파일도 한쪽 이름으로 찾을 수 있다.
+        if (path != '/dev/null') ranges[path.substring(2)] = current;
+      } else if (_diffHunkRange.firstMatch(line) case final hunk?) {
+        current.add((
+          oldStart: int.parse(hunk.group(1)!),
+          oldCount: int.parse(hunk.group(2) ?? '1'),
+          newStart: int.parse(hunk.group(3)!),
+          newCount: int.parse(hunk.group(4) ?? '1'),
+        ));
+      }
+    }
+    return ranges;
   }
 
   Future<RebaseCheckResult> simulateRebase({
@@ -2084,6 +2264,259 @@ class GitRepository implements FullDiffRepository {
     } finally {
       await session.dispose();
     }
+  }
+
+  /// Which way the measured git facts lean for this comparison, or null when
+  /// they conflict or say too little — a wrong recommendation is worse than
+  /// none. Pass [rebaseCheck] when a simulation already ran, so the engine does
+  /// not pay for a second one.
+  Future<BranchRecommendation?> recommendBranchIntegration({
+    required BranchComparisonResult comparison,
+    RebaseCheckResult? rebaseCheck,
+  }) async {
+    if (comparison.mergeBases.isEmpty) return null;
+    final counts = (await _run([
+      'rev-list',
+      '--left-right',
+      '--count',
+      '${comparison.baseTip}...${comparison.compareTip}',
+    ])).trim().split(RegExp(r'\s+'));
+    final baseAhead = int.tryParse(counts.first) ?? 0;
+    final compareAhead = counts.length > 1 ? int.tryParse(counts[1]) ?? 0 : 0;
+    // 기준 브랜치가 갈라진 뒤 안 움직였으면 fast-forward로 끝나고 가져올 커밋이
+    // 없으면 할 일 자체가 없다. 둘 다 추천할 게 없는 자리다.
+    if (baseAhead == 0 || compareAhead == 0) return null;
+
+    final sharing = await _remoteSharingOf(comparison);
+    // 이름만 같은 남의 브랜치인지 원격에서 다시 쓴 공유 브랜치인지 못 가리면 공유
+    // 여부부터 틀릴 수 있으니 아무 추천도 하지 않는다.
+    if (sharing?.unrelated ?? false) return null;
+    if (sharing != null) {
+      final reasons = [
+        '브랜치가 원격 ${sharing.ref}에도 있어서 히스토리를 다시 쓰면 같이 쓰는 사람이 다칩니다',
+      ];
+      if (!sharing.tipMatches) {
+        final unpushed =
+            int.tryParse(
+              (await _run([
+                'rev-list',
+                '--count',
+                '${sharing.tip}..${comparison.compareTip}',
+              ])).trim(),
+            ) ??
+            0;
+        if (unpushed > 0) {
+          reasons.add(
+            '원격 ${sharing.ref}에 없는 커밋 $unpushed개가 로컬에 남아 있어도 '
+            '브랜치는 이미 원격에 올라가 있습니다',
+          );
+        }
+      }
+      return BranchRecommendation(
+        verdict: BranchIntegrationVerdict.merge,
+        summary: '원격에 공유된 브랜치',
+        reasons: reasons,
+      );
+    }
+
+    final check =
+        rebaseCheck ??
+        await simulateRebase(
+          baseRef: comparison.baseRef,
+          compareRef: comparison.compareRef,
+        );
+    // 어느 한쪽을 재보지 못했으면 멈춘 횟수를 말할 수 없다.
+    if (check.status == RebaseCheckStatus.failed ||
+        comparison.merge.status == MergeConflictStatus.failed) {
+      return null;
+    }
+    final mergeClean = comparison.merge.status == MergeConflictStatus.clean;
+    final rebaseClean = check.status == RebaseCheckStatus.clean;
+    if (!mergeClean && !rebaseClean) return null;
+    const localOnly = '브랜치가 로컬 전용이라 히스토리를 다시 써도 아무도 안 다칩니다';
+    if (!rebaseClean) {
+      return BranchRecommendation(
+        verdict: BranchIntegrationVerdict.merge,
+        summary: '재배치는 충돌에서 멈춤',
+        reasons: [
+          'Rebase 시뮬레이션은 충돌 파일 ${check.files.length}개에서 멈추지만 '
+              'Merge는 충돌이 없습니다',
+        ],
+      );
+    }
+    if (!mergeClean) {
+      return BranchRecommendation(
+        verdict: BranchIntegrationVerdict.rebase,
+        summary: '근거 2',
+        reasons: [
+          'Merge는 충돌 파일 ${comparison.merge.files.length}개에서 멈추지만 '
+              'Rebase 미리보기는 커밋 $compareAhead개를 전부 재생했습니다',
+          localOnly,
+        ],
+      );
+    }
+
+    final mergeBase = comparison.mergeBases.first;
+    final internalMerges =
+        int.tryParse(
+          (await _run([
+            'rev-list',
+            '--merges',
+            '--count',
+            '$mergeBase..${comparison.compareTip}',
+          ])).trim(),
+        ) ??
+        0;
+    // 재배치가 브랜치 안의 머지 커밋을 펴 버리니 어느 쪽도 자신 있게 못 고른다.
+    if (internalMerges > 0) return null;
+    final duplicates = (await _run([
+      'cherry',
+      comparison.baseTip,
+      comparison.compareTip,
+    ])).split('\n').where((line) => line.startsWith('-')).length;
+    final share = await _mergeCommitShare(comparison.baseTip);
+    // 커밋 몇 개짜리 히스토리로는 관례를 말할 수 없고, 남은 신호만으로는 어느 쪽도
+    // 못 고른다.
+    if (share.total < conventionSampleFloor) return null;
+    final ratio = share.merges / share.total;
+    final duplicateReason = duplicates > 0
+        ? '이미 ${comparison.baseRef}에 들어간 커밋 $duplicates개는 재배치하면 알아서 빠집니다'
+        : null;
+    if (ratio >= 0.4) {
+      // 관례 근거가 이 판정을 그냥 Rebase와 갈라놓는 유일한 사실이라 세 개로 자를 때
+      // 밀려나면 안 된다. 밀려도 되는 쪽은 중복 커밋 이야기다.
+      final reasons = [
+        localOnly,
+        'Rebase 미리보기 $compareAhead개 커밋 전부 충돌 없이 재생됐습니다',
+        '최근 ${comparison.baseRef} 커밋 ${share.total}개 중 ${share.merges}개가 머지 커밋 — 이 저장소의 관례입니다',
+        ?duplicateReason,
+      ].take(3).toList();
+      return BranchRecommendation(
+        verdict: BranchIntegrationVerdict.rebaseThenMerge,
+        summary: '근거 ${reasons.length}',
+        reasons: reasons,
+      );
+    }
+    // 관례가 선형이거나, 관례가 어느 쪽도 아니어도 재배치가 떨궈 줄 중복 커밋이
+    // 있으면 Rebase로 기운다. 중복 근거가 있으면 세 개로 자를 때 관례 쪽이 밀린다 —
+    // 이 판정에서 관례는 갈림길이 아니다.
+    if (ratio < 0.15 || duplicates > 0) {
+      return BranchRecommendation(
+        verdict: BranchIntegrationVerdict.rebase,
+        summary: '커밋 $compareAhead개 · 선형 유지',
+        reasons: [
+          localOnly,
+          'Rebase 미리보기 $compareAhead개 커밋 전부 충돌 없이 재생됐습니다',
+          ?duplicateReason,
+          '최근 ${comparison.baseRef} 커밋 ${share.total}개 중 머지 커밋은 ${share.merges}개뿐이라 선형 히스토리가 관례입니다',
+        ].take(3).toList(),
+      );
+    }
+    // 관례가 어느 쪽도 아니라 남은 신호로는 고를 수 없다.
+    return null;
+  }
+
+  /// The remote-tracking ref carrying the compared branch, or null when the
+  /// branch only exists locally. A remote tip that trails unpushed local commits
+  /// still counts as shared: the branch is already out there. A same-named
+  /// remote ref settles it first; otherwise the branch's own upstream does, but
+  /// only when it resolves under refs/remotes/ — an upstream can be a local
+  /// branch, which says nothing about sharing. [unrelated] marks the case the
+  /// match cannot settle — a remote tip that is neither the local tip nor its
+  /// ancestor, so it may be a teammate's own branch or this one rebased on the
+  /// remote.
+  Future<({String ref, String tip, bool tipMatches, bool unrelated})?>
+  _remoteSharingOf(BranchComparisonResult comparison) async {
+    final compareRef = comparison.compareRef;
+    final separator = compareRef.indexOf('/');
+    final short = separator > 0 && !await _localBranchExists(compareRef)
+        ? compareRef.substring(separator + 1)
+        : compareRef;
+    // 이름이 같아도 같은 히스토리라는 뜻은 아니다. 원격 tip이 로컬 tip이거나 그
+    // 조상일 때만 이 브랜치가 올라가 있다고 말할 수 있다.
+    Future<({String ref, String tip, bool tipMatches, bool unrelated})> sharing(
+      String ref,
+      String tip,
+    ) async => (
+      ref: ref,
+      tip: tip,
+      tipMatches: tip == comparison.compareTip,
+      unrelated:
+          tip != comparison.compareTip &&
+          (await runner(gitExecutable, [
+                'merge-base',
+                '--is-ancestor',
+                tip,
+                comparison.compareTip,
+              ], workingDirectory: root))
+              .exitCode !=
+              0,
+    );
+    for (final line in (await _run([
+      'for-each-ref',
+      '--format=%(refname:short)%09%(objectname)',
+      'refs/remotes',
+    ])).split('\n')) {
+      final fields = line.trim().split('\t');
+      if (fields.length < 2) continue;
+      final slash = fields.first.indexOf('/');
+      if (slash <= 0 || fields.first.substring(slash + 1) != short) continue;
+      return sharing(fields.first, fields[1]);
+    }
+    // 이름이 다른 원격을 추적하고 있을 수도 있다. 다만 upstream은 로컬 브랜치일 수도
+    // 있어서(`git branch --set-upstream-to=main feature`) 그건 공유와 무관하다 —
+    // refs/remotes/로 풀리는 upstream만 원격 공유로 읽는다.
+    const remotePrefix = 'refs/remotes/';
+    final upstream = await runner(gitExecutable, [
+      'rev-parse',
+      '--symbolic-full-name',
+      '$compareRef@{upstream}',
+    ], workingDirectory: root);
+    final name = upstream.stdout.toString().trim();
+    if (upstream.exitCode != 0 || !name.startsWith(remotePrefix)) return null;
+    final tip = (await runner(gitExecutable, [
+      'rev-parse',
+      '--verify',
+      '--quiet',
+      '$name^{commit}',
+    ], workingDirectory: root)).stdout.toString().trim();
+    // upstream 설정만 남고 원격 ref가 사라졌으면 무엇과 공유 중인지 말할 수 없다.
+    return tip.isEmpty
+        ? null
+        : sharing(name.substring(remotePrefix.length), tip);
+  }
+
+  Future<bool> _localBranchExists(String branch) async =>
+      (await runner(gitExecutable, [
+        'rev-parse',
+        '--verify',
+        '--quiet',
+        'refs/heads/$branch',
+      ], workingDirectory: root)).exitCode ==
+      0;
+
+  /// How many of the base branch's last 50 first-parent commits are merge
+  /// commits — this repository's own convention, measured rather than assumed.
+  /// `--parents` rewrites parents under `--first-parent`, so the shas take a
+  /// second pass to be counted.
+  Future<({int merges, int total})> _mergeCommitShare(String tip) async {
+    final shas = (await _run([
+      'rev-list',
+      '--first-parent',
+      '--max-count=50',
+      tip,
+    ])).split('\n').where((line) => line.trim().isNotEmpty).toList();
+    if (shas.isEmpty) return (merges: 0, total: 0);
+    final merges = int.tryParse(
+      (await _run([
+        'rev-list',
+        '--no-walk',
+        '--min-parents=2',
+        '--count',
+        ...shas,
+      ])).trim(),
+    );
+    return (merges: merges ?? 0, total: shas.length);
   }
 
   Future<MergePreviewSession> openMergePreview({
@@ -2322,7 +2755,167 @@ class GitRepository implements FullDiffRepository {
     }
   }
 
+  /// Moves the compared branch onto the rebased tip and then walks the base
+  /// branch onto a merge commit over it. Both moves follow the same rules as the
+  /// single-step applies: only a checked-out branch touches disk.
+  Future<BranchApplyResult> applyRebaseThenMerge({
+    required BranchComparisonResult comparison,
+    required String virtualTip,
+  }) async {
+    final refs = await _verifyApplyTips(comparison);
+    final baseTarget = resolveBranchApplyTarget(
+      mode: BranchApplyMode.merge,
+      comparison: comparison,
+      refs: refs,
+    );
+    final compareTarget = resolveBranchApplyTarget(
+      mode: BranchApplyMode.rebase,
+      comparison: comparison,
+      refs: refs,
+    );
+    if (baseTarget == null ||
+        baseTarget.needsRecalculation ||
+        compareTarget == null ||
+        compareTarget.needsRecalculation) {
+      throw GitRepositoryException(root, '기존 로컬 브랜치 기준으로 미리보기를 다시 계산해야 합니다.');
+    }
+    // 두 브랜치 중 하나라도 다른 worktree가 들고 있으면 아무것도 옮기기 전에 멈춘다.
+    final current = (await _run(['branch', '--show-current'])).trim();
+    for (final branch in {baseTarget.localBranch, compareTarget.localBranch}) {
+      if (branch != current && await branchWorktreePath(branch) != null) {
+        throw GitRepositoryException(
+          branch,
+          '다른 worktree에서 체크아웃한 브랜치라 적용할 수 없습니다.',
+        );
+      }
+    }
+    final rewrittenTip = (await _run([
+      'rev-parse',
+      '--verify',
+      '$virtualTip^{commit}',
+    ])).trim();
+    // 재배치 결과가 기준 브랜치 그 자체면 부모가 하나뿐인 빈 커밋이 만들어지고,
+    // 그 커밋은 머지가 아닌데 머지라고 적힌 히스토리가 된다.
+    if (rewrittenTip == comparison.baseTip) {
+      throw GitRepositoryException(root, '재배치 결과가 기준 브랜치와 같아 만들 머지 커밋이 없습니다.');
+    }
+    // 재배치 결과가 기준 브랜치 위에 얹혀 있어야 그 트리가 곧 병합 결과다.
+    final ancestry = await runner(gitExecutable, [
+      'merge-base',
+      '--is-ancestor',
+      comparison.baseTip,
+      rewrittenTip,
+    ], workingDirectory: root);
+    if (ancestry.exitCode != 0) {
+      throw GitRepositoryException(
+        root,
+        '재배치 결과가 기준 브랜치 위에 없어 머지 커밋을 만들 수 없습니다.',
+      );
+    }
+    final tree = (await _run([
+      'rev-parse',
+      '--verify',
+      '$rewrittenTip^{tree}',
+    ])).trim();
+
+    final rebased = await applyRebasePreview(
+      comparison: comparison,
+      virtualTip: virtualTip,
+    );
+    try {
+      final mergeCommit = (await _run([
+        '-c',
+        'commit.gpgSign=false',
+        'commit-tree',
+        tree,
+        '-p',
+        comparison.baseTip,
+        '-p',
+        rewrittenTip,
+        '-m',
+        "Merge branch '${comparison.compareRef}' into ${comparison.baseRef}",
+      ])).trim();
+      final baseUpdated = await _moveLocalBranch(
+        branch: baseTarget.localBranch,
+        expected: baseTarget.selectedTip,
+        next: mergeCommit,
+      );
+      return BranchApplyResult(
+        mode: BranchApplyMode.rebaseMerge,
+        baseBranch: baseTarget.localBranch,
+        compareBranch: rebased.compareBranch,
+        baseBefore: comparison.baseTip,
+        baseAfter: await _localBranchTip(baseTarget.localBranch),
+        compareBefore: comparison.compareTip,
+        compareAfter: rebased.compareAfter,
+        compareBranchCreated: rebased.compareBranchCreated,
+        workingTreeUpdated: baseUpdated,
+        compareWorkingTreeUpdated: rebased.workingTreeUpdated,
+      );
+    } catch (error) {
+      try {
+        await restoreBranchApply(rebased);
+      } on Object catch (rollbackError) {
+        throw GitRepositoryException(
+          root,
+          '${baseTarget.localBranch}는 ${comparison.baseTip}에 그대로 있지만 '
+          '${rebased.compareBranch}를 ${rebased.compareBefore}으로 되돌리지 못했습니다. '
+          '지금 ${rebased.compareBranch}는 ${rebased.compareAfter}입니다. '
+          '($error / $rollbackError)',
+        );
+      }
+      rethrow;
+    }
+  }
+
   Future<void> restoreBranchApply(BranchApplyResult result) async {
+    if (result.mode == BranchApplyMode.rebaseMerge) {
+      if (await _localBranchTip(result.baseBranch) != result.baseAfter ||
+          await _localBranchTip(result.compareBranch) != result.compareAfter) {
+        throw GitRepositoryException(root, '적용 뒤 브랜치가 바뀌어 이전 시점으로 되돌릴 수 없습니다.');
+      }
+      Future<void> restoreBase() => _moveLocalBranch(
+        branch: result.baseBranch,
+        expected: result.baseAfter,
+        next: result.baseBefore,
+      );
+      Future<void> restoreCompare() async {
+        if (result.compareBranchCreated) {
+          await _deleteLocalBranch(
+            branch: result.compareBranch,
+            expected: result.compareAfter,
+          );
+          return;
+        }
+        await _moveLocalBranch(
+          branch: result.compareBranch,
+          expected: result.compareAfter,
+          next: result.compareBefore,
+        );
+      }
+
+      // 체크아웃된 브랜치만 더러운 작업 트리에 막히니 그 쪽을 먼저 되돌린다. 순서가
+      // 반대면 한쪽만 되돌아간 채로 끝나고, 그 뒤로는 적용 시점 SHA가 안 맞아 다시
+      // 시도할 수도 없다.
+      final current = (await _run(['branch', '--show-current'])).trim();
+      final compareFirst = current == result.compareBranch;
+      await (compareFirst ? restoreCompare() : restoreBase());
+      try {
+        await (compareFirst ? restoreBase() : restoreCompare());
+      } on Object catch (error) {
+        final restored = compareFirst ? result.compareBranch : result.baseBranch;
+        final stuck = compareFirst ? result.baseBranch : result.compareBranch;
+        throw GitRepositoryException(
+          root,
+          '되돌리는 중에 멈췄습니다. $restored 브랜치는 '
+          '${compareFirst ? result.compareBefore : result.baseBefore}으로 '
+          '되돌렸지만 $stuck 브랜치는 '
+          '${compareFirst ? result.baseAfter : result.compareAfter}에 '
+          '그대로 있습니다. ($error)',
+        );
+      }
+      return;
+    }
     if (result.mode == BranchApplyMode.merge) {
       if (await _localBranchTip(result.baseBranch) != result.baseAfter) {
         throw GitRepositoryException(root, '적용 뒤 브랜치가 바뀌어 이전 시점으로 되돌릴 수 없습니다.');
@@ -3653,6 +4246,69 @@ class GitRepository implements FullDiffRepository {
 
 typedef _StatusEntry = ({String status, String path, String? oldPath});
 typedef _Stats = ({int? additions, int? deletions, bool isBinary});
+typedef _HunkRange = ({int oldStart, int oldCount, int newStart, int newCount});
+
+final _diffHunkRange = RegExp(
+  r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@',
+  multiLine: true,
+);
+
+/// Maps a line number through [hunks] into the other side's coordinates. A line
+/// inside a rewritten hunk lands on that hunk's start; everything else shifts by
+/// what the hunks before it added or removed.
+int Function(int) _lineMapper(List<_HunkRange> hunks) => (line) {
+  var delta = 0;
+  for (final hunk in hunks) {
+    if (hunk.oldCount > 0 &&
+        line >= hunk.oldStart &&
+        line <= hunk.oldStart + hunk.oldCount - 1) {
+      return hunk.newStart;
+    }
+    final oldEnd = hunk.oldCount == 0
+        ? hunk.oldStart
+        : hunk.oldStart + hunk.oldCount - 1;
+    if (oldEnd < line) delta += hunk.newCount - hunk.oldCount;
+  }
+  return line + delta;
+};
+
+/// Spans covering an edit from each side that touch or sit within
+/// [proximityLineGap] lines of one another.
+List<LineSpan> _nearSpans(List<LineSpan> ours, List<LineSpan> theirs) => [
+  for (final ourSpan in ours)
+    for (final theirSpan in theirs)
+      if (_spanGap(ourSpan, theirSpan) <= proximityLineGap)
+        (
+          startLine: min(ourSpan.startLine, theirSpan.startLine),
+          endLine: max(ourSpan.endLine, theirSpan.endLine),
+        ),
+];
+
+int _spanGap(LineSpan left, LineSpan right) => left.startLine > right.endLine
+    ? left.startLine - right.endLine
+    : right.startLine > left.endLine
+    ? right.startLine - left.endLine
+    : 0;
+
+/// Overlapping spans read as one region, so a file's regions never double-count
+/// the same lines.
+List<LineSpan> _mergeSpans(List<LineSpan> spans) {
+  final sorted = [...spans]
+    ..sort((left, right) => left.startLine.compareTo(right.startLine));
+  final merged = <LineSpan>[];
+  for (final span in sorted) {
+    final last = merged.isEmpty ? null : merged.last;
+    if (last != null && span.startLine <= last.endLine) {
+      merged[merged.length - 1] = (
+        startLine: last.startLine,
+        endLine: max(last.endLine, span.endLine),
+      );
+      continue;
+    }
+    merged.add(span);
+  }
+  return merged;
+}
 
 List<_StatusEntry> _parseNameStatus(String output) {
   final fields = output.split('\x00');
