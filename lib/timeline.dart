@@ -62,6 +62,13 @@ const _previewConflict = Color(0xFFFF7A84);
 const _previewConflictPanel = Color(0xFF4B252C);
 const _previewControlBlue = Color(0xFF4388EE);
 
+/// 커밋 행 배지와 '양쪽 유지' 미리보기의 색. 초록이 브랜치 쪽(그리고 이미 반영된
+/// 커밋), 파랑이 기준 쪽 추가, 주황이 충돌 예고다.
+const _duplicateBadge = Color(0xFF7CE0A0);
+const _forecastBadge = Color(0xFFF0A35E);
+const _keepBothOursColor = Color(0xFF8FCBFF);
+const _keepBothTheirsColor = Color(0xFF7CE0A0);
+
 List<Color> rebaseMappingColors(Color branchColor) {
   final source = HSLColor.fromColor(branchColor);
   final startLightness = source.lightness + (1 - source.lightness) * 0.12;
@@ -1015,6 +1022,17 @@ class _TimelineScreenState extends State<TimelineScreen>
   var _repositoryOperationInProgress = false;
   final _rebaseResolvedFiles = <String>{};
   final _rebaseEditedFiles = <String>{};
+
+  /// P1b/P2 — 커밋 행 배지의 근거. 비동기로 도착하고 도착 전에는 아무 자리도
+  /// 차지하지 않는다. 비교가 바뀌면 둘 다 버려진다.
+  var _duplicateCommits = const <String>{};
+  var _conflictForecast = const <String, List<String>>{};
+  var _conflictForecastSerial = 0;
+
+  /// P3 — 자격이 있는 충돌 파일만 여기 남는다. 열려 있는 순서 선택은 한 파일뿐.
+  final _keepBothCandidates = <String, KeepBothCandidate>{};
+  var _keepBothSerial = 0;
+  String? _keepBothOpenPath;
   final _rebaseConflictRowContextKey = GlobalKey();
   final _rebaseApplyRowContextKey = GlobalKey();
   var _branchApplyStatus = BranchApplyStatus.idle;
@@ -3086,6 +3104,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         _previewGraph = null;
         _rebaseCheck = null;
         _dropRecommendation();
+        _dropCommitBadges();
         _comparisonError = null;
         _selectedIndex.value = 0;
       });
@@ -3120,11 +3139,14 @@ class _TimelineScreenState extends State<TimelineScreen>
         ];
         _rebaseCheck = null;
         _dropRecommendation();
+        _dropCommitBadges();
         _comparisonError = null;
         _selectedIndex.value = 0;
       });
       _scheduleRatchetUpdate();
       _showFirstComparisonRow();
+      unawaited(_loadDuplicateCommits(result, serial));
+      unawaited(_loadConflictForecast(result, serial));
       unawaited(_openPaneForBranchPreview());
       if (_branchPreviewMode == BranchPreviewMode.rebase) {
         unawaited(_startRebasePreview());
@@ -3212,6 +3234,82 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
   }
 
+  void _dropCommitBadges() {
+    _conflictForecastSerial++;
+    _duplicateCommits = const {};
+    _conflictForecast = const {};
+  }
+
+  /// P1b — patch-id가 이미 base에 있는 커밋을 행 배지로 올린다. 기다리는 것은 없고
+  /// 비교가 바뀌면 답은 버려진다. 자동 skip 같은 동작은 없다.
+  Future<void> _loadDuplicateCommits(
+    BranchComparisonResult comparison,
+    int serial,
+  ) async {
+    try {
+      final duplicates = await widget.repository.duplicateCompareCommits(
+        baseTip: comparison.baseTip,
+        compareTip: comparison.compareTip,
+      );
+      if (!mounted ||
+          serial != _comparisonSerial ||
+          _comparison != comparison) {
+        return;
+      }
+      setState(() => _duplicateCommits = duplicates);
+    } catch (_) {
+      // 배지는 부가 정보라 실패하면 붙지 않고 넘어간다.
+    }
+  }
+
+  /// P2 — 커밋별 단독 재생 예고. 새 비교나 미리보기 Drop이 진행 중인 예고를
+  /// 취소하고 늦게 도착한 결과는 다른 브랜치 쌍에 붙지 못한다.
+  Future<void> _loadConflictForecast(
+    BranchComparisonResult comparison,
+    int serial,
+  ) async {
+    final request = ++_conflictForecastSerial;
+    try {
+      final forecast = await widget.repository.probeRebaseConflicts(
+        baseTip: comparison.baseTip,
+        commits: [
+          for (final entry in comparison.commits)
+            if (entry.side == BranchCommitSide.compareOnly) entry.commit.sha,
+        ],
+        cancelled: () => !mounted || request != _conflictForecastSerial,
+      );
+      if (!mounted ||
+          request != _conflictForecastSerial ||
+          serial != _comparisonSerial ||
+          _comparison != comparison) {
+        return;
+      }
+      setState(() => _conflictForecast = forecast);
+    } catch (_) {
+      // 예고는 부가 정보라 실패하면 배지를 띄우지 않고 넘어간다.
+    }
+  }
+
+  /// P3 — 충돌 파일마다 '양쪽 유지' 자격을 미리 물어 둔다. 자격이 있는 파일만
+  /// 지도에 남고 그 파일에만 세 번째 버튼이 생긴다.
+  Future<void> _loadKeepBothCandidates(
+    Future<KeepBothCandidate?> Function(String path) probe,
+    List<String> paths,
+    bool Function() stale,
+  ) async {
+    final request = ++_keepBothSerial;
+    for (final path in paths) {
+      try {
+        final candidate = await probe(path);
+        if (!mounted || request != _keepBothSerial || stale()) return;
+        if (candidate == null) continue;
+        setState(() => _keepBothCandidates[path] = candidate);
+      } catch (_) {
+        // 제안은 부가 기능이라 실패하면 버튼 없이 기존 선택지만 남는다.
+      }
+    }
+  }
+
   Future<void> _startMergePreview() async {
     final comparison = _comparison;
     if (_branchPreviewMode != BranchPreviewMode.merge ||
@@ -3270,7 +3368,17 @@ class _TimelineScreenState extends State<TimelineScreen>
         _mergePreview = result;
         _mergePreviewError = null;
         _mergeResolvedFiles.clear();
+        _dropKeepBoth();
       });
+      if (result.status == MergePreviewStatus.conflict) {
+        unawaited(
+          _loadKeepBothCandidates(
+            session.keepBothCandidate,
+            result.conflictFiles,
+            () => !identical(_mergePreviewSession, session),
+          ),
+        );
+      }
       if (result.status == MergePreviewStatus.conflict &&
           _previewController.previewPlacement == PreviewPlacement.closed) {
         await _previewController.setPreview(widget.preferredPreviewPlacement);
@@ -3290,7 +3398,14 @@ class _TimelineScreenState extends State<TimelineScreen>
     _mergePreviewBusy = false;
     _mergePreviewError = null;
     _mergeResolvedFiles.clear();
+    _dropKeepBoth();
     if (session != null) unawaited(session.dispose());
+  }
+
+  void _dropKeepBoth() {
+    _keepBothSerial++;
+    _keepBothCandidates.clear();
+    _keepBothOpenPath = null;
   }
 
   Future<void> _startRebasePreview() async {
@@ -3402,6 +3517,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       _repositoryOperationInProgress = operationInProgress;
       _rebaseResolvedFiles.clear();
       _rebaseEditedFiles.clear();
+      _dropKeepBoth();
       _rebaseCheck = switch (result.status) {
         RebasePreviewStatus.clean => const RebaseCheckResult(
           status: RebaseCheckStatus.clean,
@@ -3431,6 +3547,15 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (_rebaseCheck case final check?) {
       unawaited(
         _loadRecommendation(comparison, _comparisonSerial, rebaseCheck: check),
+      );
+    }
+    if (result.status == RebasePreviewStatus.conflict && session != null) {
+      unawaited(
+        _loadKeepBothCandidates(
+          session.keepBothCandidate,
+          result.conflictFiles,
+          () => !identical(_rebasePreviewSession, session),
+        ),
       );
     }
     if (result.status == RebasePreviewStatus.conflict &&
@@ -3491,6 +3616,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     _rebaseEditedFiles.clear();
     _rebasePreviewError = null;
     _rebaseApplyMerge = false;
+    _dropKeepBoth();
     if (session != null) unawaited(session.dispose());
   }
 
@@ -3518,6 +3644,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       _previewGraph = null;
       _rebaseCheck = null;
       _dropRecommendation();
+      _dropCommitBadges();
       _comparisonError = null;
       if (_normalEntries.isNotEmpty) {
         _selectedIndex.value = _selectedIndex.value.clamp(
@@ -6311,6 +6438,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       _mergePreviewSession = null;
       _rebasePreviewSession = null;
       _resetBranchApply();
+      _dropCommitBadges();
+      _dropKeepBoth();
       _branchPreviewDropped = true;
     });
     await mergeSession?.dispose();
@@ -6860,6 +6989,10 @@ class _TimelineScreenState extends State<TimelineScreen>
               entry.side == BranchCommitSide.compareOnly,
         ) ??
         false;
+    final baseRef = _comparison?.baseRef;
+    final alreadyInBase =
+        baseRef != null && _duplicateCommits.contains(commit.sha);
+    final forecast = _comparison == null ? null : _conflictForecast[commit.sha];
     final resolvedRebaseConflict =
         rebasePreview?.status == RebasePreviewStatus.conflict &&
         originalIndex >= 0 &&
@@ -7128,6 +7261,40 @@ class _TimelineScreenState extends State<TimelineScreen>
                             ),
                           ),
                         ),
+                        // 배지 묶음도 제목과 같은 flex 몫을 받는다 — 열이 좁아지면
+                        // 배지가 줄어들 뿐, 행이 넘치는 일은 구조적으로 없다.
+                        if (alreadyInBase || forecast != null)
+                          Expanded(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                if (alreadyInBase)
+                                  Flexible(
+                                    child: _rowBadge(
+                                      key: Key(
+                                        'commit-already-in-base-${commit.sha}',
+                                      ),
+                                      text: '이미 $baseRef에 반영됨',
+                                      color: _duplicateBadge,
+                                    ),
+                                  ),
+                                if (forecast != null && forecast.isNotEmpty)
+                                  Flexible(
+                                    child: _tooltip(
+                                      '순차 재배치에서는 앞 커밋의 해결이 이 예상을 바꿀 수 있습니다',
+                                      _rowBadge(
+                                        key: Key(
+                                          'commit-conflict-forecast-'
+                                          '${commit.sha}',
+                                        ),
+                                        text: _conflictForecastLabel(forecast),
+                                        color: _forecastBadge,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -7682,6 +7849,43 @@ class _TimelineScreenState extends State<TimelineScreen>
   Widget _tooltip(String? message, Widget child) => message == null
       ? child
       : Tooltip(message: message, waitDuration: _tooltipDelay, child: child);
+
+  /// 커밋 행 오른쪽 배지. 근거가 도착하기 전에는 이 위젯 자체가 없으니 자리도
+  /// 차지하지 않는다.
+  Widget _rowBadge({
+    required Key key,
+    required String text,
+    required Color color,
+  }) => Padding(
+    padding: const EdgeInsets.only(left: 4),
+    child: Container(
+      key: key,
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        text,
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: color,
+          fontSize: 9.5,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    ),
+  );
+
+  /// '충돌 예상 · settings.dart 외 2' — 첫 파일 이름과 나머지 개수.
+  static String _conflictForecastLabel(List<String> files) {
+    final first = files.first.split('/').last;
+    return files.length == 1
+        ? '충돌 예상 · $first'
+        : '충돌 예상 · $first 외 ${files.length - 1}';
+  }
 
   /// No hairlines anywhere: the hash column's rule is the only line, a 2px strip
   /// stopping 1px short top and bottom so stacked rows read apart.
@@ -8798,10 +9002,17 @@ class _TimelineScreenState extends State<TimelineScreen>
     final interactive = mergeMode
         ? _mergePreviewSession != null
         : _rebasePreviewSession != null;
+    final conflictPath = mergeMode
+        ? _selectedMergeConflictPath
+        : _selectedRebaseConflictPath;
+    final keepBoth = conflictPath == null
+        ? null
+        : _keepBothCandidates[conflictPath];
     Widget choice({
       required Key key,
       required String label,
       required VoidCallback onTap,
+      bool accent = false,
     }) => InkWell(
       key: key,
       onTap:
@@ -8815,13 +9026,22 @@ class _TimelineScreenState extends State<TimelineScreen>
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
         decoration: BoxDecoration(
-          color: _palette.raised,
-          border: Border.all(color: _palette.muted.withValues(alpha: 0.55)),
+          color: accent
+              ? _previewPurple.withValues(alpha: 0.08)
+              : _palette.raised,
+          border: Border.all(
+            color: accent
+                ? const Color(0xFF9D79D0)
+                : _palette.muted.withValues(alpha: 0.55),
+          ),
           borderRadius: BorderRadius.circular(5),
         ),
         child: Text(
           label,
-          style: TextStyle(color: _palette.text, fontSize: 10),
+          style: TextStyle(
+            color: accent ? _previewPurple : _palette.text,
+            fontSize: 10,
+          ),
         ),
       ),
     );
@@ -8879,13 +9099,27 @@ class _TimelineScreenState extends State<TimelineScreen>
                       : _resolveRebaseConflict(RebaseConflictChoice.commit),
                 ),
               ),
+              // P3 — 양쪽 모두 순수 추가로 판정된 파일에만 나타나는 세 번째 선택지.
+              if (keepBoth != null)
+                choice(
+                  key: const Key('conflict-keep-both'),
+                  label: '양쪽 유지',
+                  accent: true,
+                  onTap: () => setState(
+                    () => _keepBothOpenPath = _keepBothOpenPath == conflictPath
+                        ? null
+                        : conflictPath,
+                  ),
+                ),
               choice(
                 key: Key(
                   mergeMode
                       ? 'merge-conflict-use-both'
                       : 'rebase-conflict-edit',
                 ),
-                label: mergeMode ? '둘 다 사용' : '직접 편집',
+                // 두 모드 모두 에디터를 여는 같은 동작이다 — 문구도 같아야 '양쪽
+                // 유지'(P3 결합)와 헷갈리지 않는다.
+                label: '직접 편집',
                 onTap: () => unawaited(
                   _openBranchPreviewConflictEditor(mergeMode: mergeMode),
                 ),
@@ -8893,10 +9127,221 @@ class _TimelineScreenState extends State<TimelineScreen>
             ],
           ),
         ),
+        if (keepBoth != null && _keepBothOpenPath == conflictPath)
+          _keepBothChooser(
+            conflictPath!,
+            keepBoth,
+            baseRef: comparison.baseRef,
+            mergeMode: mergeMode,
+          ),
         if (interactive)
           mergeMode ? _mergeConflictActions() : _rebaseConflictActions(),
       ],
     );
+  }
+
+  /// P3 상태 B — 결합 순서 두 가지를 나란히 놓고 하나만 고르게 한다. 미리보기는
+  /// 실제 결합 내용 그대로다: 파랑이 기준 쪽 추가, 초록이 브랜치 쪽 추가.
+  Widget _keepBothChooser(
+    String path,
+    KeepBothCandidate candidate, {
+    required String baseRef,
+    required bool mergeMode,
+  }) {
+    Widget order({
+      required Key key,
+      required String caption,
+      required bool baseFirst,
+    }) => Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            caption,
+            style: TextStyle(
+              color: _palette.muted,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: _palette.background,
+              border: Border.all(color: _palette.muted.withValues(alpha: 0.4)),
+              borderRadius: BorderRadius.circular(7),
+            ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Text.rich(
+                _keepBothPreview(candidate, baseFirst: baseFirst),
+                softWrap: false,
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          FilledButton(
+            key: key,
+            onPressed:
+                (mergeMode ? _mergePreviewBusy : _rebasePreviewBusy) ||
+                    _repositoryOperationInProgress
+                ? null
+                : () => unawaited(
+                    _applyKeepBoth(
+                      path,
+                      candidate,
+                      mergeMode: mergeMode,
+                      baseFirst: baseFirst,
+                    ),
+                  ),
+            child: const Text('이 순서로 적용'),
+          ),
+        ],
+      ),
+    );
+    return Container(
+      key: const Key('conflict-keep-both-chooser'),
+      padding: const EdgeInsets.all(8),
+      color: _previewPurplePanel.withValues(alpha: 0.72),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            '$path — 양쪽 유지',
+            style: TextStyle(
+              color: _palette.text,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '충돌 구역 ${candidate.hunks.length}곳 전부에서 양쪽이 서로 다른 코드를 '
+            '추가했습니다. 순서만 고르면 됩니다.',
+            style: TextStyle(color: _palette.muted, fontSize: 10),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              order(
+                key: const Key('keep-both-apply-base-first'),
+                caption: '기준($baseRef) 먼저',
+                baseFirst: true,
+              ),
+              const SizedBox(width: 10),
+              order(
+                key: const Key('keep-both-apply-branch-first'),
+                caption: '브랜치 먼저',
+                baseFirst: false,
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '적용해도 파일은 계속 편집할 수 있습니다. 파랑은 기준 쪽 추가, 초록은 '
+            '브랜치 쪽 추가입니다.',
+            style: TextStyle(color: _palette.muted, fontSize: 10),
+          ),
+        ],
+      ),
+    );
+  }
+
+  TextSpan _keepBothPreview(
+    KeepBothCandidate candidate, {
+    required bool baseFirst,
+  }) => TextSpan(
+    children: [
+      for (final hunk in candidate.hunks)
+        for (final side
+            in baseFirst
+                ? [
+                    (lines: hunk.ours, color: _keepBothOursColor),
+                    (lines: hunk.theirs, color: _keepBothTheirsColor),
+                  ]
+                : [
+                    (lines: hunk.theirs, color: _keepBothTheirsColor),
+                    (lines: hunk.ours, color: _keepBothOursColor),
+                  ])
+          if (side.lines.isNotEmpty)
+            TextSpan(
+              text: '${side.lines.join('\n')}\n',
+              style: TextStyle(
+                color: side.color,
+                fontSize: 10,
+                height: 1.5,
+                fontFamily: technicalFontFamily,
+                fontFamilyFallback: technicalFontFallback,
+              ),
+            ),
+    ],
+  );
+
+  /// 고른 순서의 결합 내용을 쓰고 해결로 표시한다. 파일은 그 뒤로도 편집할 수 있고
+  /// 마커가 남으면 markResolved가 막는다(P1a).
+  Future<void> _applyKeepBoth(
+    String path,
+    KeepBothCandidate candidate, {
+    required bool mergeMode,
+    required bool baseFirst,
+  }) async {
+    final mergeSession = _mergePreviewSession;
+    final rebaseSession = _rebasePreviewSession;
+    if ((mergeMode ? mergeSession == null : rebaseSession == null) ||
+        (mergeMode ? _mergePreviewBusy : _rebasePreviewBusy) ||
+        _repositoryOperationInProgress) {
+      return;
+    }
+    setState(() {
+      if (mergeMode) {
+        _mergePreviewBusy = true;
+        _mergePreviewError = null;
+      } else {
+        _rebasePreviewBusy = true;
+        _rebasePreviewError = null;
+      }
+    });
+    try {
+      final content = baseFirst ? candidate.baseFirst : candidate.branchFirst;
+      if (mergeMode) {
+        await mergeSession!.applyKeepBoth(path, content);
+      } else {
+        await rebaseSession!.applyKeepBoth(path, content);
+      }
+      if (!mounted) return;
+      setState(() {
+        if (mergeMode) {
+          _mergeResolvedFiles.add(path);
+        } else {
+          _rebaseResolvedFiles.add(path);
+        }
+        _keepBothCandidates.remove(path);
+        _keepBothOpenPath = null;
+        _previewDiffs.removeWhere((key, _) => key.path == path);
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          if (mergeMode) {
+            _mergePreviewError = error;
+          } else {
+            _rebasePreviewError = error;
+          }
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          if (mergeMode) {
+            _mergePreviewBusy = false;
+          } else {
+            _rebasePreviewBusy = false;
+          }
+        });
+      }
+    }
   }
 
   String? get _selectedMergeConflictPath {
@@ -8950,6 +9395,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       if (mounted && identical(session, _mergePreviewSession)) {
         setState(() {
           _mergeResolvedFiles.add(path);
+          _keepBothCandidates.remove(path);
+          if (_keepBothOpenPath == path) _keepBothOpenPath = null;
           _previewDiffs.removeWhere((key, _) => key.path == path);
         });
       }
@@ -9087,6 +9534,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       if (mounted && identical(session, _rebasePreviewSession)) {
         setState(() {
           _rebaseResolvedFiles.add(path);
+          _keepBothCandidates.remove(path);
+          if (_keepBothOpenPath == path) _keepBothOpenPath = null;
           _previewDiffs.removeWhere((key, _) => key.path == path);
         });
       }

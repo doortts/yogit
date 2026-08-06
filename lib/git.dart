@@ -448,6 +448,124 @@ String _previewFilePath(String? worktreePath, String relativePath) {
       '${parts.join(Platform.pathSeparator)}';
 }
 
+/// A resolution that still carries a marker git wrote. The message names the
+/// file and the first offending line, and nothing else: the error surface prints
+/// it verbatim.
+class ConflictMarkerResidueException implements Exception {
+  const ConflictMarkerResidueException(this.path, this.line);
+
+  final String path;
+  final int line;
+
+  @override
+  String toString() => '충돌 마커가 남아 있어 해결로 표시할 수 없습니다: $path $line행';
+}
+
+/// A line git would have written to mark a conflict. Whether such a line is
+/// residue or the file's own content is decided by comparing it against the
+/// three stage blobs, never by the line alone.
+bool isConflictMarkerLine(String line) =>
+    line.startsWith('<<<<<<<') ||
+    line.startsWith('|||||||') ||
+    line.startsWith('=======') ||
+    line.startsWith('>>>>>>>');
+
+/// One conflict region of a file both sides only added to: the base section was
+/// empty, so nothing was overwritten and only the order is left to pick.
+class KeepBothHunk {
+  const KeepBothHunk({required this.ours, required this.theirs});
+
+  final List<String> ours;
+  final List<String> theirs;
+}
+
+/// A conflicted file where every region is a two-sided addition, with the two
+/// combined results already built. Non-conflict regions are carried through
+/// untouched, so applying one of these is a marker replacement and nothing more.
+class KeepBothCandidate {
+  const KeepBothCandidate({
+    required this.hunks,
+    required this.baseFirst,
+    required this.branchFirst,
+  });
+
+  final List<KeepBothHunk> hunks;
+
+  /// The whole file with the base side's addition placed first in every region.
+  final String baseFirst;
+  final String branchFirst;
+}
+
+/// Splits `git merge-file -p --diff3` output into its conflict regions. Null
+/// unless every region's base section is empty — one region that overwrote
+/// something is a real modification conflict, and a half-right suggestion there
+/// is worse than none. The caller has already checked that no stage blob carried
+/// a marker-shaped line, so every marker here is one merge-file wrote.
+KeepBothCandidate? parseKeepBothCandidate(String merged) {
+  final hunks = <KeepBothHunk>[];
+  final baseFirst = <String>[];
+  final branchFirst = <String>[];
+  var ours = <String>[];
+  var base = <String>[];
+  var theirs = <String>[];
+  var section = 0;
+  for (final line in merged.split('\n')) {
+    if (section == 0 && line.startsWith('<<<<<<<')) {
+      section = 1;
+      ours = [];
+      base = [];
+      theirs = [];
+      continue;
+    }
+    if (section == 1 && line.startsWith('|||||||')) {
+      section = 2;
+      continue;
+    }
+    if (section == 2 && line.startsWith('=======')) {
+      section = 3;
+      continue;
+    }
+    if (section == 3 && line.startsWith('>>>>>>>')) {
+      if (base.isNotEmpty) return null;
+      hunks.add(KeepBothHunk(ours: ours, theirs: theirs));
+      baseFirst
+        ..addAll(ours)
+        ..addAll(theirs);
+      branchFirst
+        ..addAll(theirs)
+        ..addAll(ours);
+      section = 0;
+      continue;
+    }
+    switch (section) {
+      case 0:
+        baseFirst.add(line);
+        branchFirst.add(line);
+      case 1:
+        ours.add(line);
+      case 2:
+        base.add(line);
+      case 3:
+        theirs.add(line);
+    }
+  }
+  if (section != 0 || hunks.isEmpty) return null;
+  return KeepBothCandidate(
+    hunks: hunks,
+    baseFirst: baseFirst.join('\n'),
+    branchFirst: branchFirst.join('\n'),
+  );
+}
+
+/// ponytail: 커밋 30개면 cherry-pick을 30번 도는 값이고 그 위는 사람이 기다릴
+/// 시간이 아니다. 넘으면 예고를 아예 접는다 — 진행률 표시가 정말 필요해지면 그때
+/// 상한을 올린다.
+const conflictForecastCommitCeiling = 30;
+
+/// 예고 프로브 worktree를 stale로 보는 나이. 30커밋을 다 돌아도 한 시간을 넘길
+/// 일은 없으니, 이보다 오래된 프로브는 강제 종료가 남긴 것이다.
+const staleConflictProbeAge = Duration(hours: 1);
+
 class MergePreviewSession {
   MergePreviewSession({
     required GitRepository repository,
@@ -555,7 +673,23 @@ class MergePreviewSession {
 
   Future<void> markResolved(String relativePath) async {
     filePath(relativePath);
+    await _repository._rejectConflictMarkerResidue(
+      _worktreePath!,
+      relativePath,
+    );
     await _run(['add', '--', relativePath]);
+  }
+
+  /// The two-sided-addition reading of a conflicted file, or null when the file
+  /// does not qualify. See [GitRepository._keepBothCandidate].
+  Future<KeepBothCandidate?> keepBothCandidate(String relativePath) =>
+      _repository._keepBothCandidate(_worktreePath!, relativePath);
+
+  /// Writes one of the combined orders and stages it. The file stays editable
+  /// afterwards; this only replaces the markers with both sides.
+  Future<void> applyKeepBoth(String relativePath, String content) async {
+    await File(filePath(relativePath)).writeAsString(content);
+    await markResolved(relativePath);
   }
 
   Future<MergePreviewResult> finish() async {
@@ -730,6 +864,10 @@ class RebasePreviewSession {
 
   Future<void> markResolved(String relativePath) async {
     filePath(relativePath);
+    await _repository._rejectConflictMarkerResidue(
+      _worktreePath!,
+      relativePath,
+    );
     final result = await _repository.runner(_repository.gitExecutable, [
       'add',
       '--',
@@ -756,6 +894,18 @@ class RebasePreviewSession {
       '--',
       relativePath,
     ]);
+    await markResolved(relativePath);
+  }
+
+  /// The two-sided-addition reading of a conflicted file, or null when the file
+  /// does not qualify. See [GitRepository._keepBothCandidate].
+  Future<KeepBothCandidate?> keepBothCandidate(String relativePath) =>
+      _repository._keepBothCandidate(_worktreePath!, relativePath);
+
+  /// Writes one of the combined orders and stages it. The file stays editable
+  /// afterwards; this only replaces the markers with both sides.
+  Future<void> applyKeepBoth(String relativePath, String content) async {
+    await File(filePath(relativePath)).writeAsString(content);
     await markResolved(relativePath);
   }
 
@@ -2369,11 +2519,10 @@ class GitRepository implements FullDiffRepository {
         0;
     // 재배치가 브랜치 안의 머지 커밋을 펴 버리니 어느 쪽도 자신 있게 못 고른다.
     if (internalMerges > 0) return null;
-    final duplicates = (await _run([
-      'cherry',
-      comparison.baseTip,
-      comparison.compareTip,
-    ])).split('\n').where((line) => line.startsWith('-')).length;
+    final duplicates = (await duplicateCompareCommits(
+      baseTip: comparison.baseTip,
+      compareTip: comparison.compareTip,
+    )).length;
     final share = await _mergeCommitShare(comparison.baseTip);
     // 커밋 몇 개짜리 히스토리로는 관례를 말할 수 없고, 남은 신호만으로는 어느 쪽도
     // 못 고른다.
@@ -3256,11 +3405,27 @@ class GitRepository implements FullDiffRepository {
 
   bool _isYogitPreviewPath(String path) {
     final directory = Directory(path).absolute;
-    return directory.parent.path == Directory.systemTemp.absolute.path &&
-        directory.uri.pathSegments
-            .where((segment) => segment.isNotEmpty)
-            .last
-            .startsWith(RegExp(r'yogit_(?:merge|rebase)_preview_'));
+    // `git worktree list`는 심볼릭 링크를 푼 경로를 찍는다(macOS의 /var는
+    // /private/var 링크다). 두 모양 다 systemTemp로 인정해야 우리가 만든
+    // worktree를 우리가 알아본다.
+    if (!{
+      Directory.systemTemp.absolute.path,
+      Directory.systemTemp.resolveSymbolicLinksSync(),
+    }.contains(directory.parent.path)) {
+      return false;
+    }
+    final name = directory.uri.pathSegments
+        .where((segment) => segment.isNotEmpty)
+        .last;
+    if (name.startsWith(RegExp(r'yogit_(?:merge|rebase)_preview_'))) {
+      return true;
+    }
+    // 예고 프로브는 지금 돌고 있을 수 있다. 그래서 오래된 것만 청소한다 — 강제
+    // 종료로 남은 디렉터리는 사라지고 진행 중 프로브는 건드리지 않는다. 디렉터리가
+    // 이미 없으면 stat이 1970년을 주니 등록만 남은 것도 함께 정리된다.
+    if (!name.startsWith('yogit_conflict_probe_')) return false;
+    return DateTime.now().difference(directory.statSync().modified) >
+        staleConflictProbeAge;
   }
 
   Future<void> _ignoreCommand(
@@ -3578,23 +3743,23 @@ class GitRepository implements FullDiffRepository {
     return parseUnifiedDiff(output);
   }
 
-  Future<List<DiffLine>> _loadPreviewConflictDiff(
+  /// The unmerged stage blobs of [relativePath] — 1 base, 2 ours, 3 theirs.
+  /// Empty when git records no conflict for the path.
+  Future<Map<int, String>> _conflictFileStages(
     String worktreePath,
     String relativePath,
   ) async {
     _previewFilePath(worktreePath, relativePath);
-    final pathspec = ':(literal)$relativePath';
-    final unmerged = await runner(gitExecutable, [
-      'ls-files',
-      '-u',
-      '-z',
-      '--',
-      pathspec,
-    ], workingDirectory: worktreePath);
+    final arguments = ['ls-files', '-u', '-z', '--', ':(literal)$relativePath'];
+    final unmerged = await runner(
+      gitExecutable,
+      arguments,
+      workingDirectory: worktreePath,
+    );
     if (unmerged.exitCode != 0) {
       throw ProcessException(
         gitExecutable,
-        ['ls-files', '-u', '-z', '--', pathspec],
+        arguments,
         unmerged.stderr.toString(),
         unmerged.exitCode,
       );
@@ -3602,11 +3767,226 @@ class GitRepository implements FullDiffRepository {
     final stages = <int, String>{};
     final record = RegExp(r'^[^ ]+ ([0-9a-f]+) ([123])\t');
     for (final line in unmerged.stdout.toString().split('\x00')) {
-      final match = record.firstMatch(line);
-      if (match != null) {
+      if (record.firstMatch(line) case final match?) {
         stages[int.parse(match.group(2)!)] = match.group(1)!;
       }
     }
+    return stages;
+  }
+
+  /// P1a — 스테이징하려는 내용에 git이 써 넣은 충돌 마커가 남아 있으면 거부한다.
+  /// 근거는 세 stage 블롭뿐이다: 그 블롭들이 이미 갖고 있던 마커 모양 행(문서 속
+  /// 예시 같은 것)은 원래 파일 내용이라 통과시킨다.
+  Future<void> _rejectConflictMarkerResidue(
+    String worktreePath,
+    String relativePath,
+  ) async {
+    final file = File(_previewFilePath(worktreePath, relativePath));
+    if (!file.existsSync()) return;
+    final lines = const LineSplitter().convert(
+      utf8.decode(await file.readAsBytes(), allowMalformed: true),
+    );
+    final markers = [
+      for (var at = 0; at < lines.length; at++)
+        if (isConflictMarkerLine(lines[at])) (line: lines[at], number: at + 1),
+    ];
+    if (markers.isEmpty) return;
+    final stages = await _conflictFileStages(worktreePath, relativePath);
+    // 스테이지 기록이 없으면 git은 이 파일을 충돌로 보지 않는다 — 대조할 근거가
+    // 없으니 판정도 하지 않는다.
+    if (stages.isEmpty) return;
+    final known = <String>{};
+    for (final blob in stages.values) {
+      final show = await runner(gitExecutable, [
+        'cat-file',
+        'blob',
+        blob,
+      ], workingDirectory: worktreePath);
+      if (show.exitCode != 0) continue;
+      known.addAll(
+        const LineSplitter()
+            .convert(show.stdout.toString())
+            .where(isConflictMarkerLine),
+      );
+    }
+    for (final marker in markers) {
+      if (!known.contains(marker.line)) {
+        throw ConflictMarkerResidueException(relativePath, marker.number);
+      }
+    }
+  }
+
+  /// P3 — 세 stage 블롭을 diff3로 병합해 충돌 구역을 읽는다. 모든 구역에서 base가
+  /// 비어 있으면(양쪽 모두 순수 추가) 순서만 고르면 되는 파일이라 후보로 돌려준다.
+  /// 저장소의 코드를 코드로 읽는 곳은 없다 — 보는 것은 블롭과 마커 행뿐이다.
+  Future<KeepBothCandidate?> _keepBothCandidate(
+    String worktreePath,
+    String relativePath,
+  ) async {
+    final stages = await _conflictFileStages(worktreePath, relativePath);
+    if (stages.length != 3) return null;
+    // merge-file은 stdin이 아니라 파일 경로 세 개를 받는다. worktree를 더럽히지
+    // 않도록 저장소 plumbing 디렉터리에 풀어 놓고 바로 지운다.
+    final gitDir = await runner(gitExecutable, const [
+      'rev-parse',
+      '--absolute-git-dir',
+    ], workingDirectory: worktreePath);
+    if (gitDir.exitCode != 0) return null;
+    final scratch = await Directory(
+      gitDir.stdout.toString().trim(),
+    ).createTemp('yogit_keep_both_');
+    try {
+      for (final stage in const {1: 'base', 2: 'ours', 3: 'theirs'}.entries) {
+        final blob = await runner(gitExecutable, [
+          'cat-file',
+          'blob',
+          stages[stage.key]!,
+        ], workingDirectory: worktreePath);
+        if (blob.exitCode != 0) return null;
+        final content = blob.stdout.toString();
+        // merge-file 출력의 내용 행은 전부 이 세 블롭에서 온다. 어느 블롭이든 마커
+        // 모양 행을 이미 갖고 있으면 파서가 내용과 진짜 마커를 구분할 수 없으니
+        // 제안을 내지 않는다 — 어설픈 제안은 없느니만 못하다.
+        if (const LineSplitter().convert(content).any(isConflictMarkerLine)) {
+          return null;
+        }
+        // 블롭 바이트가 UTF-8로 왕복되지 않으면(EUC-KR 등) 결합 결과에 대체 문자가
+        // 섞인다. 바이트를 보존할 수 없는 파일에도 제안을 내지 않는다. 디코딩 자체가
+        // 실패하는 경우는 아래 FormatException이 받는다.
+        final size = await runner(gitExecutable, [
+          'cat-file',
+          '-s',
+          stages[stage.key]!,
+        ], workingDirectory: worktreePath);
+        if (size.exitCode != 0 ||
+            int.tryParse(size.stdout.toString().trim()) !=
+                utf8.encode(content).length) {
+          return null;
+        }
+        await File(
+          '${scratch.path}${Platform.pathSeparator}${stage.value}',
+        ).writeAsString(content);
+      }
+      final merged = await runner(gitExecutable, [
+        'merge-file',
+        '-p',
+        '--diff3',
+        '${scratch.path}${Platform.pathSeparator}ours',
+        '${scratch.path}${Platform.pathSeparator}base',
+        '${scratch.path}${Platform.pathSeparator}theirs',
+      ], workingDirectory: worktreePath);
+      // merge-file의 종료 코드는 충돌 구역 수다(127에서 잘린다). 그보다 크면 실패.
+      if (merged.exitCode > 127) return null;
+      return parseKeepBothCandidate(merged.stdout.toString());
+    } on FormatException {
+      // 블롭이 UTF-8로 디코딩되지 않는 파일이다 — 바이트를 그대로 옮길 수 없으니
+      // 제안하지 않는다.
+      return null;
+    } finally {
+      await scratch.delete(recursive: true);
+    }
+  }
+
+  /// P1b — patch-id가 이미 base에 있는 비교 커밋들. `git cherry`의 `-` 항목이고
+  /// 추천 엔진이 개수만 쓰던 그 신호를 커밋 단위로 돌려준다.
+  Future<Set<String>> duplicateCompareCommits({
+    required String baseTip,
+    required String compareTip,
+  }) async => {
+    for (final line in const LineSplitter().convert(
+      await _run(['cherry', baseTip, compareTip]),
+    ))
+      if (line.startsWith('- ')) line.substring(2).trim(),
+  };
+
+  /// P2 — 브랜치 커밋을 하나씩 [baseTip] 위에 단독으로 얹어 보고 충돌 파일을 모은다.
+  /// 커밋 sha → 충돌 파일 목록. 단독 재생은 순차 재배치와 다르다 — 그 경고는 배지
+  /// 툴팁이 한다. [cancelled]가 참이 되면 다음 커밋으로 넘어가지 않고 정리한다.
+  Future<Map<String, List<String>>> probeRebaseConflicts({
+    required String baseTip,
+    required List<String> commits,
+    bool Function()? cancelled,
+  }) async {
+    if (commits.isEmpty || commits.length > conflictForecastCommitCeiling) {
+      return const {};
+    }
+    // stale 청소는 이 접두사를 [staleConflictProbeAge]가 지난 뒤에만 건드린다 —
+    // 예고가 도는 중에 다른 미리보기가 청소를 돌려도 발밑이 사라지지 않는다.
+    final temporary = await Directory.systemTemp.createTemp(
+      'yogit_conflict_probe_',
+    );
+    final path = temporary.path;
+    await temporary.delete();
+    final add = await runner(gitExecutable, [
+      'worktree',
+      'add',
+      '--detach',
+      path,
+      baseTip,
+    ], workingDirectory: root);
+    if (add.exitCode != 0) {
+      await _removePreviewWorktree(path);
+      return const {};
+    }
+    final forecast = <String, List<String>>{};
+    try {
+      for (final sha in commits) {
+        if (cancelled?.call() ?? false) break;
+        final pick = await runner(
+          gitExecutable,
+          [
+            '-c',
+            'core.hooksPath=/dev/null',
+            '-c',
+            'rerere.enabled=false',
+            'cherry-pick',
+            '--no-commit',
+            sha,
+          ],
+          workingDirectory: path,
+          environment: {
+            ...Platform.environment,
+            'GIT_EDITOR': 'true',
+            'GIT_TERMINAL_PROMPT': '0',
+          },
+        );
+        if (pick.exitCode != 0) {
+          final unmerged = await runner(gitExecutable, const [
+            'diff',
+            '--name-only',
+            '--diff-filter=U',
+            '-z',
+          ], workingDirectory: path);
+          final files = unmerged.stdout
+              .toString()
+              .split('\x00')
+              .where((value) => value.isNotEmpty)
+              .toList();
+          if (files.isNotEmpty) forecast[sha] = files;
+        }
+        await _ignoreCommand(const [
+          'cherry-pick',
+          '--abort',
+        ], workingDirectory: path);
+        await _ignoreCommand([
+          'reset',
+          '--hard',
+          baseTip,
+        ], workingDirectory: path);
+        await _ignoreCommand(const ['clean', '-fdq'], workingDirectory: path);
+      }
+    } finally {
+      await _removePreviewWorktree(path);
+    }
+    return forecast;
+  }
+
+  Future<List<DiffLine>> _loadPreviewConflictDiff(
+    String worktreePath,
+    String relativePath,
+  ) async {
+    final pathspec = ':(literal)$relativePath';
+    final stages = await _conflictFileStages(worktreePath, relativePath);
     if (stages.isEmpty) {
       return _runPreviewDiff(worktreePath, [
         'diff',

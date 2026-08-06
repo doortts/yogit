@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -1204,6 +1205,497 @@ void main() {
       layoutRebasePreviewGraph(comparison, conflict).kinds.values,
       contains(PreviewGraphNodeKind.conflictTarget),
     );
+  });
+
+  test(
+    'a leftover conflict marker blocks the rebase resolution it names',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'yogit_marker_rebase_',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      await _initRepository(root);
+      await File('${root.path}/shared.txt').writeAsString('base\n');
+      await _git(root, ['add', 'shared.txt']);
+      await _git(root, ['commit', '-m', 'base']);
+      await _git(root, ['switch', '-c', 'feature']);
+      await File('${root.path}/shared.txt').writeAsString('feature\n');
+      await _git(root, ['commit', '-am', 'feature conflict']);
+      await _git(root, ['switch', 'main']);
+      await File('${root.path}/shared.txt').writeAsString('main\n');
+      await _git(root, ['commit', '-am', 'main']);
+
+      final session = await GitRepository(
+        root.path,
+      ).openRebasePreview(baseRef: 'main', compareRef: 'feature');
+      addTearDown(session.dispose);
+      expect((await session.start()).status, RebasePreviewStatus.conflict);
+
+      // git이 써 넣은 마커가 그대로 남아 있다 — 파일과 첫 마커 행을 지목하며 거부한다.
+      await expectLater(
+        session.markResolved('shared.txt'),
+        throwsA(
+          isA<ConflictMarkerResidueException>().having(
+            (error) => error.toString(),
+            'message',
+            '충돌 마커가 남아 있어 해결로 표시할 수 없습니다: shared.txt 1행',
+          ),
+        ),
+      );
+      // 거부는 스테이징 전에 일어나니 파일은 여전히 충돌 상태다.
+      expect(
+        (await _git(Directory(session.worktreePath!), const [
+          'ls-files',
+          '-u',
+          '--',
+          'shared.txt',
+        ])).trim(),
+        isNotEmpty,
+      );
+
+      // 마커를 걷어내면 같은 호출이 통과한다.
+      await File(session.filePath('shared.txt')).writeAsString('둘 다\n');
+      await session.markResolved('shared.txt');
+      expect(
+        (await _git(Directory(session.worktreePath!), const [
+          'ls-files',
+          '-u',
+          '--',
+          'shared.txt',
+        ])).trim(),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
+    'a merge resolution keeps marker-looking lines the stage blobs already had',
+    () async {
+      const example =
+          '# 충돌 마커 예시\n'
+          '<<<<<<< HEAD\n'
+          '왼쪽\n'
+          '=======\n'
+          '오른쪽\n'
+          '>>>>>>> topic\n';
+      final root = await Directory.systemTemp.createTemp('yogit_marker_merge_');
+      addTearDown(() => root.delete(recursive: true));
+      await _initRepository(root);
+      await File('${root.path}/docs.md').writeAsString('$example끝\n');
+      await File('${root.path}/shared.txt').writeAsString('base\n');
+      await _git(root, ['add', 'docs.md', 'shared.txt']);
+      await _git(root, ['commit', '-m', 'base']);
+      await _git(root, ['switch', '-c', 'feature']);
+      await File('${root.path}/docs.md').writeAsString('${example}feature 끝\n');
+      await File('${root.path}/shared.txt').writeAsString('feature\n');
+      await _git(root, ['commit', '-am', 'feature']);
+      await _git(root, ['switch', 'main']);
+      await File('${root.path}/docs.md').writeAsString('${example}main 끝\n');
+      await File('${root.path}/shared.txt').writeAsString('main\n');
+      await _git(root, ['commit', '-am', 'main']);
+
+      final session = await GitRepository(
+        root.path,
+      ).openMergePreview(baseRef: 'main', compareRef: 'feature');
+      addTearDown(session.dispose);
+      final conflict = await session.start();
+      expect(conflict.status, MergePreviewStatus.conflict);
+      expect(conflict.conflictFiles, ['docs.md', 'shared.txt']);
+
+      // 원래부터 마커 모양 행이 있던 파일은 세 stage 블롭과 대조해 통과시킨다.
+      await File(
+        session.filePath('docs.md'),
+      ).writeAsString('${example}main 끝\nfeature 끝\n');
+      await session.markResolved('docs.md');
+
+      // 같은 세션에서 마커가 남은 파일은 여전히 막힌다.
+      await expectLater(
+        session.markResolved('shared.txt'),
+        throwsA(
+          isA<ConflictMarkerResidueException>().having(
+            (error) => error.toString(),
+            'message',
+            '충돌 마커가 남아 있어 해결로 표시할 수 없습니다: shared.txt 1행',
+          ),
+        ),
+      );
+    },
+  );
+
+  test(
+    'the conflict forecast lands only on the commits that conflict',
+    () async {
+      final fixture = await _conflictForecastFixture();
+      addTearDown(() => fixture.root.delete(recursive: true));
+      final repository = GitRepository(fixture.root.path);
+
+      final forecast = await repository.probeRebaseConflicts(
+        baseTip: fixture.baseTip,
+        commits: fixture.commits,
+      );
+
+      expect(forecast.keys, unorderedEquals([fixture.first, fixture.second]));
+      expect(forecast[fixture.first], ['shared.txt']);
+      expect(forecast[fixture.second]!.toList()..sort(), [
+        'second.txt',
+        'shared.txt',
+      ]);
+      // 예고는 저장소를 건드리지 않고 자기 worktree도 남기지 않는다.
+      expect(await _probeWorktrees(fixture.root), isEmpty);
+      expect(
+        (await _git(fixture.root, ['status', '--porcelain'])).trim(),
+        isEmpty,
+      );
+    },
+  );
+
+  test('a cancelled forecast stops early and leaves no worktree', () async {
+    final fixture = await _conflictForecastFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    var replays = 0;
+
+    final forecast = await GitRepository(fixture.root.path)
+        .probeRebaseConflicts(
+          baseTip: fixture.baseTip,
+          commits: fixture.commits,
+          cancelled: () => replays++ > 0,
+        );
+
+    expect(replays, 2);
+    expect(forecast.length, lessThan(2));
+    expect(await _probeWorktrees(fixture.root), isEmpty);
+  });
+
+  test('a branch past the forecast ceiling is never probed', () async {
+    final commands = <List<String>>[];
+    final repository = GitRepository(
+      '/repo',
+      runner: (executable, args, {workingDirectory, environment}) async {
+        commands.add(args);
+        return ProcessResult(1, 0, '', '');
+      },
+    );
+
+    expect(
+      await repository.probeRebaseConflicts(
+        baseTip: 'main-tip',
+        commits: [
+          for (var at = 0; at <= conflictForecastCommitCeiling; at++) 'sha$at',
+        ],
+      ),
+      isEmpty,
+    );
+    expect(commands, isEmpty);
+  });
+
+  test('patch-id duplicates come back as the compared commits', () async {
+    final root = await Directory.systemTemp.createTemp('yogit_duplicates_');
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    await File('${root.path}/base.txt').writeAsString('base\n');
+    await _git(root, ['add', 'base.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+    await _git(root, ['switch', '-c', 'feature']);
+    await File('${root.path}/picked.txt').writeAsString('picked\n');
+    await _git(root, ['add', 'picked.txt']);
+    await _git(root, ['commit', '-m', 'already in main']);
+    final picked = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+    await File('${root.path}/own.txt').writeAsString('own\n');
+    await _git(root, ['add', 'own.txt']);
+    await _git(root, ['commit', '-m', 'feature only']);
+    await _git(root, ['switch', 'main']);
+    // main이 먼저 움직여야 빼온 커밋이 원본과 다른 커밋이 된다 — 부모까지 같으면
+    // git이 같은 객체를 그대로 만들어 낸다.
+    await File('${root.path}/main.txt').writeAsString('main\n');
+    await _git(root, ['add', 'main.txt']);
+    await _git(root, ['commit', '-m', 'main only']);
+    await _git(root, ['cherry-pick', picked]);
+
+    expect(
+      await GitRepository(root.path).duplicateCompareCommits(
+        baseTip: (await _git(root, ['rev-parse', 'main'])).trim(),
+        compareTip: (await _git(root, ['rev-parse', 'feature'])).trim(),
+      ),
+      {picked},
+    );
+  });
+
+  test(
+    'a two-sided addition offers both orders and stages the one picked',
+    () async {
+      final root = await Directory.systemTemp.createTemp('yogit_keep_both_');
+      addTearDown(() => root.delete(recursive: true));
+      await _initRepository(root);
+      await File('${root.path}/list.txt').writeAsString('a\nb\nc\n');
+      await _git(root, ['add', 'list.txt']);
+      await _git(root, ['commit', '-m', 'base']);
+      await _git(root, ['switch', '-c', 'feature']);
+      await File(
+        '${root.path}/list.txt',
+      ).writeAsString('a\nFEATURE1\nFEATURE2\nb\nc\n');
+      await _git(root, ['commit', '-am', 'feature adds']);
+      await _git(root, ['switch', 'main']);
+      await File('${root.path}/list.txt').writeAsString('a\nMAIN1\nb\nc\n');
+      await _git(root, ['commit', '-am', 'main adds']);
+
+      final session = await GitRepository(
+        root.path,
+      ).openMergePreview(baseRef: 'main', compareRef: 'feature');
+      addTearDown(session.dispose);
+      expect((await session.start()).status, MergePreviewStatus.conflict);
+
+      final candidate = (await session.keepBothCandidate('list.txt'))!;
+
+      expect(candidate.hunks, hasLength(1));
+      expect(candidate.hunks.single.ours, ['MAIN1']);
+      expect(candidate.hunks.single.theirs, ['FEATURE1', 'FEATURE2']);
+      expect(candidate.baseFirst, 'a\nMAIN1\nFEATURE1\nFEATURE2\nb\nc\n');
+      expect(candidate.branchFirst, 'a\nFEATURE1\nFEATURE2\nMAIN1\nb\nc\n');
+
+      await session.applyKeepBoth('list.txt', candidate.branchFirst);
+
+      expect(
+        await File(session.filePath('list.txt')).readAsString(),
+        candidate.branchFirst,
+      );
+      final worktree = Directory(session.worktreePath!);
+      expect(
+        (await _git(worktree, const [
+          'ls-files',
+          '-u',
+          '--',
+          'list.txt',
+        ])).trim(),
+        isEmpty,
+      );
+      expect(
+        await _git(worktree, const ['show', ':list.txt']),
+        candidate.branchFirst,
+      );
+    },
+  );
+
+  test('a modification conflict is offered no keep-both suggestion', () async {
+    final root = await Directory.systemTemp.createTemp('yogit_keep_both_none_');
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    await File('${root.path}/list.txt').writeAsString('a\nOLD\nc\n');
+    await _git(root, ['add', 'list.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+    await _git(root, ['switch', '-c', 'feature']);
+    await File('${root.path}/list.txt').writeAsString('a\nFEATURE\nc\n');
+    await _git(root, ['commit', '-am', 'feature edits']);
+    await _git(root, ['switch', 'main']);
+    await File('${root.path}/list.txt').writeAsString('a\nMAIN\nc\n');
+    await _git(root, ['commit', '-am', 'main edits']);
+
+    final session = await GitRepository(
+      root.path,
+    ).openMergePreview(baseRef: 'main', compareRef: 'feature');
+    addTearDown(session.dispose);
+    expect((await session.start()).status, MergePreviewStatus.conflict);
+
+    expect(await session.keepBothCandidate('list.txt'), isNull);
+  });
+
+  test(
+    'every hunk of a qualifying file combines in the chosen order',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'yogit_keep_both_many_',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      await _initRepository(root);
+      await File('${root.path}/list.txt').writeAsString('a\nb\nc\nd\ne\n');
+      await _git(root, ['add', 'list.txt']);
+      await _git(root, ['commit', '-m', 'base']);
+      await _git(root, ['switch', '-c', 'feature']);
+      await File(
+        '${root.path}/list.txt',
+      ).writeAsString('a\nFEATURE1\nb\nc\nd\nFEATURE2\ne\n');
+      await _git(root, ['commit', '-am', 'feature adds twice']);
+      await _git(root, ['switch', 'main']);
+      await File(
+        '${root.path}/list.txt',
+      ).writeAsString('a\nMAIN1\nb\nc\nd\nMAIN2\ne\n');
+      await _git(root, ['commit', '-am', 'main adds twice']);
+
+      final session = await GitRepository(
+        root.path,
+      ).openMergePreview(baseRef: 'main', compareRef: 'feature');
+      addTearDown(session.dispose);
+      expect((await session.start()).status, MergePreviewStatus.conflict);
+
+      final candidate = (await session.keepBothCandidate('list.txt'))!;
+
+      expect(candidate.hunks, hasLength(2));
+      expect(
+        candidate.baseFirst,
+        'a\nMAIN1\nFEATURE1\nb\nc\nd\nMAIN2\nFEATURE2\ne\n',
+      );
+      expect(
+        candidate.branchFirst,
+        'a\nFEATURE1\nMAIN1\nb\nc\nd\nFEATURE2\nMAIN2\ne\n',
+      );
+    },
+  );
+
+  test('a file that carries marker-shaped lines gets no suggestion', () async {
+    // 빈 섹션 마커 예시 블록 — merge-file 출력에서 진짜 마커와 구분할 수 없다.
+    const example =
+        '<<<<<<< a\n'
+        '||||||| b\n'
+        '=======\n'
+        '>>>>>>> c\n';
+    final root = await Directory.systemTemp.createTemp(
+      'yogit_keep_both_markers_',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    await File('${root.path}/list.txt').writeAsString('${example}a\nb\n');
+    await _git(root, ['add', 'list.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+    await _git(root, ['switch', '-c', 'feature']);
+    await File(
+      '${root.path}/list.txt',
+    ).writeAsString('${example}a\nFEATURE\nb\n');
+    await _git(root, ['commit', '-am', 'feature adds']);
+    await _git(root, ['switch', 'main']);
+    await File('${root.path}/list.txt').writeAsString('${example}a\nMAIN\nb\n');
+    await _git(root, ['commit', '-am', 'main adds']);
+
+    final session = await GitRepository(
+      root.path,
+    ).openMergePreview(baseRef: 'main', compareRef: 'feature');
+    addTearDown(session.dispose);
+    expect((await session.start()).status, MergePreviewStatus.conflict);
+
+    // 양쪽 추가 충돌이지만 버튼은 뜨지 않는다 — 예시 블록을 삼킨 제안보다 없는 게 낫다.
+    expect(await session.keepBothCandidate('list.txt'), isNull);
+  });
+
+  test('a file whose bytes are not UTF-8 gets no suggestion', () async {
+    // CP949로 쓰인 '한' — UTF-8로 왕복되지 않는 바이트다.
+    const cp949 = [0xC7, 0xD1, 0x0A];
+    final root = await Directory.systemTemp.createTemp(
+      'yogit_keep_both_cp949_',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    final file = File('${root.path}/list.txt');
+    await file.writeAsBytes(utf8.encode('a\nb\n'));
+    await _git(root, ['add', 'list.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+    await _git(root, ['switch', '-c', 'feature']);
+    await file.writeAsBytes([
+      ...utf8.encode('a\n'),
+      ...cp949,
+      ...utf8.encode('b\n'),
+    ]);
+    await _git(root, ['commit', '-am', 'feature adds']);
+    await _git(root, ['switch', 'main']);
+    await file.writeAsBytes(utf8.encode('a\nMAIN\nb\n'));
+    await _git(root, ['commit', '-am', 'main adds']);
+
+    final session = await GitRepository(
+      root.path,
+    ).openMergePreview(baseRef: 'main', compareRef: 'feature');
+    addTearDown(session.dispose);
+    expect((await session.start()).status, MergePreviewStatus.conflict);
+
+    // 바이트를 그대로 보존할 수 없으니 결합을 제안하지 않는다.
+    expect(await session.keepBothCandidate('list.txt'), isNull);
+  });
+
+  test('a diff3 base-label marker blocks the resolution too', () async {
+    final root = await Directory.systemTemp.createTemp('yogit_marker_diff3_');
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    // 미리보기 worktree는 저장소 설정을 그대로 물려받는다 — git이 ||||||| 행을 쓴다.
+    await _git(root, ['config', 'merge.conflictstyle', 'diff3']);
+    await File('${root.path}/shared.txt').writeAsString('base\n');
+    await _git(root, ['add', 'shared.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+    await _git(root, ['switch', '-c', 'feature']);
+    await File('${root.path}/shared.txt').writeAsString('feature\n');
+    await _git(root, ['commit', '-am', 'feature']);
+    await _git(root, ['switch', 'main']);
+    await File('${root.path}/shared.txt').writeAsString('main\n');
+    await _git(root, ['commit', '-am', 'main']);
+
+    final session = await GitRepository(
+      root.path,
+    ).openMergePreview(baseRef: 'main', compareRef: 'feature');
+    addTearDown(session.dispose);
+    expect((await session.start()).status, MergePreviewStatus.conflict);
+
+    final conflicted = File(session.filePath('shared.txt'));
+    final lines = const LineSplitter().convert(await conflicted.readAsString());
+    expect(lines.where((line) => line.startsWith('|||||||')), hasLength(1));
+
+    // 세 마커만 걷어내고 ||||||| 행을 남긴다 — git이 쓴 마커가 아직 남아 있다.
+    final kept = lines
+        .where(
+          (line) =>
+              !line.startsWith('<<<<<<<') &&
+              !line.startsWith('=======') &&
+              !line.startsWith('>>>>>>>'),
+        )
+        .toList();
+    await conflicted.writeAsString('${kept.join('\n')}\n');
+    final residue = kept.indexWhere((line) => line.startsWith('|||||||')) + 1;
+
+    await expectLater(
+      session.markResolved('shared.txt'),
+      throwsA(
+        isA<ConflictMarkerResidueException>().having(
+          (error) => error.toString(),
+          'message',
+          '충돌 마커가 남아 있어 해결로 표시할 수 없습니다: shared.txt $residue행',
+        ),
+      ),
+    );
+    expect(
+      (await _git(Directory(session.worktreePath!), const [
+        'ls-files',
+        '-u',
+        '--',
+        'shared.txt',
+      ])).trim(),
+      isNotEmpty,
+    );
+  });
+
+  test('a stale forecast probe worktree is cleaned once it ages out', () async {
+    final root = await Directory.systemTemp.createTemp('yogit_probe_stale_');
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    await File('${root.path}/base.txt').writeAsString('base\n');
+    await _git(root, ['add', 'base.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+    // 강제 종료가 남긴 프로브 worktree를 그대로 만들어 둔다.
+    final probe = await Directory.systemTemp.createTemp(
+      'yogit_conflict_probe_',
+    );
+    await probe.delete();
+    await _git(root, ['worktree', 'add', '--detach', probe.path, 'HEAD']);
+    addTearDown(() async {
+      if (probe.existsSync()) await probe.delete(recursive: true);
+    });
+    final repository = GitRepository(root.path);
+
+    // 방금 만든 프로브는 지금 돌고 있을 수 있으니 그대로 둔다.
+    await repository.cleanupStalePreviewWorktrees();
+    expect(await _probeWorktrees(root), hasLength(1));
+
+    expect(
+      (await Process.run('touch', ['-t', '202001010000', probe.path])).exitCode,
+      0,
+    );
+    await repository.cleanupStalePreviewWorktrees();
+
+    expect(await _probeWorktrees(root), isEmpty);
+    expect(probe.existsSync(), isFalse);
   });
 
   test('merge preview applies locally and restores both exact tips', () async {
@@ -4149,6 +4641,65 @@ Future<void> _padLinearHistory(Directory root, int count) async {
     await _git(root, ['commit', '-m', 'pad $at']);
   }
 }
+
+/// The palette-merge shape: two of the four branch commits conflict with the
+/// base tip on their own, the other two replay clean.
+Future<
+  ({
+    Directory root,
+    String baseTip,
+    List<String> commits,
+    String first,
+    String second,
+  })
+>
+_conflictForecastFixture() async {
+  final root = await Directory.systemTemp.createTemp('yogit_forecast_');
+  await _initRepository(root);
+  await File('${root.path}/shared.txt').writeAsString('base\n');
+  await File('${root.path}/second.txt').writeAsString('base\n');
+  await _git(root, ['add', 'shared.txt', 'second.txt']);
+  await _git(root, ['commit', '-m', 'base']);
+  await _git(root, ['switch', '-c', 'feature']);
+  await File('${root.path}/one.txt').writeAsString('one\n');
+  await _git(root, ['add', 'one.txt']);
+  await _git(root, ['commit', '-m', 'feature one']);
+  final clean = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+  await File('${root.path}/shared.txt').writeAsString('feature\n');
+  await _git(root, ['commit', '-am', 'feature touches shared']);
+  final first = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+  await File('${root.path}/two.txt').writeAsString('two\n');
+  await _git(root, ['add', 'two.txt']);
+  await _git(root, ['commit', '-m', 'feature two']);
+  final alsoClean = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+  await File('${root.path}/shared.txt').writeAsString('feature again\n');
+  await File('${root.path}/second.txt').writeAsString('feature\n');
+  await _git(root, ['commit', '-am', 'feature touches both']);
+  final second = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+  await _git(root, ['switch', 'main']);
+  await File('${root.path}/shared.txt').writeAsString('main\n');
+  await File('${root.path}/second.txt').writeAsString('main\n');
+  await _git(root, ['commit', '-am', 'main touches both']);
+  return (
+    root: root,
+    baseTip: (await _git(root, ['rev-parse', 'HEAD'])).trim(),
+    commits: [clean, first, alsoClean, second],
+    first: first,
+    second: second,
+  );
+}
+
+/// The forecast's own worktrees still registered with [root], so a test can say
+/// the probe cleaned up after itself.
+Future<List<String>> _probeWorktrees(Directory root) async => [
+  for (final line in (await _git(root, const [
+    'worktree',
+    'list',
+    '--porcelain',
+  ])).split('\n'))
+    if (line.startsWith('worktree ') && line.contains('yogit_conflict_probe_'))
+      line,
+];
 
 Future<void> _initRepository(Directory root) async {
   await _git(root, ['init', '-b', 'main']);

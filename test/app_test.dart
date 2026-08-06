@@ -4972,9 +4972,14 @@ void main() {
       find.descendant(of: conflictActions, matching: find.text('fix/docs 사용')),
       findsOneWidget,
     );
+    // 에디터 진입 칩은 두 모드 모두 같은 문구다 — '양쪽 유지'와 헷갈릴 자리가 없다.
+    expect(
+      find.descendant(of: conflictActions, matching: find.text('직접 편집')),
+      findsOneWidget,
+    );
     expect(
       find.descendant(of: conflictActions, matching: find.text('둘 다 사용')),
-      findsOneWidget,
+      findsNothing,
     );
     await tester.tap(find.byKey(const Key('branch-preview-layout-unified')));
     await tester.pump();
@@ -7398,6 +7403,248 @@ void main() {
     expect(find.byKey(const Key('branch-preview-apply-card')), findsNothing);
     expect(find.byKey(const Key('branch-preview-apply')), findsOneWidget);
     expect(find.byKey(const Key('branch-preview-drop')), findsOneWidget);
+  });
+
+  testWidgets('commit rows wear only the badges their git facts earned', (
+    tester,
+  ) async {
+    // 기본 창에서는 비교가 열리면 선택기가 미리보기 판에 가려 다시 못 눌린다.
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    const compareRef = 'feature';
+    final comparison = branchComparison(compareRef: compareRef);
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('normal', 'normal history')],
+      refs: const RepoRefs(
+        local: ['main', compareRef],
+        current: 'main',
+        tips: {'main': 'main-tip', compareRef: 'feature-tip'},
+      ),
+      compareBranchesCallback: (_, _) async => comparison,
+      simulateRebaseCallback: ({required baseRef, required compareRef}) =>
+          Future.value(
+            const RebaseCheckResult(status: RebaseCheckStatus.clean),
+          ),
+      duplicateCommitsCallback: (_, _) async => const {'feature-tip'},
+      conflictForecastCallback: (_, _) async => const {
+        'feature-tip': [
+          'lib/settings.dart',
+          'lib/timeline.dart',
+          'test/app_test.dart',
+        ],
+      },
+    );
+    await tester.pumpWidget(app(repository, controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-$compareRef')));
+    await tester.pumpAndSettle();
+
+    // 실제 base 브랜치 이름이 들어가고 예고는 첫 파일과 나머지 개수로 줄여 말한다.
+    expect(
+      find.byKey(const Key('commit-already-in-base-feature-tip')),
+      findsOneWidget,
+    );
+    expect(find.text('이미 main에 반영됨'), findsOneWidget);
+    expect(find.text('충돌 예상 · settings.dart 외 2'), findsOneWidget);
+    // 근거가 없는 행은 배지도, 그 자리도 없다.
+    expect(
+      find.byKey(const Key('commit-already-in-base-main-tip')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const Key('commit-conflict-forecast-main-tip')),
+      findsNothing,
+    );
+    // 단독 재생과 순차 재배치가 다르다는 말은 툴팁이 한다.
+    expect(
+      tester
+          .widget<Tooltip>(
+            find.ancestor(
+              of: find.byKey(const Key('commit-conflict-forecast-feature-tip')),
+              matching: find.byType(Tooltip),
+            ),
+          )
+          .message,
+      '순차 재배치에서는 앞 커밋의 해결이 이 예상을 바꿀 수 있습니다',
+    );
+
+    // 비교를 접으면 두 배지의 근거도 함께 버려진다.
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-clear')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('commit-already-in-base-feature-tip')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const Key('commit-conflict-forecast-feature-tip')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('a two-sided addition gets a third choice and an order to pick', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    const candidate = KeepBothCandidate(
+      hunks: [
+        KeepBothHunk(ours: ['기준 줄'], theirs: ['브랜치 줄']),
+      ],
+      baseFirst: 'a\n기준 줄\n브랜치 줄\nb\n',
+      branchFirst: 'a\n브랜치 줄\n기준 줄\nb\n',
+    );
+    final current = commit(
+      'feature-tip',
+      'feature only',
+      parents: const ['root'],
+    );
+    final comparison = branchComparison();
+    late FakeGitRepository repository;
+    late FakeRebasePreviewSession session;
+    repository = FakeGitRepository(
+      (_, _) async => [commit('normal', 'normal history')],
+      refs: const RepoRefs(
+        local: ['main', 'feature'],
+        current: 'main',
+        tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+      ),
+      compareBranchesCallback: (_, _) async => comparison,
+      simulateRebaseCallback: ({required baseRef, required compareRef}) =>
+          Future.value(
+            const RebaseCheckResult(status: RebaseCheckStatus.conflicts),
+          ),
+      openRebasePreviewCallback:
+          ({required baseRef, required compareRef}) async {
+            session = FakeRebasePreviewSession(
+              repository,
+              RebasePreviewResult(
+                status: RebasePreviewStatus.conflict,
+                baseTip: 'main-tip',
+                compareTip: 'feature-tip',
+                currentCommit: current,
+                completed: 0,
+                total: 1,
+                conflictFiles: const ['lib/settings.dart'],
+              ),
+              keepBoth: candidate,
+            );
+            return session;
+          },
+      diffBetween: (_, _, _) async => const [],
+    );
+    await tester.pumpWidget(app(repository, controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-preview-rebase')));
+    await tester.pumpAndSettle();
+    // 선택지는 충돌 파일의 diff를 열었을 때 나타난다.
+    await tester.tap(find.byKey(const Key('preview-state-lib/settings.dart')));
+    await tester.pumpAndSettle();
+
+    // 상태 A — 기존 두 선택지 옆의 세 번째 버튼.
+    final keepBoth = find.byKey(const Key('conflict-keep-both'));
+    expect(keepBoth, findsOneWidget);
+    expect(find.byKey(const Key('conflict-keep-both-chooser')), findsNothing);
+
+    // 상태 B — 두 순서를 보고 하나를 고른다.
+    await tester.ensureVisible(keepBoth);
+    await tester.tap(keepBoth);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('conflict-keep-both-chooser')), findsOneWidget);
+    expect(find.text('기준(main) 먼저'), findsOneWidget);
+    expect(find.text('브랜치 먼저'), findsOneWidget);
+    expect(find.text('lib/settings.dart — 양쪽 유지'), findsOneWidget);
+    expect(find.textContaining('충돌 구역 1곳 전부에서'), findsOneWidget);
+
+    final baseFirst = find.byKey(const Key('keep-both-apply-base-first'));
+    await tester.ensureVisible(baseFirst);
+    await tester.tap(baseFirst);
+    await tester.pumpAndSettle();
+
+    // 고른 순서의 결합 내용이 그대로 쓰이고 그 파일은 해결로 표시된다.
+    expect(session.keepBothApplied, [
+      ('lib/settings.dart', 'a\n기준 줄\n브랜치 줄\nb\n'),
+    ]);
+    expect(find.byKey(const Key('conflict-keep-both-chooser')), findsNothing);
+    expect(find.byKey(const Key('conflict-keep-both')), findsNothing);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const Key('rebase-conflict-continue')),
+          )
+          .onPressed,
+      isNotNull,
+    );
+  });
+
+  testWidgets('a modification conflict is offered no third choice', (
+    tester,
+  ) async {
+    final current = commit(
+      'feature-tip',
+      'feature only',
+      parents: const ['root'],
+    );
+    final comparison = branchComparison();
+    late FakeGitRepository repository;
+    repository = FakeGitRepository(
+      (_, _) async => [commit('normal', 'normal history')],
+      refs: const RepoRefs(
+        local: ['main', 'feature'],
+        current: 'main',
+        tips: {'main': 'main-tip', 'feature': 'feature-tip'},
+      ),
+      compareBranchesCallback: (_, _) async => comparison,
+      simulateRebaseCallback: ({required baseRef, required compareRef}) =>
+          Future.value(
+            const RebaseCheckResult(status: RebaseCheckStatus.conflicts),
+          ),
+      openRebasePreviewCallback:
+          ({required baseRef, required compareRef}) async =>
+              FakeRebasePreviewSession(
+                repository,
+                RebasePreviewResult(
+                  status: RebasePreviewStatus.conflict,
+                  baseTip: 'main-tip',
+                  compareTip: 'feature-tip',
+                  currentCommit: current,
+                  completed: 0,
+                  total: 1,
+                  conflictFiles: const ['lib/settings.dart'],
+                ),
+              ),
+      diffBetween: (_, _, _) async => const [],
+    );
+    await tester.pumpWidget(app(repository, controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-preview-rebase')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('preview-state-lib/settings.dart')));
+    await tester.pumpAndSettle();
+
+    // 기존 선택지는 그대로, 어설픈 제안만 없다.
+    expect(find.byKey(const Key('rebase-conflict-use-base')), findsOneWidget);
+    expect(find.byKey(const Key('conflict-keep-both')), findsNothing);
+    expect(find.byKey(const Key('conflict-keep-both-chooser')), findsNothing);
   });
 
   testWidgets('a stale branch comparison cannot replace a newer selection', (
@@ -18242,6 +18489,8 @@ class FakeGitRepository extends GitRepository {
     this.applyRebasePreviewCallback,
     this.applyRebaseThenMergeCallback,
     this.recommendationCallback,
+    this.duplicateCommitsCallback,
+    this.conflictForecastCallback,
     this.restoreBranchApplyCallback,
     this.operationInProgressCallback,
     this.filesBetween,
@@ -18302,6 +18551,16 @@ class FakeGitRepository extends GitRepository {
     RebaseCheckResult? rebaseCheck,
   )?
   recommendationCallback;
+
+  /// 커밋 행 배지도 추천과 같은 이유로 기본은 꺼져 있다: 켜지 않으면 엔진이 테스트가
+  /// 실행되는 저장소를 재 버린다.
+  final Future<Set<String>> Function(String baseTip, String compareTip)?
+  duplicateCommitsCallback;
+  final Future<Map<String, List<String>>> Function(
+    String baseTip,
+    List<String> commits,
+  )?
+  conflictForecastCallback;
   final Future<void> Function(BranchApplyResult result)?
   restoreBranchApplyCallback;
   final Future<bool> Function()? operationInProgressCallback;
@@ -18394,6 +18653,23 @@ class FakeGitRepository extends GitRepository {
   }) =>
       simulateRebaseCallback?.call(baseRef: baseRef, compareRef: compareRef) ??
       super.simulateRebase(baseRef: baseRef, compareRef: compareRef);
+
+  @override
+  Future<Set<String>> duplicateCompareCommits({
+    required String baseTip,
+    required String compareTip,
+  }) =>
+      duplicateCommitsCallback?.call(baseTip, compareTip) ??
+      Future.value(const {});
+
+  @override
+  Future<Map<String, List<String>>> probeRebaseConflicts({
+    required String baseTip,
+    required List<String> commits,
+    bool Function()? cancelled,
+  }) =>
+      conflictForecastCallback?.call(baseTip, commits) ??
+      Future.value(const {});
 
   @override
   Future<RebasePreviewSession> openRebasePreview({
@@ -18628,6 +18904,7 @@ class FakeMergePreviewSession extends MergePreviewSession {
     this.result, {
     required this.finishResult,
     this.conflictDiff = const [],
+    this.keepBoth,
   }) : super(
          repository: repository,
          baseTip: result.baseTip,
@@ -18637,11 +18914,21 @@ class FakeMergePreviewSession extends MergePreviewSession {
   final MergePreviewResult result;
   final MergePreviewResult finishResult;
   final List<DiffLine> conflictDiff;
+  final KeepBothCandidate? keepBoth;
   final resolvedChoices = <(String, MergeConflictChoice)>[];
+  final keepBothApplied = <(String, String)>[];
   var disposed = false;
 
   @override
   Future<MergePreviewResult> start() async => result;
+
+  @override
+  Future<KeepBothCandidate?> keepBothCandidate(String relativePath) async =>
+      keepBoth;
+
+  @override
+  Future<void> applyKeepBoth(String relativePath, String content) async =>
+      keepBothApplied.add((relativePath, content));
 
   @override
   Future<void> resolveFile(
@@ -18671,6 +18958,7 @@ class FakeRebasePreviewSession extends RebasePreviewSession {
     this.result, {
     List<RebasePreviewResult> continuations = const [],
     this.conflictDiff = const [],
+    this.keepBoth,
   }) : _continuations = List.of(continuations),
        super(
          repository: repository,
@@ -18682,11 +18970,21 @@ class FakeRebasePreviewSession extends RebasePreviewSession {
   final RebasePreviewResult result;
   final List<RebasePreviewResult> _continuations;
   final List<DiffLine> conflictDiff;
+  final KeepBothCandidate? keepBoth;
   final resolvedChoices = <(String, RebaseConflictChoice)>[];
+  final keepBothApplied = <(String, String)>[];
   var disposed = false;
 
   @override
   Future<RebasePreviewResult> start() async => result;
+
+  @override
+  Future<KeepBothCandidate?> keepBothCandidate(String relativePath) async =>
+      keepBoth;
+
+  @override
+  Future<void> applyKeepBoth(String relativePath, String content) async =>
+      keepBothApplied.add((relativePath, content));
 
   @override
   Future<void> resolveFile(
