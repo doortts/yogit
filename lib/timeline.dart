@@ -171,9 +171,13 @@ BranchPreviewGraph layoutMergePreviewGraph(BranchComparisonResult comparison) {
   );
 }
 
-/// The rebase preview as the timeline draws it. With [mergeCommit] the base
-/// branch also gets the merge commit it would land on, one row above the
-/// replayed commits — the same tree, one more virtual node.
+/// The rebase preview as the timeline draws it. The replayed commits continue
+/// the base branch's own lane, and the oldest copy's rail reaches the base
+/// branch's real HEAD row — the node it is replayed onto. With [mergeCommit] the
+/// base branch also gets the merge commit it would land on, one row above the
+/// replayed commits; the base lane then runs straight from that node down to
+/// HEAD and the chain steps aside into a bubble lane, both of its ends reaching
+/// the base branch again — the same tree, one more virtual node.
 BranchPreviewGraph layoutRebasePreviewGraph(
   BranchComparisonResult comparison,
   RebasePreviewResult preview, {
@@ -258,9 +262,23 @@ BranchPreviewGraph layoutRebasePreviewGraph(
     );
   }
   if (preview.rewritten.isEmpty) return BranchPreviewGraph(rows: existing);
-  final base = existing.firstWhere(
+  final baseIndex = existing.indexWhere(
     (row) => row.commit.sha == comparison.baseTip,
   );
+  final base = existing[baseIndex];
+  // 'Rebase만'이면 재배치된 복사본은 현행 그림대로 기준 브랜치 레인을 그대로 잇는다.
+  // 가상 머지가 있으면 그 레인은 머지 노드에서 HEAD까지 곧게 내려가야 하니 복사본이
+  // 옆 버블로 비켜 앉고, 기준 브랜치 HEAD보다 위에 원본 줄이 남아 있으면 그 줄들보다
+  // 한 칸 더 오른쪽으로 비켜 앉는다.
+  final chainLane = !mergeCommit
+      ? base.lane
+      : existing
+                .take(baseIndex)
+                .fold<int>(
+                  base.lane,
+                  (deepest, row) => math.max(deepest, row.maxLane),
+                ) +
+            1;
   final virtualOldestFirst = <GitCommit>[];
   var parent = comparison.baseTip;
   for (final rewrite in preview.rewritten) {
@@ -284,6 +302,14 @@ BranchPreviewGraph layoutRebasePreviewGraph(
   final template = comparison.commits.first.commit;
   final mergeSha =
       'virtual-rebase-merge-${comparison.baseTip}-${virtualOldestFirst.last.sha}';
+  // 가상 머지가 있으면 기준 브랜치 레인은 그 노드에서 HEAD까지 곧게 내려간다.
+  // 'Rebase만'이면 HEAD 위로는 기준 브랜치 선이 없다.
+  final baseRail = [if (mergeCommit) base.lane];
+  // 체인의 뿌리에서 기준 브랜치 HEAD 노드로 들어가는 점선. 인라인이면 같은 레인의
+  // 직선이 그대로 HEAD 노드로 내려가니 꺾을 것이 없다.
+  final chainRoot = chainLane == base.lane
+      ? null
+      : (from: chainLane, to: base.lane, sha: comparison.baseTip);
   final mergeRow = !mergeCommit
       ? null
       : GraphRow(
@@ -300,32 +326,93 @@ BranchPreviewGraph layoutRebasePreviewGraph(
                 "Merge branch '${comparison.compareRef}' into ${comparison.baseRef}",
           ),
           lane: base.lane,
-          // 두 부모 모두 이 그림에서는 기준 브랜치 선 위에 있다.
-          parentLanes: [base.lane, base.lane],
+          // 첫 부모는 기준 브랜치 HEAD, 두 번째 부모는 옆 레인의 재배치 tip이다.
+          parentLanes: [base.lane, chainLane],
           activeLanes: [base.lane],
-          nextLanes: [base.lane],
+          nextLanes: [base.lane, chainLane],
           activeLaneShas: {base.lane: mergeSha},
-          nextLaneShas: {base.lane: virtualNewestFirst.first.sha},
+          nextLaneShas: {
+            base.lane: comparison.baseTip,
+            chainLane: virtualNewestFirst.first.sha,
+          },
+          transitions: [
+            (from: base.lane, to: chainLane, sha: virtualNewestFirst.first.sha),
+          ],
           branch: base.branch,
           activeLaneBranches: {base.lane: base.branch},
-          nextLaneBranches: {base.lane: base.branch},
+          nextLaneBranches: {base.lane: base.branch, chainLane: base.branch},
         );
+  // 체인이 기준 브랜치 HEAD보다 위에 남은 원본 줄들을 지나가야 하면 그 줄들에 체인
+  // 레인과 기준 브랜치 레인을 함께 얹는다. 원본 줄에는 기준 브랜치 선이 없을 수도
+  // 있어서, 얹지 않으면 가상 머지의 첫 부모 선이 HEAD에 닿기 전에 끊긴다. 버블이면
+  // HEAD 바로 윗줄에서 HEAD 노드로 꺾고, 인라인이면 레인이 같아 그대로 내려간다.
+  final carried = {...baseRail, chainLane};
+  List<int> sortedLanes(Iterable<int> lanes) => lanes.toSet().toList()..sort();
+  Map<int, T> fillLanes<T>(Map<int, T> source, List<int> lanes, T value) => {
+    ...source,
+    for (final lane in lanes)
+      if (!source.containsKey(lane)) lane: value,
+  };
+  GraphRow carryChain(GraphRow row, {required bool bends}) {
+    final bend = bends ? chainRoot : null;
+    final active = sortedLanes([...row.activeLanes, ...carried]);
+    final next = sortedLanes([
+      ...row.nextLanes,
+      ...bend == null ? carried : carried.difference({chainLane}),
+    ]);
+    return _copyGraphRow(
+      row,
+      activeLanes: active,
+      nextLanes: next,
+      activeLaneShas: fillLanes(row.activeLaneShas, active, comparison.baseTip),
+      nextLaneShas: fillLanes(row.nextLaneShas, next, comparison.baseTip),
+      activeLaneBranches: fillLanes(
+        row.activeLaneBranches,
+        active,
+        base.branch,
+      ),
+      nextLaneBranches: fillLanes(row.nextLaneBranches, next, base.branch),
+      transitions: bend == null ? null : [...row.transitions, bend],
+    );
+  }
+
   final rows = [
     ?mergeRow,
-    for (final commit in virtualNewestFirst)
-      GraphRow(
-        commit: commit,
-        lane: base.lane,
-        parentLanes: [base.lane],
-        activeLanes: [base.lane],
-        nextLanes: [base.lane],
-        activeLaneShas: {base.lane: commit.sha},
-        nextLaneShas: {base.lane: commit.parents.single},
-        branch: base.branch,
-        activeLaneBranches: {base.lane: base.branch},
-        nextLaneBranches: {base.lane: base.branch},
-      ),
-    ...existing,
+    for (var index = 0; index < virtualNewestFirst.length; index++)
+      () {
+        final commit = virtualNewestFirst[index];
+        final root = index == virtualNewestFirst.length - 1;
+        // 바로 아래가 HEAD 줄이면 뿌리 줄에서 곧장 꺾는다.
+        final bend = root && baseIndex == 0 ? chainRoot : null;
+        final bends = bend != null;
+        final active = [...baseRail, chainLane];
+        final next = [...baseRail, if (!bends) chainLane];
+        return GraphRow(
+          commit: commit,
+          lane: chainLane,
+          parentLanes: [root ? base.lane : chainLane],
+          activeLanes: active,
+          nextLanes: next,
+          activeLaneShas: {
+            for (final lane in active)
+              lane: lane == chainLane ? commit.sha : comparison.baseTip,
+          },
+          nextLaneShas: {
+            for (final lane in next)
+              lane: lane == chainLane
+                  ? commit.parents.single
+                  : comparison.baseTip,
+          },
+          transitions: [?bend],
+          branch: base.branch,
+          activeLaneBranches: {for (final lane in active) lane: base.branch},
+          nextLaneBranches: {for (final lane in next) lane: base.branch},
+        );
+      }(),
+    for (var index = 0; index < existing.length; index++)
+      index < baseIndex
+          ? carryChain(existing[index], bends: index == baseIndex - 1)
+          : existing[index],
   ];
   final rowBySha = {
     for (var index = 0; index < rows.length; index++)
@@ -338,9 +425,15 @@ BranchPreviewGraph layoutRebasePreviewGraph(
       for (final commit in virtualOldestFirst)
         commit.sha: PreviewGraphNodeKind.virtualRebase,
     },
+    // 가상 노드들, 그리고 체인이 지나가는 원본 줄들까지가 점선이다. 기준 브랜치
+    // HEAD 줄부터는 실제 히스토리라 실선으로 돌아온다.
     dashedLanes: {
-      for (var index = 0; index < rows.length - existing.length; index++)
-        index: {base.lane},
+      for (
+        var index = 0;
+        index < rows.length - existing.length + baseIndex;
+        index++
+      )
+        index: carried,
     },
     mappings: [
       for (var index = 0; index < preview.rewritten.length; index++)
@@ -10726,6 +10819,13 @@ class CommitGraphPainter extends CustomPainter {
   bool isDashedAbove(int lane) =>
       isDashedLane(lane) || previousDashedLanes.contains(lane);
 
+  /// A lane movement is a preview line when the lane it LEAVES is dashed;
+  /// [above] asks the row that started it. The lane it arrives in is never
+  /// asked — a real branch converging on a lane the preview borrows is still
+  /// real history and keeps its solid rail.
+  bool isDashedTransition(LaneTransition transition, {bool above = false}) =>
+      (above ? previousDashedLanes : dashedLanes).contains(transition.from);
+
   double laneX(int lane) =>
       compact ? laneInset : laneInset + lane * laneSpacing;
 
@@ -10943,9 +11043,7 @@ class CommitGraphPainter extends CustomPainter {
       // are the whole story.
       if (previous case final previous?) {
         for (final transition in previous.transitions) {
-          final dashed =
-              previousDashedLanes.contains(transition.from) ||
-              previousDashedLanes.contains(transition.to);
+          final dashed = isDashedTransition(transition, above: true);
           _drawRailPath(
             canvas,
             transitionPath(
@@ -10967,8 +11065,7 @@ class CommitGraphPainter extends CustomPainter {
         }
       }
       for (final transition in row.transitions) {
-        final dashed =
-            isDashedLane(transition.from) || isDashedLane(transition.to);
+        final dashed = isDashedTransition(transition);
         _drawRailPath(
           canvas,
           transitionPath(

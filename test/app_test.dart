@@ -5185,6 +5185,19 @@ void main() {
       timelinePainters.map((painter) => painter.refConnector),
       everyElement(isFalse),
     );
+    // 'Rebase만'이면 재배치 체인은 현행 그림대로 기준 브랜치 레인 위에 인라인으로
+    // 이어지고, 뿌리의 점선이 기준 브랜치 HEAD 노드까지 닿는다.
+    CommitGraphPainter painterFor(String sha) => timelinePainters.singleWhere(
+      (painter) => painter.row.commit.sha == sha,
+    );
+    expect(painterFor('3333333333333333333333333333333333333333').row.lane, 0);
+    final rootPainter = painterFor('1111111111111111111111111111111111111111');
+    expect(rootPainter.row.lane, 0);
+    expect(rootPainter.row.transitions, isEmpty);
+    expect(CommitGraphPainter.railsBelow(rootPainter.row), {0});
+    expect(painterFor('main-tip').continuesFromAbove(0), isTrue);
+    expect(painterFor('main-tip').previousDashedLanes, {0});
+    expect(painterFor('main-tip').dashedLanes, isEmpty);
     final mappingPainter = tester
         .widgetList<CustomPaint>(find.byType(CustomPaint))
         .map((paint) => paint.painter)
@@ -5712,7 +5725,10 @@ void main() {
           compareBranchesCallback: (_, _) async => comparison,
           // 한 화면에 안 들어가는 diff라 목표 줄은 게으른 목록 밖에서 시작한다.
           diffBetween: (_, _, file) async => [
-            const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,300 +1,300 @@'),
+            const DiffLine(
+              kind: DiffLineKind.hunk,
+              text: '@@ -1,300 +1,300 @@',
+            ),
             for (var at = 1; at <= 300; at++)
               DiffLine(
                 kind: at == 300 ? DiffLineKind.add : DiffLineKind.context,
@@ -8370,16 +8386,34 @@ void main() {
       landed.kinds[merge.commit.sha],
       PreviewGraphNodeKind.virtualRebaseMerge,
     );
-    // 가상 머지는 기준 브랜치 레인 맨 위에 앉고 바로 아래가 재배치된 커밋이다.
-    expect(merge.lane, landed.rows[1].lane);
-    expect(landed.rows[1].commit.sha, 'rewritten-feature');
+    // 가상 머지는 기준 브랜치 레인 맨 위에 앉고, 재배치된 커밋은 그 옆 레인이다.
+    final rebased = landed.rows[1];
+    final baseLane = landed.rows[2].lane;
+    expect(merge.lane, baseLane);
+    expect(rebased.commit.sha, 'rewritten-feature');
+    expect(rebased.lane, baseLane + 1);
+    expect(landed.rows[2].commit.sha, comparison.baseTip);
     expect(merge.commit.parents, [comparison.baseTip, 'rewritten-feature']);
     expect(merge.commit.subject, "Merge branch 'feature' into main");
     expect(merge.commit.shortSha, 'new SHA');
-    expect(merge.nextLaneShas[merge.lane], 'rewritten-feature');
+    // 첫 부모는 기준 브랜치 레인을 따라 HEAD까지 곧게, 두 번째 부모는 옆 레인의
+    // 재배치 tip으로 꺾어 나간다.
+    expect(merge.parentLanes, [baseLane, rebased.lane]);
+    expect(merge.nextLaneShas[baseLane], comparison.baseTip);
+    expect(merge.nextLaneShas[rebased.lane], 'rewritten-feature');
+    expect(merge.transitions, [
+      (from: baseLane, to: rebased.lane, sha: 'rewritten-feature'),
+    ]);
+    expect(CommitGraphPainter.railsBelow(merge), contains(baseLane));
+    // 체인의 뿌리는 기준 브랜치 HEAD 노드로 들어간다: 옆 레인을 타고 내려와
+    // HEAD 줄에서 옆으로 꺾이는 곡선이라 출발점에서 꺾이지 않는다.
+    final root = (from: rebased.lane, to: baseLane, sha: comparison.baseTip);
+    expect(rebased.transitions, [root]);
+    expect(rebased.parentLanes, [baseLane]);
+    expect(CommitGraphPainter.isMergeEdge(rebased, root), isFalse);
     // 점선은 가상 머지 줄까지 이어지고 매핑 행 번호도 한 칸씩 밀린다.
-    expect(landed.dashedLanes[0], contains(merge.lane));
-    expect(landed.dashedLanes[1], contains(merge.lane));
+    expect(landed.dashedLanes[0], {baseLane, rebased.lane});
+    expect(landed.dashedLanes[1], {baseLane, rebased.lane});
     expect(landed.dashedLanes[2], isNull);
     expect(
       landed.mappings.single.originalRow,
@@ -8389,6 +8423,222 @@ void main() {
       landed.mappings.single.rewrittenRow,
       plain.mappings.single.rewrittenRow + 1,
     );
+
+    // 'Rebase만'은 현행 그림대로 기준 브랜치 레인 위에 인라인으로 이어지고, 그 레인의
+    // 점선이 그대로 HEAD 노드로 내려간다 — 꺾을 것이 없으니 뿌리 전환도 없다.
+    final plainRebased = plain.rows.first;
+    expect(plainRebased.commit.sha, 'rewritten-feature');
+    expect(plainRebased.lane, baseLane);
+    expect(plainRebased.transitions, isEmpty);
+    expect(plainRebased.activeLanes, [baseLane]);
+    expect(plainRebased.nextLanes, [baseLane]);
+    expect(plainRebased.nextLaneShas[baseLane], comparison.baseTip);
+    expect(plain.dashedLanes[0], {baseLane});
+    expect(plain.dashedLanes[1], isNull);
+    expect(plain.rows[1].commit.sha, comparison.baseTip);
+    expect(
+      CommitGraphPainter(
+        row: plain.rows[1],
+        previous: plainRebased,
+        selected: false,
+        committerColor: const Color(0xFF7AD6E8),
+      ).continuesFromAbove(baseLane),
+      isTrue,
+    );
+  });
+
+  test(
+    'a rebase chain crossing original rows still lands on the base HEAD',
+    () {
+      // 원본 커밋이 기준 브랜치 HEAD보다 위에 남는 배치. 체인은 그 줄들을 한 칸
+      // 비켜 지나가고 HEAD 바로 윗줄에서 꺾인다.
+      final base = commit('main-tip', 'main only', parents: const ['root']);
+      final newer = commit(
+        'feature-new',
+        'newer feature',
+        parents: const ['1'],
+      );
+      final older = commit(
+        'feature-old',
+        'older feature',
+        parents: const ['root'],
+      );
+      final comparison = BranchComparisonResult(
+        baseRef: 'main',
+        compareRef: 'feature',
+        baseTip: base.sha,
+        compareTip: newer.sha,
+        baseParent: 'root',
+        compareParent: older.sha,
+        mergeBases: const ['root'],
+        commits: [
+          BranchComparisonCommit(
+            commit: newer,
+            side: BranchCommitSide.compareOnly,
+          ),
+          BranchComparisonCommit(commit: base, side: BranchCommitSide.baseOnly),
+          BranchComparisonCommit(
+            commit: older,
+            side: BranchCommitSide.compareOnly,
+          ),
+          BranchComparisonCommit(
+            commit: commit('root', 'shared commit'),
+            side: BranchCommitSide.commonBoundary,
+          ),
+        ],
+        files: const [],
+        merge: const MergeConflictCheck(status: MergeConflictStatus.clean),
+      );
+      final graph = layoutRebasePreviewGraph(
+        comparison,
+        RebasePreviewResult(
+          status: RebasePreviewStatus.clean,
+          baseTip: base.sha,
+          compareTip: newer.sha,
+          rewritten: [(original: newer, rewrittenSha: 'rewritten-new')],
+          completed: 1,
+          total: 1,
+          virtualTip: 'rewritten-new',
+        ),
+        mergeCommit: true,
+      );
+
+      // 줄 순서: 가상 머지, 재배치 커밋, 원본 newer, 기준 브랜치 HEAD, …
+      expect(graph.rows[1].commit.sha, 'rewritten-new');
+      expect(graph.rows[2].commit.sha, newer.sha);
+      expect(graph.rows[3].commit.sha, base.sha);
+      // 원본 줄이 레인 1을 쓰고 있으니 체인은 레인 2로 비켜 앉는다.
+      final chainLane = graph.rows[1].lane;
+      expect(chainLane, 2);
+      expect(graph.rows[2].lane, 1);
+      expect(graph.rows[1].nextLanes, contains(chainLane));
+      expect(graph.rows[1].transitions, isEmpty);
+      // 뿌리는 HEAD 바로 윗줄에서 꺾인다.
+      final crossed = graph.rows[2];
+      expect(crossed.activeLanes, contains(chainLane));
+      expect(crossed.nextLanes, isNot(contains(chainLane)));
+      expect(
+        crossed.transitions,
+        contains((from: chainLane, to: 0, sha: base.sha)),
+      );
+      expect(graph.dashedLanes[2], contains(chainLane));
+      expect(graph.dashedLanes[3], isNull);
+    },
+  );
+
+  test('a rebase preview onto an unchanged base reaches the HEAD node', () {
+    // 기준 브랜치가 분기 뒤로 그대로인 흔한 배치: 기준 브랜치 HEAD가 곧 머지 베이스라
+    // 원본 커밋이 전부 그 위에 남고, HEAD 위로는 기준 브랜치 선이 없다.
+    final baseTip = commit('main-tip', 'shared commit');
+    final older = commit('feature-old', 'older feature', parents: ['main-tip']);
+    final newer = commit(
+      'feature-new',
+      'newer feature',
+      parents: ['feature-old'],
+    );
+    final comparison = BranchComparisonResult(
+      baseRef: 'main',
+      compareRef: 'feature',
+      baseTip: baseTip.sha,
+      compareTip: newer.sha,
+      baseParent: 'root',
+      compareParent: older.sha,
+      mergeBases: [baseTip.sha],
+      commits: [
+        BranchComparisonCommit(
+          commit: newer,
+          side: BranchCommitSide.compareOnly,
+        ),
+        BranchComparisonCommit(
+          commit: older,
+          side: BranchCommitSide.compareOnly,
+        ),
+        BranchComparisonCommit(
+          commit: baseTip,
+          side: BranchCommitSide.commonBoundary,
+        ),
+      ],
+      files: const [],
+      merge: const MergeConflictCheck(status: MergeConflictStatus.clean),
+    );
+    final preview = RebasePreviewResult(
+      status: RebasePreviewStatus.clean,
+      baseTip: baseTip.sha,
+      compareTip: newer.sha,
+      rewritten: [
+        (original: older, rewrittenSha: 'rewritten-old'),
+        (original: newer, rewrittenSha: 'rewritten-new'),
+      ],
+      completed: 2,
+      total: 2,
+      virtualTip: 'rewritten-new',
+    );
+    CommitGraphPainter painter(BranchPreviewGraph graph, int index) =>
+        CommitGraphPainter(
+          row: graph.rows[index],
+          previous: index > 0 ? graph.rows[index - 1] : null,
+          selected: false,
+          committerColor: const Color(0xFF7AD6E8),
+          dashedLanes: graph.dashedLanes[index] ?? const {},
+          previousDashedLanes: index > 0
+              ? graph.dashedLanes[index - 1] ?? const {}
+              : const {},
+        );
+
+    final landed = layoutRebasePreviewGraph(
+      comparison,
+      preview,
+      mergeCommit: true,
+    );
+    final headIndex = landed.rows.indexWhere(
+      (row) => row.commit.sha == baseTip.sha,
+    );
+    expect(headIndex, landed.rows.length - 1);
+    // 가상 머지의 첫 부모 선은 남은 원본 줄들을 지나 HEAD 노드까지 끊기지 않는다.
+    const baseLane = 0;
+    for (var index = 0; index < headIndex; index++) {
+      expect(landed.rows[index].activeLanes, contains(baseLane));
+      expect(
+        CommitGraphPainter.railsBelow(landed.rows[index]),
+        contains(baseLane),
+      );
+      expect(landed.dashedLanes[index], contains(baseLane));
+    }
+    expect(painter(landed, headIndex).continuesFromAbove(baseLane), isTrue);
+    // 원본 브랜치가 HEAD로 합쳐지는 실제 선은 점선 레인에 닿아도 실선으로 남고,
+    // 체인의 뿌리만 점선으로 꺾인다.
+    final converging = landed.rows[headIndex - 1];
+    final real = (from: 1, to: baseLane, sha: baseTip.sha);
+    final chainRoot = (
+      from: landed.rows[1].lane,
+      to: baseLane,
+      sha: baseTip.sha,
+    );
+    expect(converging.transitions, [real, chainRoot]);
+    expect(painter(landed, headIndex - 1).isDashedTransition(real), isFalse);
+    expect(
+      painter(landed, headIndex - 1).isDashedTransition(chainRoot),
+      isTrue,
+    );
+    expect(
+      painter(landed, headIndex).isDashedTransition(real, above: true),
+      isFalse,
+    );
+    expect(
+      painter(landed, headIndex).isDashedTransition(chainRoot, above: true),
+      isTrue,
+    );
+
+    // 'Rebase만'도 같은 원본 줄들을 지나 HEAD 노드까지 닿는다 — 인라인이라 레인 하나로.
+    final plain = layoutRebasePreviewGraph(comparison, preview);
+    final plainHead = plain.rows.length - 1;
+    for (var index = 0; index < plainHead; index++) {
+      expect(plain.rows[index].activeLanes, contains(baseLane));
+      expect(plain.dashedLanes[index], {baseLane});
+    }
+    expect(painter(plain, plainHead).continuesFromAbove(baseLane), isTrue);
+    expect(plain.dashedLanes[plainHead], isNull);
+    expect(painter(plain, plainHead - 1).isDashedTransition(real), isFalse);
   });
 
   test('preview graphs preserve existing comparison commits', () {
