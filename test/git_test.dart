@@ -1331,6 +1331,7 @@ void main() {
 
       final forecast = await repository.probeRebaseConflicts(
         baseTip: fixture.baseTip,
+        compareTip: fixture.compareTip,
         commits: fixture.commits,
       );
 
@@ -1349,6 +1350,57 @@ void main() {
     },
   );
 
+  test('the forecast never warns about a commit rebase would drop', () async {
+    // 옛 브랜치 tip 모양: feature의 첫 커밋이 이미 main에 들어갔고 main이 그 뒤로
+    // 같은 파일을 또 고쳤다. 그 커밋만 단독으로 다시 얹으면 충돌하지만 — 변경이 이미
+    // 적용돼 있으니 충돌한다 — 순차 재배치는 그 커밋을 아예 재생하지 않는다.
+    final root = await Directory.systemTemp.createTemp('yogit_forecast_drop_');
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    await File('${root.path}/file.txt').writeAsString('base\n');
+    await File('${root.path}/other.txt').writeAsString('base\n');
+    await _git(root, ['add', 'file.txt', 'other.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+    await _git(root, ['switch', '-c', 'feature']);
+    await File('${root.path}/file.txt').writeAsString('feature\n');
+    await _git(root, ['commit', '-am', 'feature edits file']);
+    final duplicate = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+    await File('${root.path}/other.txt').writeAsString('feature\n');
+    await _git(root, ['commit', '-am', 'feature edits other']);
+    final conflicting = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+    await _git(root, ['switch', 'main']);
+    // main이 먼저 움직여야 빼온 커밋이 원본과 다른 커밋이 된다.
+    await File('${root.path}/main.txt').writeAsString('main\n');
+    await _git(root, ['add', 'main.txt']);
+    await _git(root, ['commit', '-m', 'main only']);
+    await _git(root, ['cherry-pick', duplicate]);
+    await File('${root.path}/file.txt').writeAsString('main again\n');
+    await File('${root.path}/other.txt').writeAsString('main\n');
+    await _git(root, ['commit', '-am', 'main moves both on']);
+    final repository = GitRepository(root.path);
+    final baseTip = (await _git(root, ['rev-parse', 'main'])).trim();
+
+    // patch-id 중복이라는 사실과 단독 재생이 충돌한다는 사실이 둘 다 참이다.
+    expect(
+      await repository.duplicateCompareCommits(
+        baseTip: baseTip,
+        compareTip: conflicting,
+      ),
+      {duplicate},
+    );
+
+    final forecast = await repository.probeRebaseConflicts(
+      baseTip: baseTip,
+      compareTip: conflicting,
+      commits: [duplicate, conflicting],
+    );
+
+    // 예고는 재배치가 실제로 재생할 커밋에만 붙는다.
+    expect(forecast.keys, [conflicting]);
+    expect(forecast[conflicting], ['other.txt']);
+    expect(await _probeWorktrees(root), isEmpty);
+  });
+
   test('a cancelled forecast stops early and leaves no worktree', () async {
     final fixture = await _conflictForecastFixture();
     addTearDown(() => fixture.root.delete(recursive: true));
@@ -1357,6 +1409,7 @@ void main() {
     final forecast = await GitRepository(fixture.root.path)
         .probeRebaseConflicts(
           baseTip: fixture.baseTip,
+          compareTip: fixture.compareTip,
           commits: fixture.commits,
           cancelled: () => replays++ > 0,
         );
@@ -1379,6 +1432,7 @@ void main() {
     expect(
       await repository.probeRebaseConflicts(
         baseTip: 'main-tip',
+        compareTip: 'feature-tip',
         commits: [
           for (var at = 0; at <= conflictForecastCommitCeiling; at++) 'sha$at',
         ],
@@ -3728,6 +3782,39 @@ void main() {
     expect(await unlaunchable.loadLocalStateSignature(), isNull);
   });
 
+  test('loadRecentCommits reads one ref, newest first', () async {
+    final repository = GitRepository(
+      '/repo',
+      runner: (executable, arguments, {workingDirectory, environment}) async {
+        expect(arguments, [
+          'log',
+          'dev',
+          '-n',
+          '3',
+          '--format=%H%x00%s%x00%an%x00%ct',
+        ]);
+        return ProcessResult(
+          1,
+          0,
+          'aaa\x00feat: lane cache\x00sc\x001754500000\n'
+          'bbb\x00fix: plan audit\x00jh\x001754400000\n'
+          'malformed-line\n'
+          'ccc\x00feat: outline\x00mk\x001754300000\n',
+          '',
+        );
+      },
+    );
+
+    final commits = await repository.loadRecentCommits('dev', limit: 3);
+
+    expect(commits, hasLength(3));
+    expect(commits.first.sha, 'aaa');
+    expect(commits.first.subject, 'feat: lane cache');
+    expect(commits.first.author, 'sc');
+    expect(commits.first.time, 1754500000);
+    expect(commits.last.sha, 'ccc');
+  });
+
   test('a detached HEAD reports no current branch', () async {
     final repository = GitRepository(
       '/tmp/repository',
@@ -4648,6 +4735,7 @@ Future<
   ({
     Directory root,
     String baseTip,
+    String compareTip,
     List<String> commits,
     String first,
     String second,
@@ -4683,6 +4771,7 @@ _conflictForecastFixture() async {
   return (
     root: root,
     baseTip: (await _git(root, ['rev-parse', 'HEAD'])).trim(),
+    compareTip: second,
     commits: [clean, first, alsoClean, second],
     first: first,
     second: second,

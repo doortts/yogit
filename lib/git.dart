@@ -3902,14 +3902,29 @@ class GitRepository implements FullDiffRepository {
   /// P2 — 브랜치 커밋을 하나씩 [baseTip] 위에 단독으로 얹어 보고 충돌 파일을 모은다.
   /// 커밋 sha → 충돌 파일 목록. 단독 재생은 순차 재배치와 다르다 — 그 경고는 배지
   /// 툴팁이 한다. [cancelled]가 참이 되면 다음 커밋으로 넘어가지 않고 정리한다.
+  ///
+  /// patch-id가 이미 base에 있는 커밋은 재생해 보지 않는다. `git rebase`는 그 커밋을
+  /// 기본값 그대로 떨구니(--no-reapply-cherry-picks), 단독 재생이 충돌해도 순차
+  /// 재배치에서는 일어날 수 없는 충돌이다 — 오히려 변경이 이미 적용돼 있어서 충돌한다.
+  /// 예고가 없는 커밋과 예고가 빈 커밋을 가리지 않으니 답에서 그냥 빠진다.
   Future<Map<String, List<String>>> probeRebaseConflicts({
     required String baseTip,
+    required String compareTip,
     required List<String> commits,
     bool Function()? cancelled,
   }) async {
     if (commits.isEmpty || commits.length > conflictForecastCommitCeiling) {
       return const {};
     }
+    final duplicates = await duplicateCompareCommits(
+      baseTip: baseTip,
+      compareTip: compareTip,
+    );
+    final replayed = [
+      for (final sha in commits)
+        if (!duplicates.contains(sha)) sha,
+    ];
+    if (replayed.isEmpty) return const {};
     // stale 청소는 이 접두사를 [staleConflictProbeAge]가 지난 뒤에만 건드린다 —
     // 예고가 도는 중에 다른 미리보기가 청소를 돌려도 발밑이 사라지지 않는다.
     final temporary = await Directory.systemTemp.createTemp(
@@ -3930,7 +3945,7 @@ class GitRepository implements FullDiffRepository {
     }
     final forecast = <String, List<String>>{};
     try {
-      for (final sha in commits) {
+      for (final sha in replayed) {
         if (cancelled?.call() ?? false) break;
         final pick = await runner(
           gitExecutable,
@@ -4542,6 +4557,35 @@ class GitRepository implements FullDiffRepository {
   /// Removes a worktree along with its directory, even when dirty.
   Future<void> removeWorktree(String path) =>
       _run(['worktree', 'remove', '--force', path]);
+
+  /// The last [limit] commits reachable from [ref], newest first. Lines that
+  /// do not parse are skipped — one odd reflog entry should not blank the
+  /// monitor's lane.
+  Future<List<({String sha, String subject, String author, int time})>>
+  loadRecentCommits(String ref, {int limit = 20}) async {
+    final output = await _run([
+      'log',
+      ref,
+      '-n',
+      '$limit',
+      '--format=%H%x00%s%x00%an%x00%ct',
+    ]);
+    return [
+      for (final line in output.split('\n'))
+        if (line.split('\x00') case [
+          final sha,
+          final subject,
+          final author,
+          final time,
+        ] when int.tryParse(time) != null)
+          (
+            sha: sha,
+            subject: subject,
+            author: author,
+            time: int.parse(time),
+          ),
+    ];
+  }
 
   /// Like [_run], but with every interactive credential prompt disabled so a
   /// network command fails instead of hanging the app on a hidden prompt.
