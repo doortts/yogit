@@ -672,15 +672,6 @@ GraphRow passThroughRow({required GitCommit commit, GraphRow? above}) =>
       nextLaneBranches: above?.nextLaneBranches ?? const {},
     );
 
-/// The base branch is fixed, the second line is one of two, and every later line
-/// takes the first pool color no line running beside it at birth already wears.
-const _branchColorPool = [
-  Color(0xFF3B82F6),
-  Color(0xFFFFF01F),
-  Color(0xFFB026FF),
-];
-const _secondBranchColors = [Color(0xFF00E5FF), Color(0xFFFF3131)];
-
 int stableRefPaletteIndex(String name, int length) {
   var hash = 0;
   for (final codeUnit in name.codeUnits) {
@@ -689,10 +680,25 @@ int stableRefPaletteIndex(String name, int length) {
   return hash % length;
 }
 
-RefPaletteColors refPaletteColorsForName(
-  String name,
-  List<RefPaletteEntry> palette,
-) {
+List<int> randomRefPaletteIndexes(List<int> assignments) {
+  final valid = assignments.length == AppSettings.defaultRefPalette.length
+      ? assignments
+      : AppSettings.defaultRefPaletteAssignments;
+  final random = [
+    for (var index = 1; index < valid.length; index++)
+      if (valid[index] == 0) index,
+  ];
+  return random.isEmpty
+      ? [for (var index = 1; index < valid.length; index++) index]
+      : random;
+}
+
+int refPaletteIndexForName(String name, List<int> assignments) {
+  final candidates = randomRefPaletteIndexes(assignments);
+  return candidates[stableRefPaletteIndex(name, candidates.length)];
+}
+
+RefPaletteColors refPaletteColorsAt(int index, List<RefPaletteEntry> palette) {
   final valid =
       palette.length == AppSettings.defaultRefPalette.length &&
           palette.every(
@@ -702,9 +708,18 @@ RefPaletteColors refPaletteColorsForName(
           )
       ? palette
       : AppSettings.defaultRefPalette;
-  final entry = valid[stableRefPaletteIndex(name, valid.length)];
+  final entry = valid[index.clamp(0, valid.length - 1)];
   return (base: parseHexColor(entry.base)!, text: parseHexColor(entry.text)!);
 }
+
+RefPaletteColors refPaletteColorsForName(
+  String name,
+  List<RefPaletteEntry> palette, {
+  List<int> refPaletteAssignments = AppSettings.defaultRefPaletteAssignments,
+}) => refPaletteColorsAt(
+  refPaletteIndexForName(name, refPaletteAssignments),
+  palette,
+);
 
 int refPriority(GitRef ref, RepoRefs refs) {
   if (ref.isHead || ref.name == refs.current) return 0;
@@ -750,38 +765,13 @@ List<GitRef> timelineRefsForCommit(GitCommit commit, RepoRefs refs) {
   return result;
 }
 
-Map<int, String> branchRefNames(List<GraphRow> rows, RepoRefs refs) {
-  final representatives = <int, GitRef>{};
-  for (final row in rows) {
-    for (final ref in timelineRefsForCommit(row.commit, refs)) {
-      final current = representatives[row.branch];
-      if (current == null || compareTimelineRefs(ref, current, refs) < 0) {
-        representatives[row.branch] = ref;
-      }
-    }
-  }
-  return {
-    for (final entry in representatives.entries) entry.key: entry.value.name,
-  };
-}
-
-/// Branch id → color, decided at each line's birth row and therefore stable as
-/// pages append. [seed] keeps a repository's colors the same across launches.
-Map<int, Color> assignBranchColors(
+Map<int, int> assignBranchPaletteIndexes(
   List<GraphRow> rows,
   int seed, {
-  Map<int, String> branchNames = const {},
-  List<RefPaletteEntry> refPalette = AppSettings.defaultRefPalette,
+  List<int> refPaletteAssignments = AppSettings.defaultRefPaletteAssignments,
 }) {
-  final colors = <int, Color>{};
-  final overflow = [
-    for (final color in AvatarService.defaultColors)
-      if (!_branchColorPool.contains(color) &&
-          !_secondBranchColors.contains(color) &&
-          color != AvatarService.baseBranchColor)
-        color,
-  ]..shuffle(math.Random(seed));
-  var taken = 0;
+  final indexes = <int, int>{};
+  final candidates = randomRefPaletteIndexes(refPaletteAssignments);
   for (final row in rows) {
     final ids = {
       row.branch,
@@ -789,37 +779,42 @@ Map<int, Color> assignBranchColors(
       ...row.nextLaneBranches.values,
     }.toList()..sort();
     for (final id in ids) {
-      if (id < 0 || colors.containsKey(id)) continue;
-      final name = branchNames[id];
-      if (name != null) {
-        colors[id] = refPaletteColorsForName(name, refPalette).text;
-        continue;
-      }
+      if (id < 0 || indexes.containsKey(id)) continue;
       if (id == 0) {
-        colors[id] = AvatarService.baseBranchColor;
+        indexes[id] = 0;
         continue;
       }
-      if (id == 1) {
-        colors[id] = _secondBranchColors[math.Random(seed).nextInt(2)];
+      final pinned =
+          refPaletteAssignments.length == AppSettings.defaultRefPalette.length
+          ? refPaletteAssignments.indexOf(id + 1, 1)
+          : -1;
+      if (pinned > 0) {
+        indexes[id] = pinned;
         continue;
       }
-      // Lines already on screen where this one is born keep their colors.
-      final beside = {
-        for (final other in [
-          ...row.activeLaneBranches.values,
-          ...row.nextLaneBranches.values,
-        ])
-          colors[other],
-      };
-      colors[id] = _branchColorPool.firstWhere(
-        (color) => !beside.contains(color),
-        orElse: () => overflow.isEmpty
-            ? _branchColorPool.first
-            : overflow[taken++ % overflow.length],
-      );
+      final key = '$seed:$id';
+      indexes[id] = candidates[stableRefPaletteIndex(key, candidates.length)];
     }
   }
-  return colors;
+  return indexes;
+}
+
+/// Branch id → Text / line color from its assigned palette row.
+Map<int, Color> assignBranchColors(
+  List<GraphRow> rows,
+  int seed, {
+  List<RefPaletteEntry> refPalette = AppSettings.defaultRefPalette,
+  List<int> refPaletteAssignments = AppSettings.defaultRefPaletteAssignments,
+}) {
+  final indexes = assignBranchPaletteIndexes(
+    rows,
+    seed,
+    refPaletteAssignments: refPaletteAssignments,
+  );
+  return {
+    for (final entry in indexes.entries)
+      entry.key: refPaletteColorsAt(entry.value, refPalette).text,
+  };
 }
 
 typedef ColumnSpec = ({String label, double min, double max});
@@ -858,6 +853,7 @@ class TimelineScreen extends StatefulWidget {
     this.fullDiffColumnWidths = const FullDiffColumnWidths(),
     this.fullDiffPreferences = const FullDiffPreferences(),
     this.refPalette = AppSettings.defaultRefPalette,
+    this.refPaletteAssignments = AppSettings.defaultRefPaletteAssignments,
     this.branchPreviewMode = BranchPreviewMode.merge,
     this.mergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
     this.rebaseMergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
@@ -911,6 +907,7 @@ class TimelineScreen extends StatefulWidget {
   final FullDiffColumnWidths fullDiffColumnWidths;
   final FullDiffPreferences fullDiffPreferences;
   final List<RefPaletteEntry> refPalette;
+  final List<int> refPaletteAssignments;
   final BranchPreviewMode branchPreviewMode;
 
   /// What the commit message box is prefilled with when an apply creates a
@@ -993,6 +990,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   final _normalCommits = <GitCommit>[];
   final _committersBySha = <String, GitIdentity>{};
   var _normalRows = <GraphRow>[];
+  var _branchPaletteIndexes = <int, int>{};
   var _normalEntries = <TimelineEntry>[];
   String? _compareRef;
   BranchComparisonResult? _comparison;
@@ -1494,7 +1492,11 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (widget.branchPreviewMode != oldWidget.branchPreviewMode) {
       _branchPreviewMode = widget.branchPreviewMode;
     }
-    if (!listEquals(widget.refPalette, oldWidget.refPalette)) {
+    if (!listEquals(widget.refPalette, oldWidget.refPalette) ||
+        !listEquals(
+          widget.refPaletteAssignments,
+          oldWidget.refPaletteAssignments,
+        )) {
       _rebuildGraph();
     }
     final preferredBranchBecameReady =
@@ -1676,12 +1678,15 @@ class _TimelineScreenState extends State<TimelineScreen>
   void _rebuildGraph() {
     _normalRows = layoutGraph(_normalCommits, preferredTip: _preferredTip);
     _normalEntries = timelineEntries(_normalRows, DateTime.now());
-    AvatarService.branchAssignments = assignBranchColors(
+    _branchPaletteIndexes = assignBranchPaletteIndexes(
       _normalRows,
       widget.repository.root.hashCode,
-      branchNames: branchRefNames(_normalRows, _refs),
-      refPalette: widget.refPalette,
+      refPaletteAssignments: widget.refPaletteAssignments,
     );
+    AvatarService.branchAssignments = {
+      for (final entry in _branchPaletteIndexes.entries)
+        entry.key: refPaletteColorsAt(entry.value, widget.refPalette).text,
+    };
   }
 
   Future<void> _fetchNextPage() async {
@@ -6898,6 +6903,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         commit,
         refs,
         rowAccentColor,
+        row.branch,
         showConnector: _comparison == null,
         deletedBranchName: lineTip == null
             ? null
@@ -7376,7 +7382,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     int index,
     GitCommit commit,
     List<GitRef> refs,
-    Color color, {
+    Color color,
+    int branch, {
     bool showConnector = true,
     String? deletedBranchName,
     bool deletedBranchLoading = false,
@@ -7418,7 +7425,14 @@ class _TimelineScreenState extends State<TimelineScreen>
                       top: (TimelineScreen.rowHeight - 24) / 2,
                       width: slot,
                       height: 24,
-                      child: _refChip(commit, shown[index], color),
+                      child: _refChip(
+                        commit,
+                        shown[index],
+                        color,
+                        paletteIndex: _comparison == null && index == 0
+                            ? _branchPaletteIndexes[branch]
+                            : null,
+                      ),
                     ),
                   if (showConnector)
                     Positioned(
@@ -7471,8 +7485,19 @@ class _TimelineScreenState extends State<TimelineScreen>
         ),
       );
 
-  Widget _refChip(GitCommit commit, GitRef ref, Color color) {
-    final colors = refPaletteColorsForName(ref.name, widget.refPalette);
+  Widget _refChip(
+    GitCommit commit,
+    GitRef ref,
+    Color color, {
+    int? paletteIndex,
+  }) {
+    final colors = paletteIndex == null
+        ? refPaletteColorsForName(
+            ref.name,
+            widget.refPalette,
+            refPaletteAssignments: widget.refPaletteAssignments,
+          )
+        : refPaletteColorsAt(paletteIndex, widget.refPalette);
     final background = _comparison == null
         ? colors.base.withValues(alpha: .18)
         : color.withValues(alpha: .14);
@@ -7608,12 +7633,18 @@ class _TimelineScreenState extends State<TimelineScreen>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                for (final ref in refs)
+                for (var refIndex = 0; refIndex < refs.length; refIndex++)
                   Builder(
                     builder: (context) {
+                      final ref = refs[refIndex];
                       final refColor = _comparison == null
-                          ? refPaletteColorsForName(
-                              ref.name,
+                          ? refPaletteColorsAt(
+                              refIndex == 0
+                                  ? _branchPaletteIndexes[row.branch] ?? 0
+                                  : refPaletteIndexForName(
+                                      ref.name,
+                                      widget.refPaletteAssignments,
+                                    ),
                               widget.refPalette,
                             ).text
                           : color;
