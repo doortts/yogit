@@ -329,6 +329,8 @@ class _YogitAppState extends State<YogitApp> {
           fullDiffPreferences: _settings.fullDiffPreferences,
           refPalette: _settings.refPalette,
           branchPreviewMode: _settings.branchPreviewMode,
+          mergeMessageTemplate: _settings.mergeMessageTemplate,
+          rebaseMergeMessageTemplate: _settings.rebaseMergeMessageTemplate,
           previewWidth: _settings.previewWidth,
           previewHeight: _settings.previewHeight,
           previewDiffLeftWidth: _settings.previewDiffLeftWidth,

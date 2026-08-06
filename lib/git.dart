@@ -2631,9 +2631,12 @@ class GitRepository implements FullDiffRepository {
     await _ignoreCommand(const ['worktree', 'prune'], workingDirectory: root);
   }
 
+  /// [message] is the merge commit's message, verbatim — subject, blank line,
+  /// body and all. Omitting it keeps git's own wording.
   Future<BranchApplyResult> applyMergePreview({
     required BranchComparisonResult comparison,
     required String treeSha,
+    String? message,
   }) async {
     final refs = await _verifyApplyTips(comparison);
     final target = resolveBranchApplyTarget(
@@ -2659,7 +2662,8 @@ class GitRepository implements FullDiffRepository {
       '-p',
       comparison.compareTip,
       '-m',
-      "Merge branch '${comparison.compareRef}' into ${comparison.baseRef}",
+      message ??
+          "Merge branch '${comparison.compareRef}' into ${comparison.baseRef}",
     ])).trim();
     // A base branch that is not the checked-out one only has its ref moved, so
     // the user's working directory is never yanked from under them.
@@ -2757,10 +2761,12 @@ class GitRepository implements FullDiffRepository {
 
   /// Moves the compared branch onto the rebased tip and then walks the base
   /// branch onto a merge commit over it. Both moves follow the same rules as the
-  /// single-step applies: only a checked-out branch touches disk.
+  /// single-step applies: only a checked-out branch touches disk. [message] is
+  /// the merge commit's message, verbatim; omitting it keeps git's own wording.
   Future<BranchApplyResult> applyRebaseThenMerge({
     required BranchComparisonResult comparison,
     required String virtualTip,
+    String? message,
   }) async {
     final refs = await _verifyApplyTips(comparison);
     final baseTarget = resolveBranchApplyTarget(
@@ -2833,7 +2839,8 @@ class GitRepository implements FullDiffRepository {
         '-p',
         rewrittenTip,
         '-m',
-        "Merge branch '${comparison.compareRef}' into ${comparison.baseRef}",
+        message ??
+            "Merge branch '${comparison.compareRef}' into ${comparison.baseRef}",
       ])).trim();
       final baseUpdated = await _moveLocalBranch(
         branch: baseTarget.localBranch,

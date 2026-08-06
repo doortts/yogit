@@ -1252,6 +1252,39 @@ void main() {
     );
   });
 
+  test('merge apply writes the message it was handed, body and all', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    const message =
+        "Merge branch 'feature' into main\n"
+        '\n'
+        'Reviewed-by: 채수원';
+
+    final applied = await repository.applyMergePreview(
+      comparison: fixture.comparison,
+      treeSha: fixture.comparison.merge.treeSha!,
+      message: message,
+    );
+
+    expect(
+      (await _git(fixture.root, ['log', '-1', '--format=%B', 'main'])).trim(),
+      message,
+    );
+
+    // 메시지를 주지 않으면 git이 쓰던 문구 그대로다.
+    await repository.restoreBranchApply(applied);
+    await repository.applyMergePreview(
+      comparison: fixture.comparison,
+      treeSha: fixture.comparison.merge.treeSha!,
+    );
+
+    expect(
+      (await _git(fixture.root, ['log', '-1', '--format=%B', 'main'])).trim(),
+      "Merge branch 'feature' into main",
+    );
+  });
+
   test('merge apply moves a base branch that is checked out nowhere', () async {
     final fixture = await _branchPreviewFixture();
     addTearDown(() => fixture.root.delete(recursive: true));
@@ -3681,6 +3714,29 @@ void main() {
       expect(File('${fixture.root.path}/feature.txt').existsSync(), isFalse);
     },
   );
+
+  test('rebase then merge writes the message it was handed', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    final virtualTip = await _rebasedTip(fixture.root, repository);
+    const message =
+        "Merge branch 'feature' into main\n"
+        '\n'
+        '재배치한 커밋 위에 얹은 머지입니다.\n'
+        'Reviewed-by: 채수원';
+
+    await repository.applyRebaseThenMerge(
+      comparison: fixture.comparison,
+      virtualTip: virtualTip,
+      message: message,
+    );
+
+    expect(
+      (await _git(fixture.root, ['log', '-1', '--format=%B', 'main'])).trim(),
+      message,
+    );
+  });
 
   test(
     'rebase then merge onto a branch checked out nowhere only moves refs',

@@ -382,10 +382,20 @@ class AppSettings {
     this.deletedBranchNames = const {},
     this.recentRepositories = const [],
     this.commitProfiles = const [],
+    this.mergeMessageTemplate = defaultMergeMessageTemplate,
+    this.rebaseMergeMessageTemplate = defaultMergeMessageTemplate,
   });
 
   /// How many repositories the picker remembers before the oldest drops off.
   static const maxRecentRepositories = 10;
+
+  /// What git itself writes for a merge, and the floor an emptied template
+  /// falls back to.
+  static const standardMergeMessage = "Merge branch '{source}' into {target}";
+
+  /// The message an apply that creates a merge commit starts from.
+  static const defaultMergeMessageTemplate =
+      '$standardMergeMessage\n\nReviewed-by: {profile}';
 
   /// The selected base branch color, as stored.
   static const defaultBaseBranchColor = '#5CB270';
@@ -443,6 +453,11 @@ class AppSettings {
 
   /// The commit identities the status bar offers, in display order.
   final List<CommitProfile> commitProfiles;
+
+  /// What the commit message box is prefilled with when an apply creates a
+  /// merge commit. Empty means git's own [standardMergeMessage] alone.
+  final String mergeMessageTemplate;
+  final String rebaseMergeMessageTemplate;
 
   /// The detail panel's size, per placement axis.
   final double previewWidth;
@@ -550,6 +565,8 @@ class AppSettings {
     Map<String, Map<String, String>>? deletedBranchNames,
     List<String>? recentRepositories,
     List<CommitProfile>? commitProfiles,
+    String? mergeMessageTemplate,
+    String? rebaseMergeMessageTemplate,
   }) => AppSettings(
     showAvatars: showAvatars ?? this.showAvatars,
     timelineTheme: timelineTheme ?? this.timelineTheme,
@@ -572,6 +589,9 @@ class AppSettings {
     deletedBranchNames: deletedBranchNames ?? this.deletedBranchNames,
     recentRepositories: recentRepositories ?? this.recentRepositories,
     commitProfiles: commitProfiles ?? this.commitProfiles,
+    mergeMessageTemplate: mergeMessageTemplate ?? this.mergeMessageTemplate,
+    rebaseMergeMessageTemplate:
+        rebaseMergeMessageTemplate ?? this.rebaseMergeMessageTemplate,
   );
 
   factory AppSettings.fromJson(Object? value) {
@@ -652,6 +672,14 @@ class AppSettings {
       deletedBranchNames: _parseNestedStringMap(value['deletedBranchNames']),
       recentRepositories: _parseRecentRepositories(value['recentRepositories']),
       commitProfiles: _parseCommitProfiles(value['commitProfiles']),
+      // An empty string is a choice — git's own message — so only a missing or
+      // non-string entry falls back to the default template.
+      mergeMessageTemplate: value['mergeMessageTemplate'] is String
+          ? value['mergeMessageTemplate'] as String
+          : defaultMergeMessageTemplate,
+      rebaseMergeMessageTemplate: value['rebaseMergeMessageTemplate'] is String
+          ? value['rebaseMergeMessageTemplate'] as String
+          : defaultMergeMessageTemplate,
     );
   }
 
@@ -698,6 +726,8 @@ class AppSettings {
     'deletedBranchNames': deletedBranchNames,
     'recentRepositories': recentRepositories,
     'commitProfiles': [for (final profile in commitProfiles) profile.toJson()],
+    'mergeMessageTemplate': mergeMessageTemplate,
+    'rebaseMergeMessageTemplate': rebaseMergeMessageTemplate,
   };
 
   @override
@@ -722,10 +752,14 @@ class AppSettings {
       mapEquals(baseBranches, other.baseBranches) &&
       _nestedStringMapEquals(deletedBranchNames, other.deletedBranchNames) &&
       listEquals(recentRepositories, other.recentRepositories) &&
-      listEquals(commitProfiles, other.commitProfiles);
+      listEquals(commitProfiles, other.commitProfiles) &&
+      mergeMessageTemplate == other.mergeMessageTemplate &&
+      rebaseMergeMessageTemplate == other.rebaseMergeMessageTemplate;
 
+  // Object.hash tops out at 20 arguments and this settled on exactly 20, so the
+  // list form is what keeps taking fields.
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     showAvatars,
     timelineTheme,
     previewPlacement,
@@ -763,7 +797,51 @@ class AppSettings {
     ),
     Object.hashAll(recentRepositories),
     Object.hashAll(commitProfiles),
-  );
+    mergeMessageTemplate,
+    rebaseMergeMessageTemplate,
+  ]);
+}
+
+/// [template] with its variables filled in: `{source}` the compared branch,
+/// `{target}` the base branch, `{profile}` who reviewed it. An empty template
+/// means git's own message. A `{profile}` with nobody to name takes its whole
+/// line with it — a dangling `Reviewed-by:` is worse than no line — and any
+/// blank run left at the end goes too. Anything else in braces is left alone.
+String renderCommitMessageTemplate(
+  String template, {
+  required String source,
+  required String target,
+  String? profile,
+}) {
+  final body = template.trim().isEmpty
+      ? AppSettings.standardMergeMessage
+      : template;
+  final lines = <String>[];
+  var dropped = false;
+  for (final line in body.split('\n')) {
+    if (profile == null && line.contains('{profile}')) {
+      dropped = true;
+      continue;
+    }
+    // 지운 줄이 빈 줄 사이에 있었으면 빈 줄 하나만 남긴다.
+    if (dropped &&
+        line.trim().isEmpty &&
+        (lines.isEmpty || lines.last.trim().isEmpty)) {
+      dropped = false;
+      continue;
+    }
+    dropped = false;
+    lines.add(
+      line
+          .replaceAll('{source}', source)
+          .replaceAll('{target}', target)
+          .replaceAll('{profile}', profile ?? ''),
+    );
+  }
+  while (lines.isNotEmpty && lines.last.trim().isEmpty) {
+    lines.removeLast();
+  }
+  return lines.join('\n');
 }
 
 class SettingsStore {
@@ -803,7 +881,12 @@ class SettingsStore {
   }
 }
 
-enum _SettingsSection { gitIntegrations, commitProfiles, appearance }
+enum _SettingsSection {
+  gitIntegrations,
+  commitProfiles,
+  commitMessages,
+  appearance,
+}
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -833,6 +916,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     border: OutlineInputBorder(),
   );
 
+  /// The 시안's template editor: a sunken monospace block, first line the
+  /// subject and everything under the blank line the body, as in git.
+  static const _templateStyle = TextStyle(
+    color: Color(0xFFE5E5EA),
+    fontSize: 12,
+    height: 1.55,
+    fontFamily: 'monospace',
+  );
+  static const _templateDecoration = InputDecoration(
+    isDense: true,
+    filled: true,
+    fillColor: Color(0xFF1C1C1E),
+    contentPadding: EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.all(Radius.circular(7)),
+      borderSide: BorderSide(color: Color(0xFF38383A)),
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.all(Radius.circular(7)),
+      borderSide: BorderSide(color: Color(0xFF38383A)),
+    ),
+  );
+
   late AppSettings _settings = widget.settings;
   var _section = _SettingsSection.gitIntegrations;
   late final _baseBranchColorField = TextEditingController(
@@ -848,10 +954,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final _laneFields = [
     for (final hex in _settings.laneColors) TextEditingController(text: hex),
   ];
+  late final _mergeMessageField = TextEditingController(
+    text: _settings.mergeMessageTemplate,
+  );
+  late final _rebaseMergeMessageField = TextEditingController(
+    text: _settings.rebaseMergeMessageTemplate,
+  );
 
   @override
   void dispose() {
     _baseBranchColorField.dispose();
+    _mergeMessageField.dispose();
+    _rebaseMergeMessageField.dispose();
     for (final fields in _refPaletteFields) {
       fields.base.dispose();
       fields.text.dispose();
@@ -976,6 +1090,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       icon: Icons.badge_outlined,
                       label: '커밋 프로필',
                     ),
+                    const SizedBox(height: 4),
+                    _settingsSectionRow(
+                      section: _SettingsSection.commitMessages,
+                      key: const Key('settings-section-commit-messages'),
+                      icon: Icons.notes_outlined,
+                      label: '커밋 메시지 템플릿',
+                    ),
                   ],
                 ),
               ),
@@ -985,6 +1106,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _SettingsSection.appearance => _appearance(),
                   _SettingsSection.gitIntegrations => _gitIntegrations(),
                   _SettingsSection.commitProfiles => _commitProfiles(),
+                  _SettingsSection.commitMessages => _commitMessages(),
                 },
               ),
             ],
@@ -1148,6 +1270,83 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
+
+  Widget _commitMessages() => SingleChildScrollView(
+    padding: const EdgeInsets.all(24),
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 560),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '커밋 메시지 템플릿',
+            style: TextStyle(
+              color: Color(0xFFE8EAF2),
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            '머지 커밋을 만드는 적용에서 커밋 메시지 창에 미리 채울 내용입니다.',
+            style: TextStyle(color: Color(0xFF8D94A8), fontSize: 12),
+          ),
+          const SizedBox(height: 20),
+          _messageTemplateField(
+            label: 'Merge 커밋 메시지',
+            fieldKey: const Key('merge-message-template'),
+            controller: _mergeMessageField,
+            onChanged: (value) =>
+                _change(_settings.copyWith(mergeMessageTemplate: value)),
+          ),
+          const SizedBox(height: 16),
+          _messageTemplateField(
+            label: 'Rebase 후 Merge 커밋 메시지',
+            fieldKey: const Key('rebase-merge-message-template'),
+            controller: _rebaseMergeMessageField,
+            onChanged: (value) =>
+                _change(_settings.copyWith(rebaseMergeMessageTemplate: value)),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            '{source} 비교 브랜치 · {target} 기준 브랜치 · {profile} 이 저장소의 커밋 프로필 이름입니다. '
+            '변수는 그 창을 열 때 채워집니다. '
+            '템플릿을 비우면 git 표준 메시지만 씁니다.',
+            style: TextStyle(color: Color(0xFF8D94A8), fontSize: 10),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _messageTemplateField({
+    required String label,
+    required Key fieldKey,
+    required TextEditingController controller,
+    required ValueChanged<String> onChanged,
+  }) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        label,
+        style: const TextStyle(
+          color: Color(0xFF8D94A8),
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      const SizedBox(height: 4),
+      TextField(
+        key: fieldKey,
+        controller: controller,
+        minLines: 3,
+        maxLines: 8,
+        style: _templateStyle,
+        decoration: _templateDecoration,
+        onChanged: onChanged,
+      ),
+    ],
+  );
 
   Widget _commitProfileRow(int index, CommitProfile profile) => Container(
     key: Key('commit-profile-row-$index'),

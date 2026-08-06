@@ -859,6 +859,8 @@ class TimelineScreen extends StatefulWidget {
     this.fullDiffPreferences = const FullDiffPreferences(),
     this.refPalette = AppSettings.defaultRefPalette,
     this.branchPreviewMode = BranchPreviewMode.merge,
+    this.mergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
+    this.rebaseMergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
     this.previewWidth = 288,
     this.previewHeight = 280,
     this.previewDiffLeftWidth,
@@ -910,6 +912,11 @@ class TimelineScreen extends StatefulWidget {
   final FullDiffPreferences fullDiffPreferences;
   final List<RefPaletteEntry> refPalette;
   final BranchPreviewMode branchPreviewMode;
+
+  /// What the commit message box is prefilled with when an apply creates a
+  /// merge commit.
+  final String mergeMessageTemplate;
+  final String rebaseMergeMessageTemplate;
   final double previewWidth;
   final double previewHeight;
   final double? previewDiffLeftWidth;
@@ -1774,6 +1781,16 @@ class _TimelineScreenState extends State<TimelineScreen>
     } catch (_) {
       // A repository that cannot answer keeps the chip on its last reading.
     }
+  }
+
+  /// Who a commit message template's `{profile}` names: the profile this
+  /// repository commits as, or the bare `user.name` behind it. Null where Git
+  /// has neither, so the line naming nobody can be dropped instead.
+  String? get _commitMessageProfile {
+    final profile = _commitIdentity.profile?.name.trim() ?? '';
+    if (profile.isNotEmpty) return profile;
+    final name = _commitIdentity.identity.name.trim();
+    return name.isEmpty ? null : name;
   }
 
   Future<void> _applyCommitProfile(CommitProfile profile) async {
@@ -5371,20 +5388,48 @@ class _TimelineScreenState extends State<TimelineScreen>
       return;
     }
     final merge = _branchPreviewMode == BranchPreviewMode.merge;
-    final label = rebaseThenMerge
-        ? 'Rebase 후 Merge'
-        : merge
-        ? 'Merge'
-        : 'Rebase';
+    // An apply that writes a merge commit asks for its message instead of a
+    // confirmation: writing the message is the confirmation. A plain rebase
+    // carries the original messages over, so there is nothing to write.
+    if (merge || rebaseThenMerge) {
+      final message = await showYogitAlert<String>(
+        context,
+        _CommitMessageDialog(
+          lead: merge
+              ? '${comparison.baseRef} ← ${comparison.compareRef} · '
+              : '${comparison.compareRef} 재배치 → ',
+          emphasis: merge
+              ? '머지 커밋 1개 생성'
+              : '머지 커밋 1개로 ${comparison.baseRef} 이동',
+          message: renderCommitMessageTemplate(
+            merge
+                ? widget.mergeMessageTemplate
+                : widget.rebaseMergeMessageTemplate,
+            source: comparison.compareRef,
+            target: comparison.baseRef,
+            profile: _commitMessageProfile,
+          ),
+          templated:
+              (merge
+                      ? widget.mergeMessageTemplate
+                      : widget.rebaseMergeMessageTemplate)
+                  .trim()
+                  .isNotEmpty,
+        ),
+      );
+      if (message != null && mounted) {
+        await _runBranchPreviewApply(comparison, message: message);
+      }
+      return;
+    }
+    // 남은 길은 'Rebase만' 하나뿐이라 문구도 그 한 가지다.
     final confirmed = await showYogitAlert<bool>(
       context,
       YogitAlert(
-        title: '$label를 실제로 적용할까요?',
-        message: rebaseThenMerge
-            ? '로컬 ${target.localBranch}와 ${comparison.baseRef} 브랜치를 변경합니다. '
-                  '원격 추적 브랜치와 원격 저장소는 그대로입니다.'
-            : '로컬 ${target.localBranch} 브랜치만 변경합니다. '
-                  '원격 추적 브랜치와 원격 저장소는 그대로입니다.',
+        title: 'Rebase를 실제로 적용할까요?',
+        message:
+            '로컬 ${target.localBranch} 브랜치만 변경합니다. '
+            '원격 추적 브랜치와 원격 저장소는 그대로입니다.',
         body: YogitAlertBlock([
           '기준 ${comparison.baseRef}  ${comparison.baseTip}',
           '대상 ${comparison.compareRef}  ${comparison.compareTip}',
@@ -5399,7 +5444,10 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
   }
 
-  Future<void> _runBranchPreviewApply(BranchComparisonResult comparison) async {
+  Future<void> _runBranchPreviewApply(
+    BranchComparisonResult comparison, {
+    String? message,
+  }) async {
     final rebaseThenMerge = _rebaseThenMergeSelected;
     final mode = _branchPreviewMode;
     final request = ++_branchApplySerial;
@@ -5413,6 +5461,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         result = await widget.repository.applyMergePreview(
           comparison: comparison,
           treeSha: (_mergePreview?.treeSha ?? comparison.merge.treeSha)!,
+          message: message,
         );
       } else {
         final preview = _rebasePreview!;
@@ -5443,6 +5492,7 @@ class _TimelineScreenState extends State<TimelineScreen>
             ? await widget.repository.applyRebaseThenMerge(
                 comparison: comparison,
                 virtualTip: preview.virtualTip!,
+                message: message,
               )
             : await widget.repository.applyRebasePreview(
                 comparison: comparison,
@@ -10375,6 +10425,222 @@ class _CopyButtonState extends State<_CopyButton> {
       ),
     );
   }
+}
+
+/// The message the merge commit an apply is about to write will carry. Prefilled
+/// from the settings template; confirming pops the text exactly as edited, and
+/// Escape or 취소 pops nothing at all — the apply itself is off.
+///
+/// Its own surface rather than [YogitAlert]'s: the mockup draws a wider card
+/// with an editor in it, radius 12, and the preview's purple on 적용.
+class _CommitMessageDialog extends StatefulWidget {
+  const _CommitMessageDialog({
+    required this.lead,
+    required this.emphasis,
+    required this.message,
+    required this.templated,
+  });
+
+  /// The context line, split where the mockup colors it: quiet up to [lead],
+  /// then [emphasis] in the preview's purple.
+  final String lead;
+  final String emphasis;
+  final String message;
+
+  /// Whether [message] came from the settings template or, with that emptied,
+  /// from git's own wording — the helper line names whichever filled the box.
+  final bool templated;
+
+  @override
+  State<_CommitMessageDialog> createState() => _CommitMessageDialogState();
+}
+
+class _CommitMessageDialogState extends State<_CommitMessageDialog> {
+  late final _message = TextEditingController(text: widget.message);
+
+  /// 무엇이 채웠는지 그대로 말한다 — 템플릿을 비웠으면 git 표준 메시지가 채운
+  /// 것이고, Reviewed-by 줄이 없으면 그 줄을 설명할 일도 없다.
+  String get _prefillHelp {
+    final source = widget.templated
+        ? '설정의 기본 메시지 템플릿으로 채워졌습니다'
+        : 'git 표준 메시지로 채워졌습니다';
+    return widget.message.contains('Reviewed-by:')
+        ? '$source · Reviewed-by는 이 저장소의 커밋 프로필 이름입니다'
+        : source;
+  }
+
+  @override
+  void dispose() {
+    _message.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.timelineTheme;
+    // An empty message would write a subject-less merge commit, so it is the one
+    // edit the dialog refuses; the helper line says so while it is refusing.
+    final blank = _message.text.trim().isEmpty;
+    // 시안의 CSS 그대로: 440 너비, 16/16/14 패딩, 줄 사이 10, 편집기는 88부터.
+    return Center(
+      child: Material(
+        color: palette.surface,
+        elevation: 24,
+        shadowColor: Colors.black.withValues(alpha: 0.5),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: Color(0xFF48484A)),
+        ),
+        child: SizedBox(
+          width: 440,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  '실제 적용하기',
+                  style: TextStyle(
+                    color: palette.text,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text.rich(
+                  TextSpan(
+                    text: widget.lead,
+                    children: [
+                      TextSpan(
+                        text: widget.emphasis,
+                        style: const TextStyle(
+                          color: _previewPurple,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                  style: TextStyle(color: palette.muted, fontSize: 11),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '커밋 메시지',
+                  style: TextStyle(
+                    color: palette.muted,
+                    fontSize: 10.5,
+                    letterSpacing: 0.4,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                TextField(
+                  key: const Key('branch-apply-message'),
+                  controller: _message,
+                  autofocus: true,
+                  minLines: 4,
+                  maxLines: 10,
+                  cursorColor: _previewPurple,
+                  style: TextStyle(
+                    color: palette.text,
+                    fontSize: 11.5,
+                    height: 1.55,
+                    fontFamily: 'monospace',
+                  ),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    filled: true,
+                    fillColor: palette.background,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 11,
+                      vertical: 9,
+                    ),
+                    // 편집기는 포커스를 받아도 테두리가 변하지 않는다 — 커서가 말해 준다.
+                    border: _editorBorder(palette),
+                    enabledBorder: _editorBorder(palette),
+                    focusedBorder: _editorBorder(palette),
+                  ),
+                  onChanged: (_) => setState(() {}),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  blank
+                      ? '비워서 적용할 수는 없습니다 · Esc 또는 취소로 적용 자체를 중단합니다'
+                      : _prefillHelp,
+                  style: TextStyle(color: palette.muted, fontSize: 10),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      key: const Key('branch-apply-cancel'),
+                      onPressed: () => Navigator.pop(context),
+                      style: TextButton.styleFrom(
+                        foregroundColor: palette.text,
+                        backgroundColor: palette.raised,
+                        side: const BorderSide(color: Color(0xFF48484A)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        textStyle: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        visualDensity: VisualDensity.standard,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 6,
+                        ),
+                      ),
+                      child: const Text('취소'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      key: const Key('branch-apply-confirm'),
+                      onPressed: blank
+                          ? null
+                          : () => Navigator.pop(context, _message.text),
+                      style: FilledButton.styleFrom(
+                        foregroundColor: const Color(0xFFFFF4FF),
+                        backgroundColor: const Color(0xFF594576),
+                        disabledForegroundColor: const Color(
+                          0xFFFFF4FF,
+                        ).withValues(alpha: 0.4),
+                        disabledBackgroundColor: const Color(
+                          0xFF594576,
+                        ).withValues(alpha: 0.35),
+                        side: const BorderSide(color: Color(0xFF9D79D0)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        textStyle: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        visualDensity: VisualDensity.standard,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 6,
+                        ),
+                      ),
+                      child: const Text('적용'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  OutlineInputBorder _editorBorder(TimelineThemePalette palette) =>
+      OutlineInputBorder(
+        borderRadius: BorderRadius.circular(7),
+        borderSide: BorderSide(color: palette.border),
+      );
 }
 
 /// Rebuilds one row only when *its* selected or hovered state flips. Every row

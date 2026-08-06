@@ -5395,11 +5395,14 @@ void main() {
     await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
     await tester.tap(find.byKey(const Key('branch-preview-apply')));
     await tester.pumpAndSettle();
-    expect(find.text('Merge를 실제로 적용할까요?'), findsOneWidget);
-    expect(find.textContaining('원격 추적 브랜치와 원격 저장소는 그대로입니다'), findsOneWidget);
-    expect(find.textContaining('적용 전 SHA로 되돌릴 수'), findsOneWidget);
-    expect(find.textContaining('main-tip'), findsWidgets);
-    expect(find.textContaining('feature-tip'), findsWidgets);
+    // 머지 커밋을 만드는 적용은 확인 창 대신 커밋 메시지 창으로 확인받는다.
+    expect(find.text('main ← fix/docs · 머지 커밋 1개 생성'), findsOneWidget);
+    expect(find.text('커밋 메시지'), findsOneWidget);
+    expect(
+      find.textContaining("Merge branch 'fix/docs' into main"),
+      findsWidgets,
+    );
+    expect(find.text('Merge를 실제로 적용할까요?'), findsNothing);
     await tester.tap(find.byKey(const Key('branch-apply-confirm')));
     await tester.pumpAndSettle();
 
@@ -5491,6 +5494,291 @@ void main() {
     await tester.tap(find.byKey(const Key('branch-preview-rollback')));
     await tester.pumpAndSettle();
   }
+
+  /// Opens a clean merge preview and presses 실제 적용하기, so the commit message
+  /// dialog is on screen. [userName] is what this repository commits as.
+  Future<FakeGitRepository> openMergeMessageDialog(
+    WidgetTester tester, {
+    String userName = '채수원',
+    List<CommitProfile> profiles = const [],
+    String template = AppSettings.defaultMergeMessageTemplate,
+  }) async {
+    final comparison = branchComparison(
+      compareRef: 'fix/docs',
+      merge: const MergeConflictCheck(
+        status: MergeConflictStatus.clean,
+        treeSha: 'merge-tree',
+      ),
+    );
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('normal', 'normal history')],
+      refs: const RepoRefs(
+        local: ['main', 'fix/docs'],
+        current: 'main',
+        tips: {'main': 'main-tip', 'fix/docs': 'feature-tip'},
+      ),
+      compareBranchesCallback: (_, _) async => comparison,
+      applyMergePreviewCallback:
+          ({required comparison, required treeSha}) async => BranchApplyResult(
+            mode: BranchApplyMode.merge,
+            baseBranch: 'main',
+            compareBranch: 'fix/docs',
+            baseBefore: comparison.baseTip,
+            baseAfter: 'merge-commit',
+            compareBefore: comparison.compareTip,
+            compareAfter: comparison.compareTip,
+          ),
+      // The repository's own identity, which is where {profile} comes from.
+      runner: (executable, arguments, {workingDirectory, environment}) async =>
+          arguments.length >= 3 && arguments.first == 'config'
+          ? ProcessResult(
+              1,
+              0,
+              arguments.last == 'user.name'
+                  ? '$userName\n'
+                  : 'sw.chae@navercorp.com\n',
+              '',
+            )
+          : ProcessResult(1, 0, '', ''),
+    );
+    await tester.pumpWidget(
+      app(
+        repository,
+        controller,
+        commitProfiles: profiles,
+        mergeMessageTemplate: template,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-fix/docs')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
+    await tester.tap(find.byKey(const Key('branch-preview-apply')));
+    await tester.pumpAndSettle();
+    return repository;
+  }
+
+  String messageFieldText(WidgetTester tester) => tester
+      .widget<TextField>(find.byKey(const Key('branch-apply-message')))
+      .controller!
+      .text;
+
+  VoidCallback? applyButtonPress(WidgetTester tester) => tester
+      .widget<FilledButton>(find.byKey(const Key('branch-apply-confirm')))
+      .onPressed;
+
+  testWidgets('the merge apply writes the message the user confirmed', (
+    tester,
+  ) async {
+    final repository = await openMergeMessageDialog(
+      tester,
+      profiles: const [
+        CommitProfile(label: '회사', name: '채수원', email: 'sw.chae@navercorp.com'),
+      ],
+    );
+    final field = find.byKey(const Key('branch-apply-message'));
+
+    expect(find.text('실제 적용하기'), findsOneWidget);
+    expect(find.text('main ← fix/docs · 머지 커밋 1개 생성'), findsOneWidget);
+    expect(find.text('커밋 메시지'), findsOneWidget);
+    expect(
+      messageFieldText(tester),
+      "Merge branch 'fix/docs' into main\n\nReviewed-by: 채수원",
+    );
+    expect(find.textContaining('설정의 기본 메시지 템플릿으로 채워졌습니다'), findsOneWidget);
+
+    // Esc도 취소도 메시지가 아니라 적용 자체를 중단한다.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(field, findsNothing);
+    expect(repository.appliedMessage, isNull);
+
+    await tester.tap(find.byKey(const Key('branch-preview-apply')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-apply-cancel')));
+    await tester.pumpAndSettle();
+    expect(field, findsNothing);
+    expect(repository.appliedMessage, isNull);
+    expect(find.byKey(const Key('branch-preview-rollback')), findsNothing);
+
+    // 다시 열어 비우면 적용이 잠기고, 왜 잠겼는지 말한다.
+    await tester.tap(find.byKey(const Key('branch-preview-apply')));
+    await tester.pumpAndSettle();
+    expect(applyButtonPress(tester), isNotNull);
+    await tester.enterText(field, '   \n');
+    await tester.pumpAndSettle();
+    expect(applyButtonPress(tester), isNull);
+    expect(find.textContaining('비워서 적용할 수는 없습니다'), findsOneWidget);
+
+    // 고친 그대로가 머지 커밋 메시지가 된다.
+    const edited =
+        "Merge branch 'fix/docs' into main\n"
+        '\n'
+        '리뷰 끝났습니다.\n'
+        'Reviewed-by: 채수원';
+    await tester.enterText(field, edited);
+    await tester.pumpAndSettle();
+    expect(applyButtonPress(tester), isNotNull);
+    await tester.tap(find.byKey(const Key('branch-apply-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(repository.appliedMessage, edited);
+    expect(find.text('Merge 이전 시점으로 되돌리기'), findsOneWidget);
+  });
+
+  testWidgets('an emptied template prefills git\'s own message', (
+    tester,
+  ) async {
+    await openMergeMessageDialog(tester, template: '');
+
+    expect(messageFieldText(tester), "Merge branch 'fix/docs' into main");
+    // 채운 쪽을 그대로 말한다: 템플릿을 비웠으니 템플릿이 채웠다고 하지 않는다.
+    expect(find.textContaining('git 표준 메시지로 채워졌습니다'), findsOneWidget);
+    expect(find.textContaining('설정의 기본 메시지 템플릿'), findsNothing);
+  });
+
+  testWidgets('a repository with no name to give drops the Reviewed-by line', (
+    tester,
+  ) async {
+    await openMergeMessageDialog(tester, userName: '');
+
+    // 줄만이 아니라 그 위에 남을 빈 줄까지 사라진다.
+    expect(messageFieldText(tester), "Merge branch 'fix/docs' into main");
+    // 없는 줄을 설명하지 않는다.
+    expect(find.textContaining('Reviewed-by는'), findsNothing);
+  });
+
+  /// A clean rebase preview on screen, with 'Rebase만' selected as it starts.
+  Future<FakeGitRepository> openRebasePreview(WidgetTester tester) async {
+    // 선택 카드가 붙은 적용 카드는 기본 창보다 길어서 버튼이 창 밖으로 나간다.
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    const compareRef = 'fix/docs';
+    final comparison = branchComparison(compareRef: compareRef);
+    final original = comparison.commits
+        .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
+        .commit;
+    final preview = RebasePreviewResult(
+      status: RebasePreviewStatus.clean,
+      baseTip: comparison.baseTip,
+      compareTip: comparison.compareTip,
+      rewritten: [(original: original, rewrittenSha: 'rewritten-feature')],
+      completed: 1,
+      total: 1,
+      virtualTip: 'rewritten-feature',
+    );
+    late FakeGitRepository repository;
+    repository = FakeGitRepository(
+      (_, _) async => [commit('normal', 'normal history')],
+      refs: const RepoRefs(
+        local: ['main', compareRef],
+        current: 'main',
+        tips: {'main': 'main-tip', compareRef: 'feature-tip'},
+      ),
+      compareBranchesCallback: (_, _) async => comparison,
+      openRebasePreviewCallback:
+          ({required baseRef, required compareRef}) async =>
+              FakeRebasePreviewSession(repository, preview),
+      applyRebasePreviewCallback:
+          ({required comparison, required virtualTip}) async =>
+              BranchApplyResult(
+                mode: BranchApplyMode.rebase,
+                baseBranch: 'main',
+                compareBranch: compareRef,
+                baseBefore: comparison.baseTip,
+                baseAfter: comparison.baseTip,
+                compareBefore: comparison.compareTip,
+                compareAfter: 'rewritten-feature',
+              ),
+      applyRebaseThenMergeCallback:
+          ({required comparison, required virtualTip}) async =>
+              BranchApplyResult(
+                mode: BranchApplyMode.rebaseMerge,
+                baseBranch: 'main',
+                compareBranch: compareRef,
+                baseBefore: comparison.baseTip,
+                baseAfter: 'merge-commit',
+                compareBefore: comparison.compareTip,
+                compareAfter: 'rewritten-feature',
+                workingTreeUpdated: true,
+              ),
+      filesBetween: (_, _) async => const [],
+      runner: (executable, arguments, {workingDirectory, environment}) async =>
+          arguments.length >= 3 && arguments.first == 'config'
+          ? ProcessResult(
+              1,
+              0,
+              arguments.last == 'user.name' ? '채수원\n' : '',
+              '',
+            )
+          : ProcessResult(1, 0, '', ''),
+    );
+    await tester.pumpWidget(
+      app(repository, controller, branchPreviewMode: BranchPreviewMode.rebase),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-$compareRef')));
+    await tester.pumpAndSettle();
+    return repository;
+  }
+
+  testWidgets('a plain rebase has no message to write and keeps its confirm', (
+    tester,
+  ) async {
+    await openRebasePreview(tester);
+
+    await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
+    await tester.tap(find.byKey(const Key('branch-preview-apply')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Rebase를 실제로 적용할까요?'), findsOneWidget);
+    expect(find.byKey(const Key('branch-apply-message')), findsNothing);
+    expect(find.text('실제 적용하기'), findsOneWidget); // 카드의 버튼뿐, 창 제목이 아니다.
+  });
+
+  testWidgets('a rebase-merge apply writes the message the user confirmed', (
+    tester,
+  ) async {
+    final repository = await openRebasePreview(tester);
+    final optionMerge = find.byKey(
+      const Key('branch-preview-option-rebase-merge'),
+    );
+    await tester.ensureVisible(optionMerge);
+    await tester.tap(optionMerge);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
+    await tester.tap(find.byKey(const Key('branch-preview-apply')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('fix/docs 재배치 → 머지 커밋 1개로 main 이동'), findsOneWidget);
+    expect(find.text('Rebase 후 Merge를 실제로 적용할까요?'), findsNothing);
+    expect(
+      messageFieldText(tester),
+      "Merge branch 'fix/docs' into main\n\nReviewed-by: 채수원",
+    );
+
+    const edited = "Merge branch 'fix/docs' into main\n\n재배치한 뒤 병합했습니다.";
+    await tester.enterText(
+      find.byKey(const Key('branch-apply-message')),
+      edited,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-apply-confirm')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 220));
+    await tester.pumpAndSettle();
+
+    expect(repository.appliedMessage, edited);
+    expect(find.text('Rebase 후 Merge 이전 시점으로 되돌리기'), findsOneWidget);
+  });
 
   testWidgets('a merge applied to a branch checked out nowhere says so', (
     tester,
@@ -6164,11 +6452,9 @@ void main() {
     await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
     await tester.tap(find.byKey(const Key('branch-preview-apply')));
     await tester.pumpAndSettle();
-    expect(find.text('Rebase 후 Merge를 실제로 적용할까요?'), findsOneWidget);
-    expect(
-      find.textContaining('로컬 $compareRef와 main 브랜치를 변경합니다'),
-      findsOneWidget,
-    );
+    // Rebase 후 Merge도 머지 커밋을 만드니 메시지 창이 확인 창을 대신한다.
+    expect(find.text('$compareRef 재배치 → 머지 커밋 1개로 main 이동'), findsOneWidget);
+    expect(find.text('Rebase 후 Merge를 실제로 적용할까요?'), findsNothing);
     await tester.tap(find.byKey(const Key('branch-apply-confirm')));
     await tester.pumpAndSettle();
 
@@ -6642,8 +6928,7 @@ void main() {
 
     await tester.tap(find.byKey(const Key('branch-preview-apply')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('로컬 main 브랜치만 변경합니다'), findsOneWidget);
-    expect(find.textContaining('원격 추적 브랜치와 원격 저장소는 그대로입니다'), findsOneWidget);
+    expect(find.text('main ← origin/feature · 머지 커밋 1개 생성'), findsOneWidget);
     await tester.tap(find.byKey(const Key('branch-apply-confirm')));
     await tester.pumpAndSettle();
 
@@ -7882,6 +8167,72 @@ void main() {
     );
   });
 
+  test('commit message templates fill their variables in', () {
+    expect(
+      renderCommitMessageTemplate(
+        AppSettings.defaultMergeMessageTemplate,
+        source: 'fix/docs',
+        target: 'main',
+        profile: '채수원',
+      ),
+      "Merge branch 'fix/docs' into main\n\nReviewed-by: 채수원",
+    );
+    // 이름이 없으면 그 줄과 위의 빈 줄까지 사라진다 — 'Reviewed-by:'만 남는 편이 나쁘다.
+    expect(
+      renderCommitMessageTemplate(
+        AppSettings.defaultMergeMessageTemplate,
+        source: 'fix/docs',
+        target: 'main',
+      ),
+      "Merge branch 'fix/docs' into main",
+    );
+    // 비운 템플릿은 git 표준 메시지다.
+    expect(
+      renderCommitMessageTemplate(
+        '   \n',
+        source: 'fix/docs',
+        target: 'main',
+        profile: '채수원',
+      ),
+      "Merge branch 'fix/docs' into main",
+    );
+    // 모르는 변수는 손대지 않는다.
+    expect(
+      renderCommitMessageTemplate(
+        '{source} → {target} ({ticket})',
+        source: 'fix/docs',
+        target: 'main',
+      ),
+      'fix/docs → main ({ticket})',
+    );
+    // 본문 가운데서 사라진 줄도 빈 줄을 겹쳐 남기지 않는다.
+    final middle = renderCommitMessageTemplate(
+      'Subject\n\nReviewed-by: {profile}\n\nCo-authored-by: 이수린',
+      source: 'fix/docs',
+      target: 'main',
+    );
+    expect(middle, 'Subject\n\nCo-authored-by: 이수린');
+    expect(middle, isNot(contains('\n\n\n')));
+  });
+
+  test('commit message templates round-trip, empty one included', () {
+    const settings = AppSettings(
+      mergeMessageTemplate: "Merge '{source}'\n\nReviewed-by: {profile}",
+      rebaseMergeMessageTemplate: '',
+    );
+    expect(AppSettings.fromJson(settings.toJson()), settings);
+    expect(
+      AppSettings.fromJson(const {}).mergeMessageTemplate,
+      AppSettings.defaultMergeMessageTemplate,
+    );
+    expect(
+      AppSettings.fromJson(const {
+        'rebaseMergeMessageTemplate': 42,
+      }).rebaseMergeMessageTemplate,
+      AppSettings.defaultMergeMessageTemplate,
+    );
+  });
+
   test('recent repositories round-trip newest first, capped and deduped', () {
     const settings = AppSettings(
       recentRepositories: ['/repos/one', '/repos/two'],
@@ -8899,6 +9250,53 @@ void main() {
           .isSelected,
       ui.Tristate.isTrue,
     );
+  });
+
+  testWidgets('the commit message section edits both templates', (
+    tester,
+  ) async {
+    final saved = <AppSettings>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          settings: const AppSettings(),
+          onChanged: saved.add,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('settings-section-commit-messages')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Merge 커밋 메시지'), findsOneWidget);
+    expect(find.text('Rebase 후 Merge 커밋 메시지'), findsOneWidget);
+    expect(find.textContaining('{profile} 이 저장소의 커밋 프로필 이름'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('merge-message-template')))
+          .controller
+          ?.text,
+      AppSettings.defaultMergeMessageTemplate,
+    );
+
+    await tester.enterText(
+      find.byKey(const Key('merge-message-template')),
+      "Merge '{source}'\n\nReviewed-by: {profile}",
+    );
+    await tester.pumpAndSettle();
+    expect(
+      saved.last.mergeMessageTemplate,
+      "Merge '{source}'\n\nReviewed-by: {profile}",
+    );
+
+    // 비우는 것도 선택이다: git 표준 메시지만 쓰겠다는 뜻이다.
+    await tester.enterText(
+      find.byKey(const Key('rebase-merge-message-template')),
+      '',
+    );
+    await tester.pumpAndSettle();
+    expect(saved.last.rebaseMergeMessageTemplate, isEmpty);
+    expect(AppSettings.fromJson(saved.last.toJson()), saved.last);
   });
 
   testWidgets('the timeline colors editor applies hex edits and resets', (
@@ -17755,6 +18153,9 @@ Widget app(
   BranchPreviewMode branchPreviewMode = BranchPreviewMode.merge,
   ValueChanged<BranchPreviewMode>? onBranchPreviewModeChanged,
   VoidCallback? onOpenSettings,
+  List<CommitProfile> commitProfiles = const [],
+  String mergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
+  String rebaseMergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
 }) => MaterialApp(
   home: TimelineScreen(
     repository: repository,
@@ -17762,6 +18163,9 @@ Widget app(
     branchPreviewMode: branchPreviewMode,
     onBranchPreviewModeChanged: onBranchPreviewModeChanged,
     onOpenSettings: onOpenSettings,
+    commitProfiles: commitProfiles,
+    mergeMessageTemplate: mergeMessageTemplate,
+    rebaseMergeMessageTemplate: rebaseMergeMessageTemplate,
   ),
 );
 
@@ -18003,16 +18407,27 @@ class FakeGitRepository extends GitRepository {
     return FakeMergePreviewSession(this, result, finishResult: result);
   }
 
+  /// The commit message the last apply was handed, so a test can assert what
+  /// the message dialog passed through.
+  String? appliedMessage;
+
   @override
   Future<BranchApplyResult> applyMergePreview({
     required BranchComparisonResult comparison,
     required String treeSha,
-  }) =>
-      applyMergePreviewCallback?.call(
-        comparison: comparison,
-        treeSha: treeSha,
-      ) ??
-      super.applyMergePreview(comparison: comparison, treeSha: treeSha);
+    String? message,
+  }) {
+    appliedMessage = message;
+    return applyMergePreviewCallback?.call(
+          comparison: comparison,
+          treeSha: treeSha,
+        ) ??
+        super.applyMergePreview(
+          comparison: comparison,
+          treeSha: treeSha,
+          message: message,
+        );
+  }
 
   @override
   Future<BranchApplyResult> applyRebasePreview({
@@ -18029,15 +18444,19 @@ class FakeGitRepository extends GitRepository {
   Future<BranchApplyResult> applyRebaseThenMerge({
     required BranchComparisonResult comparison,
     required String virtualTip,
-  }) =>
-      applyRebaseThenMergeCallback?.call(
-        comparison: comparison,
-        virtualTip: virtualTip,
-      ) ??
-      super.applyRebaseThenMerge(
-        comparison: comparison,
-        virtualTip: virtualTip,
-      );
+    String? message,
+  }) {
+    appliedMessage = message;
+    return applyRebaseThenMergeCallback?.call(
+          comparison: comparison,
+          virtualTip: virtualTip,
+        ) ??
+        super.applyRebaseThenMerge(
+          comparison: comparison,
+          virtualTip: virtualTip,
+          message: message,
+        );
+  }
 
   @override
   Future<BranchRecommendation?> recommendBranchIntegration({
