@@ -80,6 +80,7 @@ enum PreviewGraphNodeKind {
   actual,
   virtualMerge,
   virtualRebase,
+  virtualRebaseMerge,
   conflictTarget,
 }
 
@@ -170,10 +171,14 @@ BranchPreviewGraph layoutMergePreviewGraph(BranchComparisonResult comparison) {
   );
 }
 
+/// The rebase preview as the timeline draws it. With [mergeCommit] the base
+/// branch also gets the merge commit it would land on, one row above the
+/// replayed commits — the same tree, one more virtual node.
 BranchPreviewGraph layoutRebasePreviewGraph(
   BranchComparisonResult comparison,
-  RebasePreviewResult preview,
-) {
+  RebasePreviewResult preview, {
+  bool mergeCommit = false,
+}) {
   final laidOut = layoutBranchComparison(comparison.commits);
   final compare = laidOut.firstWhere(
     (row) => row.commit.sha == comparison.compareTip,
@@ -276,7 +281,37 @@ BranchPreviewGraph layoutRebasePreviewGraph(
     parent = rewrite.rewrittenSha;
   }
   final virtualNewestFirst = virtualOldestFirst.reversed.toList();
+  final template = comparison.commits.first.commit;
+  final mergeSha =
+      'virtual-rebase-merge-${comparison.baseTip}-${virtualOldestFirst.last.sha}';
+  final mergeRow = !mergeCommit
+      ? null
+      : GraphRow(
+          commit: GitCommit(
+            sha: mergeSha,
+            shortSha: 'new SHA',
+            parents: [comparison.baseTip, virtualOldestFirst.last.sha],
+            author: template.author,
+            authorTimestamp: template.authorTimestamp,
+            committer: template.committer,
+            committerTimestamp: template.committerTimestamp + 1,
+            refs: const [],
+            subject:
+                "Merge branch '${comparison.compareRef}' into ${comparison.baseRef}",
+          ),
+          lane: base.lane,
+          // 두 부모 모두 이 그림에서는 기준 브랜치 선 위에 있다.
+          parentLanes: [base.lane, base.lane],
+          activeLanes: [base.lane],
+          nextLanes: [base.lane],
+          activeLaneShas: {base.lane: mergeSha},
+          nextLaneShas: {base.lane: virtualNewestFirst.first.sha},
+          branch: base.branch,
+          activeLaneBranches: {base.lane: base.branch},
+          nextLaneBranches: {base.lane: base.branch},
+        );
   final rows = [
+    ?mergeRow,
     for (final commit in virtualNewestFirst)
       GraphRow(
         commit: commit,
@@ -299,11 +334,12 @@ BranchPreviewGraph layoutRebasePreviewGraph(
   return BranchPreviewGraph(
     rows: rows,
     kinds: {
+      if (mergeRow != null) mergeSha: PreviewGraphNodeKind.virtualRebaseMerge,
       for (final commit in virtualOldestFirst)
         commit.sha: PreviewGraphNodeKind.virtualRebase,
     },
     dashedLanes: {
-      for (var index = 0; index < virtualNewestFirst.length; index++)
+      for (var index = 0; index < rows.length - existing.length; index++)
         index: {base.lane},
     },
     mappings: [
@@ -888,6 +924,10 @@ class _TimelineScreenState extends State<TimelineScreen>
   BranchApplyResult? _branchApplyResult;
   Object? _branchApplyError;
   String? _rebaseApplyingSha;
+
+  /// 어떤 rebase 결과를 적용할지 카드에서 고른 값. 미리보기가 바뀌면 함께
+  /// 초기화되니 비교 대상이 달라지면 다시 'Rebase만'에서 시작한다.
+  var _rebaseApplyMerge = false;
   var _branchPreviewDropped = false;
   Object? _comparisonError;
   var _comparisonSerial = 0;
@@ -3219,7 +3259,11 @@ class _TimelineScreenState extends State<TimelineScreen>
       });
       return;
     }
-    final graph = layoutRebasePreviewGraph(comparison, result);
+    final graph = layoutRebasePreviewGraph(
+      comparison,
+      result,
+      mergeCommit: _rebaseApplyMerge,
+    );
     final conflictIndex = graph.rows.indexWhere(
       (row) => row.commit.sha == result.currentCommit?.sha,
     );
@@ -3331,6 +3375,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     _rebaseResolvedFiles.clear();
     _rebaseEditedFiles.clear();
     _rebasePreviewError = null;
+    _rebaseApplyMerge = false;
     if (session != null) unawaited(session.dispose());
   }
 
@@ -3340,6 +3385,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     _branchApplyResult = null;
     _branchApplyError = null;
     _rebaseApplyingSha = null;
+    _rebaseApplyMerge = false;
     _branchPreviewDropped = false;
   }
 
@@ -4969,7 +5015,13 @@ class _TimelineScreenState extends State<TimelineScreen>
         ]);
       } else if (_rebaseCheck?.status == RebaseCheckStatus.clean) {
         final count = _rebasePreview?.rewritten.length ?? 0;
-        if (count > 0) details.add(detail('가상 커밋 $count개'));
+        if (count > 0) {
+          details.add(detail('가상 커밋 $count개'));
+          // 선택에 따라 타임라인에 머지 커밋이 하나 더 그려지면 요약에서도 센다.
+          if (_rebaseApplyMerge) {
+            details.add(detail('머지 커밋 1개', color: _previewPurple));
+          }
+        }
         details.addAll([
           detail('점선 이동 경로', color: _previewPurple),
           detail('실제 브랜치 변경 없음'),
@@ -5173,9 +5225,10 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (target?.needsRecalculation == true) {
       return '로컬 ${target!.localBranch} 기준으로 다시 계산';
     }
+    // Rebase 쪽은 무엇을 적용할지 카드의 선택이 말하니 버튼 문구는 고정이다.
     return _branchPreviewMode == BranchPreviewMode.merge
         ? '${comparison.compareRef}를 ${target?.localBranch ?? comparison.baseRef}에 Merge 실제 적용'
-        : '${comparison.baseRef} 위로 ${target?.localBranch ?? comparison.compareRef} Rebase 실제 적용';
+        : '실제 적용하기';
   }
 
   String get _branchPreviewApplyHelp {
@@ -5195,9 +5248,11 @@ class _TimelineScreenState extends State<TimelineScreen>
     return '가상 결과를 로컬 ${target.localBranch}에 적용할 수 있습니다.';
   }
 
-  Future<void> _prepareBranchPreviewApply({
-    bool rebaseThenMerge = false,
-  }) async {
+  /// Which rebase apply path the card has selected. Merge mode never asks.
+  bool get _rebaseThenMergeSelected =>
+      _branchPreviewMode == BranchPreviewMode.rebase && _rebaseApplyMerge;
+
+  Future<void> _prepareBranchPreviewApply() async {
     final target = _branchPreviewTarget;
     if (target == null || !_branchPreviewReady || _branchApplyBusy) return;
     if (target.needsRecalculation) {
@@ -5209,12 +5264,11 @@ class _TimelineScreenState extends State<TimelineScreen>
       await _selectComparison(target.localBranch);
       return;
     }
-    await _confirmBranchPreviewApply(rebaseThenMerge: rebaseThenMerge);
+    await _confirmBranchPreviewApply();
   }
 
-  Future<void> _confirmBranchPreviewApply({
-    bool rebaseThenMerge = false,
-  }) async {
+  Future<void> _confirmBranchPreviewApply() async {
+    final rebaseThenMerge = _rebaseThenMergeSelected;
     final comparison = _comparison;
     final target = _branchPreviewTarget;
     if (comparison == null ||
@@ -5248,17 +5302,12 @@ class _TimelineScreenState extends State<TimelineScreen>
       ),
     );
     if (confirmed == true && mounted) {
-      await _runBranchPreviewApply(
-        comparison,
-        rebaseThenMerge: rebaseThenMerge,
-      );
+      await _runBranchPreviewApply(comparison);
     }
   }
 
-  Future<void> _runBranchPreviewApply(
-    BranchComparisonResult comparison, {
-    bool rebaseThenMerge = false,
-  }) async {
+  Future<void> _runBranchPreviewApply(BranchComparisonResult comparison) async {
+    final rebaseThenMerge = _rebaseThenMergeSelected;
     final mode = _branchPreviewMode;
     final request = ++_branchApplySerial;
     setState(() {
@@ -5464,49 +5513,152 @@ class _TimelineScreenState extends State<TimelineScreen>
     ),
   );
 
-  /// The second way to land a clean rebase preview: replay the commits, then put
-  /// one merge commit over them. One more option, nothing to decide first.
-  List<Widget> _branchPreviewRebaseMergeOption() {
+  /// Picking a landing changes nothing but the drawing: the pane's graph and the
+  /// timeline's dashed path redraw from the tree we already have.
+  void _selectRebaseApplyMerge(bool mergeCommit) {
+    if (_rebaseApplyMerge == mergeCommit || _branchApplyBusy) return;
     final comparison = _comparison;
-    if (comparison == null) return const [];
+    final preview = _rebasePreview;
+    setState(() {
+      _rebaseApplyMerge = mergeCommit;
+      if (comparison == null || preview == null) return;
+      final graph = layoutRebasePreviewGraph(
+        comparison,
+        preview,
+        mergeCommit: mergeCommit,
+      );
+      _previewGraph = graph;
+      _comparisonRows = graph.rows;
+      _comparisonEntries = [
+        for (var index = 0; index < graph.rows.length; index++)
+          (rowIndex: index, label: null, row: graph.rows[index]),
+      ];
+      _selectedIndex.value = 0;
+    });
+    _showFirstComparisonRow();
+  }
+
+  /// The two ways a clean rebase preview can land, as one choice: replay the
+  /// commits, or replay them and put one merge commit over them. What is
+  /// selected is what both graphs draw and what the button applies.
+  List<Widget> _branchPreviewApplyOptions() {
+    final comparison = _comparison;
     // 옮길 커밋이 하나도 없으면 재배치 결과가 곧 기준 브랜치라 얹을 머지 커밋이
-    // 없다. 누르면 엔진이 거절할 버튼은 아예 내보내지 않는다.
-    if (_rebasePreview?.rewritten.isEmpty ?? true) return const [];
+    // 없다. 고를 것이 하나뿐이면 라디오도 내보내지 않는다.
+    if (comparison == null || (_rebasePreview?.rewritten.isEmpty ?? true)) {
+      return const [];
+    }
+    Widget option({
+      required Key key,
+      required bool mergeCommit,
+      required String title,
+      required String description,
+      Key? descriptionKey,
+    }) {
+      final selected = _rebaseApplyMerge == mergeCommit;
+      return Padding(
+        padding: const EdgeInsets.only(top: 7),
+        child: InkWell(
+          key: key,
+          onTap: _branchApplyBusy
+              ? null
+              : () => _selectRebaseApplyMerge(mergeCommit),
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+            decoration: BoxDecoration(
+              color: selected
+                  ? _previewPurple.withValues(alpha: 0.08)
+                  : Colors.transparent,
+              border: Border.all(
+                color: selected
+                    ? const Color(0xFF9D79D0)
+                    : const Color(0xFF4A4157),
+              ),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Container(
+                    width: 14,
+                    height: 14,
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: selected
+                            ? _previewPurple
+                            : const Color(0xFF8A8494),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: selected
+                        ? const DecoratedBox(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _previewPurple,
+                            ),
+                          )
+                        : null,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          color: selected
+                              ? const Color(0xFFE8DCFF)
+                              : _palette.text,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        description,
+                        key: descriptionKey,
+                        style: TextStyle(color: _palette.muted, fontSize: 10),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return [
-      const SizedBox(height: 7),
-      OutlinedButton(
-        key: const Key('branch-preview-apply-rebase-merge'),
-        onPressed: _branchApplyBusy || !_branchPreviewCanPrepare
-            ? null
-            : () =>
-                  unawaited(_prepareBranchPreviewApply(rebaseThenMerge: true)),
-        style: OutlinedButton.styleFrom(
-          foregroundColor: _previewPurple,
-          backgroundColor: Colors.transparent,
-          side: const BorderSide(color: Color(0xFF695786)),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-        ),
-        child: const Text(
-          'Rebase 후 Merge 커밋으로 병합',
-          textAlign: TextAlign.center,
-          softWrap: true,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
+      option(
+        key: const Key('branch-preview-option-rebase'),
+        mergeCommit: false,
+        title: 'Rebase만',
+        description:
+            '${comparison.compareRef}를 ${comparison.baseRef} 위로 재배치합니다. '
+            '${comparison.baseRef}은 움직이지 않습니다.',
       ),
-      const SizedBox(height: 3),
-      Text(
-        key: const Key('branch-preview-rebase-merge-caption'),
-        '재배치한 커밋 위에 머지 커밋 하나를 만들어 ${comparison.baseRef}을 옮깁니다. '
-        '${comparison.baseRef}이 체크아웃돼 있지 않으면 포인터만 이동합니다.',
-        style: TextStyle(color: _palette.muted, fontSize: 10),
+      option(
+        key: const Key('branch-preview-option-rebase-merge'),
+        mergeCommit: true,
+        title: 'Rebase 후 Merge 커밋으로 병합',
+        descriptionKey: const Key('branch-preview-rebase-merge-caption'),
+        description:
+            '재배치한 커밋 위에 머지 커밋 하나를 만들어 ${comparison.baseRef}을 옮깁니다. '
+            '${comparison.baseRef}이 체크아웃돼 있지 않으면 포인터만 이동합니다.',
       ),
     ];
   }
 
-  /// What the two steps leave behind: the replayed commits on a dashed arc and
-  /// the merge commit the base branch ends on.
+  /// What the selected landing leaves behind: the replayed commits carrying on
+  /// along the base rail, or riding a dashed arc onto a merge commit.
   Widget _branchPreviewRebaseMergeGraph(BranchComparisonResult comparison) =>
       SizedBox(
         key: const Key('branch-preview-rebase-merge-graph'),
@@ -5515,6 +5667,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           painter: RebaseMergeResultPainter(
             commitCount: _rebasePreview?.rewritten.length ?? 0,
             baseLabel: comparison.baseRef,
+            mergeCommit: _rebaseApplyMerge,
             railColor: _palette.border,
             mutedColor: _palette.muted,
           ),
@@ -5683,12 +5836,12 @@ class _TimelineScreenState extends State<TimelineScreen>
                   _branchPreviewApplyHelp,
                   style: TextStyle(color: _palette.muted, fontSize: 10),
                 ),
+                if (!merge) ..._branchPreviewApplyOptions(),
                 const SizedBox(height: 7),
                 SizedBox(
                   width: double.infinity,
                   child: _branchPreviewApplyButton(),
                 ),
-                if (!merge) ..._branchPreviewRebaseMergeOption(),
               ],
             ),
         ],
@@ -6308,6 +6461,10 @@ class _TimelineScreenState extends State<TimelineScreen>
           ),
         ];
       }
+      // 머지 커밋을 얹으면 기준 브랜치는 이 가상 노드로 옮겨간다.
+      if (previewKind == PreviewGraphNodeKind.virtualRebaseMerge) {
+        return [GitRef(name: comparison.baseRef, isHead: true)];
+      }
       if (previewKind == PreviewGraphNodeKind.conflictTarget) {
         return const [GitRef(name: '가상 rebase 위치')];
       }
@@ -6342,7 +6499,9 @@ class _TimelineScreenState extends State<TimelineScreen>
             BranchCommitSide.compareOnly => compareLabel,
             BranchCommitSide.commonBoundary => '공통',
           },
-          isHead: side == BranchCommitSide.baseOnly,
+          // 가상 머지 노드가 있으면 기준 브랜치 칩은 그 줄로 올라가고 실제 tip은
+          // 표시 없는 칩만 남는다.
+          isHead: side == BranchCommitSide.baseOnly && !_rebaseApplyMerge,
         ),
       ];
     }
@@ -6514,15 +6673,20 @@ class _TimelineScreenState extends State<TimelineScreen>
         : AvatarService.branchColor(row.branch);
     final previewKind = _previewGraph?.kinds[commit.sha];
     final virtualMerge = previewKind == PreviewGraphNodeKind.virtualMerge;
+    final virtualRebaseMerge =
+        previewKind == PreviewGraphNodeKind.virtualRebaseMerge;
     final rebaseConflict =
         _rebasePreview?.status == RebasePreviewStatus.conflict &&
         _rebasePreview?.currentCommit?.sha == commit.sha;
     final rebaseApplying = _rebaseApplyingSha == commit.sha;
     final virtualPreview =
-        virtualMerge || previewKind == PreviewGraphNodeKind.virtualRebase;
+        virtualMerge ||
+        virtualRebaseMerge ||
+        previewKind == PreviewGraphNodeKind.virtualRebase;
     final mergeConflict =
         virtualMerge && _effectiveMergeStatus == MergeConflictStatus.conflicts;
-    final synthetic = commit.isWorkingTree || virtualMerge;
+    final synthetic =
+        commit.isWorkingTree || virtualMerge || virtualRebaseMerge;
     final previewColor = previewKind == PreviewGraphNodeKind.conflictTarget
         ? _previewPurple
         : virtualPreview
@@ -6568,6 +6732,8 @@ class _TimelineScreenState extends State<TimelineScreen>
         ? mergeConflict
               ? '충돌'
               : '가상'
+        : virtualRebaseMerge
+        ? '가상 머지'
         : rewrittenIndex >= 0
         ? '재작성 ${rewrittenIndex + 1}/${rebasePreview!.total}'
         : rebasePreview?.status == RebasePreviewStatus.conflict &&
@@ -6611,6 +6777,12 @@ class _TimelineScreenState extends State<TimelineScreen>
       if (previewKind == PreviewGraphNodeKind.virtualRebase) {
         return KeyedSubtree(
           key: Key('virtual-rebase-chip-${commit.sha}'),
+          child: cell,
+        );
+      }
+      if (virtualRebaseMerge) {
+        return KeyedSubtree(
+          key: const Key('virtual-rebase-merge-chip'),
           child: cell,
         );
       }
@@ -6658,6 +6830,8 @@ class _TimelineScreenState extends State<TimelineScreen>
               ? const Key('virtual-merge-conflict-row')
               : previewKind == PreviewGraphNodeKind.virtualMerge
               ? const Key('virtual-preview-row')
+              : virtualRebaseMerge
+              ? const Key('virtual-rebase-merge-row')
               : previewKind == PreviewGraphNodeKind.virtualRebase
               ? Key('virtual-rebase-row-${commit.sha}')
               : null,
@@ -6731,7 +6905,8 @@ class _TimelineScreenState extends State<TimelineScreen>
                         commit.isWorkingTree ||
                             (merge &&
                                 previewKind !=
-                                    PreviewGraphNodeKind.virtualMerge)
+                                    PreviewGraphNodeKind.virtualMerge &&
+                                !virtualRebaseMerge)
                         ? null
                         : _graphNode(
                             commit: commit,
@@ -6770,7 +6945,12 @@ class _TimelineScreenState extends State<TimelineScreen>
                               vertical: 3,
                             ),
                             decoration: BoxDecoration(
-                              color: rowAccentColor.withValues(alpha: 0.2),
+                              color: rowAccentColor.withValues(
+                                alpha: virtualRebaseMerge ? 0.28 : 0.2,
+                              ),
+                              border: virtualRebaseMerge
+                                  ? Border.all(color: const Color(0xFF9D79D0))
+                                  : null,
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
@@ -6778,6 +6958,8 @@ class _TimelineScreenState extends State<TimelineScreen>
                               style: TextStyle(
                                 color: rebaseConflict
                                     ? const Color(0xFFFFC4C8)
+                                    : virtualRebaseMerge
+                                    ? const Color(0xFFE4D4FF)
                                     : rowAccentColor,
                                 fontSize: 9,
                                 fontWeight: FontWeight.w700,
@@ -6811,7 +6993,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                         Text(
                           commit.isWorkingTree
                               ? 'working tree'
-                              : virtualMerge
+                              : virtualMerge || virtualRebaseMerge
                               ? '—'
                               : _socialTime(commit.committerTimestamp),
                           maxLines: 1,
@@ -6948,6 +7130,26 @@ class _TimelineScreenState extends State<TimelineScreen>
               'VM',
               style: TextStyle(
                 color: Colors.black,
+                fontSize: 8,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          )
+        : kind == PreviewGraphNodeKind.virtualRebaseMerge
+        ? Container(
+            key: const Key('virtual-rebase-merge-node'),
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _previewPurplePanel,
+              border: Border.all(color: _previewPurple, width: 2),
+            ),
+            child: const Text(
+              'VM',
+              style: TextStyle(
+                color: _previewPurple,
                 fontSize: 8,
                 fontWeight: FontWeight.w800,
               ),
@@ -7772,6 +7974,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     final kind = commit == null ? null : _previewGraph?.kinds[commit.sha];
     return kind == PreviewGraphNodeKind.virtualMerge ||
         kind == PreviewGraphNodeKind.virtualRebase ||
+        kind == PreviewGraphNodeKind.virtualRebaseMerge ||
         (_comparison != null &&
             (_branchPreviewMode == BranchPreviewMode.merge
                 ? _mergePreviewError != null
@@ -10142,19 +10345,23 @@ class _RowStateScopeState extends State<_RowStateScope> {
   Widget build(BuildContext context) => widget.builder(_selected, _hovered);
 }
 
-/// The result of a rebase-then-merge: the base rail, a dashed arc carrying the
-/// replayed commits, and the merge commit the base branch lands on. Drawn in a
-/// 560 wide design space and stretched to whatever the pane gives it.
+/// What the selected rebase landing leaves behind. Without [mergeCommit] the
+/// replayed commits carry the base rail straight on, because rebasing onto the
+/// base branch is that line continuing; with it they ride a dashed arc onto the
+/// merge commit the base branch lands on. Drawn in a 560 wide design space and
+/// stretched to whatever the pane gives it.
 class RebaseMergeResultPainter extends CustomPainter {
   const RebaseMergeResultPainter({
     required this.commitCount,
     required this.baseLabel,
+    required this.mergeCommit,
     required this.railColor,
     required this.mutedColor,
   });
 
   final int commitCount;
   final String baseLabel;
+  final bool mergeCommit;
   final Color railColor;
   final Color mutedColor;
 
@@ -10173,6 +10380,9 @@ class RebaseMergeResultPainter extends CustomPainter {
           style: TextStyle(color: color, fontSize: 10, fontFamily: 'monospace'),
         ),
         textDirection: TextDirection.ltr,
+        // 좁은 pane에서도 한 줄로 남아야 선과 점 위로 겹치지 않는다.
+        maxLines: 1,
+        ellipsis: '…',
       )..layout(maxWidth: size.width);
       painter.paint(
         canvas,
@@ -10183,9 +10393,11 @@ class RebaseMergeResultPainter extends CustomPainter {
       );
     }
 
+    // 머지 커밋이 없으면 기준 브랜치 선이 재배치된 커밋으로 그대로 이어지니
+    // 회색 구간은 기준 tip에서 끝난다.
     canvas.drawLine(
       Offset(x(20), 58),
-      Offset(x(540), 58),
+      Offset(x(mergeCommit ? 540 : 130), 58),
       Paint()
         ..color = railColor
         ..strokeWidth = 2,
@@ -10195,17 +10407,21 @@ class RebaseMergeResultPainter extends CustomPainter {
     canvas.drawCircle(Offset(x(130), 58), 5, dot);
     label(baseLabel, x(95), 68, mutedColor);
 
-    final arc = Path()
-      ..moveTo(x(130), 58)
-      ..cubicTo(x(170), 58, x(170), 26, x(210), 26)
-      ..lineTo(x(400), 26)
-      ..cubicTo(x(450), 26, x(450), 58, x(490), 58);
+    final path = mergeCommit
+        ? (Path()
+            ..moveTo(x(130), 58)
+            ..cubicTo(x(170), 58, x(170), 26, x(210), 26)
+            ..lineTo(x(400), 26)
+            ..cubicTo(x(450), 26, x(450), 58, x(490), 58))
+        : (Path()
+            ..moveTo(x(130), 58)
+            ..lineTo(x(470), 58));
     final rail = Paint()
       ..color = _previewPurple
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.8
       ..strokeCap = StrokeCap.round;
-    for (final metric in arc.computeMetrics()) {
+    for (final metric in path.computeMetrics()) {
       for (var start = 0.0; start < metric.length; start += 9) {
         canvas.drawPath(
           metric.extractPath(start, math.min(start + 5, metric.length)),
@@ -10216,12 +10432,25 @@ class RebaseMergeResultPainter extends CustomPainter {
 
     final dots = math.min(commitCount, maxDots);
     final replayed = Paint()..color = _previewPurple;
+    final (from, to, y) = mergeCommit
+        ? (210.0, 400.0, 26.0)
+        : (140.0, 460.0, 58.0);
     for (var index = 0; index < dots; index++) {
-      final at = 210 + (400 - 210) * (index + 1) / (dots + 1);
-      canvas.drawCircle(Offset(x(at), 26), 4.5, replayed);
+      final at = from + (to - from) * (index + 1) / (dots + 1);
+      canvas.drawCircle(Offset(x(at), y), 4.5, replayed);
+    }
+
+    if (!mergeCommit) {
+      label(
+        '재배치된 커밋 $commitCount개 — $baseLabel 선 위에 그대로 이어짐',
+        x(300),
+        34,
+        _previewPurple,
+      );
+      label('브랜치 tip', x(505), 51, mutedColor);
+      return;
     }
     label('재배치된 커밋 $commitCount개', x(305), 2, _previewPurple);
-
     canvas.drawCircle(
       Offset(x(490), 58),
       6,
@@ -10242,6 +10471,7 @@ class RebaseMergeResultPainter extends CustomPainter {
   bool shouldRepaint(covariant RebaseMergeResultPainter oldDelegate) =>
       oldDelegate.commitCount != commitCount ||
       oldDelegate.baseLabel != baseLabel ||
+      oldDelegate.mergeCommit != mergeCommit ||
       oldDelegate.railColor != railColor ||
       oldDelegate.mutedColor != mutedColor;
 }

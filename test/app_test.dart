@@ -5848,6 +5848,13 @@ void main() {
   testWidgets('branch preview applies rebase with a focused commit', (
     tester,
   ) async {
+    // 선택 카드가 붙은 적용 카드는 기본 창보다 길어서 버튼이 창 밖으로 나간다.
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
     const compareRef =
         'codex/remote-behind-badge-with-an-extra-long-branch-name';
     final comparison = branchComparison(compareRef: compareRef);
@@ -5902,7 +5909,7 @@ void main() {
     // The comparison opens the preview pane itself now.
     await tester.pumpAndSettle();
 
-    expect(find.text('main 위로 $compareRef Rebase 실제 적용'), findsOneWidget);
+    expect(find.text('실제 적용하기'), findsOneWidget);
     expect(find.text('Rebase 미리보기 성공'), findsOneWidget);
     expect(find.text('가상 커밋'), findsOneWidget);
     expect(find.text('원본 커밋'), findsOneWidget);
@@ -5927,9 +5934,7 @@ void main() {
     expect(find.text('Rebase 이전 시점으로 되돌리기'), findsOneWidget);
   });
 
-  testWidgets('a clean rebase preview offers the merge commit landing', (
-    tester,
-  ) async {
+  testWidgets('the selected rebase landing is the one applied', (tester) async {
     const compareRef = 'fix/docs';
     final comparison = branchComparison(compareRef: compareRef);
     final original = comparison.commits
@@ -5988,7 +5993,7 @@ void main() {
       find.byKey(const Key('branch-preview-rebase-merge-graph')),
       findsOneWidget,
     );
-    final painter =
+    RebaseMergeResultPainter graphPainter() =>
         tester
                 .widget<CustomPaint>(
                   find.descendant(
@@ -6000,23 +6005,56 @@ void main() {
                 )
                 .painter!
             as RebaseMergeResultPainter;
-    expect(painter.commitCount, 1);
-    expect(painter.baseLabel, 'main');
-    final secondary = find.byKey(
-      const Key('branch-preview-apply-rebase-merge'),
+    expect(graphPainter().commitCount, 1);
+    expect(graphPainter().baseLabel, 'main');
+    // 기본 선택은 'Rebase만' — 같은 선 위로 이어 그리고, 머지 노드는 없다.
+    expect(graphPainter().mergeCommit, isFalse);
+    expect(find.byKey(const Key('virtual-rebase-merge-row')), findsNothing);
+    expect(find.text('머지 커밋 1개'), findsNothing);
+    // 기준 브랜치 칩은 아직 실제 tip 줄에 있다.
+    final baseTipChip = find.byKey(const Key('ref-chip-main-tip-main'));
+    expect(
+      find.descendant(of: baseTipChip, matching: find.text('✓')),
+      findsOneWidget,
+    );
+    final optionRebase = find.byKey(const Key('branch-preview-option-rebase'));
+    final optionMerge = find.byKey(
+      const Key('branch-preview-option-rebase-merge'),
     );
     expect(
-      tester
-          .widget<Text>(
-            find.descendant(of: secondary, matching: find.byType(Text)),
-          )
-          .data,
-      'Rebase 후 Merge 커밋으로 병합',
+      tester.widget<Text>(find.text('Rebase만')).style!.color,
+      const Color(0xFFE8DCFF),
     );
-    final style = tester.widget<OutlinedButton>(secondary).style!;
-    expect(style.backgroundColor!.resolve({}), Colors.transparent);
-    expect(style.side!.resolve({})!.color, const Color(0xFF695786));
-    expect(style.foregroundColor!.resolve({}), const Color(0xFFC69AFF));
+    // 카드 자체의 Container가 첫 번째, 그 안의 라디오가 두 번째다.
+    Decoration cardDecoration(Finder option) => tester
+        .widget<Container>(
+          find.descendant(of: option, matching: find.byType(Container)).first,
+        )
+        .decoration!;
+    expect(
+      cardDecoration(optionRebase),
+      isA<BoxDecoration>()
+          .having(
+            (decoration) => (decoration.border! as Border).top.color,
+            'border',
+            const Color(0xFF9D79D0),
+          )
+          .having(
+            (decoration) => decoration.color,
+            'fill',
+            const Color(0xFFC69AFF).withValues(alpha: 0.08),
+          ),
+    );
+    expect(
+      cardDecoration(optionMerge),
+      isA<BoxDecoration>()
+          .having(
+            (decoration) => (decoration.border! as Border).top.color,
+            'border',
+            const Color(0xFF4A4157),
+          )
+          .having((decoration) => decoration.color, 'fill', Colors.transparent),
+    );
     expect(
       tester
           .widget<Text>(
@@ -6026,9 +6064,40 @@ void main() {
       '재배치한 커밋 위에 머지 커밋 하나를 만들어 main을 옮깁니다. '
       'main이 체크아웃돼 있지 않으면 포인터만 이동합니다.',
     );
+    expect(
+      find.text('$compareRef를 main 위로 재배치합니다. main은 움직이지 않습니다.'),
+      findsOneWidget,
+    );
 
-    await tester.ensureVisible(secondary);
-    await tester.tap(secondary);
+    await tester.ensureVisible(optionMerge);
+    await tester.tap(optionMerge);
+    await tester.pumpAndSettle();
+
+    // 선택이 곧 미리보기: pane 그래프와 타임라인 가상 경로가 같이 바뀐다.
+    expect(graphPainter().mergeCommit, isTrue);
+    expect(find.byKey(const Key('virtual-rebase-merge-row')), findsOneWidget);
+    expect(find.byKey(const Key('virtual-rebase-merge-node')), findsOneWidget);
+    expect(find.text('가상 머지'), findsOneWidget);
+    expect(find.text("Merge branch '$compareRef' into main"), findsOneWidget);
+    expect(find.text('머지 커밋 1개'), findsOneWidget);
+    final vmChip = find.byKey(const Key('virtual-rebase-merge-chip'));
+    expect(
+      find.descendant(of: vmChip, matching: find.text('main')),
+      findsOneWidget,
+    );
+    // 기준 브랜치 칩이 가상 머지 줄로 올라가면서 실제 tip 줄에는 체크가 남지 않는다.
+    expect(
+      find.descendant(of: vmChip, matching: find.text('✓')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: baseTipChip, matching: find.text('✓')),
+      findsNothing,
+    );
+    expect(find.text('재작성 1/1'), findsOneWidget);
+
+    await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
+    await tester.tap(find.byKey(const Key('branch-preview-apply')));
     await tester.pumpAndSettle();
     expect(find.text('Rebase 후 Merge를 실제로 적용할까요?'), findsOneWidget);
     expect(
@@ -6069,6 +6138,126 @@ void main() {
     expect(restored, same(applied));
   });
 
+  testWidgets('the rebase landing selection never outlives its preview', (
+    tester,
+  ) async {
+    // 비교 대상을 두 번 고르니 툴바 선택기가 잘리지 않을 만큼 넓은 창을 쓴다.
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final comparisons = {
+      'feature': branchComparison(),
+      'other': branchComparison(compareRef: 'other', compareTip: 'other-tip'),
+    };
+    late FakeGitRepository repository;
+    repository = FakeGitRepository(
+      (_, _) async => [commit('normal', 'normal history')],
+      refs: const RepoRefs(
+        local: ['main', 'feature', 'other'],
+        current: 'main',
+        tips: {
+          'main': 'main-tip',
+          'feature': 'feature-tip',
+          'other': 'other-tip',
+        },
+      ),
+      compareBranchesCallback: (_, compare) async => comparisons[compare]!,
+      openRebasePreviewCallback:
+          ({required baseRef, required compareRef}) async {
+            final comparison = comparisons[compareRef]!;
+            final original = comparison.commits
+                .singleWhere(
+                  (entry) => entry.side == BranchCommitSide.compareOnly,
+                )
+                .commit;
+            return FakeRebasePreviewSession(
+              repository,
+              RebasePreviewResult(
+                status: RebasePreviewStatus.clean,
+                baseTip: comparison.baseTip,
+                compareTip: comparison.compareTip,
+                rewritten: [
+                  (original: original, rewrittenSha: 'rewritten-$compareRef'),
+                ],
+                completed: 1,
+                total: 1,
+                virtualTip: 'rewritten-$compareRef',
+              ),
+            );
+          },
+      filesBetween: (_, _) async => const [],
+    );
+    await tester.pumpWidget(
+      app(repository, controller, branchPreviewMode: BranchPreviewMode.rebase),
+    );
+    await tester.pumpAndSettle();
+    Future<void> compareWith(String ref) async {
+      await tester.tap(find.byKey(const Key('branch-diff-selector')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(Key('branch-diff-menu-$ref')));
+      await tester.pumpAndSettle();
+    }
+
+    // 좁은 pane에서는 두 카드가 한 화면에 다 들어오지 않으니 선택 배선만 부른다.
+    // 실제 탭 경로는 위 테스트가 덮는다.
+    Future<void> pick(Key option) async {
+      tester.widget<InkWell>(find.byKey(option)).onTap!();
+      await tester.pumpAndSettle();
+    }
+
+    bool mergeCommitDrawn() =>
+        (tester
+                    .widget<CustomPaint>(
+                      find.descendant(
+                        of: find.byKey(
+                          const Key('branch-preview-rebase-merge-graph'),
+                        ),
+                        matching: find.byType(CustomPaint),
+                      ),
+                    )
+                    .painter!
+                as RebaseMergeResultPainter)
+            .mergeCommit;
+    const merged = Key('branch-preview-option-rebase-merge');
+    const plain = Key('branch-preview-option-rebase');
+
+    await compareWith('feature');
+    await pick(merged);
+    expect(find.byKey(const Key('virtual-rebase-merge-row')), findsOneWidget);
+    expect(find.text('머지 커밋 1개'), findsOneWidget);
+    expect(mergeCommitDrawn(), isTrue);
+
+    // 다시 'Rebase만'을 고르면 현행 그림으로 돌아온다.
+    await pick(plain);
+    expect(find.byKey(const Key('virtual-rebase-merge-row')), findsNothing);
+    expect(find.text('머지 커밋 1개'), findsNothing);
+    expect(mergeCommitDrawn(), isFalse);
+    expect(
+      find.byKey(const Key('virtual-rebase-row-rewritten-feature')),
+      findsOneWidget,
+    );
+
+    // 비교 대상이 바뀌면 선택도 기본값으로 돌아간다.
+    await pick(merged);
+    await compareWith('other');
+    expect(find.byKey(const Key('virtual-rebase-merge-row')), findsNothing);
+    expect(find.text('머지 커밋 1개'), findsNothing);
+    expect(mergeCommitDrawn(), isFalse);
+
+    // 미리보기 모드를 오갈 때도 마찬가지다.
+    await pick(merged);
+    await tester.tap(find.byKey(const Key('branch-preview-merge-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-preview-rebase-button')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('virtual-rebase-merge-row')), findsNothing);
+    expect(find.text('머지 커밋 1개'), findsNothing);
+    expect(mergeCommitDrawn(), isFalse);
+  });
+
   testWidgets('a rebase preview with nothing to replay hides the option', (
     tester,
   ) async {
@@ -6107,11 +6296,11 @@ void main() {
     await tester.tap(find.byKey(const Key('branch-diff-menu-$compareRef')));
     await tester.pumpAndSettle();
 
-    // 재배치할 커밋이 없으면 가상 노드가 없어 결과 패널도, 그 안의 두 번째 버튼도
+    // 재배치할 커밋이 없으면 가상 노드가 없어 결과 패널도, 그 안의 두 번째 선택지도
     // 뜨지 않는다 — 만들 머지 커밋이 없는 적용을 제안하지 않는다.
     expect(find.byKey(const Key('branch-preview-apply-card')), findsNothing);
     expect(
-      find.byKey(const Key('branch-preview-apply-rebase-merge')),
+      find.byKey(const Key('branch-preview-option-rebase-merge')),
       findsNothing,
     );
     expect(
@@ -6146,8 +6335,9 @@ void main() {
     await openCleanMergePreview(tester);
 
     expect(find.byKey(const Key('branch-preview-apply-card')), findsOneWidget);
+    expect(find.byKey(const Key('branch-preview-option-rebase')), findsNothing);
     expect(
-      find.byKey(const Key('branch-preview-apply-rebase-merge')),
+      find.byKey(const Key('branch-preview-option-rebase-merge')),
       findsNothing,
     );
     expect(
@@ -6155,6 +6345,8 @@ void main() {
       findsNothing,
     );
     expect(find.textContaining('머지 커밋 하나를 만들어'), findsNothing);
+    // Merge 모드 버튼 문구는 그대로다.
+    expect(find.text('feature를 main에 Merge 실제 적용'), findsOneWidget);
   });
 
   testWidgets('stale merge preview tips are discarded', (tester) async {
@@ -6406,6 +6598,13 @@ void main() {
   testWidgets('remote rebase preview creates a local branch before apply', (
     tester,
   ) async {
+    // 선택 카드가 붙은 적용 카드는 기본 창보다 길어서 버튼이 창 밖으로 나간다.
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
     final comparison = branchComparison(compareRef: 'origin/feature');
     final original = comparison.commits
         .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
@@ -6466,7 +6665,7 @@ void main() {
       find.text('로컬 feature를 origin/feature에서 만든 뒤 결과를 적용합니다.'),
       findsOneWidget,
     );
-    expect(find.text('main 위로 feature Rebase 실제 적용'), findsOneWidget);
+    expect(find.text('실제 적용하기'), findsOneWidget);
     expect(
       tester
           .widget<FilledButton>(find.byKey(const Key('branch-preview-apply')))
@@ -6474,6 +6673,7 @@ void main() {
       isNotNull,
     );
 
+    await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
     await tester.tap(find.byKey(const Key('branch-preview-apply')));
     await tester.pumpAndSettle();
     expect(find.textContaining('로컬 feature 브랜치만 변경합니다'), findsOneWidget);
@@ -6499,6 +6699,13 @@ void main() {
   testWidgets('divergent local rebase target recalculates before apply', (
     tester,
   ) async {
+    // 선택 카드가 붙은 적용 카드는 기본 창보다 길어서 버튼이 창 밖으로 나간다.
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
     final comparisons = <String>[];
     late FakeGitRepository repository;
     repository = FakeGitRepository(
@@ -6559,6 +6766,7 @@ void main() {
     // The preview pane opens with the comparison now, so Enter would close it.
 
     expect(find.text('로컬 feature 기준으로 다시 계산'), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
     await tester.tap(find.byKey(const Key('branch-preview-apply')));
     await tester.pumpAndSettle();
 
@@ -8129,6 +8337,58 @@ void main() {
       isNot(contains(PreviewGraphNodeKind.virtualRebase)),
     );
     expect(graph.mappings, isEmpty);
+  });
+
+  test('the rebase preview graph adds the merge commit only when selected', () {
+    final comparison = branchComparison();
+    final feature = comparison.commits
+        .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
+        .commit;
+    final preview = RebasePreviewResult(
+      status: RebasePreviewStatus.clean,
+      baseTip: comparison.baseTip,
+      compareTip: comparison.compareTip,
+      rewritten: [(original: feature, rewrittenSha: 'rewritten-feature')],
+      completed: 1,
+      total: 1,
+      virtualTip: 'rewritten-feature',
+    );
+    final plain = layoutRebasePreviewGraph(comparison, preview);
+    expect(
+      plain.kinds.values,
+      isNot(contains(PreviewGraphNodeKind.virtualRebaseMerge)),
+    );
+
+    final landed = layoutRebasePreviewGraph(
+      comparison,
+      preview,
+      mergeCommit: true,
+    );
+    final merge = landed.rows.first;
+    expect(landed.rows, hasLength(plain.rows.length + 1));
+    expect(
+      landed.kinds[merge.commit.sha],
+      PreviewGraphNodeKind.virtualRebaseMerge,
+    );
+    // 가상 머지는 기준 브랜치 레인 맨 위에 앉고 바로 아래가 재배치된 커밋이다.
+    expect(merge.lane, landed.rows[1].lane);
+    expect(landed.rows[1].commit.sha, 'rewritten-feature');
+    expect(merge.commit.parents, [comparison.baseTip, 'rewritten-feature']);
+    expect(merge.commit.subject, "Merge branch 'feature' into main");
+    expect(merge.commit.shortSha, 'new SHA');
+    expect(merge.nextLaneShas[merge.lane], 'rewritten-feature');
+    // 점선은 가상 머지 줄까지 이어지고 매핑 행 번호도 한 칸씩 밀린다.
+    expect(landed.dashedLanes[0], contains(merge.lane));
+    expect(landed.dashedLanes[1], contains(merge.lane));
+    expect(landed.dashedLanes[2], isNull);
+    expect(
+      landed.mappings.single.originalRow,
+      plain.mappings.single.originalRow + 1,
+    );
+    expect(
+      landed.mappings.single.rewrittenRow,
+      plain.mappings.single.rewrittenRow + 1,
+    );
   });
 
   test('preview graphs preserve existing comparison commits', () {
