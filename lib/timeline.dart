@@ -7170,6 +7170,26 @@ class _TimelineScreenState extends State<TimelineScreen>
     );
   }
 
+  /// A commit that does not exist yet — the merge preview's virtual commit, the
+  /// virtual merge, a rewritten rebase copy. Same disc, same ring color and
+  /// width as before; only the ring is dashed.
+  Widget _virtualNode({
+    required Key key,
+    required double size,
+    required Color fill,
+    required Color ring,
+    required double ringWidth,
+    required Widget child,
+  }) => CustomPaint(
+    key: key,
+    painter: DashedRingNodePainter(
+      fill: fill,
+      ring: ring,
+      ringWidth: ringWidth,
+    ),
+    child: SizedBox.square(dimension: size, child: Center(child: child)),
+  );
+
   Widget _graphNode({
     required GitCommit commit,
     required PreviewGraphNodeKind? kind,
@@ -7189,16 +7209,12 @@ class _TimelineScreenState extends State<TimelineScreen>
       }
     }
     final child = kind == PreviewGraphNodeKind.virtualMerge && conflict
-        ? Container(
+        ? _virtualNode(
             key: const Key('virtual-merge-conflict-node'),
-            width: size,
-            height: size,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: _previewConflict,
-              border: Border.all(color: const Color(0xFFFFB8BD), width: 2),
-            ),
+            size: size,
+            fill: _previewConflict,
+            ring: const Color(0xFFFFB8BD),
+            ringWidth: 2,
             child: const Text(
               '!',
               style: TextStyle(
@@ -7209,16 +7225,12 @@ class _TimelineScreenState extends State<TimelineScreen>
             ),
           )
         : kind == PreviewGraphNodeKind.virtualMerge
-        ? Container(
+        ? _virtualNode(
             key: const Key('virtual-merge-node'),
-            width: size,
-            height: size,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: _previewPurple,
-              border: Border.all(color: _palette.background, width: 2),
-            ),
+            size: size,
+            fill: _previewPurple,
+            ring: _palette.background,
+            ringWidth: 2,
             child: const Text(
               'VM',
               style: TextStyle(
@@ -7229,16 +7241,12 @@ class _TimelineScreenState extends State<TimelineScreen>
             ),
           )
         : kind == PreviewGraphNodeKind.virtualRebaseMerge
-        ? Container(
+        ? _virtualNode(
             key: const Key('virtual-rebase-merge-node'),
-            width: size,
-            height: size,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: _previewPurplePanel,
-              border: Border.all(color: _previewPurple, width: 2),
-            ),
+            size: size,
+            fill: _previewPurplePanel,
+            ring: _previewPurple,
+            ringWidth: 2,
             child: const Text(
               'VM',
               style: TextStyle(
@@ -7249,19 +7257,12 @@ class _TimelineScreenState extends State<TimelineScreen>
             ),
           )
         : kind == PreviewGraphNodeKind.virtualRebase
-        ? Container(
+        ? _virtualNode(
             key: Key('virtual-rebase-node-${commit.sha}'),
-            width: size,
-            height: size,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xFF8D6BB8),
-              border: Border.all(
-                color: mappingColor ?? const Color(0xFFB78BEF),
-                width: _rebaseMappingAvatarBorderWidth,
-              ),
-            ),
+            size: size,
+            fill: const Color(0xFF8D6BB8),
+            ring: mappingColor ?? const Color(0xFFB78BEF),
+            ringWidth: _rebaseMappingAvatarBorderWidth,
             child: const Text(
               'VR',
               style: TextStyle(
@@ -11282,22 +11283,77 @@ class CommitGraphPainter extends CustomPainter {
       oldDelegate.selectedRowColor != selectedRowColor;
 }
 
+/// Dashes a ring by walking its perimeter. The dash count is FITTED to that
+/// perimeter — whole [dash] + [gap] periods only, [gap] defaulting to [dash] —
+/// so the pattern closes at the seam instead of butting a clipped dash against
+/// a full one.
 void drawDashedRing(
   Canvas canvas,
   Offset center,
   double radius,
   Paint paint,
-  double dash,
-) {
+  double dash, {
+  double? gap,
+}) {
+  final period = dash + (gap ?? dash);
   final ring = Path()..addOval(Rect.fromCircle(center: center, radius: radius));
   for (final metric in ring.computeMetrics()) {
-    for (var start = 0.0; start < metric.length; start += dash * 2) {
+    final count = math.max(1, (metric.length / period).round());
+    final step = metric.length / count;
+    for (var i = 0; i < count; i++) {
       canvas.drawPath(
-        metric.extractPath(start, math.min(start + dash, metric.length)),
+        metric.extractPath(i * step, i * step + step * dash / period),
         paint,
       );
     }
   }
+}
+
+/// A virtual commit's node: the same filled disc and the same ring color and
+/// width as a real node's, but the ring is DASHED — the commit does not exist
+/// yet, just like the dashed rails that lead into it. A `BoxDecoration` border
+/// can only be solid, so the ring moves onto the canvas.
+class DashedRingNodePainter extends CustomPainter {
+  const DashedRingNodePainter({
+    required this.fill,
+    required this.ring,
+    required this.ringWidth,
+  });
+
+  /// Denser than the rails' dash, so it still reads as a dash around a circle
+  /// this small.
+  static const dash = 4.0;
+  static const gap = 3.0;
+
+  final Color fill;
+  final Color ring;
+  final double ringWidth;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Same geometry as the BoxDecoration this replaces: the disc fills the box
+    // and the ring is stroked just inside its edge.
+    final radius = math.min(size.width, size.height) / 2;
+    final center = size.center(Offset.zero);
+    canvas.drawCircle(center, radius, Paint()..color = fill);
+    drawDashedRing(
+      canvas,
+      center,
+      radius - ringWidth / 2,
+      Paint()
+        ..color = ring
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = ringWidth,
+      dash,
+      gap: gap,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant DashedRingNodePainter oldDelegate) =>
+      oldDelegate.fill != fill ||
+      oldDelegate.ring != ring ||
+      oldDelegate.ringWidth != ringWidth;
 }
 
 /// Status bar legend marker: outlined commit, filled merge, dashed WIP.

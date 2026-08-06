@@ -1319,6 +1319,37 @@ void main() {
     );
   });
 
+  test('a virtual commit node draws its ring as dashes fitted to the circle', () {
+    const fill = Color(0xFF8D6BB8);
+    const ring = Color(0xFFB78BEF);
+    const painter = DashedRingNodePainter(fill: fill, ring: ring, ringWidth: 3);
+    const size = Size.square(CommitGraphPainter.avatarRadius * 2);
+    // The ring is stroked just inside the disc (r = 11 - 1.5), and its dash
+    // count is FITTED to that perimeter — whole dash+gap periods only, so the
+    // pattern closes without a seam instead of clipping the last dash.
+    final period = DashedRingNodePainter.dash + DashedRingNodePainter.gap;
+    final perimeter = (Path()
+          ..addOval(
+            Rect.fromCircle(center: size.center(Offset.zero), radius: 9.5),
+          ))
+        .computeMetrics()
+        .single
+        .length;
+    final fitted = (perimeter / period).round();
+    PaintPattern dashes(int count) {
+      final pattern = paints..circle(color: fill);
+      for (var i = 0; i < count; i++) {
+        pattern.path(color: ring, strokeWidth: 3);
+      }
+      return pattern;
+    }
+
+    void paint(Canvas canvas) => painter.paint(canvas, size);
+    expect(fitted, greaterThan(1));
+    expect(paint, dashes(fitted));
+    expect(paint, isNot(dashes(fitted + 1)));
+  });
+
   test(
     'compact preview keeps the virtual segment dashed above its real parent',
     () async {
@@ -4383,6 +4414,20 @@ void main() {
     expect(find.text('Merge 미리보기'), findsWidgets);
     expect(find.text('Merge 성공'), findsNothing);
     expect(find.byKey(const Key('virtual-merge-node')), findsOneWidget);
+    // 아직 없는 커밋이니 링이 점선이다. 실제 커밋 노드는 아바타 그대로라 점선 링
+    // 페인터를 쓰는 노드는 이 가상 커밋 하나뿐이다.
+    expect(
+      tester
+          .widget<CustomPaint>(find.byKey(const Key('virtual-merge-node')))
+          .painter,
+      isA<DashedRingNodePainter>(),
+    );
+    expect(
+      tester
+          .widgetList<CustomPaint>(find.byType(CustomPaint))
+          .where((paint) => paint.painter is DashedRingNodePainter),
+      hasLength(1),
+    );
     expect(find.byKey(const Key('virtual-preview-row')), findsOneWidget);
     expect(find.byKey(const Key('virtual-preview-chip')), findsOneWidget);
     expect(find.text('가상'), findsOneWidget);
@@ -5206,17 +5251,21 @@ void main() {
     final mappings = mappingPainter.mappings;
     expect(mappings, hasLength(3));
     expect(mappings.map((mapping) => mapping.color).toSet(), hasLength(3));
-    final virtualNode = tester.widget<Container>(
-      find.byKey(
-        const Key(
-          'virtual-rebase-node-3333333333333333333333333333333333333333',
-        ),
-      ),
-    );
-    final virtualBorder = virtualNode.decoration! as BoxDecoration;
-    expect((virtualBorder.border! as Border).top.width, 3);
+    // 아직 없는 커밋이라 링은 점선이다. 색과 굵기는 매핑 색 그대로.
+    final virtualRing =
+        tester
+                .widget<CustomPaint>(
+                  find.byKey(
+                    const Key(
+                      'virtual-rebase-node-3333333333333333333333333333333333333333',
+                    ),
+                  ),
+                )
+                .painter!
+            as DashedRingNodePainter;
+    expect(virtualRing.ringWidth, 3);
     expect(
-      (virtualBorder.border! as Border).top.color,
+      virtualRing.ring,
       mappings
           .singleWhere(
             (mapping) =>
