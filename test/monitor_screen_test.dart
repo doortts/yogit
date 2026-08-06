@@ -2,11 +2,13 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/avatars.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/monitor_screen.dart';
 import 'package:yogit/pr_monitor.dart';
+import 'package:yogit/window_frame.dart';
 
 MonitoredPullRequest pr({
   int number = 22,
@@ -307,6 +309,40 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('dev로 향하는 열린 PR 없음'), findsOneWidget);
+    });
+
+    testWidgets('esc asks the native window to close', (tester) async {
+      final calls = <String>[];
+      const channel = MethodChannel('test/yogit-monitor-window');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call.method);
+            return null;
+          });
+
+      await tester.pumpWidget(
+        app(
+          MonitorWindow(
+            controller: WindowFrameController(channel: channel),
+            child: MonitorScreen(
+              repository: localRepository(),
+              branch: 'dev',
+              repositoryName: 'yonalist',
+              service: service(
+                (arguments) => arguments.contains('open') ? [] : <Object>[],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // The window maximizes itself once on entry.
+      expect(calls, contains('toggleZoom'));
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(calls, contains('closeWindow'));
     });
 
     testWidgets('a gh failure shows the banner and retry reloads', (

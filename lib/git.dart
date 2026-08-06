@@ -2597,8 +2597,7 @@ class GitRepository implements FullDiffRepository {
                 '--is-ancestor',
                 tip,
                 comparison.compareTip,
-              ], workingDirectory: root))
-              .exitCode !=
+              ], workingDirectory: root)).exitCode !=
               0,
     );
     for (final line in (await _run([
@@ -3059,7 +3058,9 @@ class GitRepository implements FullDiffRepository {
       try {
         await (compareFirst ? restoreBase() : restoreCompare());
       } on Object catch (error) {
-        final restored = compareFirst ? result.compareBranch : result.baseBranch;
+        final restored = compareFirst
+            ? result.compareBranch
+            : result.baseBranch;
         final stuck = compareFirst ? result.baseBranch : result.compareBranch;
         throw GitRepositoryException(
           root,
@@ -3903,10 +3904,10 @@ class GitRepository implements FullDiffRepository {
   /// 커밋 sha → 충돌 파일 목록. 단독 재생은 순차 재배치와 다르다 — 그 경고는 배지
   /// 툴팁이 한다. [cancelled]가 참이 되면 다음 커밋으로 넘어가지 않고 정리한다.
   ///
-  /// patch-id가 이미 base에 있는 커밋은 재생해 보지 않는다. `git rebase`는 그 커밋을
-  /// 기본값 그대로 떨구니(--no-reapply-cherry-picks), 단독 재생이 충돌해도 순차
-  /// 재배치에서는 일어날 수 없는 충돌이다 — 오히려 변경이 이미 적용돼 있어서 충돌한다.
-  /// 예고가 없는 커밋과 예고가 빈 커밋을 가리지 않으니 답에서 그냥 빠진다.
+  /// patch-id가 이미 base에 있는 커밋은 재생해 보지 않는다. `git rebase`가 기본값
+  /// 그대로(--no-reapply-cherry-picks) 그 커밋을 떨구니 단독 재생이 충돌해도 순차
+  /// 재배치에서는 일어날 수 없는 충돌이다. 변경이 이미 적용돼 있어서 충돌하는 것이다.
+  /// 건너뛴 커밋은 예고 항목이 아예 없다.
   Future<Map<String, List<String>>> probeRebaseConflicts({
     required String baseTip,
     required String compareTip,
@@ -4578,12 +4579,7 @@ class GitRepository implements FullDiffRepository {
           final author,
           final time,
         ] when int.tryParse(time) != null)
-          (
-            sha: sha,
-            subject: subject,
-            author: author,
-            time: int.parse(time),
-          ),
+          (sha: sha, subject: subject, author: author, time: int.parse(time)),
     ];
   }
 

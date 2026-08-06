@@ -2,11 +2,68 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 
 import 'avatars.dart';
 import 'git.dart';
 import 'pr_monitor.dart';
 import 'timeline_theme.dart';
+import 'window_frame.dart';
+
+/// `open`'s argument list for launching the monitor as its own app instance.
+List<String> monitorLaunchArguments({
+  required String bundlePath,
+  required String root,
+  required String gitExecutable,
+  required String? ghExecutable,
+  required String branch,
+}) => [
+  '-n',
+  bundlePath,
+  '--args',
+  '--repo',
+  root,
+  '--git',
+  gitExecutable,
+  if (ghExecutable != null) ...['--gh', ghExecutable],
+  '--monitor',
+  branch,
+];
+
+/// The monitor's window shell: maximizes itself once on entry and lets esc
+/// hand the window back to the system.
+class MonitorWindow extends StatefulWidget {
+  const MonitorWindow({
+    required this.controller,
+    required this.child,
+    super.key,
+  });
+
+  final WindowFrameController controller;
+  final Widget child;
+
+  @override
+  State<MonitorWindow> createState() => _MonitorWindowState();
+}
+
+class _MonitorWindowState extends State<MonitorWindow> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => unawaited(widget.controller.toggleZoom()),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => CallbackShortcuts(
+    bindings: {
+      const SingleActivator(LogicalKeyboardKey.escape): () =>
+          unawaited(widget.controller.closeWindow()),
+    },
+    child: Focus(autofocus: true, child: widget.child),
+  );
+}
 
 const _ready = Color(0xFF34C759);
 const _review = Color(0xFF64D2FF);

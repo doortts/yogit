@@ -842,6 +842,7 @@ class TimelineScreen extends StatefulWidget {
     this.controller,
     this.onOpenFullDiff,
     this.onOpenSettings,
+    this.onOpenMonitor,
     this.onOpenRepository,
     this.recentRepositories = const [],
     this.onForgetRecentRepository,
@@ -888,6 +889,10 @@ class TimelineScreen extends StatefulWidget {
   final WindowFrameController? controller;
   final ValueChanged<GitCommit>? onOpenFullDiff;
   final VoidCallback? onOpenSettings;
+
+  /// Called with the base branch when the toolbar's monitor button is
+  /// pressed; the monitor opens as its own window.
+  final ValueChanged<String>? onOpenMonitor;
 
   /// Called with the validated root of a repository the user picked.
   final ValueChanged<String>? onOpenRepository;
@@ -3272,6 +3277,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     try {
       final forecast = await widget.repository.probeRebaseConflicts(
         baseTip: comparison.baseTip,
+        compareTip: comparison.compareTip,
         commits: [
           for (final entry in comparison.commits)
             if (entry.side == BranchCommitSide.compareOnly) entry.commit.sha,
@@ -3985,6 +3991,27 @@ class _TimelineScreenState extends State<TimelineScreen>
         ),
       ),
       const SizedBox(width: 12),
+      if (widget.onOpenMonitor != null) ...[
+        TextButton(
+          key: const Key('toolbar-monitor'),
+          style: TextButton.styleFrom(
+            foregroundColor: _palette.text,
+            backgroundColor: _palette.raised,
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(6),
+              side: BorderSide(color: _palette.border),
+            ),
+          ),
+          onPressed: () {
+            final branch = _baseBranch ?? _refs.current;
+            if (branch != null) widget.onOpenMonitor!(branch);
+          },
+          child: const Text('모니터링', style: TextStyle(fontSize: 13)),
+        ),
+        const SizedBox(width: 8),
+      ],
       _toolbarFullDiffButton(),
       const SizedBox(width: 8),
       _HoverBuilder(
@@ -6972,36 +6999,23 @@ class _TimelineScreenState extends State<TimelineScreen>
               : _previewPurple
         : branchColor;
     final rebasePreview = _rebasePreview;
-    final rewrittenIndex =
-        rebasePreview?.rewritten.indexWhere(
-          (rewrite) => rewrite.rewrittenSha == commit.sha,
-        ) ??
-        -1;
     final originalIndex =
         rebasePreview?.rewritten.indexWhere(
           (rewrite) => rewrite.original.sha == commit.sha,
         ) ??
         -1;
-    final compareOnly =
-        _comparison?.commits.any(
-          (entry) =>
-              entry.commit.sha == commit.sha &&
-              entry.side == BranchCommitSide.compareOnly,
-        ) ??
-        false;
-    final baseRef = _comparison?.baseRef;
-    final alreadyInBase =
-        baseRef != null && _duplicateCommits.contains(commit.sha);
-    final forecast = _comparison == null ? null : _conflictForecast[commit.sha];
+    final compareOnly = _isCompareOnly(commit.sha);
     final resolvedRebaseConflict =
         rebasePreview?.status == RebasePreviewStatus.conflict &&
         originalIndex >= 0 &&
         !rebaseConflict;
+    // 재배치가 건너뛸 커밋은 대기 중이 아니라서 대기 색도 받지 않는다.
     final pendingRebaseConflict =
         rebasePreview?.status == RebasePreviewStatus.conflict &&
         compareOnly &&
         originalIndex < 0 &&
-        !rebaseConflict;
+        !rebaseConflict &&
+        !_duplicateCommits.contains(commit.sha);
     final rowAccentColor = rebaseConflict
         ? _previewConflict
         : resolvedRebaseConflict
@@ -7009,23 +7023,8 @@ class _TimelineScreenState extends State<TimelineScreen>
         : pendingRebaseConflict
         ? _behind
         : previewColor;
-    final progressTag = previewKind == PreviewGraphNodeKind.virtualMerge
-        ? mergeConflict
-              ? '충돌'
-              : '가상'
-        : virtualRebaseMerge
-        ? '가상 머지'
-        : rewrittenIndex >= 0
-        ? '재작성 ${rewrittenIndex + 1}/${rebasePreview!.total}'
-        : rebasePreview?.status == RebasePreviewStatus.conflict &&
-              commit.sha == rebasePreview?.currentCommit?.sha
-        ? '충돌 해결 중'
-        : rebasePreview?.status == RebasePreviewStatus.conflict &&
-              originalIndex >= 0
-        ? '해결 완료'
-        : rebasePreview?.status == RebasePreviewStatus.conflict && compareOnly
-        ? '다음'
-        : null;
+    final progress = _commitProgressLabel(commit);
+    final badges = _commitBadges(commit);
     final refs = _rowRefs(commit);
     Widget refsCell() {
       final lineTip = selected && refs.isEmpty
@@ -7220,14 +7219,14 @@ class _TimelineScreenState extends State<TimelineScreen>
                     commitWidth,
                     Row(
                       children: [
-                        if (progressTag != null) ...[
+                        if (progress != null) ...[
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 4,
                               vertical: 3,
                             ),
                             decoration: BoxDecoration(
-                              color: rowAccentColor.withValues(
+                              color: progress.color.withValues(
                                 alpha: virtualRebaseMerge ? 0.28 : 0.2,
                               ),
                               border: virtualRebaseMerge
@@ -7236,13 +7235,9 @@ class _TimelineScreenState extends State<TimelineScreen>
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
-                              progressTag,
+                              progress.text,
                               style: TextStyle(
-                                color: rebaseConflict
-                                    ? const Color(0xFFFFC4C8)
-                                    : virtualRebaseMerge
-                                    ? const Color(0xFFE4D4FF)
-                                    : rowAccentColor,
+                                color: progress.textColor,
                                 fontSize: 9,
                                 fontWeight: FontWeight.w700,
                               ),
@@ -7263,32 +7258,22 @@ class _TimelineScreenState extends State<TimelineScreen>
                         ),
                         // 배지 묶음도 제목과 같은 flex 몫을 받는다 — 열이 좁아지면
                         // 배지가 줄어들 뿐, 행이 넘치는 일은 구조적으로 없다.
-                        if (alreadyInBase || forecast != null)
+                        if (badges.isNotEmpty)
                           Expanded(
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.end,
                               children: [
-                                if (alreadyInBase)
-                                  Flexible(
-                                    child: _rowBadge(
-                                      key: Key(
-                                        'commit-already-in-base-${commit.sha}',
-                                      ),
-                                      text: '이미 $baseRef에 반영됨',
-                                      color: _duplicateBadge,
-                                    ),
-                                  ),
-                                if (forecast != null && forecast.isNotEmpty)
+                                for (final badge in badges)
                                   Flexible(
                                     child: _tooltip(
-                                      '순차 재배치에서는 앞 커밋의 해결이 이 예상을 바꿀 수 있습니다',
+                                      badge.tooltip,
                                       _rowBadge(
                                         key: Key(
-                                          'commit-conflict-forecast-'
+                                          'commit-${badge.id}-'
                                           '${commit.sha}',
                                         ),
-                                        text: _conflictForecastLabel(forecast),
-                                        color: _forecastBadge,
+                                        text: badge.text,
+                                        color: badge.color,
                                       ),
                                     ),
                                   ),
@@ -7410,7 +7395,10 @@ class _TimelineScreenState extends State<TimelineScreen>
       ring: ring,
       ringWidth: ringWidth,
     ),
-    child: SizedBox.square(dimension: size, child: Center(child: child)),
+    child: SizedBox.square(
+      dimension: size,
+      child: Center(child: child),
+    ),
   );
 
   Widget _graphNode({
@@ -7850,12 +7838,137 @@ class _TimelineScreenState extends State<TimelineScreen>
       ? child
       : Tooltip(message: message, waitDuration: _tooltipDelay, child: child);
 
+  bool _isCompareOnly(String sha) =>
+      _comparison?.commits.any(
+        (entry) =>
+            entry.commit.sha == sha &&
+            entry.side == BranchCommitSide.compareOnly,
+      ) ??
+      false;
+
+  /// 커밋 하나가 Merge/Rebase 미리보기에서 받는 진행 라벨. 행과 미리보기 판이 같은
+  /// 함수를 불러 문구와 색이 두 자리에서 갈라질 수 없게 한다.
+  ({String text, Color color, Color textColor})? _commitProgressLabel(
+    GitCommit commit,
+  ) {
+    final kind = _previewGraph?.kinds[commit.sha];
+    if (kind == PreviewGraphNodeKind.virtualMerge) {
+      return _effectiveMergeStatus == MergeConflictStatus.conflicts
+          ? (text: '충돌', color: _previewConflict, textColor: _previewConflict)
+          : (text: '가상', color: _previewPurple, textColor: _previewPurple);
+    }
+    if (kind == PreviewGraphNodeKind.virtualRebaseMerge) {
+      return (
+        text: '가상 머지',
+        color: _previewPurple,
+        textColor: const Color(0xFFE4D4FF),
+      );
+    }
+    final preview = _rebasePreview;
+    if (preview == null) return null;
+    final rewrittenIndex = preview.rewritten.indexWhere(
+      (rewrite) => rewrite.rewrittenSha == commit.sha,
+    );
+    if (rewrittenIndex >= 0) {
+      return (
+        text: '재작성 ${rewrittenIndex + 1}/${preview.total}',
+        color: _previewPurple,
+        textColor: _previewPurple,
+      );
+    }
+    if (preview.status != RebasePreviewStatus.conflict) return null;
+    if (preview.currentCommit?.sha == commit.sha) {
+      return (
+        text: '충돌 해결 중',
+        color: _previewConflict,
+        textColor: const Color(0xFFFFC4C8),
+      );
+    }
+    if (preview.rewritten.any(
+      (rewrite) => rewrite.original.sha == commit.sha,
+    )) {
+      return (text: '해결 완료', color: _previewPurple, textColor: _previewPurple);
+    }
+    if (!_isCompareOnly(commit.sha)) return null;
+    // 재배치는 patch-id가 이미 base에 있는 커밋을 재생하지 않는다. 미리보기가 그
+    // 커밋을 지나가도 재작성본이 생기지 않으니 남은 '다음' 대신 건너뛴 사실을 적는다.
+    return _duplicateCommits.contains(commit.sha)
+        ? (
+            text: '건너뜀 · 이미 반영',
+            color: _duplicateBadge,
+            textColor: _duplicateBadge,
+          )
+        : (text: '다음', color: _behind, textColor: _behind);
+  }
+
+  /// 커밋 하나가 근거로 얻은 배지들. 행 오른쪽과 미리보기 판이 함께 쓴다.
+  List<({String id, String text, Color color, String tooltip})> _commitBadges(
+    GitCommit commit,
+  ) {
+    final baseRef = _comparison?.baseRef;
+    if (baseRef == null) return const [];
+    final alreadyInBase = _duplicateCommits.contains(commit.sha);
+    final forecast = _conflictForecast[commit.sha];
+    return [
+      if (alreadyInBase)
+        (
+          id: 'already-in-base',
+          text: '이미 $baseRef에 반영됨',
+          color: _duplicateBadge,
+          tooltip: '재배치는 이 커밋을 건너뜁니다',
+        ),
+      // 이미 base에 있는 커밋은 재배치가 재생하지 않으니 단독 재생의 충돌 예고는
+      // 일어날 수 없는 일을 경고하는 셈이다. 예고를 만들 때 이미 걸러 두지만 뒤늦게
+      // 도착한 예고가 있어도 배지로 올리지 않는다.
+      if (!alreadyInBase && forecast != null && forecast.isNotEmpty)
+        (
+          id: 'conflict-forecast',
+          text: _conflictForecastLabel(forecast),
+          color: _forecastBadge,
+          tooltip: '순차 재배치에서는 앞 커밋의 해결이 이 예상을 바꿀 수 있습니다',
+        ),
+    ];
+  }
+
+  /// 선택된 커밋이 행에서 달고 있는 라벨을 미리보기 판 머리에도 같은 문구·색으로
+  /// 올린다. 라벨이 없는 평범한 커밋이면 위젯 자체가 없다.
+  Widget _previewCommitLabels(GitCommit commit) {
+    final progress = _commitProgressLabel(commit);
+    final badges = _commitBadges(commit);
+    if (progress == null && badges.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 9),
+      child: Wrap(
+        runSpacing: 3,
+        children: [
+          if (progress != null)
+            _rowBadge(
+              key: Key('preview-commit-progress-${commit.sha}'),
+              text: progress.text,
+              color: progress.color,
+              textColor: progress.textColor,
+            ),
+          for (final badge in badges)
+            _tooltip(
+              badge.tooltip,
+              _rowBadge(
+                key: Key('preview-commit-${badge.id}-${commit.sha}'),
+                text: badge.text,
+                color: badge.color,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   /// 커밋 행 오른쪽 배지. 근거가 도착하기 전에는 이 위젯 자체가 없으니 자리도
   /// 차지하지 않는다.
   Widget _rowBadge({
     required Key key,
     required String text,
     required Color color,
+    Color? textColor,
   }) => Padding(
     padding: const EdgeInsets.only(left: 4),
     child: Container(
@@ -7871,7 +7984,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         softWrap: false,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          color: color,
+          color: textColor ?? color,
           fontSize: 9.5,
           fontWeight: FontWeight.w700,
         ),
@@ -8583,6 +8696,7 @@ class _TimelineScreenState extends State<TimelineScreen>
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
+              _previewCommitLabels(commit),
               if (!branchPreview) ...[
                 Text(
                   commit.subject,

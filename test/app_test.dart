@@ -18,6 +18,7 @@ import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/full_diff_unified_view.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/main.dart';
+import 'package:yogit/monitor_screen.dart';
 import 'package:yogit/monaco_editor_screen.dart';
 import 'package:yogit/settings.dart';
 import 'package:yogit/shortcut_modifier.dart';
@@ -1319,36 +1320,43 @@ void main() {
     );
   });
 
-  test('a virtual commit node draws its ring as dashes fitted to the circle', () {
-    const fill = Color(0xFF8D6BB8);
-    const ring = Color(0xFFB78BEF);
-    const painter = DashedRingNodePainter(fill: fill, ring: ring, ringWidth: 3);
-    const size = Size.square(CommitGraphPainter.avatarRadius * 2);
-    // The ring is stroked just inside the disc (r = 11 - 1.5), and its dash
-    // count is FITTED to that perimeter — whole dash+gap periods only, so the
-    // pattern closes without a seam instead of clipping the last dash.
-    final period = DashedRingNodePainter.dash + DashedRingNodePainter.gap;
-    final perimeter = (Path()
-          ..addOval(
-            Rect.fromCircle(center: size.center(Offset.zero), radius: 9.5),
-          ))
-        .computeMetrics()
-        .single
-        .length;
-    final fitted = (perimeter / period).round();
-    PaintPattern dashes(int count) {
-      final pattern = paints..circle(color: fill);
-      for (var i = 0; i < count; i++) {
-        pattern.path(color: ring, strokeWidth: 3);
+  test(
+    'a virtual commit node draws its ring as dashes fitted to the circle',
+    () {
+      const fill = Color(0xFF8D6BB8);
+      const ring = Color(0xFFB78BEF);
+      const painter = DashedRingNodePainter(
+        fill: fill,
+        ring: ring,
+        ringWidth: 3,
+      );
+      const size = Size.square(CommitGraphPainter.avatarRadius * 2);
+      // The ring is stroked just inside the disc (r = 11 - 1.5), and its dash
+      // count is FITTED to that perimeter — whole dash+gap periods only, so the
+      // pattern closes without a seam instead of clipping the last dash.
+      final period = DashedRingNodePainter.dash + DashedRingNodePainter.gap;
+      final perimeter =
+          (Path()..addOval(
+                Rect.fromCircle(center: size.center(Offset.zero), radius: 9.5),
+              ))
+              .computeMetrics()
+              .single
+              .length;
+      final fitted = (perimeter / period).round();
+      PaintPattern dashes(int count) {
+        final pattern = paints..circle(color: fill);
+        for (var i = 0; i < count; i++) {
+          pattern.path(color: ring, strokeWidth: 3);
+        }
+        return pattern;
       }
-      return pattern;
-    }
 
-    void paint(Canvas canvas) => painter.paint(canvas, size);
-    expect(fitted, greaterThan(1));
-    expect(paint, dashes(fitted));
-    expect(paint, isNot(dashes(fitted + 1)));
-  });
+      void paint(Canvas canvas) => painter.paint(canvas, size);
+      expect(fitted, greaterThan(1));
+      expect(paint, dashes(fitted));
+      expect(paint, isNot(dashes(fitted + 1)));
+    },
+  );
 
   test(
     'compact preview keeps the virtual segment dashed above its real parent',
@@ -4430,7 +4438,14 @@ void main() {
     );
     expect(find.byKey(const Key('virtual-preview-row')), findsOneWidget);
     expect(find.byKey(const Key('virtual-preview-chip')), findsOneWidget);
-    expect(find.text('가상'), findsOneWidget);
+    // 선택된 커밋이면 미리보기 판도 같은 라벨을 달아서, 행 쪽만 세어야 한다.
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('timeline-list')),
+        matching: find.text('가상'),
+      ),
+      findsOneWidget,
+    );
     await tester.tap(find.byKey(const Key('virtual-preview-row')));
     await tester.pumpAndSettle();
     expect(
@@ -5211,9 +5226,14 @@ void main() {
           )
           .dy,
     );
-    expect(find.text('재작성 1/3'), findsOneWidget);
-    expect(find.text('재작성 2/3'), findsOneWidget);
-    expect(find.text('재작성 3/3'), findsOneWidget);
+    // 선택된 커밋이면 미리보기 판도 같은 라벨을 달아서, 행 쪽만 세어야 한다.
+    Finder inTimeline(String text) => find.descendant(
+      of: find.byKey(const Key('timeline-list')),
+      matching: find.text(text),
+    );
+    expect(inTimeline('재작성 1/3'), findsOneWidget);
+    expect(inTimeline('재작성 2/3'), findsOneWidget);
+    expect(inTimeline('재작성 3/3'), findsOneWidget);
     expect(find.text('Rebase 성공'), findsNothing);
     expect(find.text('가상 커밋 3개'), findsOneWidget);
     final previewPainters = tester
@@ -6435,7 +6455,12 @@ void main() {
     expect(graphPainter().mergeCommit, isTrue);
     expect(find.byKey(const Key('virtual-rebase-merge-row')), findsOneWidget);
     expect(find.byKey(const Key('virtual-rebase-merge-node')), findsOneWidget);
-    expect(find.text('가상 머지'), findsOneWidget);
+    // 선택된 커밋이면 미리보기 판도 같은 라벨을 달아서, 행 쪽만 세어야 한다.
+    Finder inTimeline(String text) => find.descendant(
+      of: find.byKey(const Key('timeline-list')),
+      matching: find.text(text),
+    );
+    expect(inTimeline('가상 머지'), findsOneWidget);
     expect(find.text("Merge branch '$compareRef' into main"), findsOneWidget);
     expect(find.text('머지 커밋 1개'), findsOneWidget);
     final vmChip = find.byKey(const Key('virtual-rebase-merge-chip'));
@@ -6452,7 +6477,7 @@ void main() {
       find.descendant(of: baseTipChip, matching: find.text('✓')),
       findsNothing,
     );
-    expect(find.text('재작성 1/1'), findsOneWidget);
+    expect(inTimeline('재작성 1/1'), findsOneWidget);
 
     await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
     await tester.tap(find.byKey(const Key('branch-preview-apply')));
@@ -7197,7 +7222,18 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('충돌 해결 중'), findsOneWidget);
+    // 행과 미리보기 판이 같은 라벨을 다니 둘 다 하나씩 나온다.
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('timeline-list')),
+        matching: find.text('충돌 해결 중'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('preview-commit-progress-feature-tip')),
+      findsOneWidget,
+    );
     expect(find.text('현재 적용 중'), findsNothing);
     expect(
       tester
@@ -7416,7 +7452,41 @@ void main() {
       tester.view.resetPhysicalSize();
     });
     const compareRef = 'feature';
-    final comparison = branchComparison(compareRef: compareRef);
+    final short = branchComparison(compareRef: compareRef);
+    // 두 브랜치 커밋 중 앞의 것은 patch-id가 이미 main에 있고, 뒤의 것만 진짜로
+    // 충돌한다.
+    final groundwork = commit(
+      'feature-mid',
+      'feature groundwork',
+      parents: const ['root'],
+    );
+    final comparison = BranchComparisonResult(
+      baseRef: short.baseRef,
+      compareRef: compareRef,
+      baseTip: short.baseTip,
+      compareTip: 'feature-tip',
+      baseParent: 'root',
+      compareParent: 'feature-mid',
+      mergeBases: short.mergeBases,
+      commits: [
+        short.commits.first,
+        BranchComparisonCommit(
+          commit: commit(
+            'feature-tip',
+            'feature only',
+            parents: const ['feature-mid'],
+          ),
+          side: BranchCommitSide.compareOnly,
+        ),
+        BranchComparisonCommit(
+          commit: groundwork,
+          side: BranchCommitSide.compareOnly,
+        ),
+        short.commits.last,
+      ],
+      files: short.files,
+      merge: short.merge,
+    );
     final repository = FakeGitRepository(
       (_, _) async => [commit('normal', 'normal history')],
       refs: const RepoRefs(
@@ -7430,8 +7500,11 @@ void main() {
             const RebaseCheckResult(status: RebaseCheckStatus.clean),
           ),
       duplicateCommitsCallback: (_, _) async => const {'feature-tip'},
+      // 예고가 중복 커밋까지 들고 와도 — 단독 재생은 정말 충돌한다 — 재배치가 재생하지
+      // 않는 커밋이니 배지로는 올리지 않는다.
       conflictForecastCallback: (_, _) async => const {
-        'feature-tip': [
+        'feature-tip': ['lib/shared.dart'],
+        'feature-mid': [
           'lib/settings.dart',
           'lib/timeline.dart',
           'test/app_test.dart',
@@ -7452,6 +7525,13 @@ void main() {
     );
     expect(find.text('이미 main에 반영됨'), findsOneWidget);
     expect(find.text('충돌 예상 · settings.dart 외 2'), findsOneWidget);
+    // 재배치가 떨굴 커밋에는 예고 배지가 붙지 않는다 — 두 배지가 한 행에서 서로
+    // 다른 말을 하지 않는다.
+    expect(
+      find.byKey(const Key('commit-conflict-forecast-feature-tip')),
+      findsNothing,
+    );
+    expect(find.text('충돌 예상 · shared.dart'), findsNothing);
     // 근거가 없는 행은 배지도, 그 자리도 없다.
     expect(
       find.byKey(const Key('commit-already-in-base-main-tip')),
@@ -7466,13 +7546,38 @@ void main() {
       tester
           .widget<Tooltip>(
             find.ancestor(
-              of: find.byKey(const Key('commit-conflict-forecast-feature-tip')),
+              of: find.byKey(const Key('commit-conflict-forecast-feature-mid')),
               matching: find.byType(Tooltip),
             ),
           )
           .message,
       '순차 재배치에서는 앞 커밋의 해결이 이 예상을 바꿀 수 있습니다',
     );
+    // 중복 배지는 재배치가 이 커밋을 어떻게 다루는지까지 말한다.
+    expect(
+      tester
+          .widget<Tooltip>(
+            find.ancestor(
+              of: find.byKey(const Key('commit-already-in-base-feature-tip')),
+              matching: find.byType(Tooltip),
+            ),
+          )
+          .message,
+      '재배치는 이 커밋을 건너뜁니다',
+    );
+    // 그 커밋을 고르면 미리보기 판 머리도 같은 배지를 단다.
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('timeline-list')),
+        matching: find.text('feature groundwork'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('preview-commit-conflict-forecast-feature-mid')),
+      findsOneWidget,
+    );
+    expect(find.text('충돌 예상 · settings.dart 외 2'), findsNWidgets(2));
 
     // 비교를 접으면 두 배지의 근거도 함께 버려진다.
     await tester.tap(find.byKey(const Key('branch-diff-selector')));
@@ -7484,7 +7589,133 @@ void main() {
       findsNothing,
     );
     expect(
-      find.byKey(const Key('commit-conflict-forecast-feature-tip')),
+      find.byKey(const Key('commit-conflict-forecast-feature-mid')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('a commit the rebase drops reads as skipped, in row and pane', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final dropped = commit(
+      'feature-one',
+      'docs: update examples',
+      parents: const ['root'],
+    );
+    final stopped = commit(
+      'feature-two',
+      'docs: publish guide',
+      parents: const ['feature-one'],
+    );
+    final comparison = BranchComparisonResult(
+      baseRef: 'main',
+      compareRef: 'feature',
+      baseTip: 'main-tip',
+      compareTip: 'feature-two',
+      baseParent: 'root',
+      compareParent: 'feature-one',
+      mergeBases: const ['root'],
+      commits: [
+        BranchComparisonCommit(
+          commit: commit('main-tip', 'main only', parents: const ['root']),
+          side: BranchCommitSide.baseOnly,
+        ),
+        BranchComparisonCommit(
+          commit: stopped,
+          side: BranchCommitSide.compareOnly,
+        ),
+        BranchComparisonCommit(
+          commit: dropped,
+          side: BranchCommitSide.compareOnly,
+        ),
+        BranchComparisonCommit(
+          commit: commit('root', 'shared commit'),
+          side: BranchCommitSide.commonBoundary,
+        ),
+      ],
+      files: const [],
+      merge: const MergeConflictCheck(status: MergeConflictStatus.clean),
+    );
+    late FakeGitRepository repository;
+    repository = FakeGitRepository(
+      (_, _) async => [commit('normal', 'normal history')],
+      refs: const RepoRefs(
+        local: ['main', 'feature'],
+        current: 'main',
+        tips: {'main': 'main-tip', 'feature': 'feature-two'},
+      ),
+      compareBranchesCallback: (_, _) async => comparison,
+      // 첫 커밋은 patch-id가 이미 main에 있다 — 실제 재배치는 재생하지 않고 지나간다.
+      duplicateCommitsCallback: (_, _) async => const {'feature-one'},
+      openRebasePreviewCallback:
+          ({required baseRef, required compareRef}) async =>
+              FakeRebasePreviewSession(
+                repository,
+                RebasePreviewResult(
+                  status: RebasePreviewStatus.conflict,
+                  baseTip: 'main-tip',
+                  compareTip: 'feature-two',
+                  currentCommit: stopped,
+                  completed: 1,
+                  total: 2,
+                  conflictFiles: const ['lib/guide.dart'],
+                ),
+              ),
+      diffBetween: (_, _, _) async => const [],
+    );
+    await tester.pumpWidget(app(repository, controller));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-preview-rebase')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    Finder inTimeline(String text) => find.descendant(
+      of: find.byKey(const Key('timeline-list')),
+      matching: find.text(text),
+    );
+    // 미리보기가 지나간 중복 커밋은 대기 중인 '다음'이 아니다.
+    expect(inTimeline('건너뜀 · 이미 반영'), findsOneWidget);
+    expect(inTimeline('다음'), findsNothing);
+    expect(inTimeline('충돌 해결 중'), findsOneWidget);
+
+    // 그 커밋을 고르면 미리보기 판 머리도 행과 같은 라벨을 단다.
+    await tester.tap(inTimeline('docs: update examples'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<Text>(
+            find.descendant(
+              of: find.byKey(const Key('preview-commit-progress-feature-one')),
+              matching: find.byType(Text),
+            ),
+          )
+          .data,
+      '건너뜀 · 이미 반영',
+    );
+    expect(
+      find.byKey(const Key('preview-commit-already-in-base-feature-one')),
+      findsOneWidget,
+    );
+
+    // 근거가 없는 커밋의 판은 그대로다.
+    await tester.tap(inTimeline('main only'));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('preview-commit-progress-main-tip')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const Key('preview-commit-already-in-base-main-tip')),
       findsNothing,
     );
   });
@@ -12515,6 +12746,22 @@ void main() {
     expect(launch.repositoryPath, '/tmp/project');
     expect(launch.gitExecutable, '/usr/bin/git');
     expect(launch.ghExecutable, '/usr/bin/true');
+    expect(launch.monitorBranch, isNull);
+    expect(
+      launchOptionsFromArgs([
+        '--repo',
+        '/tmp/project',
+        '--git',
+        '/usr/bin/git',
+        '--monitor',
+        'dev',
+      ]).monitorBranch,
+      'dev',
+    );
+    expect(
+      () => launchOptionsFromArgs(['--monitor']),
+      throwsA(isA<FormatException>()),
+    );
     expect(
       () => launchOptionsFromArgs(['--git', 'git']),
       throwsA(isA<FormatException>()),
@@ -16507,6 +16754,65 @@ void main() {
     expect(find.text('commit'), findsOneWidget);
   });
   // ------------------------------------------------------------------ D1
+  testWidgets('the toolbar monitor button hands over the base branch', (
+    tester,
+  ) async {
+    String? monitored;
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(
+            local: ['main', 'dev'],
+            current: 'dev',
+            tips: {'main': '1', 'dev': '1'},
+          ),
+        ),
+        controller,
+        onOpenMonitor: (branch) => monitored = branch,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('toolbar-monitor')));
+    expect(monitored, 'dev');
+  });
+
+  test('monitor launch arguments relaunch the bundle with the branch', () {
+    expect(
+      monitorLaunchArguments(
+        bundlePath: '/Applications/yogit.app',
+        root: '/repos/yonalist',
+        gitExecutable: '/usr/bin/git',
+        ghExecutable: '/opt/homebrew/bin/gh',
+        branch: 'dev',
+      ),
+      [
+        '-n',
+        '/Applications/yogit.app',
+        '--args',
+        '--repo',
+        '/repos/yonalist',
+        '--git',
+        '/usr/bin/git',
+        '--gh',
+        '/opt/homebrew/bin/gh',
+        '--monitor',
+        'dev',
+      ],
+    );
+    expect(
+      monitorLaunchArguments(
+        bundlePath: '/Applications/yogit.app',
+        root: '/repos/yonalist',
+        gitExecutable: '/usr/bin/git',
+        ghExecutable: null,
+        branch: 'dev',
+      ),
+      isNot(contains('--gh')),
+    );
+  });
+
   testWidgets('the toolbar full-diff button and Cmd+D open the same screen', (
     tester,
   ) async {
@@ -18451,6 +18757,7 @@ Widget app(
   BranchPreviewMode branchPreviewMode = BranchPreviewMode.merge,
   ValueChanged<BranchPreviewMode>? onBranchPreviewModeChanged,
   VoidCallback? onOpenSettings,
+  ValueChanged<String>? onOpenMonitor,
   List<CommitProfile> commitProfiles = const [],
   String mergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
   String rebaseMergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
@@ -18461,6 +18768,7 @@ Widget app(
     branchPreviewMode: branchPreviewMode,
     onBranchPreviewModeChanged: onBranchPreviewModeChanged,
     onOpenSettings: onOpenSettings,
+    onOpenMonitor: onOpenMonitor,
     commitProfiles: commitProfiles,
     mergeMessageTemplate: mergeMessageTemplate,
     rebaseMergeMessageTemplate: rebaseMergeMessageTemplate,
@@ -18665,6 +18973,7 @@ class FakeGitRepository extends GitRepository {
   @override
   Future<Map<String, List<String>>> probeRebaseConflicts({
     required String baseTip,
+    required String compareTip,
     required List<String> commits,
     bool Function()? cancelled,
   }) =>

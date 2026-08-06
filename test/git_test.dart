@@ -3797,9 +3797,9 @@ void main() {
           1,
           0,
           'aaa\x00feat: lane cache\x00sc\x001754500000\n'
-          'bbb\x00fix: plan audit\x00jh\x001754400000\n'
-          'malformed-line\n'
-          'ccc\x00feat: outline\x00mk\x001754300000\n',
+              'bbb\x00fix: plan audit\x00jh\x001754400000\n'
+              'malformed-line\n'
+              'ccc\x00feat: outline\x00mk\x001754300000\n',
           '',
         );
       },
@@ -4056,25 +4056,28 @@ void main() {
     );
   });
 
-  test('a remote tip the local branch grew from still reads as shared', () async {
-    final fixture = await _branchPreviewFixture();
-    addTearDown(() => fixture.root.delete(recursive: true));
-    final repository = GitRepository(fixture.root.path);
-    await _git(fixture.root, ['remote', 'add', 'origin', '.']);
-    await _git(fixture.root, [
-      'update-ref',
-      'refs/remotes/origin/feature',
-      fixture.comparison.compareParent!,
-    ]);
+  test(
+    'a remote tip the local branch grew from still reads as shared',
+    () async {
+      final fixture = await _branchPreviewFixture();
+      addTearDown(() => fixture.root.delete(recursive: true));
+      final repository = GitRepository(fixture.root.path);
+      await _git(fixture.root, ['remote', 'add', 'origin', '.']);
+      await _git(fixture.root, [
+        'update-ref',
+        'refs/remotes/origin/feature',
+        fixture.comparison.compareParent!,
+      ]);
 
-    final recommendation = await repository.recommendBranchIntegration(
-      comparison: fixture.comparison,
-      rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
-    );
+      final recommendation = await repository.recommendBranchIntegration(
+        comparison: fixture.comparison,
+        rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
+      );
 
-    expect(recommendation!.verdict, BranchIntegrationVerdict.merge);
-    expect(recommendation.reasons.last, contains('커밋 1개가 로컬에 남아 있어도'));
-  });
+      expect(recommendation!.verdict, BranchIntegrationVerdict.merge);
+      expect(recommendation.reasons.last, contains('커밋 1개가 로컬에 남아 있어도'));
+    },
+  );
 
   test('a branch tracking a local branch is not shared with anyone', () async {
     final fixture = await _branchPreviewFixture();
@@ -4093,31 +4096,34 @@ void main() {
     expect(recommendation.reasons.first, contains('로컬 전용'));
   });
 
-  test('a branch tracking a remote ref of another name reads as shared', () async {
-    final fixture = await _branchPreviewFixture();
-    addTearDown(() => fixture.root.delete(recursive: true));
-    final repository = GitRepository(fixture.root.path);
-    await _git(fixture.root, ['remote', 'add', 'origin', '.']);
-    await _git(fixture.root, [
-      'update-ref',
-      'refs/remotes/origin/other',
-      fixture.comparison.compareTip,
-    ]);
-    await _git(fixture.root, [
-      'branch',
-      '--set-upstream-to=origin/other',
-      'feature',
-    ]);
+  test(
+    'a branch tracking a remote ref of another name reads as shared',
+    () async {
+      final fixture = await _branchPreviewFixture();
+      addTearDown(() => fixture.root.delete(recursive: true));
+      final repository = GitRepository(fixture.root.path);
+      await _git(fixture.root, ['remote', 'add', 'origin', '.']);
+      await _git(fixture.root, [
+        'update-ref',
+        'refs/remotes/origin/other',
+        fixture.comparison.compareTip,
+      ]);
+      await _git(fixture.root, [
+        'branch',
+        '--set-upstream-to=origin/other',
+        'feature',
+      ]);
 
-    final recommendation = await repository.recommendBranchIntegration(
-      comparison: fixture.comparison,
-      rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
-    );
+      final recommendation = await repository.recommendBranchIntegration(
+        comparison: fixture.comparison,
+        rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
+      );
 
-    expect(recommendation!.verdict, BranchIntegrationVerdict.merge);
-    expect(recommendation.summary, '원격에 공유된 브랜치');
-    expect(recommendation.reasons.first, contains('origin/other'));
-  });
+      expect(recommendation!.verdict, BranchIntegrationVerdict.merge);
+      expect(recommendation.summary, '원격에 공유된 브랜치');
+      expect(recommendation.reasons.first, contains('origin/other'));
+    },
+  );
 
   test('an upstream of another name is measured, not assumed', () async {
     final fixture = await _branchPreviewFixture();
