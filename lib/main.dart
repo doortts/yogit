@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 
 import 'avatars.dart';
 import 'git.dart';
+import 'monitor_screen.dart';
+import 'pr_monitor.dart';
 import 'settings.dart';
 import 'timeline.dart';
 import 'timeline_theme.dart';
@@ -14,6 +16,17 @@ void main(List<String> args) {
   WidgetsFlutterBinding.ensureInitialized();
   try {
     final launch = launchOptionsFromArgs(args);
+    if (launch.monitorBranch case final branch?) {
+      runApp(
+        MonitorBootstrap(
+          requestedPath: launch.repositoryPath,
+          branch: branch,
+          gitExecutable: launch.gitExecutable,
+          ghExecutable: launch.ghExecutable,
+        ),
+      );
+      return;
+    }
     runApp(
       YogitBootstrap(
         requestedPath: launch.repositoryPath,
@@ -31,11 +44,16 @@ class LaunchOptions {
     required this.repositoryPath,
     required this.gitExecutable,
     this.ghExecutable,
+    this.monitorBranch,
   });
 
   final String repositoryPath;
   final String gitExecutable;
   final String? ghExecutable;
+
+  /// When set, this instance is a monitor window for the branch, not a
+  /// timeline.
+  final String? monitorBranch;
 }
 
 LaunchOptions launchOptionsFromArgs(List<String> args) {
@@ -49,6 +67,7 @@ LaunchOptions launchOptionsFromArgs(List<String> args) {
     ghExecutable: suppliedGh == null
         ? resolveOptionalExecutable('gh')
         : _validatedExecutable('--gh', suppliedGh),
+    monitorBranch: _optionValue(args, '--monitor'),
   );
 }
 
@@ -70,6 +89,106 @@ String _validatedExecutable(String flag, String path) {
     throw FormatException('$flag must be an absolute executable file.');
   }
   return path;
+}
+
+/// Boots a monitor window: resolve the root, find the origin remote, then
+/// hand everything to [MonitorScreen]. Failures explain themselves in place —
+/// this window has no timeline to fall back to.
+class MonitorBootstrap extends StatefulWidget {
+  const MonitorBootstrap({
+    required this.requestedPath,
+    required this.branch,
+    required this.gitExecutable,
+    this.ghExecutable,
+    this.runner = runProcess,
+    this.windowFrameController,
+    super.key,
+  });
+
+  final String requestedPath;
+  final String branch;
+  final String gitExecutable;
+  final String? ghExecutable;
+  final CommandRunner runner;
+  final WindowFrameController? windowFrameController;
+
+  @override
+  State<MonitorBootstrap> createState() => _MonitorBootstrapState();
+}
+
+class _MonitorBootstrapState extends State<MonitorBootstrap> {
+  late final WindowFrameController _controller =
+      widget.windowFrameController ?? WindowFrameController();
+  late final Future<
+    ({GitRepository repository, RemoteRepository? remote, String root})
+  >
+  _boot = _resolve();
+
+  Future<({GitRepository repository, RemoteRepository? remote, String root})>
+  _resolve() async {
+    final root = await resolveRepositoryRoot(
+      widget.requestedPath,
+      gitExecutable: widget.gitExecutable,
+      runner: widget.runner,
+    );
+    final repository = GitRepository(
+      root,
+      gitExecutable: widget.gitExecutable,
+      runner: widget.runner,
+    );
+    final url = await repository.loadOriginUrl();
+    return (
+      repository: repository,
+      remote: url == null ? null : RemoteRepository.tryParse(url),
+      root: root,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+    title: 'yogit 모니터링',
+    debugShowCheckedModeBanner: false,
+    theme: timelineThemeData(yogitTheme(), TimelineThemeKind.systemGraphite),
+    home: FutureBuilder(
+      future: _boot,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _monitorNotice('Git 저장소가 아닙니다: ${widget.requestedPath}');
+        }
+        final boot = snapshot.data;
+        if (boot == null) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (widget.ghExecutable == null) {
+          return _monitorNotice('모니터링에는 GitHub CLI(gh)가 필요합니다.');
+        }
+        final remote = boot.remote;
+        if (remote == null) {
+          return _monitorNotice('origin 원격을 찾을 수 없어 PR을 읽을 수 없습니다.');
+        }
+        return MonitorWindow(
+          controller: _controller,
+          child: MonitorScreen(
+            repository: boot.repository,
+            branch: widget.branch,
+            repositoryName: boot.root.split('/').last,
+            service: PrMonitorService(
+              remote: remote,
+              monitoredBranch: widget.branch,
+              ghExecutable: widget.ghExecutable!,
+              runner: widget.runner,
+            ),
+          ),
+        );
+      },
+    ),
+  );
+
+  Widget _monitorNotice(String message) => Scaffold(
+    body: Center(child: Text(message, style: const TextStyle(fontSize: 14))),
+  );
 }
 
 class YogitBootstrap extends StatefulWidget {
@@ -270,6 +389,27 @@ class _YogitAppState extends State<YogitApp> {
     _save = _save.then((_) => _store.save(settings)).catchError((_) {});
   }
 
+  /// The monitor runs as its own app instance, so it gets a real window of
+  /// its own. Outside a bundle (dev runs, tests) there is nothing to launch.
+  void _openMonitor(String branch) {
+    final segments = Platform.resolvedExecutable.split('/');
+    final bundleIndex = segments.lastIndexWhere(
+      (segment) => segment.endsWith('.app'),
+    );
+    if (bundleIndex < 0) return;
+    unawaited(
+      _repository.runner('/usr/bin/open', [
+        ...monitorLaunchArguments(
+          bundlePath: segments.sublist(0, bundleIndex + 1).join('/'),
+          root: _repository.root,
+          gitExecutable: _repository.gitExecutable,
+          ghExecutable: widget.ghExecutable,
+          branch: branch,
+        ),
+      ]),
+    );
+  }
+
   void _openSettings(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -295,6 +435,7 @@ class _YogitAppState extends State<YogitApp> {
           repository: _repository,
           controller: widget.windowFrameController,
           onOpenRepository: _openRepository,
+          onOpenMonitor: _openMonitor,
           recentRepositories: _settings
               .withRecentRepository(_repository.root)
               .recentRepositories,
