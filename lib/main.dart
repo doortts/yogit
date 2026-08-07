@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 
 import 'avatars.dart';
 import 'git.dart';
+import 'github_api.dart';
+import 'github_auth.dart';
 import 'monitor_screen.dart';
 import 'pr_monitor.dart';
 import 'settings.dart';
@@ -121,11 +123,23 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
   late final WindowFrameController _controller =
       widget.windowFrameController ?? WindowFrameController();
   late final Future<
-    ({GitRepository repository, RemoteRepository? remote, String root})
+    ({
+      GitRepository repository,
+      RemoteRepository? remote,
+      String root,
+      String? token,
+    })
   >
   _boot = _resolve();
 
-  Future<({GitRepository repository, RemoteRepository? remote, String root})>
+  Future<
+    ({
+      GitRepository repository,
+      RemoteRepository? remote,
+      String root,
+      String? token,
+    })
+  >
   _resolve() async {
     final root = await resolveRepositoryRoot(
       widget.requestedPath,
@@ -138,12 +152,26 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
       runner: widget.runner,
     );
     final url = await repository.loadOriginUrl();
+    final remote = url == null ? null : RemoteRepository.tryParse(url);
     return (
       repository: repository,
-      remote: url == null ? null : RemoteRepository.tryParse(url),
+      remote: remote,
       root: root,
+      // ponytail: the token is read here only so build() stays synchronous.
+      // Telling the user there is no token — and letting them pick a server —
+      // belongs with the settings wiring, which still routes through gh.
+      token: remote == null
+          ? null
+          : await GithubTokenStore(
+              runner: widget.runner,
+            ).read(monitorApiBaseUrl(remote.host)),
     );
   }
+
+  /// github.com answers on its own API host; every enterprise server answers
+  /// under `/api/v3` on the host the remote already names.
+  static String monitorApiBaseUrl(String host) =>
+      host == 'github.com' ? 'https://api.github.com' : 'https://$host/api/v3';
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -183,8 +211,10 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
             service: PrMonitorService(
               remote: remote,
               monitoredBranch: widget.branch,
-              ghExecutable: widget.ghExecutable!,
-              runner: widget.runner,
+              api: GitHubApi(
+                apiBaseUrl: monitorApiBaseUrl(remote.host),
+                token: boot.token ?? '',
+              ),
             ),
           ),
         );

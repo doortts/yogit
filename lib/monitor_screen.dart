@@ -242,7 +242,6 @@ class _MonitorScreenState extends State<MonitorScreen> {
   List<PrHistoryEvent> _events = const [];
   List<({String sha, String subject, String author, int time})> _commits =
       const [];
-  final _closeReasons = <int, String>{};
   String? _error;
   var _loaded = false;
   var _refreshing = false;
@@ -271,21 +270,12 @@ class _MonitorScreenState extends State<MonitorScreen> {
         widget.branch,
         limit: 8,
       );
-      final pullRequests = await widget.service.loadOpenPullRequests();
-      final events = await widget.service.loadHistory();
-      // Closing reasons only for the closed events on screen — a few calls.
-      for (final event in events.take(6)) {
-        if (event.kind == PrEventKind.closed &&
-            !_closeReasons.containsKey(event.number)) {
-          final reason = await widget.service.loadCloseReason(event.number);
-          if (reason != null) _closeReasons[event.number] = reason;
-        }
-      }
+      final snapshot = await widget.service.loadSnapshot();
       final loadedCommits = await commits;
       if (!mounted) return;
       setState(() {
-        _pullRequests = pullRequests;
-        _events = events;
+        _pullRequests = snapshot.pullRequests;
+        _events = snapshot.events;
         _commits = loadedCommits;
         _error = null;
         _loaded = true;
@@ -538,7 +528,8 @@ class _MonitorScreenState extends State<MonitorScreen> {
   Widget _card(MonitoredPullRequest entry) {
     final color = _stateColor(entry.state);
     final visibleReviewers = entry.reviewers.take(3).toList();
-    final overflow = entry.reviewers.length - visibleReviewers.length;
+    // The count GitHub reports, not the page we fetched.
+    final overflow = entry.reviewerTotal - visibleReviewers.length;
     return Container(
       key: Key('monitor-card-${entry.number}'),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
@@ -737,8 +728,8 @@ class _MonitorScreenState extends State<MonitorScreen> {
                         )
                       else
                         TextSpan(
-                          text: _closeReasons[event.number] != null
-                              ? '닫음 · "${_closeReasons[event.number]}"'
+                          text: event.reason != null
+                              ? '닫음 · "${event.reason}"'
                               : '닫음',
                         ),
                     ],

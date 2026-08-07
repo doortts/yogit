@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/avatars.dart';
 import 'package:yogit/git.dart';
+import 'package:yogit/github_api.dart';
 import 'package:yogit/main.dart';
 import 'package:yogit/monitor_screen.dart';
 import 'package:yogit/pr_monitor.dart';
@@ -119,24 +120,36 @@ void main() {
   });
 
   group('MonitorScreen', () {
-    PrMonitorService service(
-      Object? Function(List<String> arguments) respond, {
-      List<int>? callCount,
-    }) => PrMonitorService(
-      remote: const RemoteRepository(
-        host: 'github.company.com',
-        owner: 'team',
-        repository: 'yonalist',
-      ),
-      monitoredBranch: 'dev',
-      ghExecutable: 'gh',
-      runner: (executable, arguments, {workingDirectory, environment}) async {
-        callCount?.add(1);
-        final body = respond(arguments);
-        if (body == null) return ProcessResult(1, 4, '', 'gh: Not logged in');
-        return ProcessResult(1, 0, jsonEncode(body), '');
-      },
-    );
+    /// [respond] returns one poll's `data`, or null to fail the request the way
+    /// GitHub does — HTTP 200 with an `errors` array.
+    PrMonitorService service(Map<String, Object?>? Function() respond) =>
+        PrMonitorService(
+          remote: const RemoteRepository(
+            host: 'github.company.com',
+            owner: 'team',
+            repository: 'yonalist',
+          ),
+          monitoredBranch: 'dev',
+          api: GitHubApi(
+            apiBaseUrl: 'https://github.company.com/api/v3',
+            token: 'token-1',
+            send: (uri, {required method, required headers, body}) async {
+              final data = respond();
+              return (
+                status: 200,
+                body: jsonEncode(
+                  data == null
+                      ? {
+                          'errors': [
+                            {'message': 'gh: Not logged in'},
+                          ],
+                        }
+                      : {'data': data},
+                ),
+              );
+            },
+          ),
+        );
 
     GitRepository localRepository() => GitRepository(
       '/repo',
@@ -164,81 +177,83 @@ void main() {
       'isDraft': false,
       'mergeable': 'MERGEABLE',
       'reviewDecision': reviewDecision,
-      'reviews': reviews,
-      'statusCheckRollup': const <Object>[],
-      'commits': const [<String, Object?>{}],
+      'latestReviews': {'totalCount': reviews.length, 'nodes': reviews},
+      'commits': {
+        'totalCount': 3,
+        'nodes': [
+          {
+            'commit': {'statusCheckRollup': null},
+          },
+        ],
+      },
     };
 
-    Object? respondWithPrs(List<String> arguments) {
-      if (arguments.contains('view')) {
-        return {
-          'comments': [
-            {'body': '중복 구현 — #17로 대체'},
-          ],
-        };
-      }
-      if (arguments.contains('merged')) {
-        return [
-          {
-            'number': 20,
-            'title': 'palette fix',
-            'author': {'login': 'sc'},
-            'baseRefName': 'dev',
-            'mergedAt': '2026-08-07T01:00:00Z',
-            'mergedBy': {'login': 'sc'},
-            'mergeCommit': {'oid': 'abc123'},
-          },
-          {
-            'number': 19,
-            'title': 'audit recovery',
-            'author': {'login': 'jh'},
-            'baseRefName': 'release/1.4',
-            'mergedAt': '2026-08-06T01:00:00Z',
-            'mergedBy': {'login': 'jh'},
-            'mergeCommit': null,
-          },
-        ];
-      }
-      if (arguments.contains('closed')) {
-        return [
-          {
-            'number': 18,
-            'title': 'dup lane cache',
-            'author': {'login': 'mk'},
-            'baseRefName': 'dev',
-            'closedAt': '2026-08-04T01:00:00Z',
-          },
-        ];
-      }
-      return [
+    Map<String, Object?> review(String login, String state) => {
+      'author': {'login': login},
+      'state': state,
+    };
+
+    Map<String, Object?> snapshot({
+      List<Map<String, Object?>> open = const [],
+      List<Map<String, Object?>> merged = const [],
+      List<Map<String, Object?>> closed = const [],
+    }) => {
+      'repository': {
+        'open': {'nodes': open},
+        'merged': {'nodes': merged},
+        'closed': {'nodes': closed},
+      },
+    };
+
+    Map<String, Object?> snapshotWithPrs() => snapshot(
+      open: [
         openPr(
           number: 22,
           reviews: [
-            {
-              'author': {'login': 'jh'},
-              'state': 'APPROVED',
-            },
-            {
-              'author': {'login': 'mk'},
-              'state': 'APPROVED',
-            },
-            {
-              'author': {'login': 'yj'},
-              'state': 'APPROVED',
-            },
-            {
-              'author': {'login': 'ab'},
-              'state': 'APPROVED',
-            },
-            {
-              'author': {'login': 'cd'},
-              'state': 'COMMENTED',
-            },
+            review('jh', 'APPROVED'),
+            review('mk', 'APPROVED'),
+            review('yj', 'APPROVED'),
+            review('ab', 'APPROVED'),
+            review('cd', 'COMMENTED'),
           ],
         ),
         openPr(number: 21, author: 'mk', reviewDecision: null),
-      ];
-    }
+      ],
+      merged: [
+        {
+          'number': 20,
+          'title': 'palette fix',
+          'author': {'login': 'sc'},
+          'baseRefName': 'dev',
+          'mergedAt': '2026-08-07T01:00:00Z',
+          'mergedBy': {'login': 'sc'},
+          'mergeCommit': {'oid': 'abc123'},
+        },
+        {
+          'number': 19,
+          'title': 'audit recovery',
+          'author': {'login': 'jh'},
+          'baseRefName': 'release/1.4',
+          'mergedAt': '2026-08-06T01:00:00Z',
+          'mergedBy': {'login': 'jh'},
+          'mergeCommit': null,
+        },
+      ],
+      closed: [
+        {
+          'number': 18,
+          'title': 'dup lane cache',
+          'author': {'login': 'mk'},
+          'baseRefName': 'dev',
+          'closedAt': '2026-08-04T01:00:00Z',
+          'comments': {
+            'nodes': [
+              {'body': '중복 구현 — #17로 대체'},
+            ],
+          },
+        },
+      ],
+    );
 
     Widget app(Widget child) => MaterialApp(home: child);
 
@@ -257,7 +272,7 @@ void main() {
             repository: localRepository(),
             branch: 'dev',
             repositoryName: 'yonalist',
-            service: service(respondWithPrs),
+            service: service(snapshotWithPrs),
           ),
         ),
       );
@@ -301,9 +316,7 @@ void main() {
             repository: localRepository(),
             branch: 'dev',
             repositoryName: 'yonalist',
-            service: service(
-              (arguments) => arguments.contains('open') ? [] : <Object>[],
-            ),
+            service: service(snapshot),
           ),
         ),
       );
@@ -329,9 +342,7 @@ void main() {
               repository: localRepository(),
               branch: 'dev',
               repositoryName: 'yonalist',
-              service: service(
-                (arguments) => arguments.contains('open') ? [] : <Object>[],
-              ),
+              service: service(snapshot),
             ),
           ),
         ),
@@ -418,17 +429,13 @@ void main() {
       tester,
     ) async {
       var failing = true;
-      final calls = <int>[];
       await tester.pumpWidget(
         app(
           MonitorScreen(
             repository: localRepository(),
             branch: 'dev',
             repositoryName: 'yonalist',
-            service: service(
-              (arguments) => failing ? null : respondWithPrs(arguments),
-              callCount: calls,
-            ),
+            service: service(() => failing ? null : snapshotWithPrs()),
           ),
         ),
       );
