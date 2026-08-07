@@ -139,8 +139,15 @@ void main() {
         tester.view.resetPhysicalSize();
       });
       TimelineColumnWidths? saved;
+      // Date starts at its minimum so it has room to take all of Author's.
       await tester.pumpWidget(
-        timeline(onColumnWidthsChanged: (value) => saved = value),
+        timeline(
+          widths: TimelineColumnWidths(
+            time: timelineColumns['time']!.min,
+            name: 120,
+          ),
+          onColumnWidthsChanged: (value) => saved = value,
+        ),
       );
       await tester.pumpAndSettle();
 
@@ -150,6 +157,51 @@ void main() {
       await dragDivider(tester, 'time', 30);
       expect(find.byKey(const Key('name-header')), findsNothing);
       expect(saved?.showName, isFalse);
+    });
+
+    testWidgets('a column at its own limit stops the divider instead of '
+        'quietly eating its neighbour', (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1500, 800);
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+      // Date starts at its maximum, so it cannot take another pixel.
+      await tester.pumpWidget(
+        timeline(
+          widths: TimelineColumnWidths(
+            time: timelineColumns['time']!.max,
+            name: 120,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final lineBefore = dividerX(tester, 'time');
+      await dragDivider(tester, 'time', 40);
+      expect(dividerX(tester, 'time'), closeTo(lineBefore, 1));
+      expect(
+        widthOf(tester, 'name'),
+        closeTo(120, 1),
+        reason: '선이 못 움직이면 Author도 빼앗기지 않아야 한다',
+      );
+
+      // The mirror case: Author at its maximum cannot take what Date gives up.
+      await tester.pumpWidget(
+        timeline(
+          widths: TimelineColumnWidths(
+            time: 100,
+            name: timelineColumns['name']!.max,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final mirrorBefore = dividerX(tester, 'time');
+      await dragDivider(tester, 'time', -40);
+      expect(dividerX(tester, 'time'), closeTo(mirrorBefore, 1));
+      expect(widthOf(tester, 'time'), closeTo(100, 1));
     });
 
     testWidgets('the total never grows, so no horizontal scroll appears', (

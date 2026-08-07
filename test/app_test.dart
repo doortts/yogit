@@ -2536,14 +2536,18 @@ void main() {
     expect(saved?.time, 124);
     expect(tester.getSize(find.byKey(const Key('time-header'))).width, 124);
 
+    // The arrow keys drive the same divider a drag does, so what Date gives up
+    // goes to Author and the pair's total holds. Author stops at its own
+    // maximum, and Date stops with it: the line cannot move left once the
+    // column on its right has nowhere to put the width.
+    final pairBefore = saved!.time + saved!.name;
     for (var press = 0; press < 13; press++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
       await tester.pump();
     }
-    expect(saved?.time, 20);
-    // The arrow keys drive the same divider a drag does, so what Date gives up
-    // goes to Author — which stops at its own 240 maximum.
-    expect(saved?.name, 240);
+    expect(saved!.name, timelineColumns['name']!.max);
+    expect(saved!.time + saved!.name, pairBefore);
+    expect(saved!.time, greaterThan(timelineColumns['time']!.min));
   });
 
   testWidgets('Date and Author columns hide and restore their last widths', (

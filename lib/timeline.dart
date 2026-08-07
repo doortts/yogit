@@ -6873,25 +6873,37 @@ class _TimelineScreenState extends State<TimelineScreen>
     final name = timelineColumns['name']!;
     final timeWidth = _w('time');
     final nameWidth = _w('name');
+    // Both ends bound the transfer: what one column can give AND what the
+    // other can take. Otherwise a column sitting at its own limit would keep
+    // taking width from its neighbour while the line under the cursor stayed
+    // put — the very thing this method exists to prevent.
     if (delta > 0) {
       if (nameWidth <= name.min) {
         _hideColumn('name', restoreWidth: _resizeStartWidths['name']);
         return;
       }
-      final given = math.min(delta, nameWidth - name.min);
+      final given = math.min(
+        delta,
+        math.min(nameWidth - name.min, time.max - timeWidth),
+      );
+      if (given <= 0) return;
       setState(() {
         _widths['name'] = nameWidth - given;
-        _widths['time'] = math.min(time.max, timeWidth + given);
+        _widths['time'] = timeWidth + given;
       });
     } else if (delta < 0) {
       if (timeWidth <= time.min) {
         _hideColumn('time', restoreWidth: _resizeStartWidths['time']);
         return;
       }
-      final given = math.min(-delta, timeWidth - time.min);
+      final given = math.min(
+        -delta,
+        math.min(timeWidth - time.min, name.max - nameWidth),
+      );
+      if (given <= 0) return;
       setState(() {
         _widths['time'] = timeWidth - given;
-        _widths['name'] = math.min(name.max, nameWidth + given);
+        _widths['name'] = nameWidth + given;
       });
     }
   }
