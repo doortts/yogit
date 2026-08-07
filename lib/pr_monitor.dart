@@ -127,6 +127,13 @@ class PrMonitorService {
   String get _repoFlag => '${remote.host}/${remote.owner}/${remote.repository}';
 
   /// Open PRs targeting [monitoredBranch], in gh's listing order.
+  ///
+  /// The field list is deliberately free of `commits`. GitHub rejects a query
+  /// by the nodes it *could* return, and gh expands `commits` into a hundred
+  /// commits per pull request: at [_listLimit] that alone is 500,000 nodes and
+  /// the whole request is refused before it runs, no matter how few pull
+  /// requests are actually open. The commit count comes from [_commitCounts]
+  /// instead, which asks for the number rather than the commits.
   Future<List<MonitoredPullRequest>> loadOpenPullRequests() async {
     final entries = await _list('open', [
       'number',
@@ -139,16 +146,69 @@ class PrMonitorService {
       'reviewDecision',
       'reviews',
       'statusCheckRollup',
-      'commits',
     ]);
+    final counts = await _commitCounts();
     final result = <MonitoredPullRequest>[];
     for (final entry in entries) {
-      final parsed = _parseOpen(entry);
+      final parsed = _parseOpen(entry, counts);
       if (parsed != null && parsed.baseRef == monitoredBranch) {
         result.add(parsed);
       }
     }
     return result;
+  }
+
+  /// Commits per open pull request, keyed by number.
+  ///
+  /// `totalCount` on its own costs nothing to speak of, where asking for the
+  /// commits and counting them locally costs the node budget the listing needs.
+  /// A count is decoration on a row, so a failure here returns nothing rather
+  /// than throwing: the monitor is worth more without the numbers than not at
+  /// all.
+  Future<Map<int, int>> _commitCounts() async {
+    const query =
+        'query(\$owner:String!,\$name:String!){'
+        'repository(owner:\$owner,name:\$name){'
+        'pullRequests(first:$_listLimit,states:OPEN){'
+        'nodes{number commits{totalCount}}}}}';
+    final result = await runner(ghExecutable, [
+      'api',
+      'graphql',
+      '--hostname',
+      remote.host,
+      '-f',
+      'query=$query',
+      '-f',
+      'owner=${remote.owner}',
+      '-f',
+      'name=${remote.repository}',
+    ]);
+    if (result.exitCode != 0) return const {};
+    try {
+      final json = jsonDecode(result.stdout.toString());
+      if (json is! Map<String, dynamic>) return const {};
+      final nodes = _dig(json, ['data', 'repository', 'pullRequests', 'nodes']);
+      if (nodes is! List) return const {};
+      final counts = <int, int>{};
+      for (final node in nodes) {
+        if (node is! Map<String, dynamic>) continue;
+        final number = node['number'];
+        final total = _dig(node, ['commits', 'totalCount']);
+        if (number is int && total is int) counts[number] = total;
+      }
+      return counts;
+    } on FormatException {
+      return const {};
+    }
+  }
+
+  static Object? _dig(Map<String, dynamic> json, List<String> path) {
+    Object? here = json;
+    for (final key in path) {
+      if (here is! Map<String, dynamic>) return null;
+      here = here[key];
+    }
+    return here;
   }
 
   /// Merged and closed PRs toward any branch, newest first — the history
@@ -220,6 +280,11 @@ class PrMonitorService {
     }
   }
 
+  /// How many pull requests one listing asks for. It is also the multiplier on
+  /// every field's node cost, so raising it means re-checking what the fields
+  /// expand to — see [loadOpenPullRequests].
+  static const _listLimit = 50;
+
   Future<List<Object?>> _list(String state, List<String> fields) async {
     final result = await runner(ghExecutable, [
       'pr',
@@ -229,7 +294,7 @@ class PrMonitorService {
       '--state',
       state,
       '--limit',
-      '50',
+      '$_listLimit',
       '--json',
       fields.join(','),
     ]);
@@ -244,7 +309,7 @@ class PrMonitorService {
     }
   }
 
-  MonitoredPullRequest? _parseOpen(Object? entry) {
+  MonitoredPullRequest? _parseOpen(Object? entry, Map<int, int> commitCounts) {
     if (entry is! Map<String, dynamic>) return null;
     final number = entry['number'];
     final title = entry['title'];
@@ -276,7 +341,6 @@ class PrMonitorService {
         );
 
     final mergeable = entry['mergeable'];
-    final commits = entry['commits'];
     final state = entry['isDraft'] == true
         ? PrMonitorState.draft
         : mergeable == 'CONFLICTING'
@@ -303,7 +367,7 @@ class PrMonitorService {
       },
       reviewers: reviewers,
       approvals: approved.length,
-      commitCount: commits is List ? commits.length : 0,
+      commitCount: commitCounts[number] ?? 0,
     );
   }
 

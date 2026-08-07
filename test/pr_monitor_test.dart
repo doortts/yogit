@@ -23,7 +23,6 @@ void main() {
     String? reviewDecision,
     List<Map<String, Object?>> reviews = const [],
     List<Map<String, Object?>> checks = const [],
-    int commits = 1,
   }) => {
     'number': number,
     'title': title,
@@ -35,17 +34,42 @@ void main() {
     'reviewDecision': reviewDecision,
     'reviews': reviews,
     'statusCheckRollup': checks,
-    'commits': [for (var i = 0; i < commits; i++) {}],
   };
 
+  /// The GraphQL shape gh returns for the commit-count query.
+  String commitCountReply(Map<int, int> counts) => jsonEncode({
+    'data': {
+      'repository': {
+        'pullRequests': {
+          'nodes': [
+            for (final entry in counts.entries)
+              {
+                'number': entry.key,
+                'commits': {'totalCount': entry.value},
+              },
+          ],
+        },
+      },
+    },
+  });
+
+  /// [respond] answers the `pr list` calls; the commit-count call is answered
+  /// separately because it goes through `gh api graphql`, not `gh pr list`.
   PrMonitorService service(
-    List<Object?> Function(List<String> arguments) respond,
-  ) => PrMonitorService(
+    List<Object?> Function(List<String> arguments) respond, {
+    Map<int, int> commitCounts = const {},
+    List<String>? record,
+  }) => PrMonitorService(
     remote: remote,
     monitoredBranch: 'dev',
     ghExecutable: 'gh',
-    runner: (executable, arguments, {workingDirectory, environment}) async =>
-        ProcessResult(1, 0, jsonEncode(respond(arguments)), ''),
+    runner: (executable, arguments, {workingDirectory, environment}) async {
+      record?.addAll(arguments);
+      if (arguments.first == 'api') {
+        return ProcessResult(1, 0, commitCountReply(commitCounts), '');
+      }
+      return ProcessResult(1, 0, jsonEncode(respond(arguments)), '');
+    },
   );
 
   group('open PR classification', () {
@@ -128,9 +152,43 @@ void main() {
         expect(entry.reviewers, ['jh', 'mk', 'yj']);
         expect(entry.approvals, 2);
         expect(entry.author, 'sc');
-        expect(entry.commitCount, 1);
       },
     );
+
+    test('commit counts arrive per number from the count query', () async {
+      final prs = await service(
+        (_) => [pr(number: 7), pr(number: 9)],
+        commitCounts: {7: 3, 9: 12},
+      ).loadOpenPullRequests();
+
+      expect(prs.map((entry) => entry.commitCount).toList(), [3, 12]);
+    });
+
+    test('a pull request the count query skipped still lists', () async {
+      final prs = await service(
+        (_) => [pr(number: 7)],
+        commitCounts: const {},
+      ).loadOpenPullRequests();
+
+      expect(prs.single.number, 7);
+      expect(prs.single.commitCount, 0);
+    });
+
+    // GitHub refuses a query by the nodes it could return, not the ones it
+    // does. gh expands these fields into a hundred rows per pull request, so
+    // at the listing limit any one of them puts the whole request over the
+    // 500,000-node ceiling and nothing loads — for every repository, however
+    // few pull requests are open.
+    test('the listing never asks for a per-commit connection', () async {
+      final arguments = <String>[];
+      await service((_) => [pr()], record: arguments).loadOpenPullRequests();
+
+      final fields = arguments[arguments.indexOf('--json') + 1].split(',');
+      expect(fields, isNot(contains('commits')));
+      expect(fields, isNot(contains('comments')));
+      expect(fields, isNot(contains('files')));
+      expect(fields, isNot(contains('closingIssuesReferences')));
+    });
 
     test(
       'mergeCommitPossible follows gh mergeable, unknown stays null',
