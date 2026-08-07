@@ -30,17 +30,28 @@ List<String> monitorLaunchArguments({
   branch,
 ];
 
-/// The monitor's window shell: maximizes itself once on entry and lets esc
-/// hand the window back to the system.
+/// The monitor's window shell. macOS draws no titlebar for yogit, so every
+/// state this window can reach — loading, a notice, the graph — needs its own
+/// controls: traffic lights, a drag region, and esc. Wrapping the whole route
+/// is what keeps a notice from becoming a window with no way out.
 class MonitorWindow extends StatefulWidget {
   const MonitorWindow({
     required this.controller,
     required this.child,
+    this.zoomOnEntry = true,
     super.key,
   });
 
   final WindowFrameController controller;
   final Widget child;
+
+  /// The graph wants the whole screen; a short notice does not.
+  final bool zoomOnEntry;
+
+  /// The strip the traffic lights and drag region occupy. Content that would
+  /// sit under them insets by this much.
+  static const titleBarHeight = 44.0;
+  static const controlsWidth = 66.0;
 
   @override
   State<MonitorWindow> createState() => _MonitorWindowState();
@@ -50,9 +61,11 @@ class _MonitorWindowState extends State<MonitorWindow> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => unawaited(widget.controller.toggleZoom()),
-    );
+    if (widget.zoomOnEntry) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => unawaited(widget.controller.toggleZoom()),
+      );
+    }
   }
 
   @override
@@ -61,7 +74,33 @@ class _MonitorWindowState extends State<MonitorWindow> {
       const SingleActivator(LogicalKeyboardKey.escape): () =>
           unawaited(widget.controller.closeWindow()),
     },
-    child: Focus(autofocus: true, child: widget.child),
+    child: Focus(
+      autofocus: true,
+      child: Stack(
+        children: [
+          Positioned.fill(child: widget.child),
+          // The drag region sits above the child but below the buttons, so a
+          // drag anywhere on the empty title strip moves the window.
+          Positioned(
+            left: MonitorWindow.controlsWidth,
+            right: 0,
+            top: 0,
+            height: MonitorWindow.titleBarHeight,
+            child: GestureDetector(
+              key: const Key('monitor-drag'),
+              behavior: HitTestBehavior.translucent,
+              onPanStart: (_) => unawaited(widget.controller.startDrag()),
+              onDoubleTap: () => unawaited(widget.controller.toggleZoom()),
+            ),
+          ),
+          Positioned(
+            left: 14,
+            top: (MonitorWindow.titleBarHeight - 12) / 2,
+            child: WindowButtons(controller: widget.controller),
+          ),
+        ],
+      ),
+    ),
   );
 }
 
@@ -306,9 +345,13 @@ class _MonitorScreenState extends State<MonitorScreen> {
   );
 
   Widget _topBar() => Container(
-    height: 44,
+    height: MonitorWindow.titleBarHeight,
     color: _palette.surface,
-    padding: const EdgeInsets.symmetric(horizontal: 14),
+    // The window's traffic lights own the left edge of this strip.
+    padding: const EdgeInsets.only(
+      left: MonitorWindow.controlsWidth,
+      right: 14,
+    ),
     child: Row(
       children: [
         Text(

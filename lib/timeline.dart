@@ -2807,29 +2807,9 @@ class _TimelineScreenState extends State<TimelineScreen>
     ),
   );
 
-  /// The window controls the titlebar no longer draws, in macOS order.
   Widget _windowButtons() => Row(
     children: [
-      _WindowButton(
-        key: const Key('window-close'),
-        color: const Color(0xFFFF5F57),
-        glyph: '×',
-        onTap: () => unawaited(_previewController.closeWindow()),
-      ),
-      const SizedBox(width: 8),
-      _WindowButton(
-        key: const Key('window-minimize'),
-        color: const Color(0xFFFEBC2E),
-        glyph: '−',
-        onTap: () => unawaited(_previewController.minimizeWindow()),
-      ),
-      const SizedBox(width: 8),
-      _WindowButton(
-        key: const Key('window-zoom'),
-        color: const Color(0xFF28C840),
-        glyph: '+',
-        onTap: () => unawaited(_previewController.toggleZoom()),
-      ),
+      WindowButtons(controller: _previewController),
       const SizedBox(width: 14),
     ],
   );
@@ -10803,60 +10783,6 @@ class _KeyCapState extends State<_KeyCap> {
   }
 }
 
-class _WindowButton extends StatefulWidget {
-  const _WindowButton({
-    required this.color,
-    required this.glyph,
-    required this.onTap,
-    super.key,
-  });
-
-  final Color color;
-  final String glyph;
-  final VoidCallback onTap;
-
-  @override
-  State<_WindowButton> createState() => _WindowButtonState();
-}
-
-class _WindowButtonState extends State<_WindowButton> {
-  var _hovered = false;
-
-  @override
-  Widget build(BuildContext context) => MouseRegion(
-    cursor: SystemMouseCursors.click,
-    onEnter: (_) => setState(() => _hovered = true),
-    onExit: (_) => setState(() => _hovered = false),
-    child: GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: widget.onTap,
-      child: Container(
-        width: 12,
-        height: 12,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: widget.color,
-          shape: BoxShape.circle,
-          border: Border.all(color: Colors.black.withValues(alpha: 0.18)),
-        ),
-        child: _hovered
-            ? Text(
-                widget.glyph,
-                style: TextStyle(
-                  color: Colors.black.withValues(alpha: 0.55),
-                  fontSize: 9,
-                  height: 1,
-                  fontWeight: FontWeight.w700,
-                ),
-              )
-            : null,
-      ),
-    ),
-  );
-}
-
-/// The green 'Full Diff' affordance, name over shortcut. The toolbar and the
-/// preview header show the same button at their own scale.
 class _ShowDiffButton extends StatelessWidget {
   const _ShowDiffButton({
     required this.onTap,

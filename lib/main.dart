@@ -153,13 +153,16 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
     home: FutureBuilder(
       future: _boot,
       builder: (context, snapshot) {
+        // Every branch below is wrapped: a monitor window without controls
+        // is a window the user cannot close.
         if (snapshot.hasError) {
           return _monitorNotice('Git 저장소가 아닙니다: ${widget.requestedPath}');
         }
         final boot = snapshot.data;
         if (boot == null) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
+          return _monitorWindow(
+            const Scaffold(body: Center(child: CircularProgressIndicator())),
+            zoomOnEntry: false,
           );
         }
         if (widget.ghExecutable == null) {
@@ -172,9 +175,8 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
         if (remote == null) {
           return _monitorNotice('origin 원격을 찾을 수 없어 PR을 읽을 수 없습니다.');
         }
-        return MonitorWindow(
-          controller: _controller,
-          child: MonitorScreen(
+        return _monitorWindow(
+          MonitorScreen(
             repository: boot.repository,
             branch: widget.branch,
             repositoryName: boot.root.split('/').last,
@@ -190,32 +192,52 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
     ),
   );
 
-  Widget _monitorNotice(String message, {String? link}) => Scaffold(
-    body: Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(message, style: const TextStyle(fontSize: 14)),
-          if (link != null) ...[
-            const SizedBox(height: 8),
-            TextButton(
-              onPressed: () =>
-                  unawaited(widget.runner('/usr/bin/open', [link])),
-              child: Text(link, style: const TextStyle(fontSize: 13)),
-            ),
+  Widget _monitorWindow(Widget child, {bool zoomOnEntry = true}) =>
+      MonitorWindow(
+        controller: _controller,
+        zoomOnEntry: zoomOnEntry,
+        child: child,
+      );
+
+  Widget _monitorNotice(String message, {String? link}) => _monitorWindow(
+    zoomOnEntry: false,
+    Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(message, style: const TextStyle(fontSize: 14)),
+            if (link != null) ...[
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () =>
+                    unawaited(widget.runner('/usr/bin/open', [link])),
+                child: Text(link, style: const TextStyle(fontSize: 13)),
+              ),
+              Text(
+                '또는 터미널에서: brew install gh',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.onSurface.withValues(alpha: 0.6),
+                  fontFamily: technicalFontFamily,
+                  fontFamilyFallback: technicalFontFallback,
+                ),
+              ),
+            ],
+            const SizedBox(height: 14),
             Text(
-              '또는 터미널에서: brew install gh',
+              'esc 또는 왼쪽 위 닫기 버튼으로 창을 닫습니다',
               style: TextStyle(
-                fontSize: 12,
+                fontSize: 11,
                 color: Theme.of(
                   context,
-                ).colorScheme.onSurface.withValues(alpha: 0.6),
-                fontFamily: technicalFontFamily,
-                fontFamilyFallback: technicalFontFallback,
+                ).colorScheme.onSurface.withValues(alpha: 0.45),
               ),
             ),
           ],
-        ],
+        ),
       ),
     ),
   );

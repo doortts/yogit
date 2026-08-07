@@ -344,16 +344,30 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
       expect(calls, contains('closeWindow'));
+
+      // The traffic lights clear the screen's own top bar content.
+      final buttons = tester.getRect(find.byKey(const Key('window-close')));
+      final title = tester.getRect(find.text('yonalist / dev'));
+      expect(buttons.right, lessThan(title.left));
     });
 
-    testWidgets('missing gh offers the download link', (tester) async {
+    testWidgets('every monitor state can close its own window', (tester) async {
       final opened = <List<String>>[];
+      final calls = <String>[];
+      const channel = MethodChannel('test/yogit-notice-window');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call.method);
+            return null;
+          });
+
       await tester.pumpWidget(
         MonitorBootstrap(
           requestedPath: '/repo',
           branch: 'dev',
           gitExecutable: '/usr/bin/git',
           ghExecutable: null,
+          windowFrameController: WindowFrameController(channel: channel),
           runner:
               (executable, arguments, {workingDirectory, environment}) async {
                 if (executable == '/usr/bin/open') {
@@ -374,6 +388,30 @@ void main() {
       expect(opened, [
         ['https://cli.github.com'],
       ]);
+
+      // The notice is a real window: traffic lights, esc, and a drag region.
+      calls.clear();
+      await tester.tap(find.byKey(const Key('window-minimize')));
+      await tester.pumpAndSettle();
+      expect(calls, ['minimizeWindow']);
+
+      calls.clear();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(calls, ['closeWindow']);
+
+      calls.clear();
+      await tester.tap(find.byKey(const Key('window-close')));
+      await tester.pumpAndSettle();
+      expect(calls, ['closeWindow']);
+
+      calls.clear();
+      await tester.drag(
+        find.byKey(const Key('monitor-drag')),
+        const Offset(30, 12),
+      );
+      await tester.pumpAndSettle();
+      expect(calls, ['startDrag']);
     });
 
     testWidgets('a gh failure shows the banner and retry reloads', (
