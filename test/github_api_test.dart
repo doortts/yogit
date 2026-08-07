@@ -37,10 +37,7 @@ void main() {
       await fixture.api.graphql('query{viewer{login}}', {});
 
       expect(fixture.calls[0].$1, Uri.parse('https://api.github.com/user'));
-      expect(
-        fixture.calls[1].$1,
-        Uri.parse('https://api.github.com/graphql'),
-      );
+      expect(fixture.calls[1].$1, Uri.parse('https://api.github.com/graphql'));
     });
 
     test('GHE api/v3 REST base derives the api/graphql endpoint', () async {
@@ -53,7 +50,9 @@ void main() {
 
       expect(
         fixture.calls[0].$1,
-        Uri.parse('https://oss.navercorp.com/api/v3/repos/team/yonalist/commits/abc'),
+        Uri.parse(
+          'https://oss.navercorp.com/api/v3/repos/team/yonalist/commits/abc',
+        ),
       );
       expect(
         fixture.calls[1].$1,
@@ -61,31 +60,35 @@ void main() {
       );
     });
 
-    test('a trailing slash on the base and a leading slash on the path fold',
-        () async {
-      final fixture = apiWith(base: 'https://oss.navercorp.com/api/v3/');
-      await fixture.api.getJson('/user');
-      expect(
-        fixture.calls.single.$1,
-        Uri.parse('https://oss.navercorp.com/api/v3/user'),
-      );
-    });
+    test(
+      'a trailing slash on the base and a leading slash on the path fold',
+      () async {
+        final fixture = apiWith(base: 'https://oss.navercorp.com/api/v3/');
+        await fixture.api.getJson('/user');
+        expect(
+          fixture.calls.single.$1,
+          Uri.parse('https://oss.navercorp.com/api/v3/user'),
+        );
+      },
+    );
   });
 
   group('request shape', () {
-    test('REST GET carries auth, accept, api-version, and a user agent',
-        () async {
-      final fixture = apiWith();
-      await fixture.api.getJson('user');
+    test(
+      'REST GET carries auth, accept, api-version, and a user agent',
+      () async {
+        final fixture = apiWith();
+        await fixture.api.getJson('user');
 
-      final (_, method, headers, body) = fixture.calls.single;
-      expect(method, 'GET');
-      expect(body, isNull);
-      expect(headers['Authorization'], 'Bearer token-1');
-      expect(headers['Accept'], 'application/vnd.github+json');
-      expect(headers['X-GitHub-Api-Version'], isNotEmpty);
-      expect(headers['User-Agent'], contains('yogit'));
-    });
+        final (_, method, headers, body) = fixture.calls.single;
+        expect(method, 'GET');
+        expect(body, isNull);
+        expect(headers['Authorization'], 'Bearer token-1');
+        expect(headers['Accept'], 'application/vnd.github+json');
+        expect(headers['X-GitHub-Api-Version'], isNotEmpty);
+        expect(headers['User-Agent'], contains('yogit'));
+      },
+    );
 
     test('GraphQL POSTs a JSON document with variables', () async {
       final fixture = apiWith(body: '{"data":{"ok":true}}');
@@ -117,7 +120,10 @@ void main() {
     });
 
     test('401 tells the user the token failed', () async {
-      final fixture = apiWith(status: 401, body: '{"message":"Bad credentials"}');
+      final fixture = apiWith(
+        status: 401,
+        body: '{"message":"Bad credentials"}',
+      );
       await expectLater(
         fixture.api.getJson('user'),
         throwsA(
@@ -144,18 +150,20 @@ void main() {
       );
     });
 
-    test('other HTTP failures carry the status and the server message',
-        () async {
-      final fixture = apiWith(status: 502, body: 'Bad Gateway');
-      await expectLater(
-        fixture.api.getJson('user'),
-        throwsA(
-          isA<GitHubApiException>()
-              .having((error) => error.status, 'status', 502)
-              .having((error) => error.message, 'message', contains('502')),
-        ),
-      );
-    });
+    test(
+      'other HTTP failures carry the status and the server message',
+      () async {
+        final fixture = apiWith(status: 502, body: 'Bad Gateway');
+        await expectLater(
+          fixture.api.getJson('user'),
+          throwsA(
+            isA<GitHubApiException>()
+                .having((error) => error.status, 'status', 502)
+                .having((error) => error.message, 'message', contains('502')),
+          ),
+        );
+      },
+    );
 
     test('a GraphQL errors array is a failure even with HTTP 200', () async {
       final fixture = apiWith(

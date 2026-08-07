@@ -24,11 +24,17 @@ void main() {
         isNotNull,
         reason: 'a trailing slash is the same server',
       );
-      expect(githubOAuthCredentialsFor('https://ghe.example.com/api/v3'), isNull);
+      expect(
+        githubOAuthCredentialsFor('https://ghe.example.com/api/v3'),
+        isNull,
+      );
     });
 
     test('the default list leads with 네이버 and carries aliases', () {
-      expect(defaultGithubApiBaseUrls.first, 'https://oss.navercorp.com/api/v3');
+      expect(
+        defaultGithubApiBaseUrls.first,
+        'https://oss.navercorp.com/api/v3',
+      );
       expect(
         defaultGithubApiBaseAliases['https://oss.navercorp.com/api/v3'],
         '네이버',
@@ -75,7 +81,8 @@ void main() {
       final query = authorizeUrl!.queryParameters;
       final redirect = Uri.parse(query['redirect_uri']!);
       final callback = redirect.replace(
-        query: redirectQueryOverride ??
+        query:
+            redirectQueryOverride ??
             Uri(
               queryParameters: {
                 'code': 'code-9',
@@ -112,44 +119,46 @@ void main() {
       expect(document['redirect_uri'], startsWith('http://localhost:'));
     });
 
-    test('the authorize URL carries client, scopes, state, and loopback',
-        () async {
-      Uri? authorizeUrl;
-      final login = GithubOAuthLogin(
-        apiBaseUrl: 'https://api.github.com',
-        openBrowser: (uri) async => authorizeUrl = uri,
-        send: (uri, {required method, required headers, body}) async =>
-            (status: 200, body: '{"access_token":"t"}'),
-      );
-      final pending = login.login();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-
-      expect(authorizeUrl!.host, 'github.com');
-      expect(authorizeUrl!.path, '/login/oauth/authorize');
-      final query = authorizeUrl!.queryParameters;
-      expect(query['client_id'], isNotEmpty);
-      expect(query['response_type'], 'code');
-      expect(query['scope'], 'repo read:org');
-      expect(query['state'], isNotEmpty);
-      expect(query['redirect_uri'], startsWith('http://localhost:'));
-
-      // Complete the flow so the server does not leak into the next test.
-      final redirect = Uri.parse(query['redirect_uri']!);
-      final client = HttpClient();
-      try {
-        final request = await client.getUrl(
-          redirect.replace(
-            query: Uri(
-              queryParameters: {'code': 'c', 'state': query['state']!},
-            ).query,
-          ),
+    test(
+      'the authorize URL carries client, scopes, state, and loopback',
+      () async {
+        Uri? authorizeUrl;
+        final login = GithubOAuthLogin(
+          apiBaseUrl: 'https://api.github.com',
+          openBrowser: (uri) async => authorizeUrl = uri,
+          send: (uri, {required method, required headers, body}) async =>
+              (status: 200, body: '{"access_token":"t"}'),
         );
-        await (await request.close()).drain<void>();
-      } finally {
-        client.close();
-      }
-      await pending;
-    });
+        final pending = login.login();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+
+        expect(authorizeUrl!.host, 'github.com');
+        expect(authorizeUrl!.path, '/login/oauth/authorize');
+        final query = authorizeUrl!.queryParameters;
+        expect(query['client_id'], isNotEmpty);
+        expect(query['response_type'], 'code');
+        expect(query['scope'], 'repo read:org');
+        expect(query['state'], isNotEmpty);
+        expect(query['redirect_uri'], startsWith('http://localhost:'));
+
+        // Complete the flow so the server does not leak into the next test.
+        final redirect = Uri.parse(query['redirect_uri']!);
+        final client = HttpClient();
+        try {
+          final request = await client.getUrl(
+            redirect.replace(
+              query: Uri(
+                queryParameters: {'code': 'c', 'state': query['state']!},
+              ).query,
+            ),
+          );
+          await (await request.close()).drain<void>();
+        } finally {
+          client.close();
+        }
+        await pending;
+      },
+    );
 
     test('a wrong state is rejected without exchanging the code', () async {
       final exchangeCalls = <(Uri, String, Map<String, String>, String?)>[];
