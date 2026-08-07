@@ -10,6 +10,7 @@ import 'pr_monitor.dart';
 import 'settings.dart';
 import 'timeline.dart';
 import 'timeline_theme.dart';
+import 'typography.dart';
 import 'window_frame.dart';
 
 void main(List<String> args) {
@@ -162,7 +163,10 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
           );
         }
         if (widget.ghExecutable == null) {
-          return _monitorNotice('모니터링에는 GitHub CLI(gh)가 필요합니다.');
+          return _monitorNotice(
+            '모니터링에는 GitHub CLI(gh)가 필요합니다.',
+            link: 'https://cli.github.com',
+          );
         }
         final remote = boot.remote;
         if (remote == null) {
@@ -186,8 +190,34 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
     ),
   );
 
-  Widget _monitorNotice(String message) => Scaffold(
-    body: Center(child: Text(message, style: const TextStyle(fontSize: 14))),
+  Widget _monitorNotice(String message, {String? link}) => Scaffold(
+    body: Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(message, style: const TextStyle(fontSize: 14)),
+          if (link != null) ...[
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () =>
+                  unawaited(widget.runner('/usr/bin/open', [link])),
+              child: Text(link, style: const TextStyle(fontSize: 13)),
+            ),
+            Text(
+              '또는 터미널에서: brew install gh',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurface.withValues(alpha: 0.6),
+                fontFamily: technicalFontFamily,
+                fontFamilyFallback: technicalFontFallback,
+              ),
+            ),
+          ],
+        ],
+      ),
+    ),
   );
 }
 

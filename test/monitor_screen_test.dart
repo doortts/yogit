@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/avatars.dart';
 import 'package:yogit/git.dart';
+import 'package:yogit/main.dart';
 import 'package:yogit/monitor_screen.dart';
 import 'package:yogit/pr_monitor.dart';
 import 'package:yogit/window_frame.dart';
@@ -343,6 +344,36 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
       expect(calls, contains('closeWindow'));
+    });
+
+    testWidgets('missing gh offers the download link', (tester) async {
+      final opened = <List<String>>[];
+      await tester.pumpWidget(
+        MonitorBootstrap(
+          requestedPath: '/repo',
+          branch: 'dev',
+          gitExecutable: '/usr/bin/git',
+          ghExecutable: null,
+          runner:
+              (executable, arguments, {workingDirectory, environment}) async {
+                if (executable == '/usr/bin/open') {
+                  opened.add(arguments);
+                  return ProcessResult(1, 0, '', '');
+                }
+                if (arguments.contains('rev-parse')) {
+                  return ProcessResult(1, 0, '/repo\n', '');
+                }
+                return ProcessResult(1, 1, '', 'no origin');
+              },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('모니터링에는 GitHub CLI(gh)가 필요합니다.'), findsOneWidget);
+      await tester.tap(find.text('https://cli.github.com'));
+      expect(opened, [
+        ['https://cli.github.com'],
+      ]);
     });
 
     testWidgets('a gh failure shows the banner and retry reloads', (
