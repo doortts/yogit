@@ -5105,10 +5105,11 @@ class _TimelineScreenState extends State<TimelineScreen>
           .where((entry) => _columnVisible(entry.key))
           .fold(graphWidth, (sum, entry) => sum + entry.value);
       final available = constraints.maxWidth - fixed;
-      final commitWidth = math.max(
-        timelineColumns['commit']!.min,
-        math.min(_commitWidth ?? available, available),
-      );
+      // The title column always swallows the leftover: nothing sits right of
+      // the last column, so a narrower title could only ever produce dead
+      // space. A dragged width is still saved, but the viewport decides —
+      // down to the 100px minimum on a narrow window, as before.
+      final commitWidth = math.max(timelineColumns['commit']!.min, available);
       _commitAvailableWidth = math.max(
         timelineColumns['commit']!.min,
         available,
@@ -5129,6 +5130,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: SizedBox(
+                  key: const Key('timeline-horizontal-content'),
                   width: fixed + commitWidth,
                   child: Column(
                     children: [

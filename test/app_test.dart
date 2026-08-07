@@ -2157,25 +2157,28 @@ void main() {
     expect(titleWidth(), 246);
     expect(nameRight(), lessThanOrEqualTo(1280 - 288));
 
-    // Dragging narrower pins the width: it is saved and stops following the
-    // viewport. The drag starts from the width on screen (246).
+    // Dragging narrower saves the width but the screen refills: a narrower
+    // title could only leave dead space right of the last column, so the
+    // viewport keeps deciding what is drawn.
     await tester.drag(
       find.byKey(const Key('commit-resizer')),
       const Offset(-100, 0),
     );
     await tester.pumpAndSettle();
-    final pinned = titleWidth();
-    expect(pinned, lessThan(246));
-    expect(saved?.commit, pinned);
+    expect(titleWidth(), 246);
+    expect(saved?.commit, isNotNull);
+    expect(saved!.commit, lessThan(246));
 
-    // A narrow window compresses even a pinned title to the 100px minimum, and
-    // widening restores it up to the pinned width — never past it.
+    // A narrow window still compresses the title to the 100px minimum before
+    // any other column clips, and widening refills the leftover.
     tester.view.physicalSize = const Size(800, 760);
     await tester.pumpAndSettle();
     expect(titleWidth(), 100);
+    // Same leftover math as the opening 1400px case: the drag changed nothing
+    // on screen.
     tester.view.physicalSize = const Size(1400, 760);
     await tester.pumpAndSettle();
-    expect(titleWidth(), pinned);
+    expect(titleWidth(), 366);
   });
 
   testWidgets('the six columns fill the timeline viewport with no dead strip', (
@@ -16688,6 +16691,38 @@ void main() {
     expect(find.text('commit'), findsOneWidget);
   });
   // ------------------------------------------------------------------ D1
+  testWidgets('the commit column always fills the leftover viewport width', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1600, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+
+    Widget timeline(TimelineColumnWidths widths) => MaterialApp(
+      home: TimelineScreen(
+        repository: FakeGitRepository((_, _) async => [commit('1', 'c')]),
+        controller: controller,
+        columnWidths: widths,
+      ),
+    );
+
+    // A stored commit width — narrow or absurd — never leaves dead space:
+    // the viewport decides, the title column swallows the leftover.
+    final content = find.byKey(const Key('timeline-horizontal-content'));
+    for (final stored in const [200.0, 3000.0]) {
+      await tester.pumpWidget(timeline(TimelineColumnWidths(commit: stored)));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSize(content).width,
+        tester.getSize(find.byType(TimelineScreen)).width - 150,
+        reason: '사이드바를 뺀 타임라인 영역에 빈 공간이 남으면 안 된다 (commit: $stored)',
+      );
+    }
+  });
+
   testWidgets('the toolbar monitor button hands over the base branch', (
     tester,
   ) async {
