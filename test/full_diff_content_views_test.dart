@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -19,8 +18,24 @@ import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/full_diff_unified_view.dart';
 import 'package:yogit/full_history_view.dart';
 import 'package:yogit/git.dart';
+import 'package:yogit/github_api.dart';
 
 import 'support/full_diff_fixtures.dart';
+
+/// An [AvatarService] whose REST calls answer from [send] instead of the
+/// network.
+AvatarService avatarServiceOn(HttpSend send) => AvatarService(
+  remote: const RemoteRepository(
+    host: 'github.com',
+    owner: 'team',
+    repository: 'yogit',
+  ),
+  api: GitHubApi(
+    apiBaseUrl: 'https://api.github.com',
+    token: 'token-1',
+    send: send,
+  ),
+);
 
 void main() {
   Future<BlameDocument> pumpInteractiveBlameView(
@@ -1127,25 +1142,22 @@ void main() {
   testWidgets('enabled blame avatars display a resolved remote author', (
     tester,
   ) async {
-    final requests = <List<String>>[];
-    final service = AvatarService(
-      remote: const RemoteRepository(
-        host: 'github.com',
-        owner: 'team',
-        repository: 'yogit',
-      ),
-      runner: (executable, arguments, {workingDirectory, environment}) async {
-        requests.add(List.unmodifiable(arguments));
-        return ProcessResult(
-          1,
-          0,
-          '{"author":{"login":"ada",'
-              '"avatar_url":"https://avatars.example/ada.png"},'
-              '"committer":null}',
-          '',
-        );
-      },
-    );
+    final requests = <Uri>[];
+    final service = avatarServiceOn((
+      uri, {
+      required method,
+      required headers,
+      body,
+    }) async {
+      requests.add(uri);
+      return (
+        status: 200,
+        body:
+            '{"author":{"login":"ada",'
+            '"avatar_url":"https://avatars.example/ada.png"},'
+            '"committer":null}',
+      );
+    });
 
     await tester.pumpWidget(
       qaApp(
@@ -1190,17 +1202,15 @@ void main() {
     tester,
   ) async {
     var requests = 0;
-    final service = AvatarService(
-      remote: const RemoteRepository(
-        host: 'github.com',
-        owner: 'team',
-        repository: 'yogit',
-      ),
-      runner: (executable, arguments, {workingDirectory, environment}) async {
-        requests++;
-        throw StateError('avatar lookup failed');
-      },
-    );
+    final service = avatarServiceOn((
+      uri, {
+      required method,
+      required headers,
+      body,
+    }) async {
+      requests++;
+      throw StateError('avatar lookup failed');
+    });
 
     await tester.pumpWidget(
       qaApp(

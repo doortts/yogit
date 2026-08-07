@@ -164,14 +164,9 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
           ? null
           : await GithubTokenStore(
               runner: widget.runner,
-            ).read(monitorApiBaseUrl(remote.host)),
+            ).read(githubApiBaseUrl(remote.host)),
     );
   }
-
-  /// github.com answers on its own API host; every enterprise server answers
-  /// under `/api/v3` on the host the remote already names.
-  static String monitorApiBaseUrl(String host) =>
-      host == 'github.com' ? 'https://api.github.com' : 'https://$host/api/v3';
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -212,7 +207,7 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
               remote: remote,
               monitoredBranch: widget.branch,
               api: GitHubApi(
-                apiBaseUrl: monitorApiBaseUrl(remote.host),
+                apiBaseUrl: githubApiBaseUrl(remote.host),
                 token: boot.token ?? '',
               ),
             ),
@@ -445,17 +440,23 @@ class _YogitAppState extends State<YogitApp> {
     }
   }
 
+  /// No token for the origin's server means no avatars: the REST calls would
+  /// only come back 401, and the rows already read fine with initials.
   Future<void> _discoverAvatarService() async {
-    final ghExecutable = widget.ghExecutable;
-    if (ghExecutable == null) return;
     final repository = _repository;
     final url = await repository.loadOriginUrl();
     final remote = url == null ? null : RemoteRepository.tryParse(url);
-    if (mounted && identical(_repository, repository) && remote != null) {
+    if (remote == null) return;
+    final apiBaseUrl = githubApiBaseUrl(remote.host);
+    final token = await GithubTokenStore(
+      runner: repository.runner,
+    ).read(apiBaseUrl);
+    if (token == null) return;
+    if (mounted && identical(_repository, repository)) {
       setState(
         () => _avatarService = AvatarService(
           remote: remote,
-          ghExecutable: ghExecutable,
+          api: GitHubApi(apiBaseUrl: apiBaseUrl, token: token),
         ),
       );
     }

@@ -17,6 +17,7 @@ import 'package:yogit/full_diff_side_by_side_view.dart';
 import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/full_diff_unified_view.dart';
 import 'package:yogit/git.dart';
+import 'package:yogit/github_api.dart';
 import 'package:yogit/main.dart';
 import 'package:yogit/monitor_screen.dart';
 import 'package:yogit/monaco_editor_screen.dart';
@@ -11154,17 +11155,15 @@ void main() {
       tester.view.resetPhysicalSize();
     });
     final requested = <int>[];
-    final service = AvatarService(
-      remote: const RemoteRepository(
-        host: 'github.com',
-        owner: 'team',
-        repository: 'yogit',
-      ),
-      runner: (executable, arguments, {workingDirectory, environment}) async {
-        requested.add(int.parse(arguments.last.split('/').last));
-        return ProcessResult(1, 1, '', 'offline');
-      },
-    );
+    final service = avatarServiceOn((
+      uri, {
+      required method,
+      required headers,
+      body,
+    }) async {
+      requested.add(int.parse(uri.pathSegments.last));
+      return (status: 500, body: 'offline');
+    });
 
     await tester.pumpWidget(
       MaterialApp(
@@ -11196,17 +11195,15 @@ void main() {
       tester.view.resetPhysicalSize();
     });
     var requests = 0;
-    final service = AvatarService(
-      remote: const RemoteRepository(
-        host: 'github.com',
-        owner: 'team',
-        repository: 'yogit',
-      ),
-      runner: (executable, arguments, {workingDirectory, environment}) async {
-        requests++;
-        return ProcessResult(1, 1, '', 'offline');
-      },
-    );
+    final service = avatarServiceOn((
+      uri, {
+      required method,
+      required headers,
+      body,
+    }) async {
+      requests++;
+      return (status: 500, body: 'offline');
+    });
     final repository = FakeGitRepository(
       (_, _) async => [
         commit('40aff6d1', 'aligned blame', parents: const ['parent']),
@@ -13098,98 +13095,94 @@ void main() {
     expect(RemoteRepository.tryParse('/tmp/local.git'), isNull);
   });
 
-  test('avatar lookup uses gh once per SHA and never requests Gravatar', () async {
-    final requests = <List<String>>[];
-    final service = AvatarService(
-      remote: const RemoteRepository(
-        host: 'github.com',
-        owner: 'team',
-        repository: 'yogit',
-      ),
-      ghExecutable: '/usr/bin/gh',
-      runner: (executable, arguments, {workingDirectory, environment}) async {
-        requests.add(arguments);
-        return ProcessResult(
-          1,
-          0,
-          '{"author":{"login":"ada","avatar_url":"https://avatars.example/ada"},'
+  test(
+    'avatar lookup asks GitHub once per SHA and never requests Gravatar',
+    () async {
+      final requests = <Uri>[];
+      final service = avatarServiceOn((
+        uri, {
+        required method,
+        required headers,
+        body,
+      }) async {
+        requests.add(uri);
+        return (
+          status: 200,
+          body:
+              '{"author":{"login":"ada","avatar_url":"https://avatars.example/ada"},'
               '"committer":{"login":"cam","avatar_url":"https://avatars.example/cam"}}',
-          '',
         );
-      },
-    );
+      });
 
-    final first = service.resolve('abc1234');
-    final second = service.resolve('abc1234');
-    final avatars = await first;
+      final first = service.resolve('abc1234');
+      final second = service.resolve('abc1234');
+      final avatars = await first;
 
-    expect(identical(first, second), isTrue);
-    expect(avatars.author?.login, 'ada');
-    expect(avatars.committer?.login, 'cam');
-    expect(requests, hasLength(1));
-    expect(requests.single, [
-      'api',
-      '--hostname',
-      'github.com',
-      'repos/team/yogit/commits/abc1234',
-    ]);
-    expect(
-      requests
-          .expand((request) => request)
-          .any((argument) => argument.toLowerCase().contains('gravatar')),
-      isFalse,
-    );
-  });
+      expect(identical(first, second), isTrue);
+      expect(avatars.author?.login, 'ada');
+      expect(avatars.committer?.login, 'cam');
+      expect(requests, hasLength(1));
+      expect(
+        requests.single,
+        Uri.parse('https://api.github.com/repos/team/yogit/commits/abc1234'),
+      );
+      expect(
+        requests.any(
+          (request) => request.toString().toLowerCase().contains('gravatar'),
+        ),
+        isFalse,
+      );
+    },
+  );
 
   test(
     'deleted branch PR lookup prefers an exact head sha over a newer merge',
     () async {
-      final requests = <List<String>>[];
-      final service = AvatarService(
-        remote: const RemoteRepository(
-          host: 'github.com',
-          owner: 'team',
-          repository: 'yogit',
-        ),
-        ghExecutable: '/usr/bin/gh',
-        runner: (executable, arguments, {workingDirectory, environment}) async {
-          requests.add(arguments);
-          return ProcessResult(1, 0, '''
+      final requests = <Uri>[];
+      final service = avatarServiceOn((
+        uri, {
+        required method,
+        required headers,
+        body,
+      }) async {
+        requests.add(uri);
+        return (
+          status: 200,
+          body: '''
 [
   {"number":2,"state":"closed","merged_at":"2026-07-28T12:00:00Z","head":{"sha":"other","ref":"newer"}},
   {"number":1,"state":"closed","merged_at":"2026-07-27T12:00:00Z","head":{"sha":"tip","ref":"exact"}}
 ]
-''', '');
-        },
-      );
+''',
+        );
+      });
 
       expect(await service.resolveMergedBranchName('tip'), 'exact');
-      expect(requests.single, [
-        'api',
-        '--hostname',
-        'github.com',
-        'repos/team/yogit/commits/tip/pulls',
-      ]);
+      expect(
+        requests.single,
+        Uri.parse('https://api.github.com/repos/team/yogit/commits/tip/pulls'),
+      );
     },
   );
 
   test(
     'deleted branch PR lookup uses the newest merge when no head matches',
     () async {
-      final service = AvatarService(
+      final service = avatarServiceOn(
+        (uri, {required method, required headers, body}) async => (
+          status: 200,
+          body: '''
+[
+  {"number":1,"state":"closed","merged_at":"2026-07-27T12:00:00Z","head":{"sha":"first","ref":"older"}},
+  {"number":2,"state":"closed","merged_at":"2026-07-28T12:00:00Z","head":{"sha":"second","ref":"newer"}}
+]
+''',
+        ),
         remote: const RemoteRepository(
           host: 'git.example.com',
           owner: 'team',
           repository: 'yogit',
         ),
-        runner:
-            (executable, arguments, {workingDirectory, environment}) async =>
-                ProcessResult(1, 0, '''
-[
-  {"number":1,"state":"closed","merged_at":"2026-07-27T12:00:00Z","head":{"sha":"first","ref":"older"}},
-  {"number":2,"state":"closed","merged_at":"2026-07-28T12:00:00Z","head":{"sha":"second","ref":"newer"}}
-]
-''', ''),
       );
 
       expect(await service.resolveMergedBranchName('tip'), 'newer');
@@ -13197,48 +13190,35 @@ void main() {
   );
 
   test('deleted branch PR lookup ignores unusable responses', () async {
-    for (final response in [
-      ProcessResult(1, 1, '', 'offline'),
-      ProcessResult(1, 0, 'not json', ''),
-      ProcessResult(
-        1,
-        0,
-        '[{"merged_at":null,"head":{"sha":"tip","ref":"open"}}]',
-        '',
+    for (final response in <HttpResponse>[
+      (status: 500, body: 'offline'),
+      (status: 200, body: 'not json'),
+      (
+        status: 200,
+        body: '[{"merged_at":null,"head":{"sha":"tip","ref":"open"}}]',
       ),
-      ProcessResult(
-        1,
-        0,
-        '[{"merged_at":"not-a-date","head":{"sha":"tip","ref":"bad"}}]',
-        '',
+      (
+        status: 200,
+        body: '[{"merged_at":"not-a-date","head":{"sha":"tip","ref":"bad"}}]',
       ),
     ]) {
-      final service = AvatarService(
-        remote: const RemoteRepository(
-          host: 'github.com',
-          owner: 'team',
-          repository: 'yogit',
-        ),
-        runner:
-            (executable, arguments, {workingDirectory, environment}) async =>
-                response,
+      final service = avatarServiceOn(
+        (uri, {required method, required headers, body}) async => response,
       );
 
       expect(await service.resolveMergedBranchName('tip'), isNull);
     }
   });
 
-  test('deleted branch PR lookup handles a missing gh executable', () async {
-    final service = AvatarService(
-      remote: const RemoteRepository(
-        host: 'github.com',
-        owner: 'team',
-        repository: 'yogit',
-      ),
-      runner: (executable, arguments, {workingDirectory, environment}) async {
-        throw ProcessException(executable, arguments, 'missing');
-      },
-    );
+  test('deleted branch PR lookup handles an unreachable server', () async {
+    final service = avatarServiceOn((
+      uri, {
+      required method,
+      required headers,
+      body,
+    }) async {
+      throw const GitHubApiException('연결할 수 없습니다');
+    });
 
     expect(await service.resolveMergedBranchName('tip'), isNull);
   });
@@ -13248,25 +13228,18 @@ void main() {
       'github.com': 'https://gravatar.com/avatar/ada',
       'git.example.com': 'https://cdn.gravatar.com/avatar/ada',
     }.entries) {
-      final service = AvatarService(
+      final service = avatarServiceOn(
+        (uri, {required method, required headers, body}) async => (
+          status: 200,
+          body:
+              '{"author":{"login":"ada","avatar_url":"${entry.value}"},'
+              '"committer":{"login":"cam","avatar_url":"https://notgravatar.com/cam"}}',
+        ),
         remote: RemoteRepository(
           host: entry.key,
           owner: 'team',
           repository: 'yogit',
         ),
-        runner:
-            (
-              executable,
-              arguments, {
-              workingDirectory,
-              environment,
-            }) async => ProcessResult(
-              1,
-              0,
-              '{"author":{"login":"ada","avatar_url":"${entry.value}"},'
-                  '"committer":{"login":"cam","avatar_url":"https://notgravatar.com/cam"}}',
-              '',
-            ),
       );
 
       final avatars = await service.resolve(entry.key);
@@ -13277,24 +13250,19 @@ void main() {
   });
 
   test('GHE token headers stay on the selected remote host', () async {
-    final service = AvatarService(
+    final service = avatarServiceOn(
+      (uri, {required method, required headers, body}) async => (
+        status: 200,
+        body:
+            '{"author":{"login":"ada","avatar_url":"https://cdn.example/ada"},'
+            '"committer":{"login":"cam","avatar_url":"https://git.example.com/cam"}}',
+      ),
       remote: const RemoteRepository(
         host: 'git.example.com',
         owner: 'team',
         repository: 'yogit',
       ),
-      runner: (executable, arguments, {workingDirectory, environment}) async {
-        if (arguments.take(2).join(' ') == 'auth token') {
-          return ProcessResult(1, 0, 'secret-token\n', '');
-        }
-        return ProcessResult(
-          1,
-          0,
-          '{"author":{"login":"ada","avatar_url":"https://cdn.example/ada"},'
-              '"committer":{"login":"cam","avatar_url":"https://git.example.com/cam"}}',
-          '',
-        );
-      },
+      token: 'secret-token',
     );
 
     final avatars = await service.resolve('abc1234');
@@ -13303,35 +13271,33 @@ void main() {
     expect(avatars.committer?.headers['Authorization'], 'Bearer secret-token');
   });
 
-  test('avatar lookup runs at most four gh requests concurrently', () async {
-    final gates = List.generate(5, (_) => Completer<ProcessResult>());
+  test('avatar lookup runs at most four requests concurrently', () async {
+    final gates = List.generate(5, (_) => Completer<HttpResponse>());
     var active = 0;
     var peak = 0;
     var started = 0;
-    final service = AvatarService(
-      remote: const RemoteRepository(
-        host: 'github.com',
-        owner: 'team',
-        repository: 'yogit',
-      ),
-      runner: (executable, arguments, {workingDirectory, environment}) {
-        final gate = gates[started++];
-        active++;
-        peak = active > peak ? active : peak;
-        return gate.future.whenComplete(() => active--);
-      },
-    );
+    final service = avatarServiceOn((
+      uri, {
+      required method,
+      required headers,
+      body,
+    }) {
+      final gate = gates[started++];
+      active++;
+      peak = active > peak ? active : peak;
+      return gate.future.whenComplete(() => active--);
+    });
 
     final futures = List.generate(5, (index) => service.resolve('$index'));
     await Future<void>.delayed(Duration.zero);
     expect(started, 4);
     expect(peak, 4);
 
-    gates.first.complete(ProcessResult(1, 1, '', 'offline'));
+    gates.first.complete((status: 500, body: 'offline'));
     await Future<void>.delayed(Duration.zero);
     expect(started, 5);
     for (final gate in gates.skip(1)) {
-      gate.complete(ProcessResult(1, 1, '', 'offline'));
+      gate.complete((status: 500, body: 'offline'));
     }
     await Future.wait(futures);
   });
@@ -13339,15 +13305,10 @@ void main() {
   test(
     'avatar queue and SHA cache stay bounded under heavy scrolling',
     () async {
-      final gates = List.generate(36, (_) => Completer<ProcessResult>());
+      final gates = List.generate(36, (_) => Completer<HttpResponse>());
       var started = 0;
-      final service = AvatarService(
-        remote: const RemoteRepository(
-          host: 'github.com',
-          owner: 'team',
-          repository: 'yogit',
-        ),
-        runner: (executable, arguments, {workingDirectory, environment}) =>
+      final service = avatarServiceOn(
+        (uri, {required method, required headers, body}) =>
             gates[started++].future,
       );
 
@@ -13364,7 +13325,7 @@ void main() {
       );
 
       for (var index = 0; index < gates.length; index++) {
-        gates[index].complete(ProcessResult(1, 1, '', 'offline'));
+        gates[index].complete((status: 500, body: 'offline'));
         await Future<void>.delayed(Duration.zero);
       }
       await Future.wait(futures);
@@ -13373,17 +13334,15 @@ void main() {
       expect(service.debugQueuedRequestCount, 0);
 
       var sequentialStarts = 0;
-      final lru = AvatarService(
-        remote: const RemoteRepository(
-          host: 'github.com',
-          owner: 'team',
-          repository: 'yogit',
-        ),
-        runner: (executable, arguments, {workingDirectory, environment}) async {
-          sequentialStarts++;
-          return ProcessResult(1, 1, '', 'offline');
-        },
-      );
+      final lru = avatarServiceOn((
+        uri, {
+        required method,
+        required headers,
+        body,
+      }) async {
+        sequentialStarts++;
+        return (status: 500, body: 'offline');
+      });
       for (var index = 0; index < 300; index++) {
         await lru.resolve('$index');
       }
@@ -13553,15 +13512,7 @@ void main() {
     tester,
   ) async {
     final store = MemorySettingsStore();
-    final service = AvatarService(
-      remote: const RemoteRepository(
-        host: 'github.com',
-        owner: 'team',
-        repository: 'yogit',
-      ),
-      runner: (executable, arguments, {workingDirectory, environment}) async =>
-          ProcessResult(1, 1, '', 'offline'),
-    );
+    final service = avatarServiceOn(offline);
     final repository = FakeGitRepository(
       (_, _) async => [
         commit('1', 'first commit'),
@@ -13608,17 +13559,15 @@ void main() {
     final loaded = Completer<AppSettings>();
     final store = DelayedSettingsStore(loaded.future);
     var requests = 0;
-    final service = AvatarService(
-      remote: const RemoteRepository(
-        host: 'github.com',
-        owner: 'team',
-        repository: 'yogit',
-      ),
-      runner: (executable, arguments, {workingDirectory, environment}) async {
-        requests++;
-        return ProcessResult(1, 1, '', 'offline');
-      },
-    );
+    final service = avatarServiceOn((
+      uri, {
+      required method,
+      required headers,
+      body,
+    }) async {
+      requests++;
+      return (status: 500, body: 'offline');
+    });
 
     await tester.pumpWidget(
       YogitApp(
@@ -16051,18 +16000,15 @@ void main() {
               return null;
             },
           ),
-          avatarService: AvatarService(
-            remote: const RemoteRepository(
-              host: 'github.com',
-              owner: 'team',
-              repository: 'yogit',
-            ),
-            runner:
-                (executable, arguments, {workingDirectory, environment}) async {
-                  remoteLookups++;
-                  return ProcessResult(1, 1, '', 'offline');
-                },
-          ),
+          avatarService: avatarServiceOn((
+            uri, {
+            required method,
+            required headers,
+            body,
+          }) async {
+            remoteLookups++;
+            return (status: 500, body: 'offline');
+          }),
           showRemoteAvatars: false,
         ),
       ),
@@ -16159,16 +16105,15 @@ void main() {
   testWidgets('deleted branch lookup ignores a stale avatar service result', (
     tester,
   ) async {
-    final oldResult = Completer<ProcessResult>();
+    final oldResult = Completer<HttpResponse>();
     late StateSetter update;
-    var service = AvatarService(
+    var service = avatarServiceOn(
+      (uri, {required method, required headers, body}) => oldResult.future,
       remote: const RemoteRepository(
         host: 'github.com',
         owner: 'team',
         repository: 'old',
       ),
-      runner: (executable, arguments, {workingDirectory, environment}) =>
-          oldResult.future,
     );
     final commits = [
       commit('merge', 'merge', parents: const ['main-parent', 'side-tip']),
@@ -16205,41 +16150,33 @@ void main() {
     await tester.tap(find.text('side commit'));
     await tester.pump();
     update(() {
-      service = AvatarService(
+      service = avatarServiceOn(
+        (uri, {required method, required headers, body}) async => (
+          status: 200,
+          body: jsonEncode([
+            {
+              'merged_at': '2026-07-29T00:00:00Z',
+              'head': {'sha': 'side-tip', 'ref': 'feature/new'},
+            },
+          ]),
+        ),
         remote: const RemoteRepository(
           host: 'github.com',
           owner: 'team',
           repository: 'new',
         ),
-        runner:
-            (executable, arguments, {workingDirectory, environment}) async =>
-                ProcessResult(
-                  1,
-                  0,
-                  jsonEncode([
-                    {
-                      'merged_at': '2026-07-29T00:00:00Z',
-                      'head': {'sha': 'side-tip', 'ref': 'feature/new'},
-                    },
-                  ]),
-                  '',
-                ),
       );
     });
     await tester.pump();
-    oldResult.complete(
-      ProcessResult(
-        1,
-        0,
-        jsonEncode([
-          {
-            'merged_at': '2026-07-28T00:00:00Z',
-            'head': {'sha': 'side-tip', 'ref': 'feature/old'},
-          },
-        ]),
-        '',
-      ),
-    );
+    oldResult.complete((
+      status: 200,
+      body: jsonEncode([
+        {
+          'merged_at': '2026-07-28T00:00:00Z',
+          'head': {'sha': 'side-tip', 'ref': 'feature/old'},
+        },
+      ]),
+    ));
     await tester.pumpAndSettle();
 
     expect(find.text('feature/old'), findsNothing);
@@ -16324,18 +16261,15 @@ void main() {
               return null;
             },
           ),
-          avatarService: AvatarService(
-            remote: const RemoteRepository(
-              host: 'github.com',
-              owner: 'team',
-              repository: 'yogit',
-            ),
-            runner:
-                (executable, arguments, {workingDirectory, environment}) async {
-                  remoteLookups++;
-                  return ProcessResult(1, 1, '', 'offline');
-                },
-          ),
+          avatarService: avatarServiceOn((
+            uri, {
+            required method,
+            required headers,
+            body,
+          }) async {
+            remoteLookups++;
+            return (status: 500, body: 'offline');
+          }),
           showRemoteAvatars: false,
         ),
       ),
@@ -18774,6 +18708,33 @@ Widget app(
     rebaseMergeMessageTemplate: rebaseMergeMessageTemplate,
   ),
 );
+
+/// An [AvatarService] whose REST calls answer from [send] instead of the
+/// network.
+AvatarService avatarServiceOn(
+  HttpSend send, {
+  RemoteRepository remote = const RemoteRepository(
+    host: 'github.com',
+    owner: 'team',
+    repository: 'yogit',
+  ),
+  String token = 'token-1',
+}) => AvatarService(
+  remote: remote,
+  api: GitHubApi(
+    apiBaseUrl: githubApiBaseUrl(remote.host),
+    token: token,
+    send: send,
+  ),
+);
+
+/// The transport every "the lookup failed" fixture uses.
+Future<HttpResponse> offline(
+  Uri uri, {
+  required String method,
+  required Map<String, String> headers,
+  String? body,
+}) async => (status: 500, body: 'offline');
 
 class FakeGitRepository extends GitRepository {
   FakeGitRepository(

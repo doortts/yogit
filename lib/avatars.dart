@@ -1,11 +1,10 @@
 import 'dart:async';
 import 'dart:collection';
-import 'dart:convert';
-import 'dart:io' show ProcessException;
 
 import 'package:flutter/material.dart';
 
 import 'git.dart';
+import 'github_api.dart';
 
 bool _isGravatarHost(String host) {
   final normalized = host.toLowerCase();
@@ -89,11 +88,7 @@ class CommitAvatars {
 }
 
 class AvatarService {
-  AvatarService({
-    required this.remote,
-    this.ghExecutable = 'gh',
-    this.runner = runProcess,
-  });
+  AvatarService({required this.remote, required this.api});
 
   /// Neon: pink, cyan, green, yellow, orange, purple, blue, red.
   static const defaultColors = [
@@ -111,13 +106,11 @@ class AvatarService {
   static List<Color> palette = defaultColors;
 
   final RemoteRepository remote;
-  final String ghExecutable;
-  final CommandRunner runner;
+  final GitHubApi api;
   final _cache = <String, Future<CommitAvatars>>{};
   final _permits = _PermitPool(4, maxQueued: 32);
   final _saturated = Future.value(const CommitAvatars());
   Future<String?>? _account;
-  Future<String?>? _token;
 
   Future<CommitAvatars> resolve(String sha) {
     final cached = _cache.remove(sha);
@@ -144,89 +137,65 @@ class AvatarService {
   Future<String?> accountLogin() => _account ??= _loadAccount();
 
   Future<String?> resolveMergedBranchName(String tipSha) async {
-    try {
-      final result = await runner(ghExecutable, [
-        'api',
-        '--hostname',
-        remote.host,
-        'repos/${remote.owner}/${remote.repository}/commits/$tipSha/pulls',
-      ]);
-      if (result.exitCode != 0) return null;
-      final json = jsonDecode(result.stdout.toString());
-      if (json is! List) return null;
-      final candidates = <({String ref, String sha, DateTime mergedAt})>[];
-      for (final entry in json) {
-        if (entry is! Map<String, dynamic>) continue;
-        final head = entry['head'];
-        final mergedAt = DateTime.tryParse('${entry['merged_at'] ?? ''}');
-        if (head is! Map<String, dynamic> || mergedAt == null) continue;
-        final sha = head['sha'];
-        final ref = head['ref'];
-        if (sha is! String || sha.isEmpty || ref is! String || ref.isEmpty) {
-          continue;
-        }
-        candidates.add((ref: ref, sha: sha, mergedAt: mergedAt));
+    final json = await _getJsonOrNull(
+      'repos/${remote.owner}/${remote.repository}/commits/$tipSha/pulls',
+    );
+    if (json is! List) return null;
+    final candidates = <({String ref, String sha, DateTime mergedAt})>[];
+    for (final entry in json) {
+      if (entry is! Map<String, dynamic>) continue;
+      final head = entry['head'];
+      final mergedAt = DateTime.tryParse('${entry['merged_at'] ?? ''}');
+      if (head is! Map<String, dynamic> || mergedAt == null) continue;
+      final sha = head['sha'];
+      final ref = head['ref'];
+      if (sha is! String || sha.isEmpty || ref is! String || ref.isEmpty) {
+        continue;
       }
-      candidates.sort((left, right) {
-        final leftExact = left.sha == tipSha;
-        final rightExact = right.sha == tipSha;
-        if (leftExact != rightExact) return leftExact ? -1 : 1;
-        return right.mergedAt.compareTo(left.mergedAt);
-      });
-      return candidates.firstOrNull?.ref;
-    } on ProcessException {
-      return null;
-    } on FormatException {
-      return null;
+      candidates.add((ref: ref, sha: sha, mergedAt: mergedAt));
     }
+    candidates.sort((left, right) {
+      final leftExact = left.sha == tipSha;
+      final rightExact = right.sha == tipSha;
+      if (leftExact != rightExact) return leftExact ? -1 : 1;
+      return right.mergedAt.compareTo(left.mergedAt);
+    });
+    return candidates.firstOrNull?.ref;
   }
 
   Future<String?> _loadAccount() async {
-    final result = await runner(ghExecutable, [
-      'api',
-      '--hostname',
-      remote.host,
-      'user',
-    ]);
-    if (result.exitCode != 0) return null;
-    try {
-      final json = jsonDecode(result.stdout.toString());
-      return json is Map<String, dynamic> && json['login'] is String
-          ? json['login'] as String
-          : null;
-    } on FormatException {
-      return null;
-    }
+    final json = await _getJsonOrNull('user');
+    return json is Map<String, dynamic> && json['login'] is String
+        ? json['login'] as String
+        : null;
   }
 
   Future<CommitAvatars> _load(String sha) async {
-    final result = await runner(ghExecutable, [
-      'api',
-      '--hostname',
-      remote.host,
+    final json = await _getJsonOrNull(
       'repos/${remote.owner}/${remote.repository}/commits/$sha',
-    ]);
-    if (result.exitCode != 0) return const CommitAvatars();
+    );
+    if (json is! Map<String, dynamic>) return const CommitAvatars();
+    final author = _parseAvatar(json['author']);
+    final committer = _parseAvatar(json['committer']);
+    if (remote.host == 'github.com' ||
+        api.token.isEmpty ||
+        !_needsRemoteHeader(author, committer)) {
+      return CommitAvatars(author: author, committer: committer);
+    }
+    final headers = {'Authorization': 'Bearer ${api.token}'};
+    return CommitAvatars(
+      author: _withSafeHeaders(author, headers),
+      committer: _withSafeHeaders(committer, headers),
+    );
+  }
+
+  /// A failed avatar lookup stays quiet — the row keeps its initials — so every
+  /// GitHub failure comes back as a missing answer instead of an error.
+  Future<Object?> _getJsonOrNull(String path) async {
     try {
-      final json = jsonDecode(result.stdout.toString());
-      if (json is! Map<String, dynamic>) return const CommitAvatars();
-      final author = _parseAvatar(json['author']);
-      final committer = _parseAvatar(json['committer']);
-      if (remote.host == 'github.com' ||
-          !_needsRemoteHeader(author, committer)) {
-        return CommitAvatars(author: author, committer: committer);
-      }
-      final token = await (_token ??= _loadToken());
-      if (token == null) {
-        return CommitAvatars(author: author, committer: committer);
-      }
-      final headers = {'Authorization': 'Bearer $token'};
-      return CommitAvatars(
-        author: _withSafeHeaders(author, headers),
-        committer: _withSafeHeaders(committer, headers),
-      );
-    } on FormatException {
-      return const CommitAvatars();
+      return await api.getJson(path);
+    } on GitHubApiException {
+      return null;
     }
   }
 
@@ -259,17 +228,6 @@ class AvatarService {
       return avatar;
     }
     return RemoteAvatar(login: avatar.login, url: avatar.url, headers: headers);
-  }
-
-  Future<String?> _loadToken() async {
-    final result = await runner(ghExecutable, [
-      'auth',
-      'token',
-      '--hostname',
-      remote.host,
-    ]);
-    final token = result.stdout.toString().trim();
-    return result.exitCode == 0 && token.isNotEmpty ? token : null;
   }
 
   static String initials(GitIdentity identity) {

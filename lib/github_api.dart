@@ -13,6 +13,11 @@ typedef HttpSend =
       String? body,
     });
 
+/// github.com answers on its own API host; every enterprise server answers
+/// under `/api/v3` on the host the remote already names.
+String githubApiBaseUrl(String host) =>
+    host == 'github.com' ? 'https://api.github.com' : 'https://$host/api/v3';
+
 /// Every GitHub failure the app shows, with the HTTP status where one exists.
 /// [message] is user-facing Korean, so it goes into a banner unchanged.
 class GitHubApiException implements Exception {
