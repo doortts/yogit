@@ -50,9 +50,14 @@ GithubOAuthCredentials? githubOAuthCredentialsFor(String apiBaseUrl) =>
 /// reviewers on a pull request.
 const githubOAuthScopes = ['repo', 'read:org'];
 
+/// The server a fresh install starts on. It is also
+/// [defaultGithubApiBaseUrls]'s first entry, and named separately because a
+/// const constructor cannot default a field to `.first`.
+const defaultGithubApiBaseUrl = 'https://oss.navercorp.com/api/v3';
+
 /// The servers offered out of the box; the first entry is the default.
 const defaultGithubApiBaseUrls = [
-  'https://oss.navercorp.com/api/v3',
+  defaultGithubApiBaseUrl,
   'https://es.naverlabs.com/api/v3',
   'https://api.github.com',
 ];

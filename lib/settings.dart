@@ -9,6 +9,9 @@ import 'avatars.dart';
 import 'commit_profile_chip.dart' show ProfileAvatar;
 import 'full_diff_model.dart';
 import 'git.dart';
+import 'github_api.dart';
+import 'github_auth.dart';
+import 'github_oauth.dart';
 import 'timeline_theme.dart';
 import 'window_frame.dart';
 import 'yogit_alert.dart';
@@ -385,6 +388,8 @@ class AppSettings {
     this.commitProfiles = const [],
     this.mergeMessageTemplate = defaultMergeMessageTemplate,
     this.rebaseMergeMessageTemplate = defaultMergeMessageTemplate,
+    this.githubApiBaseUrl = defaultGithubApiBaseUrl,
+    this.customGithubApiBaseUrls = const [],
   });
 
   /// How many repositories the picker remembers before the oldest drops off.
@@ -465,6 +470,13 @@ class AppSettings {
   /// merge commit. Empty means git's own [standardMergeMessage] alone.
   final String mergeMessageTemplate;
   final String rebaseMergeMessageTemplate;
+
+  /// The GitHub server the monitor and the avatars talk to. Its token lives in
+  /// the Keychain, never here.
+  final String githubApiBaseUrl;
+
+  /// Servers the user typed in, offered alongside [defaultGithubApiBaseUrls].
+  final List<String> customGithubApiBaseUrls;
 
   /// The detail panel's size, per placement axis.
   final double previewWidth;
@@ -575,6 +587,8 @@ class AppSettings {
     List<CommitProfile>? commitProfiles,
     String? mergeMessageTemplate,
     String? rebaseMergeMessageTemplate,
+    String? githubApiBaseUrl,
+    List<String>? customGithubApiBaseUrls,
   }) => AppSettings(
     showAvatars: showAvatars ?? this.showAvatars,
     timelineTheme: timelineTheme ?? this.timelineTheme,
@@ -601,6 +615,9 @@ class AppSettings {
     mergeMessageTemplate: mergeMessageTemplate ?? this.mergeMessageTemplate,
     rebaseMergeMessageTemplate:
         rebaseMergeMessageTemplate ?? this.rebaseMergeMessageTemplate,
+    githubApiBaseUrl: githubApiBaseUrl ?? this.githubApiBaseUrl,
+    customGithubApiBaseUrls:
+        customGithubApiBaseUrls ?? this.customGithubApiBaseUrls,
   );
 
   factory AppSettings.fromJson(Object? value) {
@@ -732,8 +749,27 @@ class AppSettings {
       rebaseMergeMessageTemplate: value['rebaseMergeMessageTemplate'] is String
           ? value['rebaseMergeMessageTemplate'] as String
           : defaultMergeMessageTemplate,
+      githubApiBaseUrl: _parseGithubApiBaseUrl(value['githubApiBaseUrl']),
+      customGithubApiBaseUrls: _parseGithubApiBaseUrls(
+        value['customGithubApiBaseUrls'],
+      ),
     );
   }
+
+  /// A stored server is only honoured when it is still a usable https base
+  /// URL — the app builds every request on top of it.
+  static String _parseGithubApiBaseUrl(Object? value) {
+    final urls = _parseGithubApiBaseUrls(value is String ? [value] : null);
+    return urls.isEmpty ? defaultGithubApiBaseUrl : urls.first;
+  }
+
+  static List<String> _parseGithubApiBaseUrls(Object? value) => [
+    if (value is List)
+      for (final entry in value)
+        if (entry is String)
+          if (Uri.tryParse(entry.trim()) case final uri?)
+            if (uri.isScheme('https') && uri.host.isNotEmpty) entry.trim(),
+  ];
 
   /// A profile with no email could never be applied, so it is dropped rather
   /// than shown as an entry that silently does nothing.
@@ -781,6 +817,8 @@ class AppSettings {
     'commitProfiles': [for (final profile in commitProfiles) profile.toJson()],
     'mergeMessageTemplate': mergeMessageTemplate,
     'rebaseMergeMessageTemplate': rebaseMergeMessageTemplate,
+    'githubApiBaseUrl': githubApiBaseUrl,
+    'customGithubApiBaseUrls': customGithubApiBaseUrls,
   };
 
   @override
@@ -808,7 +846,9 @@ class AppSettings {
       listEquals(recentRepositories, other.recentRepositories) &&
       listEquals(commitProfiles, other.commitProfiles) &&
       mergeMessageTemplate == other.mergeMessageTemplate &&
-      rebaseMergeMessageTemplate == other.rebaseMergeMessageTemplate;
+      rebaseMergeMessageTemplate == other.rebaseMergeMessageTemplate &&
+      githubApiBaseUrl == other.githubApiBaseUrl &&
+      listEquals(customGithubApiBaseUrls, other.customGithubApiBaseUrls);
 
   // Object.hash tops out at 20 arguments and this settled on exactly 20, so the
   // list form is what keeps taking fields.
@@ -854,6 +894,8 @@ class AppSettings {
     Object.hashAll(commitProfiles),
     mergeMessageTemplate,
     rebaseMergeMessageTemplate,
+    githubApiBaseUrl,
+    Object.hashAll(customGithubApiBaseUrls),
   ]);
 }
 
@@ -947,13 +989,24 @@ class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     required this.settings,
     required this.onChanged,
-    this.avatarService,
+    this.tokenStore,
+    this.githubSend,
+    this.oauthLogin,
     super.key,
   });
 
   final AppSettings settings;
   final ValueChanged<AppSettings> onChanged;
-  final AvatarService? avatarService;
+
+  /// Where the GitHub 서버 section keeps each server's token.
+  final GithubTokenStore? tokenStore;
+
+  /// The transport 연결 확인 uses, so a test never reaches the network.
+  final HttpSend? githubSend;
+
+  /// Browser login for one server, giving back the access token. Defaults to
+  /// the real loopback flow.
+  final Future<String> Function(String apiBaseUrl)? oauthLogin;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -969,6 +1022,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
     isDense: true,
     contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 7),
     border: OutlineInputBorder(),
+  );
+
+  static const _githubFieldStyle = TextStyle(
+    color: Color(0xFFE8EAF2),
+    fontSize: 11.5,
+  );
+
+  static InputDecoration _githubFieldDecoration(String hint) => InputDecoration(
+    hintText: hint,
+    isDense: true,
+    filled: true,
+    fillColor: const Color(0xFF12141A),
+    hintStyle: const TextStyle(color: Color(0xFF5A6172), fontSize: 11.5),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+    border: const OutlineInputBorder(
+      borderRadius: BorderRadius.all(Radius.circular(7)),
+      borderSide: BorderSide(color: Color(0xFF454B5C)),
+    ),
+    enabledBorder: const OutlineInputBorder(
+      borderRadius: BorderRadius.all(Radius.circular(7)),
+      borderSide: BorderSide(color: Color(0xFF454B5C)),
+    ),
   );
 
   /// The 시안's template editor: a sunken monospace block, first line the
@@ -1010,15 +1085,162 @@ class _SettingsScreenState extends State<SettingsScreen> {
     text: _settings.rebaseMergeMessageTemplate,
   );
 
+  late final GithubTokenStore _tokenStore =
+      widget.tokenStore ?? GithubTokenStore();
+  late final HttpSend _githubSend = widget.githubSend ?? sendOverHttps;
+  final _githubTokenField = TextEditingController();
+  final _newServerField = TextEditingController();
+
+  /// Whether each server has a token, by API base URL. Filled from the
+  /// Keychain on entry — a local call, so it costs nothing to ask for all of
+  /// them; the network is only touched when the user asks for 연결 확인.
+  final _serverHasToken = <String, bool>{};
+  String? _verifiedLogin;
+  String? _githubError;
+  String? _addServerError;
+  var _addingServer = false;
+  var _githubBusy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadServerTokens(_githubServers));
+  }
+
   @override
   void dispose() {
     _mergeMessageField.dispose();
     _rebaseMergeMessageField.dispose();
+    _githubTokenField.dispose();
+    _newServerField.dispose();
     for (final fields in _refPaletteFields) {
       fields.base.dispose();
       fields.text.dispose();
     }
     super.dispose();
+  }
+
+  List<String> get _githubServers => [
+    ...defaultGithubApiBaseUrls,
+    ..._settings.customGithubApiBaseUrls,
+  ];
+
+  Future<void> _loadServerTokens(List<String> servers) async {
+    final states = <String, bool>{};
+    for (final server in servers) {
+      states[server] = await _tokenStore.read(server) != null;
+    }
+    if (mounted) setState(() => _serverHasToken.addAll(states));
+  }
+
+  void _selectGithubServer(String server) {
+    if (server == _settings.githubApiBaseUrl) return;
+    setState(() {
+      _verifiedLogin = null;
+      _githubError = null;
+      _githubTokenField.clear();
+    });
+    _change(_settings.copyWith(githubApiBaseUrl: server));
+  }
+
+  void _addGithubServer() {
+    final url = _newServerField.text.trim().replaceFirst(RegExp(r'/+$'), '');
+    final uri = Uri.tryParse(url);
+    if (uri == null || !uri.isScheme('https') || uri.host.isEmpty) {
+      setState(() => _addServerError = 'https://호스트/api/v3 형식으로 입력하세요.');
+      return;
+    }
+    final known = _githubServers.contains(url);
+    setState(() {
+      _addingServer = false;
+      _addServerError = null;
+      _newServerField.clear();
+      _verifiedLogin = null;
+      _githubError = null;
+    });
+    _change(
+      _settings.copyWith(
+        githubApiBaseUrl: url,
+        customGithubApiBaseUrls: known
+            ? _settings.customGithubApiBaseUrls
+            : [..._settings.customGithubApiBaseUrls, url],
+      ),
+    );
+    if (!known) unawaited(_loadServerTokens([url]));
+  }
+
+  /// One place for the three calls that can fail, so every failure lands as
+  /// one line inside the login card instead of an unhandled exception.
+  Future<void> _runGithubAction(Future<void> Function() action) async {
+    setState(() {
+      _githubBusy = true;
+      _githubError = null;
+    });
+    try {
+      await action();
+    } on GitHubApiException catch (error) {
+      if (mounted) _githubError = error.message;
+    } on Exception catch (error) {
+      if (mounted) _githubError = _withoutExceptionPrefix(error);
+    } finally {
+      if (mounted) setState(() => _githubBusy = false);
+    }
+  }
+
+  static String _withoutExceptionPrefix(Exception error) {
+    final text = error.toString();
+    return text.startsWith('Exception: ') ? text.substring(11) : text;
+  }
+
+  Future<void> _browserLogin() => _runGithubAction(() async {
+    final server = _settings.githubApiBaseUrl;
+    final login =
+        widget.oauthLogin ??
+        (String apiBaseUrl) => GithubOAuthLogin(apiBaseUrl: apiBaseUrl).login();
+    await _tokenStore.save(server, await login(server));
+    await _refreshServerToken(server);
+  });
+
+  Future<void> _saveGithubToken() => _runGithubAction(() async {
+    final token = _githubTokenField.text.trim();
+    if (token.isEmpty) throw const GitHubApiException('토큰을 입력하세요.');
+    await _tokenStore.save(_settings.githubApiBaseUrl, token);
+    _githubTokenField.clear();
+    await _refreshServerToken(_settings.githubApiBaseUrl);
+  });
+
+  Future<void> _verifyGithub() => _runGithubAction(() async {
+    final server = _settings.githubApiBaseUrl;
+    final token = await _tokenStore.read(server);
+    _serverHasToken[server] = token != null;
+    if (token == null) {
+      throw const GitHubApiException('저장된 토큰이 없습니다. 먼저 로그인하세요.');
+    }
+    final user = await GitHubApi(
+      apiBaseUrl: server,
+      token: token,
+      send: _githubSend,
+    ).getJson('user');
+    final login = user is Map<String, dynamic> ? user['login'] : null;
+    if (login is! String || login.isEmpty) {
+      throw const GitHubApiException('GitHub가 로그인 이름을 돌려주지 않았습니다.');
+    }
+    _verifiedLogin = login;
+  });
+
+  Future<void> _githubLogout() => _runGithubAction(() async {
+    final server = _settings.githubApiBaseUrl;
+    await _tokenStore.delete(server);
+    _githubTokenField.clear();
+    await _refreshServerToken(server);
+  });
+
+  /// Asks the Keychain again rather than assuming: a token exported in the
+  /// environment survives a logout, and the chip should say so.
+  Future<void> _refreshServerToken(String server) async {
+    final token = await _tokenStore.read(server);
+    _serverHasToken[server] = token != null;
+    _verifiedLogin = null;
   }
 
   void _change(AppSettings value) {
@@ -1475,22 +1697,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Git integrations',
+            'GitHub 서버',
             style: TextStyle(
               color: Color(0xFFE8EAF2),
               fontSize: 20,
               fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           const Text(
-            'yogit reuses your existing GitHub CLI login. '
-            'There is no separate token or account to manage.',
+            '모니터링과 커밋 아바타가 이 연결을 사용합니다. '
+            '서버마다 따로 로그인하며, 토큰은 macOS 키체인에 저장됩니다.',
             style: TextStyle(color: Color(0xFF8D94A8), fontSize: 12),
           ),
-          const SizedBox(height: 20),
-          _connection(),
-          const SizedBox(height: 20),
+          const SizedBox(height: 14),
+          _githubServerList(),
+          const SizedBox(height: 14),
+          _githubLoginCard(),
+          const SizedBox(height: 14),
           SwitchListTile(
             key: const Key('show-avatars-toggle'),
             contentPadding: EdgeInsets.zero,
@@ -1703,42 +1927,413 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ],
   );
 
-  Widget _connection() {
-    final service = widget.avatarService;
-    if (service == null) {
-      return const Text(
-        'No GitHub or GHE origin detected',
-        style: TextStyle(color: Color(0xFF8D94A8), fontSize: 11),
-      );
-    }
-    return FutureBuilder<String?>(
-      future: service.accountLogin(),
-      builder: (context, snapshot) {
-        final connected = snapshot.data != null;
-        return Row(
-          children: [
-            Icon(
-              connected ? Icons.check_circle : Icons.cloud_off_outlined,
-              size: 15,
-              color: connected
-                  ? const Color(0xFF8AD6A1)
-                  : const Color(0xFF8D94A8),
-            ),
-            const SizedBox(width: 7),
-            Flexible(
-              child: Text(
-                connected
-                    ? '${service.remote.host} · ${snapshot.data}'
-                    : '${service.remote.host} · gh login not detected',
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Color(0xFFC6CAD7), fontSize: 11),
-              ),
-            ),
-          ],
-        );
-      },
+  /// The built-in servers plus the user's own, each wearing its login state.
+  Widget _githubServerList() {
+    final servers = _githubServers;
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1D25),
+        border: Border.all(color: const Color(0xFF343946)),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        children: [
+          for (var index = 0; index < servers.length; index++)
+            _githubServerRow(index, servers[index]),
+          _addGithubServerRow(),
+        ],
+      ),
     );
   }
+
+  Widget _githubServerRow(int index, String server) {
+    final selected = server == _settings.githubApiBaseUrl;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: Key('github-server-select-$index'),
+        onTap: () => _selectGithubServer(server),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          decoration: BoxDecoration(
+            color: selected ? const Color(0xFF232734) : null,
+            border: const Border(bottom: BorderSide(color: Color(0xFF343946))),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                selected
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_unchecked,
+                size: 13,
+                color: selected
+                    ? const Color(0xFF64D2FF)
+                    : const Color(0xFF3A4152),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                _githubServerName(server),
+                style: TextStyle(
+                  color: const Color(0xFFE8EAF2),
+                  fontSize: 12.5,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  _githubServerUrlLabel(server),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF8D94A8),
+                    fontSize: 10.5,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _githubStatusChip(server),
+              if (server == defaultGithubApiBaseUrl) ...[
+                const SizedBox(width: 8),
+                const Text(
+                  '기본',
+                  style: TextStyle(color: Color(0xFF8D94A8), fontSize: 10.5),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _githubStatusChip(String server) {
+    final login = server == _settings.githubApiBaseUrl ? _verifiedLogin : null;
+    final connected = login != null;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: connected ? const Color(0xFF12351D) : const Color(0xFF2A2A2E),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (connected) ...[
+            ProfileAvatar(
+              text: login.characters.take(2).toString().toUpperCase(),
+              color: const Color(0xFF9FE1CB),
+              size: 16,
+            ),
+            const SizedBox(width: 5),
+          ],
+          Text(
+            connected
+                ? '연결됨 · $login'
+                : (_serverHasToken[server] ?? false)
+                ? '토큰 저장됨'
+                : '로그인 안 함',
+            style: TextStyle(
+              color: connected
+                  ? const Color(0xFF34C759)
+                  : const Color(0xFF8D94A8),
+              fontSize: 10.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _addGithubServerRow() => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+    child: _addingServer
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      key: const Key('github-new-server-field'),
+                      controller: _newServerField,
+                      autofocus: true,
+                      style: _githubFieldStyle,
+                      decoration: _githubFieldDecoration('https://호스트/api/v3'),
+                      onSubmitted: (_) => _addGithubServer(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _githubButton(
+                    key: const Key('github-add-server-confirm'),
+                    label: '추가',
+                    onTap: _addGithubServer,
+                  ),
+                ],
+              ),
+              if (_addServerError case final error?)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    error,
+                    style: const TextStyle(
+                      color: Color(0xFFFF6B6B),
+                      fontSize: 10.5,
+                    ),
+                  ),
+                ),
+            ],
+          )
+        : InkWell(
+            key: const Key('github-add-server'),
+            onTap: () => setState(() => _addingServer = true),
+            child: Row(
+              children: [
+                const Icon(Icons.add, size: 13, color: Color(0xFF8D94A8)),
+                const SizedBox(width: 6),
+                const Text(
+                  '서버 추가',
+                  style: TextStyle(color: Color(0xFF8D94A8), fontSize: 11.5),
+                ),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    '— GHE API 주소(https://호스트/api/v3)를 직접 입력. '
+                    '직접 추가한 서버는 토큰으로만 로그인',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: Color(0xFF8D94A8), fontSize: 10.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+  );
+
+  /// Logging in to the selected server: the browser for a registered one, a
+  /// personal access token for any of them.
+  Widget _githubLoginCard() {
+    final server = _settings.githubApiBaseUrl;
+    final registered = githubOAuthCredentialsFor(server) != null;
+    final webHost = webBaseUrlOf(server).replaceFirst('https://', '');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '${_githubServerName(server)} — 로그인'
+          '${registered ? '' : ' (직접 추가한 서버)'}',
+          style: const TextStyle(color: Color(0xFF8D94A8), fontSize: 11),
+        ),
+        const SizedBox(height: 6),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1D25),
+            border: Border.all(color: const Color(0xFF343946)),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (registered)
+                Row(
+                  children: [
+                    _githubButton(
+                      key: const Key('github-browser-login'),
+                      label: '브라우저로 로그인',
+                      icon: Icons.language,
+                      primary: true,
+                      onTap: () => unawaited(_browserLogin()),
+                    ),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        '등록된 서버는 브라우저에서 GitHub 로그인만 하면 됩니다 (권장)',
+                        style: TextStyle(
+                          color: Color(0xFF8D94A8),
+                          fontSize: 10.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              else
+                const Text(
+                  '이 서버는 브라우저 로그인이 등록돼 있지 않습니다. '
+                  'Personal Access Token으로 로그인하세요.',
+                  style: TextStyle(color: Color(0xFF8D94A8), fontSize: 10.5),
+                ),
+              if (registered) _githubTokenSeparator(),
+              if (!registered) const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      key: const Key('github-token-field'),
+                      controller: _githubTokenField,
+                      obscureText: true,
+                      style: _githubFieldStyle,
+                      decoration: _githubFieldDecoration('ghp_ …'),
+                      onSubmitted: (_) => unawaited(_saveGithubToken()),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _githubButton(
+                    key: const Key('github-token-save'),
+                    label: '저장',
+                    onTap: () => unawaited(_saveGithubToken()),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  const Text(
+                    'Personal Access Token, 스코프 repo · read:org 필요 — ',
+                    style: TextStyle(color: Color(0xFF8D94A8), fontSize: 10.5),
+                  ),
+                  InkWell(
+                    key: const Key('github-token-scope-link'),
+                    onTap: () => unawaited(
+                      runProcess('/usr/bin/open', [
+                        '${webBaseUrlOf(server)}/settings/tokens',
+                      ]),
+                    ),
+                    child: Text(
+                      '$webHost/settings/tokens에서 발급 ↗',
+                      style: const TextStyle(
+                        color: Color(0xFF64D2FF),
+                        fontSize: 10.5,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                padding: const EdgeInsets.only(top: 10),
+                decoration: const BoxDecoration(
+                  border: Border(top: BorderSide(color: Color(0xFF343946))),
+                ),
+                child: Row(
+                  children: [
+                    _githubButton(
+                      key: const Key('github-verify'),
+                      label: '연결 확인',
+                      onTap: () => unawaited(_verifyGithub()),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(child: _githubOutcome()),
+                    _githubButton(
+                      key: const Key('github-logout'),
+                      label: '로그아웃 (토큰 삭제)',
+                      danger: true,
+                      onTap: () => unawaited(_githubLogout()),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _githubTokenSeparator() => const Padding(
+    padding: EdgeInsets.symmetric(vertical: 12),
+    child: Row(
+      children: [
+        Expanded(child: Divider(height: 1, color: Color(0xFF343946))),
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: 10),
+          child: Text(
+            '또는 토큰 직접 입력',
+            style: TextStyle(color: Color(0xFF8D94A8), fontSize: 10.5),
+          ),
+        ),
+        Expanded(child: Divider(height: 1, color: Color(0xFF343946))),
+      ],
+    ),
+  );
+
+  /// What 연결 확인 last said: the login it named, or the failure as the
+  /// transport phrased it.
+  Widget _githubOutcome() {
+    if (_githubError case final error?) {
+      return Text(
+        '✗ $error',
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: Color(0xFFFF6B6B), fontSize: 10.5),
+      );
+    }
+    if (_verifiedLogin case final login?) {
+      return Text(
+        '✓ 연결됨 — $login',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: Color(0xFF34C759), fontSize: 10.5),
+      );
+    }
+    return const SizedBox.shrink();
+  }
+
+  Widget _githubButton({
+    required Key key,
+    required String label,
+    required VoidCallback onTap,
+    IconData? icon,
+    bool primary = false,
+    bool danger = false,
+  }) {
+    final foreground = danger
+        ? const Color(0xFFFF6B6B)
+        : const Color(0xFFE8EAF2);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: key,
+        borderRadius: BorderRadius.circular(7),
+        onTap: _githubBusy ? null : onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          decoration: BoxDecoration(
+            color: primary ? const Color(0xFF173049) : const Color(0xFF232734),
+            border: Border.all(
+              color: primary
+                  ? const Color(0xFF2C5E8F)
+                  : danger
+                  ? const Color(0xFF5A2A2A)
+                  : const Color(0xFF454B5C),
+            ),
+            borderRadius: BorderRadius.circular(7),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 12, color: foreground),
+                const SizedBox(width: 5),
+              ],
+              Text(label, style: TextStyle(color: foreground, fontSize: 11.5)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  static String _githubServerName(String server) =>
+      defaultGithubApiBaseAliases[server] ??
+      (Uri.tryParse(server)?.host.isNotEmpty ?? false
+          ? Uri.parse(server).host
+          : server);
+
+  static String _githubServerUrlLabel(String server) =>
+      server.replaceFirst(RegExp(r'^https?://'), '');
 }
 
 /// Add/edit one commit profile. The email is the only required field — a

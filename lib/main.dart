@@ -496,11 +496,8 @@ class _YogitAppState extends State<YogitApp> {
   void _openSettings(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (context) => SettingsScreen(
-          settings: _settings,
-          avatarService: _avatarService,
-          onChanged: _changeSettings,
-        ),
+        builder: (context) =>
+            SettingsScreen(settings: _settings, onChanged: _changeSettings),
       ),
     );
   }

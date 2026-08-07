@@ -10469,6 +10469,8 @@ void main() {
         ),
       ),
     );
+    // The GitHub 서버 section reads the Keychain on entry, so let it finish.
+    await tester.pumpAndSettle();
     expect(find.text('Hunk'), findsNothing);
     expect(find.text('Full file focused on first change'), findsNothing);
     expect(saved, isEmpty);
@@ -13537,6 +13539,9 @@ void main() {
     await tester.tap(find.byKey(const Key('open-settings')));
     await tester.pumpAndSettle();
     expect(find.text('Git integrations'), findsWidgets);
+    // The GitHub 서버 section sits above the toggle, so it has to be scrolled to.
+    await tester.ensureVisible(find.byKey(const Key('show-avatars-toggle')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('show-avatars-toggle')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Done'));
