@@ -336,7 +336,8 @@ void main() {
     final list = tester.widget<ListView>(
       find.byKey(const Key('timeline-list')),
     );
-    expect(TimelineScreen.rowHeight, 30);
+    // 22 = the 13px default text plus half the padding the 30px row carried.
+    expect(TimelineScreen.rowHeight, 22);
     expect(list.itemExtent, TimelineScreen.rowHeight);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
@@ -1181,13 +1182,24 @@ void main() {
         refConnector: true,
       );
       const centerY = TimelineScreen.rowHeight / 2;
-      const tip = Offset(13, centerY);
+      // The disc's own edge, less the gap every ref arrow keeps.
+      const tip = Offset(
+        CommitGraphPainter.laneInset -
+            CommitGraphPainter.avatarRadius -
+            CommitGraphPainter.refArrowGap,
+        centerY,
+      );
 
       expect(painter.refMarkerRadius, CommitGraphPainter.avatarRadius);
       expect(painter.refArrowTipX, tip.dx);
       expect(
         painter.refArrowheadPath(centerY).getBounds(),
-        Rect.fromLTRB(6, centerY - 5, 13, centerY + 5),
+        Rect.fromLTRB(
+          tip.dx - CommitGraphPainter.refArrowLength,
+          centerY - 5,
+          tip.dx,
+          centerY + 5,
+        ),
       );
       expect(
         (Canvas canvas) => painter.paint(canvas, size),
@@ -1233,7 +1245,7 @@ void main() {
     expect(workingTree.refArrowTipX, 16.0);
     expect(compact.laneX(compact.row.lane), CommitGraphPainter.laneInset);
     expect(compact.refMarkerRadius, CommitGraphPainter.avatarRadius);
-    expect(compact.refArrowTipX, 13.0);
+    expect(compact.refArrowTipX, 15.0);
   });
 
   test('preview rail inherits the previous row dash above its node', () {
@@ -1321,43 +1333,40 @@ void main() {
     );
   });
 
-  test(
-    'a virtual commit node draws its ring as dashes fitted to the circle',
-    () {
-      const fill = Color(0xFF8D6BB8);
-      const ring = Color(0xFFB78BEF);
-      const painter = DashedRingNodePainter(
-        fill: fill,
-        ring: ring,
-        ringWidth: 3,
-      );
-      const size = Size.square(CommitGraphPainter.avatarRadius * 2);
-      // The ring is stroked just inside the disc (r = 11 - 1.5), and its dash
-      // count is FITTED to that perimeter — whole dash+gap periods only, so the
-      // pattern closes without a seam instead of clipping the last dash.
-      final period = DashedRingNodePainter.dash + DashedRingNodePainter.gap;
-      final perimeter =
-          (Path()..addOval(
-                Rect.fromCircle(center: size.center(Offset.zero), radius: 9.5),
-              ))
-              .computeMetrics()
-              .single
-              .length;
-      final fitted = (perimeter / period).round();
-      PaintPattern dashes(int count) {
-        final pattern = paints..circle(color: fill);
-        for (var i = 0; i < count; i++) {
-          pattern.path(color: ring, strokeWidth: 3);
-        }
-        return pattern;
+  test('a virtual commit node draws its ring as dashes fitted to the circle', () {
+    const fill = Color(0xFF8D6BB8);
+    const ring = Color(0xFFB78BEF);
+    const painter = DashedRingNodePainter(fill: fill, ring: ring, ringWidth: 3);
+    const size = Size.square(CommitGraphPainter.avatarRadius * 2);
+    // The ring is stroked just inside the disc (r = the disc's own radius less
+    // half the ring's width), and its dash count is FITTED to that perimeter —
+    // whole dash+gap periods only, so the pattern closes without a seam
+    // instead of clipping the last dash.
+    final period = DashedRingNodePainter.dash + DashedRingNodePainter.gap;
+    final perimeter =
+        (Path()..addOval(
+              Rect.fromCircle(
+                center: size.center(Offset.zero),
+                radius: CommitGraphPainter.avatarRadius - 1.5,
+              ),
+            ))
+            .computeMetrics()
+            .single
+            .length;
+    final fitted = (perimeter / period).round();
+    PaintPattern dashes(int count) {
+      final pattern = paints..circle(color: fill);
+      for (var i = 0; i < count; i++) {
+        pattern.path(color: ring, strokeWidth: 3);
       }
+      return pattern;
+    }
 
-      void paint(Canvas canvas) => painter.paint(canvas, size);
-      expect(fitted, greaterThan(1));
-      expect(paint, dashes(fitted));
-      expect(paint, isNot(dashes(fitted + 1)));
-    },
-  );
+    void paint(Canvas canvas) => painter.paint(canvas, size);
+    expect(fitted, greaterThan(1));
+    expect(paint, dashes(fitted));
+    expect(paint, isNot(dashes(fitted + 1)));
+  });
 
   test(
     'compact preview keeps the virtual segment dashed above its real parent',
@@ -2115,7 +2124,7 @@ void main() {
         matching: find.byType(CommitAvatarStack),
       ),
     );
-    expect(stack.size, 22);
+    expect(stack.size, CommitGraphPainter.avatarDiameter);
     expect(stack.discColor, AvatarService.branchColor(painterAt(1).row.branch));
     // Every remaining stack (the graph cell) wears its branch line.
     expect(
@@ -2254,8 +2263,9 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(columnWidth('graph'), 102);
-    expect(columnWidth('commit'), 1100 - (156 + 102 + 78 + 116 + 150));
+    final deep = CommitGraphPainter.contentWidth(2);
+    expect(columnWidth('graph'), deep);
+    expect(columnWidth('commit'), 1100 - (156 + deep + 78 + 116 + 150));
     expect(
       tester.getRect(find.byKey(const Key('name-header'))).right,
       viewport().right,
@@ -2287,7 +2297,7 @@ void main() {
     expect(const TimelineColumnWidths().graph, isNull);
     expect(graphWidth(), 96);
 
-    // Three lanes want 28 + 2 * 30 + 14 of content, which clears the minimum.
+    // Three lanes want 28 + 2 * 30 + 12 of content, which clears the minimum.
     await tester.pumpWidget(
       screen(
         FakeGitRepository(
@@ -2301,7 +2311,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(graphWidth(), 102);
+    expect(graphWidth(), CommitGraphPainter.contentWidth(2));
 
     // Dragging pins it, and the pinned width is what gets saved.
     await tester.drag(
@@ -2310,7 +2320,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     final pinned = graphWidth();
-    expect(pinned, greaterThan(102));
+    expect(pinned, greaterThan(CommitGraphPainter.contentWidth(2)));
     expect(saved?.graph, pinned);
     final painter =
         tester
@@ -2410,16 +2420,16 @@ void main() {
   test('graph lane spacing compresses in stages', () {
     // Lanes hold their coordinates while the cell still shows the last node,
     // which is all the width the content needs.
-    expect(CommitGraphPainter.contentWidth(2), 102);
-    expect(CommitGraphPainter.contentWidth(0), 42);
+    expect(CommitGraphPainter.contentWidth(2), 100);
+    expect(CommitGraphPainter.contentWidth(0), 40);
     expect(CommitGraphPainter.spacingFor(260, 2), 30);
     expect(CommitGraphPainter.spacingFor(118, 2), 30);
-    expect(CommitGraphPainter.spacingFor(102, 2), 30);
+    expect(CommitGraphPainter.spacingFor(100, 2), 30);
     expect(CommitGraphPainter.spacingFor(58, 0), 30);
     // Below that the lanes squeeze so the last node stays just inside.
-    expect(CommitGraphPainter.spacingFor(101, 2), 29.5);
-    expect(CommitGraphPainter.spacingFor(100, 2), 29);
-    expect(CommitGraphPainter.spacingFor(70, 2), 14);
+    expect(CommitGraphPainter.spacingFor(99, 2), 29.5);
+    expect(CommitGraphPainter.spacingFor(98, 2), 29);
+    expect(CommitGraphPainter.spacingFor(68, 2), 14);
     expect(CommitGraphPainter.spacingFor(40, 2), 12);
     expect(CommitGraphPainter.compactWidth, 56);
     expect(timelineColumns['graph']!.min, 40);
@@ -2457,27 +2467,27 @@ void main() {
         )
         .size;
 
-    // Stage 1: 118px is wider than the 102px content, so nothing moves.
+    // Stage 1: 118px is wider than the 100px content, so nothing moves.
     await tester.pumpWidget(screen(118));
     await tester.pumpAndSettle();
     expect(painterAt(0).compact, isFalse);
     expect(painterAt(0).laneSpacing, 30);
     expect(painterAt(1).laneX(1) - painterAt(1).laneX(0), 30);
-    expect(avatarSize(1), 22);
+    expect(avatarSize(1), CommitGraphPainter.avatarDiameter);
 
     // Stage 2: the lanes squeeze together and the node avatar shrinks with them.
-    await tester.pumpWidget(screen(70));
+    await tester.pumpWidget(screen(68));
     await tester.pumpAndSettle();
     expect(painterAt(0).compact, isFalse);
     expect(painterAt(0).laneSpacing, 14);
     expect(painterAt(1).laneX(0), CommitGraphPainter.laneInset);
     expect(painterAt(1).laneX(1) - painterAt(1).laneX(0), 14);
     expect(
-      painterAt(0).transitionPath(0, 2, 18, const Size(70, 36)).getBounds(),
+      painterAt(0).transitionPath(0, 2, 18, const Size(68, 36)).getBounds(),
       const Rect.fromLTRB(28, 18, 56, 54),
     );
     // Nodes keep their full size at every width; the overhang just clips.
-    expect(avatarSize(1), 22);
+    expect(avatarSize(1), CommitGraphPainter.avatarDiameter);
 
     // Stage 3: every lane collapses onto the inset and the curves are dropped.
     await tester.pumpWidget(screen(56));
@@ -2494,7 +2504,7 @@ void main() {
       top: 0.0,
       bottom: 18.0,
     ));
-    expect(avatarSize(1), 22);
+    expect(avatarSize(1), CommitGraphPainter.avatarDiameter);
   });
 
   testWidgets('column resizers move by 8px on arrow keys and clamp', (
@@ -9205,9 +9215,14 @@ void main() {
     final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
     int alphaAt(int x, int y) => bytes!.getUint8((y * 100 + x) * 4 + 3);
 
-    expect(alphaAt(42, 15), greaterThan(0));
-    expect(alphaAt(43, 16), 0);
-    expect(alphaAt(42, 21), greaterThan(0));
+    // The head opens rightward from the node's own edge — the lane inset plus
+    // the disc's radius — so the probes follow the avatar, not a fixed column.
+    final tip =
+        (CommitGraphPainter.laneInset + CommitGraphPainter.avatarDiameter / 2)
+            .round();
+    expect(alphaAt(tip + 3, 15), greaterThan(0));
+    expect(alphaAt(tip + 4, 16), 0);
+    expect(alphaAt(tip + 3, 21), greaterThan(0));
   });
 
   test(
@@ -11218,7 +11233,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(requested, isNotEmpty);
-    expect(requested, everyElement(lessThan(12)));
+    // The bound is an extent, not a row count: the 180px viewport plus the
+    // list's cache, never all 100 commits, however tall a row is.
+    expect(
+      requested,
+      everyElement(lessThan((360 / TimelineScreen.rowHeight).ceil())),
+    );
   });
 
   testWidgets('timeline passes avatar settings into full diff blame', (
@@ -13484,7 +13504,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    for (var index = 0; index < 12; index++) {
+    // As many rows down as the whole 500px window could hold, so the list is
+    // certainly scrolled — the viewport is shorter than the window.
+    final target = (500 / TimelineScreen.rowHeight).ceil();
+    for (var index = 0; index < target; index++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     }
     await tester.pumpAndSettle();
@@ -13493,7 +13516,7 @@ void main() {
     final preview = find.byKey(const Key('preview-surface'));
     final previewSubject = find.descendant(
       of: preview,
-      matching: find.text('message 12'),
+      matching: find.text('message $target'),
     );
     expect(preview, findsOneWidget);
     expect(previewSubject, findsOneWidget);
@@ -13518,7 +13541,7 @@ void main() {
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('selected-row-12')), findsOneWidget);
+    expect(find.byKey(Key('selected-row-$target')), findsOneWidget);
     expect(preview, findsOneWidget);
     expect(previewSubject, findsOneWidget);
     expect(
@@ -13906,6 +13929,10 @@ void main() {
     expect(boxRect.top - rowRect.top, greaterThan(centred));
     expect(boxRect.top, greaterThanOrEqualTo(rowRect.top));
     expect(boxRect.bottom, lessThanOrEqualTo(rowRect.bottom));
+    // ignore: avoid_print
+    print(
+      'DATEBOX row=$rowRect box=$boxRect text=${tester.getSize(find.text('Today'))}',
+    );
     expect(boxRect.height, greaterThanOrEqualTo(20));
 
     // Underlines are gone from commit rows too.
@@ -14355,12 +14382,13 @@ void main() {
       tester.view.resetPhysicalSize();
     });
     // A straight run on lane 0, then an octopus far below the fold opening
-    // lanes 1..3.
+    // lanes 1..3. 60 rows outrun the 600px window and its list cache at any
+    // row height, so the octopus really does start off screen.
     final repository = FakeGitRepository(
       (_, _) async => [
-        for (var index = 0; index < 20; index++)
+        for (var index = 0; index < 60; index++)
           commit('$index', 'commit $index', parents: ['${index + 1}']),
-        commit('20', 'octopus', parents: const ['a', 'b', 'c', 'd']),
+        commit('60', 'octopus', parents: const ['a', 'b', 'c', 'd']),
         commit('a', 'a'),
         commit('b', 'b'),
         commit('c', 'c'),
@@ -14382,7 +14410,7 @@ void main() {
     // Only lane 0 is on screen, so the column stays at its floor.
     expect(graphWidth(), 96);
 
-    // Scrolling the octopus into view widens it once: 28 + 3 * 30 + 14.
+    // Scrolling the octopus into view widens it once: 28 + 3 * 30 + 12.
     final scrollable = tester.state<ScrollableState>(
       find.descendant(
         of: find.byKey(const Key('timeline-list')),
@@ -14391,12 +14419,12 @@ void main() {
     );
     scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
     await tester.pumpAndSettle();
-    expect(graphWidth(), 132);
+    expect(graphWidth(), CommitGraphPainter.contentWidth(3));
 
     // Scrolling back never shrinks it inside a session.
     scrollable.position.jumpTo(0);
     await tester.pumpAndSettle();
-    expect(graphWidth(), 132);
+    expect(graphWidth(), CommitGraphPainter.contentWidth(3));
 
     // A different repository starts over.
     await tester.pumpWidget(
@@ -14445,7 +14473,7 @@ void main() {
         tester.getSize(find.byKey(const Key('graph-header'))).width;
 
     // The unpreferred merge exposes lanes 0..3.
-    expect(graphWidth(), 132);
+    expect(graphWidth(), CommitGraphPainter.contentWidth(3));
 
     // This unloaded tip reserves lane 0, shifting the visible merge to lanes
     // 1..4 after the asynchronous refs result arrives.
@@ -14464,7 +14492,7 @@ void main() {
                 .painter
             as CommitGraphPainter;
     expect(painter.row.nextLanes, contains(4));
-    expect(graphWidth(), 162);
+    expect(graphWidth(), CommitGraphPainter.contentWidth(4));
   });
 
   // ------------------------------------------------------------------ §18.1
@@ -15485,7 +15513,7 @@ void main() {
     );
   });
   // ------------------------------------------------------------------ A1
-  testWidgets('the hash rule is an inset 2px strip', (tester) async {
+  testWidgets('the hash rule is an inset 1px hairline', (tester) async {
     await tester.pumpWidget(
       app(
         FakeGitRepository(
@@ -15503,17 +15531,17 @@ void main() {
       final rect = tester.getRect(rule);
       expect(rect.width, 1);
       expect(rect.height, TimelineScreen.rowHeight - 2);
-      // A 22px node still centres cleanly in the shorter row.
+      // The node still centres cleanly in the shorter row.
       final cell = tester.getRect(find.byKey(Key('graph-cell-$index')));
       final node = find.descendant(
         of: find.byKey(Key('graph-cell-$index')),
         matching: find.byType(CommitAvatarStack),
       );
       if (node.evaluate().isNotEmpty) {
-        expect(tester.getRect(node).height, 22);
+        expect(tester.getRect(node).height, CommitGraphPainter.avatarDiameter);
         expect(
           tester.getRect(node).top - cell.top,
-          (TimelineScreen.rowHeight - 22) / 2,
+          (TimelineScreen.rowHeight - CommitGraphPainter.avatarDiameter) / 2,
         );
       }
       // 1px shy of the row at both ends.

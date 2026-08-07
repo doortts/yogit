@@ -10,7 +10,7 @@ import 'app_test.dart' show FakeGitRepository, commit;
 
 /// A hash cell never wraps. A column narrower than its content — dragged
 /// there, fitted there, or squeezed there by the viewport — clips the sha to
-/// one line instead of folding it onto a second one inside the 30px row.
+/// one line instead of folding it onto a second one inside the row.
 void main() {
   Widget timeline({required double hashWidth}) => MaterialApp(
     home: TimelineScreen(

@@ -928,7 +928,7 @@ class TimelineScreen extends StatefulWidget {
   });
 
   /// Every row is this tall — commits and date headings alike.
-  static const rowHeight = 30.0;
+  static const rowHeight = 22.0;
 
   final GitRepository repository;
   final WindowFrameController? controller;
@@ -1035,7 +1035,8 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   /// The graph disc's initials were drawn at 0.42 of the disc against a 13px
   /// base, so they scale by how far the base has moved from there. The disc
-  /// itself never changes size — a row is 30px whatever the font says.
+  /// itself never changes size — a row is [TimelineScreen.rowHeight] whatever
+  /// the font says.
   double get _initialsFontScale =>
       _baseFontSize / TimelineFontChoice.system.defaultFontSize;
 
@@ -6542,6 +6543,11 @@ class _TimelineScreenState extends State<TimelineScreen>
   static const _refChipPadding = 10.0;
   static const _refGlyphWidth = 16.0;
 
+  /// Every box a row draws inside itself — a ref chip, a date heading — is this
+  /// tall, which is [TimelineScreen.rowHeight] less the hairline of background
+  /// the row keeps above and below so stacked chips never touch.
+  static const _rowChipHeight = TimelineScreen.rowHeight - 2;
+
   /// The header label and the hash cell, without the colors that come and go
   /// with hover and selection. Shared with the double-click fit, which measures
   /// what these two actually draw.
@@ -7142,14 +7148,18 @@ class _TimelineScreenState extends State<TimelineScreen>
         graphWidth,
       ),
       Padding(
-        // 5px left of the hash text (whose 2px rule shifts it), so the box reads
-        // as heading the row rather than sitting in the hash column, and pushed
+        // 5px left of the hash text (whose rule shifts it), so the box reads as
+        // heading the row rather than sitting in the hash column, and pushed
         // down far enough to hang under the group above without clipping.
-        padding: const EdgeInsets.only(left: 6, right: 9, top: 4),
+        padding: const EdgeInsets.only(left: 6, right: 9, top: 2),
         child: Container(
           key: Key('date-box-$index'),
-          // Tight enough that the box plus its downward shift clears the row.
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+          // The row is the ceiling: box plus downward shift has to clear it, so
+          // the height comes from the row rather than from the label's own line
+          // height, which would leave the box taller than the row it heads.
+          height: _rowChipHeight,
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
             border: Border.all(color: _dateGroup),
             borderRadius: BorderRadius.circular(7),
@@ -7493,7 +7503,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                     _w('hash'),
                     Text(
                       commit.isWorkingTree ? '·······' : commit.shortSha,
-                      // A sha never folds onto a second line inside a 30px row.
+                      // A sha never folds onto a second line inside the row.
                       // Clipped rather than ellipsised: the front of a sha is
                       // the part worth reading, and '…' would spend room on
                       // saying so.
@@ -7869,9 +7879,9 @@ class _TimelineScreenState extends State<TimelineScreen>
                   for (var index = 0; index < shown.length; index++)
                     Positioned(
                       left: inset + index * slot,
-                      top: (TimelineScreen.rowHeight - 24) / 2,
+                      top: (TimelineScreen.rowHeight - _rowChipHeight) / 2,
                       width: slot,
-                      height: 24,
+                      height: _rowChipHeight,
                       child: _refChip(
                         commit,
                         shown[index],
@@ -11863,7 +11873,7 @@ class CommitGraphPainter extends CustomPainter {
   static const previewLaneSpacing = 49.0;
   static const railWidth = 2.0;
   static const previewRailWidth = 1.0;
-  static const avatarDiameter = 22.0;
+  static const avatarDiameter = 18.0;
   static const hashRailClearance = 3.0;
 
   /// Stage 3: at or below this cell width the graph collapses to one lane.
@@ -11874,9 +11884,6 @@ class CommitGraphPainter extends CustomPainter {
 
   /// Half the node avatar plus the required gap before the hash column's rail.
   static const nodeExtent = avatarDiameter / 2 + hashRailClearance;
-
-  /// Below this spacing the graph node shows the small avatar stack.
-  static const compressedAvatarSpacing = 22.0;
 
   /// The narrowest cell that still shows every node whole. Empty space right of
   /// it clips away before any lane moves.
@@ -11905,7 +11912,10 @@ class CommitGraphPainter extends CustomPainter {
   /// Rails are opaque.
   static const railOpacity = 1.0;
   static const connectorWidth = 1.0;
-  static const avatarRadius = 11.0;
+
+  /// The node disc's own radius, so the ref connector's arrow stops the same
+  /// [refArrowGap] short of an avatar as it does of a merge dot.
+  static const avatarRadius = avatarDiameter / 2;
   static const refArrowGap = 4.0;
   static const refArrowLength = 7.0;
   static const refArrowHalfHeight = 5.0;
