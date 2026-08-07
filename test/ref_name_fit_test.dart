@@ -151,8 +151,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    // The columns live inside a horizontal scroll view, so 'no scroll' means
+    // the content is no wider than the pane holding it — NOT than the list,
+    // which is the content's own child and therefore always its width.
     final content = find.byKey(const Key('timeline-horizontal-content'));
-    final viewport = find.byKey(const Key('timeline-list'));
+    final pane = find.byKey(const Key('timeline-viewport'));
     for (final column in const ['refs', 'hash', 'time', 'name', 'commit']) {
       final resizer = find.byKey(Key('$column-resizer'));
       if (resizer.evaluate().isEmpty) continue;
@@ -162,7 +165,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         tester.getSize(content).width,
-        lessThanOrEqualTo(tester.getSize(viewport).width),
+        lessThanOrEqualTo(tester.getSize(pane).width),
         reason: '$column 맞춤 후 가로 스크롤이 생겼다',
       );
     }
