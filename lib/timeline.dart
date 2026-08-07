@@ -1199,6 +1199,12 @@ class _TimelineScreenState extends State<TimelineScreen>
   };
   Map<String, double> _resizeStartWidths = const {};
 
+  /// Whether the drag in progress has moved a divider at all, and which divider
+  /// was last clicked without moving, for spotting the second click.
+  var _dragResized = false;
+  String? _lastResizerClick;
+  int _lastResizerClickMs = 0;
+
   @override
   void initState() {
     super.initState();
@@ -6484,6 +6490,31 @@ class _TimelineScreenState extends State<TimelineScreen>
   static const _columnTextInset = 9.0;
   static const _railedColumnTextInset = 11.0;
 
+  /// The refs cell pads itself instead: the right gutter is where the chip's
+  /// connector line runs out to the graph.
+  static const _refsCellInset = 14.0;
+
+  /// A chip's own horizontal padding, and the room its ✓/◇ glyph takes with the
+  /// gap after it — the same allowance the ref modal sizes itself by.
+  static const _refChipPadding = 10.0;
+  static const _refGlyphWidth = 16.0;
+
+  /// The header label and the hash cell, without the colors that come and go
+  /// with hover and selection. Shared with the double-click fit, which measures
+  /// what these two actually draw.
+  static const _headerLabelStyle = TextStyle(
+    fontSize: 12,
+    fontFamily: 'monospace',
+    fontWeight: FontWeight.w500,
+    letterSpacing: 0.66,
+  );
+  static const _hashStyle = TextStyle(
+    fontSize: 12,
+    fontFamily: technicalFontFamily,
+    fontFamilyFallback: technicalFontFallback,
+    fontWeight: FontWeight.w500,
+  );
+
   Widget _header(String column, double width) => SizedBox(
     key: Key('$column-header'),
     width: width,
@@ -6518,14 +6549,10 @@ class _TimelineScreenState extends State<TimelineScreen>
                           maxLines: 1,
                           softWrap: false,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
+                          style: _headerLabelStyle.copyWith(
                             color: hovered == column
                                 ? _palette.text
                                 : _palette.muted,
-                            fontSize: 12,
-                            fontFamily: 'monospace',
-                            fontWeight: FontWeight.w500,
-                            letterSpacing: 0.66,
                           ),
                         ),
                       ),
@@ -6632,25 +6659,152 @@ class _TimelineScreenState extends State<TimelineScreen>
           key: Key('$column-resizer'),
           behavior: HitTestBehavior.opaque,
           onHorizontalDragStart: (_) => _startResize(column),
-          onHorizontalDragUpdate: (details) =>
-              _resize(column, width + details.delta.dx),
-          onHorizontalDragEnd: (_) => _finishResize(),
-          onHorizontalDragCancel: _finishResize,
+          onHorizontalDragUpdate: (details) {
+            _dragResized = true;
+            _resize(column, width + details.delta.dx);
+          },
+          onHorizontalDragEnd: (_) => _finishResize(column),
+          onHorizontalDragCancel: () => _finishResize(column),
         ),
       ),
     ),
   );
 
+  /// Double-clicking a divider fits its column to the widest thing the column
+  /// draws right now — its header and every loaded row — clamped to the column's
+  /// own range and to the width the other columns leave it.
+  void _fitColumn(String column) {
+    // The title column absorbs whatever the other five leave, so the viewport
+    // alone decides it: there is no content width to fit it to.
+    if (column == 'commit') return;
+    // The graph column already has a fit of its own — the deepest loaded lane —
+    // so a double click hands it back to that instead of measuring text.
+    if (column == 'graph') {
+      if (_graphWidth == null) return;
+      setState(() => _graphWidth = null);
+      _saveColumnWidths();
+      return;
+    }
+    final spec = timelineColumns[column]!;
+    final taken = timelineColumns.keys
+        .where((other) => other != column && _columnVisible(other))
+        .fold(
+          0.0,
+          (sum, other) =>
+              sum +
+              switch (other) {
+                'commit' => timelineColumns['commit']!.min,
+                'graph' => _graphColumnWidth,
+                _ => _w(other),
+              },
+        );
+    final fitted = _contentWidth(column)
+        .clamp(
+          spec.min,
+          math.max(
+            spec.min,
+            math.min(spec.max, _timelineViewportWidth - taken),
+          ),
+        )
+        .toDouble();
+    if (fitted == _w(column)) return;
+    setState(() => _widths[column] = fitted);
+    _saveColumnWidths();
+  }
+
+  /// What [column] would need to clip nothing: its header label and its widest
+  /// loaded row, plus the insets the cell pads its text by.
+  double _contentWidth(String column) {
+    var widest = _textWidth(
+      timelineColumns[column]!.label.toUpperCase(),
+      _headerLabelStyle,
+    );
+    for (final entry in _entries) {
+      // A date heading spans the row instead of sitting inside one column.
+      if (entry.rowIndex < 0) continue;
+      widest = math.max(widest, _rowContentWidth(column, entry.row.commit));
+    }
+    return widest +
+        switch (column) {
+          // The refs cell keeps its own gutters, one of them for the connector.
+          'refs' => _refsCellInset * 2,
+          'hash' => _railedColumnTextInset + _columnTextInset,
+          _ => _columnTextInset * 2,
+        };
+  }
+
+  double _rowContentWidth(String column, GitCommit commit) => switch (column) {
+    'refs' => _refsContentWidth(commit),
+    'hash' => _textWidth(
+      commit.isWorkingTree ? '·······' : commit.shortSha,
+      _hashStyle,
+    ),
+    'time' => _textWidth(
+      commit.isWorkingTree
+          ? 'working tree'
+          : _socialTime(commit.committerTimestamp),
+      TextStyle(fontFamily: _fontFamily, fontSize: _supportingFontSize),
+    ),
+    _ => _textWidth(
+      commit.author.name,
+      TextStyle(
+        fontFamily: _fontFamily,
+        fontSize: _supportingFontSize,
+        fontWeight: FontWeight.w500,
+      ),
+    ),
+  };
+
+  /// Chips split the cell into equal slots, so a row needs its widest chip in
+  /// every slot it fills — not the sum of the chips it happens to carry.
+  double _refsContentWidth(GitCommit commit) {
+    final refs = _rowRefs(commit);
+    var widest = 0.0;
+    for (final ref in refs) {
+      widest = math.max(
+        widest,
+        _textWidth(ref.name, _refNameStyle(_palette.text)) +
+            (ref.isHead || ref.isTag ? _refGlyphWidth : 0) +
+            _refChipPadding,
+      );
+    }
+    return widest * refs.length;
+  }
+
+  double _textWidth(String text, TextStyle style) => (TextPainter(
+    text: TextSpan(text: text, style: style),
+    textDirection: TextDirection.ltr,
+  )..layout()).width;
+
   void _startResize(String column) {
+    _dragResized = false;
     _resizeStartWidths = {
       if (column == 'commit' || column == 'time') 'time': _w('time'),
       if (column == 'commit' || column == 'name') 'name': _w('name'),
     };
   }
 
-  void _finishResize() {
-    _saveColumnWidths();
+  /// A drag that never moved is a click, and two of them inside the
+  /// double-click window fit the column. The counting happens here rather than
+  /// through an `onDoubleTap`, because a second recognizer in the divider's
+  /// gesture arena would cost the drag its first 18px before it starts.
+  void _finishResize(String column) {
     _resizeStartWidths = const {};
+    if (_dragResized) {
+      _dragResized = false;
+      _lastResizerClick = null;
+      _saveColumnWidths();
+      return;
+    }
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (_lastResizerClick == column &&
+        now - _lastResizerClickMs <= kDoubleTapTimeout.inMilliseconds) {
+      _lastResizerClick = null;
+      _fitColumn(column);
+      return;
+    }
+    _lastResizerClick = column;
+    _lastResizerClickMs = now;
   }
 
   /// Resizes from the width on screen, so dragging a flexing title column picks
@@ -7209,12 +7363,8 @@ class _TimelineScreenState extends State<TimelineScreen>
                     _w('hash'),
                     Text(
                       commit.isWorkingTree ? '·······' : commit.shortSha,
-                      style: TextStyle(
+                      style: _hashStyle.copyWith(
                         color: selected ? _palette.text : _hash,
-                        fontSize: 12,
-                        fontFamily: technicalFontFamily,
-                        fontFamilyFallback: technicalFontFallback,
-                        fontWeight: FontWeight.w500,
                       ),
                     ),
                     leftBorder: previewColor,
@@ -7572,7 +7722,7 @@ class _TimelineScreenState extends State<TimelineScreen>
             builder: (context, constraints) {
               // Chips split the cell evenly, each keeping at least 40px, and
               // whatever no longer fits simply does not show.
-              const inset = 14.0;
+              const inset = _refsCellInset;
               final width = constraints.maxWidth - inset * 2;
               final slots = math.max(1, (width / _minChipWidth).floor());
               final shown = refs.take(slots).toList();
@@ -7732,12 +7882,11 @@ class _TimelineScreenState extends State<TimelineScreen>
   double _refsModalWidth(List<GitRef> refs) {
     var longest = 0.0;
     for (final ref in refs) {
-      final painter = TextPainter(
-        text: TextSpan(text: ref.name, style: _refNameStyle(_palette.text)),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      final glyph = ref.isHead || ref.isTag ? 16.0 : 0.0;
-      longest = math.max(longest, painter.width + glyph);
+      final glyph = ref.isHead || ref.isTag ? _refGlyphWidth : 0.0;
+      longest = math.max(
+        longest,
+        _textWidth(ref.name, _refNameStyle(_palette.text)) + glyph,
+      );
     }
     // accent bar, its gap, the copy button with its gaps, and the box padding.
     return math.min(
@@ -8010,8 +8159,8 @@ class _TimelineScreenState extends State<TimelineScreen>
         : '충돌 예상 · $first 외 ${files.length - 1}';
   }
 
-  /// No hairlines anywhere: the hash column's rule is the only line, a 2px strip
-  /// stopping 1px short top and bottom so stacked rows read apart.
+  /// The hash column's rule is the only line in a row: a 1px hairline stopping
+  /// 1px short top and bottom so stacked rows read apart.
   Widget _cell(double width, Widget child, {Color? leftBorder, Key? ruleKey}) {
     final cell = Container(
       width: width,
@@ -8033,7 +8182,7 @@ class _TimelineScreenState extends State<TimelineScreen>
             left: 0,
             top: 1,
             bottom: 1,
-            width: 2,
+            width: 1,
             child: ColoredBox(color: leftBorder),
           ),
         ],

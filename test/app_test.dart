@@ -15493,7 +15493,7 @@ void main() {
       final rule = find.byKey(Key('hash-rule-$index'));
       expect(rule, findsOneWidget, reason: 'row $index');
       final rect = tester.getRect(rule);
-      expect(rect.width, 2);
+      expect(rect.width, 1);
       expect(rect.height, TimelineScreen.rowHeight - 2);
       // A 22px node still centres cleanly in the shorter row.
       final cell = tester.getRect(find.byKey(Key('graph-cell-$index')));
