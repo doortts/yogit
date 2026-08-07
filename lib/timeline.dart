@@ -863,7 +863,8 @@ class TimelineScreen extends StatefulWidget {
     this.refPalette = AppSettings.defaultRefPalette,
     this.refPaletteAssignments = AppSettings.defaultRefPaletteAssignments,
     this.branchPreviewMode = BranchPreviewMode.merge,
-    this.commitFont = CommitFontChoice.system,
+    this.timelineFont = TimelineFontChoice.system,
+    this.timelineFontSize,
     this.mergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
     this.rebaseMergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
     this.previewWidth = 288,
@@ -923,8 +924,11 @@ class TimelineScreen extends StatefulWidget {
   final List<int> refPaletteAssignments;
   final BranchPreviewMode branchPreviewMode;
 
-  /// The commit message column's face and size, from settings.
-  final CommitFontChoice commitFont;
+  /// The face every text column is set in, from settings.
+  final TimelineFontChoice timelineFont;
+
+  /// The commit message column's size; null takes the family's own default.
+  final double? timelineFontSize;
 
   /// What the commit message box is prefilled with when an apply creates a
   /// merge commit.
@@ -976,6 +980,21 @@ class _TimelineScreenState extends State<TimelineScreen>
   static const _collapsedSidebarWidth = 52.0;
 
   TimelineThemePalette get _palette => context.timelineTheme;
+
+  /// The commit message's size, and the face every text column shares.
+  double get _baseFontSize =>
+      widget.timelineFontSize ?? widget.timelineFont.defaultFontSize;
+  String? get _fontFamily => widget.timelineFont.fontFamily;
+
+  /// Branch / Tag, Date and Author sit a point under the message so the row
+  /// keeps its hierarchy at any size, with 9px as the floor they stop at.
+  double get _supportingFontSize => math.max(9, _baseFontSize - 1);
+
+  /// The graph disc's initials were drawn at 0.42 of the disc against a 13px
+  /// base, so they scale by how far the base has moved from there. The disc
+  /// itself never changes size — a row is 30px whatever the font says.
+  double get _initialsFontScale =>
+      _baseFontSize / TimelineFontChoice.system.defaultFontSize;
 
   /// The window drag stretch the path keeps for itself before the wordmark is
   /// allowed any room.
@@ -7238,8 +7257,8 @@ class _TimelineScreenState extends State<TimelineScreen>
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: _palette.text,
-                              fontFamily: widget.commitFont.fontFamily,
-                              fontSize: widget.commitFont.fontSize,
+                              fontFamily: _fontFamily,
+                              fontSize: _baseFontSize,
                             ),
                           ),
                         ),
@@ -7288,7 +7307,8 @@ class _TimelineScreenState extends State<TimelineScreen>
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: selected ? _palette.text : _palette.muted,
-                            fontSize: 12,
+                            fontFamily: _fontFamily,
+                            fontSize: _supportingFontSize,
                           ),
                         ),
                       ),
@@ -7301,7 +7321,8 @@ class _TimelineScreenState extends State<TimelineScreen>
                               '—',
                               style: TextStyle(
                                 color: _palette.muted,
-                                fontSize: 12,
+                                fontFamily: _fontFamily,
+                                fontSize: _supportingFontSize,
                               ),
                             )
                           // The graph node already wears this commit's avatar,
@@ -7321,7 +7342,8 @@ class _TimelineScreenState extends State<TimelineScreen>
                                               _main,
                                               0.12,
                                             ),
-                                      fontSize: 12,
+                                      fontFamily: _fontFamily,
+                                      fontSize: _supportingFontSize,
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
@@ -7481,6 +7503,8 @@ class _TimelineScreenState extends State<TimelineScreen>
             size: size,
             stacked: stacked,
             discColor: branchColor,
+            fontFamily: _fontFamily,
+            fontScale: _initialsFontScale,
           )
         : Container(
             width: size,
@@ -7500,6 +7524,8 @@ class _TimelineScreenState extends State<TimelineScreen>
               size: size - _rebaseMappingAvatarBorderWidth * 2,
               stacked: stacked,
               discColor: branchColor,
+              fontFamily: _fontFamily,
+              fontScale: _initialsFontScale,
             ),
           );
     return Positioned(
@@ -7670,11 +7696,16 @@ class _TimelineScreenState extends State<TimelineScreen>
         )
       : const SizedBox.shrink();
 
-  static TextStyle _refNameStyle(Color color) =>
-      TextStyle(color: color, fontSize: 11);
+  TextStyle _refNameStyle(Color color) => TextStyle(
+    color: color,
+    fontFamily: _fontFamily,
+    fontSize: _supportingFontSize,
+  );
 
   /// Chips ellipsize inside their share of the cell; the modal, which sizes to
-  /// its longest name, shows every name whole.
+  /// its longest name, shows every name whole. A name longer than the whole
+  /// viewport is the one case the modal cannot grow for, and it flexes rather
+  /// than pushing the copy button out of its own box.
   Widget _refName(
     GitRef ref,
     Color color,
@@ -7688,7 +7719,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       overflow: ellipsis ? TextOverflow.ellipsis : TextOverflow.visible,
       style: _refNameStyle(selected ? _palette.text : color),
     );
-    return ellipsis ? Expanded(child: text) : text;
+    return ellipsis ? Expanded(child: text) : Flexible(child: text);
   }
 
   /// The width the timeline viewport has, for clamping the ref modal.

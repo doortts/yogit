@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -330,12 +331,20 @@ class IdentityAvatar extends StatelessWidget {
     this.remoteAvatar,
     this.size = 22,
     this.discColor,
+    this.fontFamily,
+    this.fontScale = 1,
     super.key,
   });
 
   final GitIdentity identity;
   final RemoteAvatar? remoteAvatar;
   final double size;
+
+  /// The face and scale the initials take when no photo covers them. The
+  /// timeline hands over its own font so the disc matches the row it sits in;
+  /// everywhere else the disc keeps its 0.42-of-the-diameter default.
+  final String? fontFamily;
+  final double fontScale;
 
   /// The disc color for an avatar sitting in a row: its branch line. Without one
   /// — the settings preview — the disc falls back to the identity color.
@@ -385,7 +394,10 @@ class IdentityAvatar extends StatelessWidget {
     maxLines: 1,
     style: TextStyle(
       color: AvatarService.onColor(background),
-      fontSize: size * 0.42,
+      fontFamily: fontFamily,
+      // Two glyphs still have to sit inside the circle, so the scale stops at
+      // the diameter however large the timeline's font grows.
+      fontSize: math.min(size, size * 0.42 * fontScale),
       fontWeight: FontWeight.w700,
       height: 1,
     ),
@@ -401,6 +413,8 @@ class CommitAvatarStack extends StatelessWidget {
     this.stacked = true,
     this.committerOnly = false,
     this.discColor,
+    this.fontFamily,
+    this.fontScale = 1,
     super.key,
   });
 
@@ -416,6 +430,10 @@ class CommitAvatarStack extends StatelessWidget {
 
   /// Passed straight through to both discs: a row's avatars wear its branch.
   final Color? discColor;
+
+  /// The initials' face and size, passed through to both discs.
+  final String? fontFamily;
+  final double fontScale;
 
   bool get _hasSeparateCommitter =>
       !committerOnly &&
@@ -441,6 +459,8 @@ class CommitAvatarStack extends StatelessWidget {
         remoteAvatar: avatars?.committer,
         size: size,
         discColor: discColor,
+        fontFamily: fontFamily,
+        fontScale: fontScale,
       );
     }
     final offset = _hasSeparateCommitter ? size * 0.45 : 0.0;
@@ -459,6 +479,8 @@ class CommitAvatarStack extends StatelessWidget {
                 remoteAvatar: avatars?.committer,
                 size: size,
                 discColor: discColor,
+                fontFamily: fontFamily,
+                fontScale: fontScale,
               ),
             ),
           Positioned(
@@ -469,6 +491,8 @@ class CommitAvatarStack extends StatelessWidget {
               remoteAvatar: avatars?.author,
               size: size,
               discColor: discColor,
+              fontFamily: fontFamily,
+              fontScale: fontScale,
             ),
           ),
         ],

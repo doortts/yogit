@@ -363,23 +363,27 @@ class CommitProfile {
   int get hashCode => Object.hash(label, name, email, color);
 }
 
-/// What the commit message column is set in. The system face at 13px is the
+/// What the timeline's text columns are set in. The system face at 13px is the
 /// approved default; Geist and Open Sans ship with the app for the people who
-/// picked their look from gitru and GitKraken.
-enum CommitFontChoice {
-  system(fontFamily: null, fontSize: 13),
-  geist(fontFamily: 'Geist', fontSize: 14),
-  openSans(fontFamily: 'OpenSans', fontSize: 12);
+/// picked their look from gitru and GitKraken. Each family carries the size it
+/// reads best at, which is where the user's own size starts from.
+enum TimelineFontChoice {
+  system(fontFamily: null, defaultFontSize: 13),
+  geist(fontFamily: 'Geist', defaultFontSize: 14),
+  openSans(fontFamily: 'OpenSans', defaultFontSize: 12);
 
-  const CommitFontChoice({required this.fontFamily, required this.fontSize});
+  const TimelineFontChoice({
+    required this.fontFamily,
+    required this.defaultFontSize,
+  });
 
   /// Null keeps the platform face.
   final String? fontFamily;
-  final double fontSize;
+  final double defaultFontSize;
 
-  static CommitFontChoice parse(Object? value) => values.firstWhere(
+  static TimelineFontChoice parse(Object? value) => values.firstWhere(
     (choice) => choice.name == value,
-    orElse: () => CommitFontChoice.system,
+    orElse: () => TimelineFontChoice.system,
   );
 }
 
@@ -405,7 +409,8 @@ class AppSettings {
     this.baseBranches = const {},
     this.deletedBranchNames = const {},
     this.recentRepositories = const [],
-    this.commitFont = CommitFontChoice.system,
+    this.timelineFont = TimelineFontChoice.system,
+    this.timelineFontSize,
     this.commitProfiles = const [],
     this.mergeMessageTemplate = defaultMergeMessageTemplate,
     this.rebaseMergeMessageTemplate = defaultMergeMessageTemplate,
@@ -415,6 +420,12 @@ class AppSettings {
 
   /// How many repositories the picker remembers before the oldest drops off.
   static const maxRecentRepositories = 10;
+
+  /// The range the timeline font size control offers. Below the floor the
+  /// supporting columns stop being readable, above the ceiling a row no longer
+  /// fits the 30px it is given.
+  static const minTimelineFontSize = 10.0;
+  static const maxTimelineFontSize = 18.0;
 
   /// What git itself writes for a merge, and the floor an emptied template
   /// falls back to.
@@ -484,8 +495,12 @@ class AppSettings {
   /// Repository roots, most recently opened first.
   final List<String> recentRepositories;
 
-  /// The commit message column's face and size.
-  final CommitFontChoice commitFont;
+  /// The face every text column in the timeline is set in.
+  final TimelineFontChoice timelineFont;
+
+  /// The size the commit message column is set in, which the supporting columns
+  /// size themselves against. Null means [TimelineFontChoice.defaultFontSize].
+  final double? timelineFontSize;
 
   /// The commit identities the status bar offers, in display order.
   final List<CommitProfile> commitProfiles;
@@ -608,7 +623,9 @@ class AppSettings {
     Map<String, String>? baseBranches,
     Map<String, Map<String, String>>? deletedBranchNames,
     List<String>? recentRepositories,
-    CommitFontChoice? commitFont,
+    TimelineFontChoice? timelineFont,
+    double? timelineFontSize,
+    bool clearTimelineFontSize = false,
     List<CommitProfile>? commitProfiles,
     String? mergeMessageTemplate,
     String? rebaseMergeMessageTemplate,
@@ -636,7 +653,11 @@ class AppSettings {
     baseBranches: baseBranches ?? this.baseBranches,
     deletedBranchNames: deletedBranchNames ?? this.deletedBranchNames,
     recentRepositories: recentRepositories ?? this.recentRepositories,
-    commitFont: commitFont ?? this.commitFont,
+    timelineFont: timelineFont ?? this.timelineFont,
+    // `??` cannot say "back to the family default", so the flag says it.
+    timelineFontSize: clearTimelineFontSize
+        ? null
+        : timelineFontSize ?? this.timelineFontSize,
     commitProfiles: commitProfiles ?? this.commitProfiles,
     mergeMessageTemplate: mergeMessageTemplate ?? this.mergeMessageTemplate,
     rebaseMergeMessageTemplate:
@@ -766,7 +787,8 @@ class AppSettings {
       baseBranches: baseBranches,
       deletedBranchNames: _parseNestedStringMap(value['deletedBranchNames']),
       recentRepositories: _parseRecentRepositories(value['recentRepositories']),
-      commitFont: CommitFontChoice.parse(value['commitFont']),
+      timelineFont: TimelineFontChoice.parse(value['timelineFont']),
+      timelineFontSize: _parseTimelineFontSize(value['timelineFontSize']),
       commitProfiles: _parseCommitProfiles(value['commitProfiles']),
       // An empty string is a choice — git's own message — so only a missing or
       // non-string entry falls back to the default template.
@@ -782,6 +804,15 @@ class AppSettings {
       ),
     );
   }
+
+  /// A size outside the control's own range, or one that is not a number at
+  /// all, means the family default rather than a row the timeline cannot draw.
+  static double? _parseTimelineFontSize(Object? value) =>
+      value is num &&
+          value >= minTimelineFontSize &&
+          value <= maxTimelineFontSize
+      ? value.toDouble()
+      : null;
 
   /// A stored server is only honoured when it is still a usable https base
   /// URL — the app builds every request on top of it.
@@ -841,7 +872,8 @@ class AppSettings {
     'baseBranches': baseBranches,
     'deletedBranchNames': deletedBranchNames,
     'recentRepositories': recentRepositories,
-    'commitFont': commitFont.name,
+    'timelineFont': timelineFont.name,
+    'timelineFontSize': ?timelineFontSize,
     'commitProfiles': [for (final profile in commitProfiles) profile.toJson()],
     'mergeMessageTemplate': mergeMessageTemplate,
     'rebaseMergeMessageTemplate': rebaseMergeMessageTemplate,
@@ -872,7 +904,8 @@ class AppSettings {
       mapEquals(baseBranches, other.baseBranches) &&
       _nestedStringMapEquals(deletedBranchNames, other.deletedBranchNames) &&
       listEquals(recentRepositories, other.recentRepositories) &&
-      commitFont == other.commitFont &&
+      timelineFont == other.timelineFont &&
+      timelineFontSize == other.timelineFontSize &&
       listEquals(commitProfiles, other.commitProfiles) &&
       mergeMessageTemplate == other.mergeMessageTemplate &&
       rebaseMergeMessageTemplate == other.rebaseMergeMessageTemplate &&
@@ -920,7 +953,8 @@ class AppSettings {
       ),
     ),
     Object.hashAll(recentRepositories),
-    commitFont,
+    timelineFont,
+    timelineFontSize,
     Object.hashAll(commitProfiles),
     mergeMessageTemplate,
     rebaseMergeMessageTemplate,
@@ -1488,7 +1522,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 28),
           const Text(
-            '커밋 메시지 폰트',
+            '타임라인 폰트',
             style: TextStyle(
               color: Color(0xFFE8EAF2),
               fontSize: 14,
@@ -1497,30 +1531,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 4),
           const Text(
-            '타임라인 커밋 메시지 컬럼에만 적용됩니다.',
+            'Branch / Tag 칩, 그래프 이니셜, 커밋 메시지, Date, Author에 함께 적용됩니다. '
+            '커밋 메시지가 고른 크기로 서고 나머지 컬럼은 1px 작게 따라옵니다.',
             style: TextStyle(color: Color(0xFF8D94A8), fontSize: 12),
           ),
           const SizedBox(height: 8),
-          RadioGroup<CommitFontChoice>(
-            groupValue: _settings.commitFont,
+          RadioGroup<TimelineFontChoice>(
+            groupValue: _settings.timelineFont,
             onChanged: (value) {
               if (value != null) {
-                _change(_settings.copyWith(commitFont: value));
+                _change(_settings.copyWith(timelineFont: value));
               }
             },
             child: Column(
               children: [
                 for (final (choice, label, hint) in const [
-                  (CommitFontChoice.system, '시스템 폰트 · 13px', '기본 — macOS 표준'),
-                  (CommitFontChoice.geist, 'Geist · 14px', 'gitru와 같은 얼굴'),
+                  (TimelineFontChoice.system, '시스템 폰트', '기본 — macOS 표준 · 13px'),
+                  (TimelineFontChoice.geist, 'Geist', 'gitru와 같은 얼굴 · 14px'),
                   (
-                    CommitFontChoice.openSans,
-                    'Open Sans · 12px',
-                    'GitKraken과 같은 얼굴',
+                    TimelineFontChoice.openSans,
+                    'Open Sans',
+                    'GitKraken과 같은 얼굴 · 12px',
                   ),
                 ])
-                  RadioListTile<CommitFontChoice>(
-                    key: Key('commit-font-${choice.name}'),
+                  RadioListTile<TimelineFontChoice>(
+                    key: Key('timeline-font-${choice.name}'),
                     value: choice,
                     contentPadding: EdgeInsets.zero,
                     dense: true,
@@ -1543,9 +1578,49 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ),
+          const SizedBox(height: 8),
+          _timelineFontSizeControl(),
         ],
       ),
     ),
+  );
+
+  /// The size on screen: the stored one, or the family's own until the user
+  /// moves the slider, so switching family moves the control with it.
+  double get _timelineFontSize =>
+      _settings.timelineFontSize ?? _settings.timelineFont.defaultFontSize;
+
+  Widget _timelineFontSizeControl() => Row(
+    children: [
+      Expanded(
+        child: Slider(
+          key: const Key('timeline-font-size'),
+          value: _timelineFontSize,
+          min: AppSettings.minTimelineFontSize,
+          max: AppSettings.maxTimelineFontSize,
+          divisions:
+              (AppSettings.maxTimelineFontSize -
+                      AppSettings.minTimelineFontSize)
+                  .round(),
+          label: '${_timelineFontSize.round()}px',
+          onChanged: (value) =>
+              _change(_settings.copyWith(timelineFontSize: value)),
+        ),
+      ),
+      SizedBox(
+        width: 44,
+        child: Text(
+          '${_timelineFontSize.round()}px',
+          style: const TextStyle(color: Color(0xFFE8EAF2), fontSize: 12),
+        ),
+      ),
+      TextButton(
+        key: const Key('timeline-font-size-reset'),
+        onPressed: () =>
+            _change(_settings.copyWith(clearTimelineFontSize: true)),
+        child: const Text('초기화'),
+      ),
+    ],
   );
 
   Widget _commitProfiles() {
