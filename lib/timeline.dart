@@ -863,6 +863,7 @@ class TimelineScreen extends StatefulWidget {
     this.refPalette = AppSettings.defaultRefPalette,
     this.refPaletteAssignments = AppSettings.defaultRefPaletteAssignments,
     this.branchPreviewMode = BranchPreviewMode.merge,
+    this.commitFont = CommitFontChoice.system,
     this.mergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
     this.rebaseMergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
     this.previewWidth = 288,
@@ -921,6 +922,9 @@ class TimelineScreen extends StatefulWidget {
   final List<RefPaletteEntry> refPalette;
   final List<int> refPaletteAssignments;
   final BranchPreviewMode branchPreviewMode;
+
+  /// The commit message column's face and size, from settings.
+  final CommitFontChoice commitFont;
 
   /// What the commit message box is prefilled with when an apply creates a
   /// merge commit.
@@ -7234,7 +7238,8 @@ class _TimelineScreenState extends State<TimelineScreen>
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: _palette.text,
-                              fontSize: 14,
+                              fontFamily: widget.commitFont.fontFamily,
+                              fontSize: widget.commitFont.fontSize,
                             ),
                           ),
                         ),

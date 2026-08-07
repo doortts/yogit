@@ -550,6 +550,7 @@ class _YogitAppState extends State<YogitApp> {
           refPalette: _settings.refPalette,
           refPaletteAssignments: _settings.refPaletteAssignments,
           branchPreviewMode: _settings.branchPreviewMode,
+          commitFont: _settings.commitFont,
           mergeMessageTemplate: _settings.mergeMessageTemplate,
           rebaseMergeMessageTemplate: _settings.rebaseMergeMessageTemplate,
           previewWidth: _settings.previewWidth,
