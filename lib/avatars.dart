@@ -402,13 +402,9 @@ class IdentityAvatar extends StatelessWidget {
                 width: inner,
                 height: inner,
                 fit: BoxFit.cover,
-                // A photo that never arrives falls back to the initials only
-                // where they are the disc's whole content. On the graph the ring
-                // and its dimmed centre already say which branch the commit sits
-                // on, so an empty face there still carries the row's meaning.
-                errorBuilder: (_, _, _) => branch != null
-                    ? const SizedBox.shrink()
-                    : _initials(ink, inner),
+                // A photo that never arrives leaves the initials, ring and all:
+                // a 404 avatar must not cost the row who wrote the commit.
+                errorBuilder: (_, _, _) => _initials(ink, inner),
               ),
             ),
     );

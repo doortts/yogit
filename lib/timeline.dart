@@ -7814,13 +7814,14 @@ class _TimelineScreenState extends State<TimelineScreen>
                 width: _rebaseMappingAvatarBorderWidth,
               ),
             ),
+            // No branch ring inside this one: the border already colors the
+            // node, and a second ring would leave 8px of face for the initials.
             child: CommitAvatarStack(
               commit: commit,
               avatarService: widget.avatarService,
               showRemoteAvatars: widget.showRemoteAvatars,
               size: size - _rebaseMappingAvatarBorderWidth * 2,
               stacked: stacked,
-              discColor: branchColor,
               fontFamily: _fontFamily,
               fontScale: _initialsFontScale,
             ),

@@ -55,8 +55,10 @@ void main() {
       CommitGraphPainter.railWidth,
       reason: '링은 레일과 같은 두께다',
     );
-    // The initials are gone behind the photo, but the ring is not.
-    expect(find.text('AL'), findsNothing);
+    // The photo is fetched and clipped inside the ring. Whether it arrives is
+    // the network's business — a failed one still falls back to the initials,
+    // so this asserts the ring, not the absence of a face.
+    expect(find.byType(Image), findsOneWidget);
   });
 
   testWidgets('the ring leaves room for two glyphs inside it', (tester) async {
@@ -73,7 +75,9 @@ void main() {
     );
     await tester.pump();
 
-    // Two capitals must fit the ringed interior, not the whole disc.
+    // Two capitals must fit the ringed interior, not the whole disc. The test
+    // font draws every glyph as wide as it is tall, which is the widest any
+    // face gets, so passing here passes with a real one.
     final glyphs = tester.getSize(find.text('AL'));
     expect(
       glyphs.width,
@@ -82,6 +86,32 @@ void main() {
       ),
       reason: '이니셜이 링을 넘어 그려지면 안 된다',
     );
+  });
+
+  testWidgets('a photo that never arrives still shows who committed', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Center(
+          child: IdentityAvatar(
+            identity: ada,
+            discColor: AvatarService.branchColor(3),
+            remoteAvatar: const RemoteAvatar(
+              login: 'ada',
+              url: 'https://example.com/gone.png',
+            ),
+          ),
+        ),
+      ),
+    );
+    // Widget tests answer every request with a failure, which is the same
+    // thing a 404 avatar is: the disc falls back to the initials rather than
+    // going blank, and the ring stays either way.
+    await tester.pumpAndSettle();
+
+    expect(find.text('AL'), findsOneWidget);
+    expect((discOf(tester).border! as Border).top.color, isNotNull);
   });
 
   testWidgets('a row draws the disc in its own branch colour', (tester) async {
