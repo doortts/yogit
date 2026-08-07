@@ -9801,35 +9801,43 @@ void main() {
     final fill =
         tester.widget<Container>(find.byType(Container)).decoration!
             as BoxDecoration;
-    // Opaque identity color, no transparent center, and no outline at all.
+    // No branch to wear: the settings preview keeps the opaque identity disc,
+    // no transparent center and no ring.
     expect(fill.color, AvatarService.color(ada));
     expect(fill.color!.a, 1.0);
     expect(fill.border, isNull);
     expect(tester.widget<IdentityAvatar>(find.byType(IdentityAvatar)).size, 22);
-
-    // In a row the disc wears the branch line instead, ink following suit.
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Center(
-          child: IdentityAvatar(
-            identity: ada,
-            discColor: AvatarService.branchColor(2),
-          ),
-        ),
-      ),
-    );
-    final branchFill =
-        tester.widget<Container>(find.byType(Container)).decoration!
-            as BoxDecoration;
-    expect(branchFill.color, AvatarService.branchColor(2));
-    expect(
-      tester.widget<Text>(find.text('AL')).style?.color,
-      AvatarService.onColor(AvatarService.branchColor(2)),
-    );
     expect(
       tester.widget<Text>(find.text('AL')).style?.color,
       AvatarService.onColor(AvatarService.color(ada)),
     );
+
+    // In a row the disc becomes the branch's own colour throughout: a ring at
+    // the rail's weight, the same colour dimmed inside it, and ink to match.
+    // One branch reads as one thing, photo or not.
+    final branch = AvatarService.branchColor(2);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Center(
+          child: IdentityAvatar(identity: ada, discColor: branch),
+        ),
+      ),
+    );
+    final ringed =
+        tester.widget<Container>(find.byType(Container)).decoration!
+            as BoxDecoration;
+    expect(ringed.border, isNotNull);
+    final border = ringed.border! as Border;
+    expect(border.top.color, branch);
+    expect(border.top.width, CommitGraphPainter.railWidth);
+    // The interior is the same colour, dimmed — never opaque, never the ink.
+    expect(ringed.color, isNotNull);
+    expect(ringed.color!.a, lessThan(1.0));
+    expect(ringed.color!.r, branch.r);
+    expect(ringed.color!.g, branch.g);
+    expect(ringed.color!.b, branch.b);
+    expect(tester.widget<Text>(find.text('AL')).style?.color, branch);
+
     expect(AvatarService.onColor(const Color(0xFFD29922)), isNot(Colors.white));
     expect(AvatarService.onColor(const Color(0xFF1D2029)), Colors.white);
   });

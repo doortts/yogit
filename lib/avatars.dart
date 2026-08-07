@@ -106,6 +106,13 @@ class AvatarService {
   /// The palette every rail, ring, chip and dot reads. Settings replace it.
   static List<Color> palette = defaultColors;
 
+  /// A branch line's weight. It lives here, beside the colour, because the
+  /// avatar ring is that same line drawn around a disc — and the graph painter
+  /// that draws the rails already reads its colours from this class, so the
+  /// number stays in one place instead of once per drawer.
+  /// `CommitGraphPainter.railWidth` forwards to it.
+  static const railWidth = 2.0;
+
   final RemoteRepository remote;
   final GitHubApi api;
   final _cache = <String, Future<CommitAvatars>>{};
@@ -347,12 +354,31 @@ class IdentityAvatar extends StatelessWidget {
   final double fontScale;
 
   /// The disc color for an avatar sitting in a row: its branch line. Without one
-  /// — the settings preview — the disc falls back to the identity color.
+  /// — the settings preview, the blame gutter — the disc falls back to the
+  /// identity color.
   final Color? discColor;
+
+  /// How far the branch color is dimmed inside the ring. The initials sit on
+  /// this fill in the undimmed branch color, so the two share a hue and the
+  /// alpha barely moves their contrast — over the row background (`#1C1C1E`) and
+  /// the selected row (`#234D72`) the worst palette color reads 1.87 at 0.18 and
+  /// 1.70 at 0.40. What the alpha does decide is whether the disc reads as
+  /// filled, which is why it is the mockup's 0.22 and not lower.
+  static const dimmedFillAlpha = 0.22;
 
   @override
   Widget build(BuildContext context) {
-    final color = discColor ?? AvatarService.color(identity);
+    final branch = discColor;
+    // A row's disc is its branch line the whole way through: a ring at the
+    // rail's own weight, the same color dimmed inside it, initials in that
+    // color. Off the graph there is no branch to wear, so the disc keeps the
+    // opaque identity fill and its contrasting ink.
+    final ring = branch == null ? 0.0 : AvatarService.railWidth;
+    final fill =
+        branch?.withValues(alpha: dimmedFillAlpha) ??
+        AvatarService.color(identity);
+    final ink = branch ?? AvatarService.onColor(fill);
+    final inner = size - ring * 2;
     final avatar = _safeAvatar(remoteAvatar);
     return Container(
       width: size,
@@ -360,20 +386,30 @@ class IdentityAvatar extends StatelessWidget {
       alignment: Alignment.center,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        // A filled identity-colored disc, no outline: a photo covers it,
-        // initials sit on it.
-        color: color,
+        color: fill,
+        border: branch == null ? null : Border.all(color: branch, width: ring),
       ),
       clipBehavior: Clip.antiAlias,
       child: avatar == null
-          ? _initials(color)
-          : Image.network(
-              avatar.url,
-              headers: avatar.headers.isEmpty ? null : avatar.headers,
-              width: size,
-              height: size,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => _initials(color),
+          ? _initials(ink, inner)
+          // The border insets the child, and clipping the photo to its own
+          // circle keeps its corners off the ring: the branch stays visible
+          // around a face that used to hide it completely.
+          : ClipOval(
+              child: Image.network(
+                avatar.url,
+                headers: avatar.headers.isEmpty ? null : avatar.headers,
+                width: inner,
+                height: inner,
+                fit: BoxFit.cover,
+                // A photo that never arrives falls back to the initials only
+                // where they are the disc's whole content. On the graph the ring
+                // and its dimmed centre already say which branch the commit sits
+                // on, so an empty face there still carries the row's meaning.
+                errorBuilder: (_, _, _) => branch != null
+                    ? const SizedBox.shrink()
+                    : _initials(ink, inner),
+              ),
             ),
     );
   }
@@ -389,15 +425,15 @@ class IdentityAvatar extends StatelessWidget {
         : avatar;
   }
 
-  Widget _initials(Color background) => Text(
+  Widget _initials(Color ink, double inner) => Text(
     AvatarService.initials(identity),
     maxLines: 1,
     style: TextStyle(
-      color: AvatarService.onColor(background),
+      color: ink,
       fontFamily: fontFamily,
       // Two glyphs still have to sit inside the circle, so the scale stops at
-      // the diameter however large the timeline's font grows.
-      fontSize: math.min(size, size * 0.42 * fontScale),
+      // half the room the ring leaves however large the timeline's font grows.
+      fontSize: math.min(inner / 2, size * 0.42 * fontScale),
       fontWeight: FontWeight.w700,
       height: 1,
     ),

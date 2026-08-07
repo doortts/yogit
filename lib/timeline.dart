@@ -11871,7 +11871,7 @@ class CommitGraphPainter extends CustomPainter {
   static const laneInset = 28.0;
   static const defaultLaneSpacing = 30.0;
   static const previewLaneSpacing = 49.0;
-  static const railWidth = 2.0;
+  static const railWidth = AvatarService.railWidth;
   static const previewRailWidth = 1.0;
   static const avatarDiameter = 18.0;
   static const hashRailClearance = 3.0;
