@@ -6,7 +6,9 @@ import 'package:yogit/github_auth.dart';
 /// Contract for token storage, the yonalist way:
 /// - one token per API base URL, held in the macOS Keychain through the
 ///   `security` CLI (no plugin);
-/// - read order: Keychain → GH_TOKEN → GITHUB_TOKEN; misses return null;
+/// - read order: Keychain first, then the env pair for the right host —
+///   github.com reads GH_TOKEN → GITHUB_TOKEN, an enterprise host reads
+///   GH_ENTERPRISE_TOKEN → GITHUB_ENTERPRISE_TOKEN; misses return null;
 /// - the gh CLI is never consulted.
 void main() {
   ({List<List<String>> calls, GithubTokenStore store}) storeWith({
