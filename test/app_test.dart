@@ -2541,7 +2541,9 @@ void main() {
       await tester.pump();
     }
     expect(saved?.time, 20);
-    expect(saved?.name, 150);
+    // The arrow keys drive the same divider a drag does, so what Date gives up
+    // goes to Author — which stops at its own 240 maximum.
+    expect(saved?.name, 240);
   });
 
   testWidgets('Date and Author columns hide and restore their last widths', (
@@ -2600,7 +2602,9 @@ void main() {
         .focusNode!
         .requestFocus();
     await tester.pump();
-    for (var press = 0; press < 7; press++) {
+    // Author is at 130 by now: the Date divider handed it the 60px Date gave up
+    // on its way down to the minimum, so it takes 14 presses to walk it back.
+    for (var press = 0; press < 14; press++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
       await tester.pump();
     }
@@ -2742,10 +2746,12 @@ void main() {
     expect(tester.getSize(find.byKey(const Key('time-header'))).width, 80);
 
     await hideWithOneDrag('name');
-    expect(saved?.name, 70);
+    // Collapsing Date first handed Author the 60px it gave up, so 130 is the
+    // width this drag started from — and the width the restore hands back.
+    expect(saved?.name, 130);
     await tester.tap(find.byKey(const Key('show-name-column')));
     await tester.pumpAndSettle();
-    expect(tester.getSize(find.byKey(const Key('name-header'))).width, 70);
+    expect(tester.getSize(find.byKey(const Key('name-header'))).width, 130);
   });
 
   testWidgets(

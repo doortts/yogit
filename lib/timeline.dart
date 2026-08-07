@@ -6691,7 +6691,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           _ => null,
         };
         if (delta == null) return KeyEventResult.ignored;
-        _resize(column, width + delta);
+        _resizeBy(column, width, delta);
         _saveColumnWidths();
         return KeyEventResult.handled;
       },
@@ -6703,7 +6703,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           onHorizontalDragStart: (_) => _startResize(column),
           onHorizontalDragUpdate: (details) {
             _dragResized = true;
-            _resize(column, width + details.delta.dx);
+            _resizeBy(column, width, details.delta.dx);
           },
           onHorizontalDragEnd: (_) => _finishResize(column),
           onHorizontalDragCancel: () => _finishResize(column),
@@ -6825,7 +6825,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     _dragResized = false;
     _resizeStartWidths = {
       if (column == 'commit' || column == 'time') 'time': _w('time'),
-      if (column == 'commit' || column == 'name') 'name': _w('name'),
+      if (column == 'commit' || column == 'time' || column == 'name')
+        'name': _w('name'),
     };
   }
 
@@ -6850,6 +6851,49 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
     _lastResizerClick = column;
     _lastResizerClickMs = now;
+  }
+
+  /// Moves the divider on [column]'s right edge by the distance the cursor just
+  /// travelled.
+  ///
+  /// Date's divider is the line between the last two columns, so it hands width
+  /// to Author rather than taking it from the title column on its left: the
+  /// title column absorbs whatever the fixed columns leave, so widening Date
+  /// used to shrink the title column by the same amount and leave the dragged
+  /// line exactly where it was, with Author untouched. The column the drag
+  /// shrinks gives up the whole distance — that is what keeps the line under
+  /// the cursor — and the other takes as much of it as its own maximum allows,
+  /// so the row never totals more than it did.
+  void _resizeBy(String column, double width, double delta) {
+    if (column != 'time' || !_showName) {
+      _resize(column, width + delta);
+      return;
+    }
+    final time = timelineColumns['time']!;
+    final name = timelineColumns['name']!;
+    final timeWidth = _w('time');
+    final nameWidth = _w('name');
+    if (delta > 0) {
+      if (nameWidth <= name.min) {
+        _hideColumn('name', restoreWidth: _resizeStartWidths['name']);
+        return;
+      }
+      final given = math.min(delta, nameWidth - name.min);
+      setState(() {
+        _widths['name'] = nameWidth - given;
+        _widths['time'] = math.min(time.max, timeWidth + given);
+      });
+    } else if (delta < 0) {
+      if (timeWidth <= time.min) {
+        _hideColumn('time', restoreWidth: _resizeStartWidths['time']);
+        return;
+      }
+      final given = math.min(-delta, timeWidth - time.min);
+      setState(() {
+        _widths['time'] = timeWidth - given;
+        _widths['name'] = math.min(name.max, nameWidth + given);
+      });
+    }
   }
 
   /// Resizes from the width on screen, so dragging a flexing title column picks
