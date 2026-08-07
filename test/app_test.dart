@@ -17068,8 +17068,10 @@ void main() {
       tester.getRect(status).left,
       tester.getRect(find.byKey(const Key('refs-header'))).left,
     );
+    // Too long for the chip column, so it gives way from the front and its tail
+    // survives — the readout is cut like the chip is.
     expect(
-      find.descendant(of: status, matching: find.text(long)),
+      find.descendant(of: status, matching: find.textContaining('name-indeed')),
       findsOneWidget,
     );
     // Truncated before the DATE stamp it shares the bar with.
@@ -17088,7 +17090,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-root')), findsOneWidget);
     expect(
-      find.descendant(of: status, matching: find.text(long)),
+      find.descendant(of: status, matching: find.textContaining('name-indeed')),
       findsOneWidget,
     );
 

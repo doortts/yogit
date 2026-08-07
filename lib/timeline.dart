@@ -44,6 +44,49 @@ const _dateGroup = Color(0xFF5AB0FF);
 /// A ref chip narrower than this is unreadable, so the extra chips hide instead.
 const _minChipWidth = 40.0;
 
+/// What a shortened ref name is marked with, wherever it gave way.
+const _ellipsis = '…';
+
+/// [name] cut to fit [maxWidth], with [measure] reporting how wide a candidate
+/// draws in the style it will be drawn in.
+///
+/// The useful half of a branch or tag name is its end, so the front is what
+/// gives way: leading namespace segments shrink to their first letter
+/// (`codex/branch-lane` → `c…/branch-lane`), and only when that still does not
+/// fit do characters drop off the front behind a leading ellipsis. The tail is
+/// never cut. A width too narrow even for the ellipsis still gets the ellipsis:
+/// an empty chip says less than a marked one.
+String fitRefName(
+  String name,
+  double maxWidth,
+  double Function(String) measure,
+) {
+  if (measure(name) <= maxWidth) return name;
+  var base = name;
+  if (name.contains('/')) {
+    final segments = name.split('/');
+    final short = [
+      for (final segment in segments.take(segments.length - 1))
+        // A segment of two characters or fewer already costs what its
+        // abbreviation would, so it stays whole.
+        segment.characters.length > 2
+            ? '${segment.characters.first}$_ellipsis'
+            : segment,
+      segments.last,
+    ].join('/');
+    if (short.length < name.length) {
+      if (measure(short) <= maxWidth) return short;
+      base = short;
+    }
+  }
+  final tail = base.characters;
+  for (var dropped = 1; dropped < tail.length; dropped++) {
+    final candidate = '$_ellipsis${tail.skip(dropped)}';
+    if (measure(candidate) <= maxWidth) return candidate;
+  }
+  return _ellipsis;
+}
+
 /// Long enough that arrowing past a row does not flash tooltips.
 const _tooltipDelay = Duration(milliseconds: 400);
 
@@ -4979,15 +5022,14 @@ class _TimelineScreenState extends State<TimelineScreen>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Flexible(
-                      child: Text(
+                      child: _fittedRefName(
                         name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: _palette.muted, fontSize: 11),
+                        TextStyle(color: _palette.muted, fontSize: 11),
                       ),
                     ),
                     const SizedBox(width: 6),
                     _CopyButton(
+                      // Shortened on screen, whole on the clipboard.
                       text: name,
                       color: _palette.muted,
                       slot: 'status-copy',
@@ -6675,7 +6717,10 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// own range and to the width the other columns leave it.
   void _fitColumn(String column) {
     // The title column absorbs whatever the other five leave, so the viewport
-    // alone decides it: there is no content width to fit it to.
+    // alone decides it: there is no content width to fit it to. Widening it to
+    // its longest subject would push the row past the viewport and open a
+    // horizontal scroll, which the timeline never has — so a double click here
+    // does nothing.
     if (column == 'commit') return;
     // The graph column already has a fit of its own — the deepest loaded lane —
     // so a double click hands it back to that instead of measuring text.
@@ -7852,25 +7897,62 @@ class _TimelineScreenState extends State<TimelineScreen>
     fontSize: _supportingFontSize,
   );
 
-  /// Chips ellipsize inside their share of the cell; the modal, which sizes to
-  /// its longest name, shows every name whole. A name longer than the whole
-  /// viewport is the one case the modal cannot grow for, and it flexes rather
-  /// than pushing the copy button out of its own box.
+  /// A chip gives its name up from the front to fit its share of the cell — see
+  /// [fitRefName], which the chip measures against the room it actually got.
+  /// The modal sizes itself to its longest name instead, so it shows every name
+  /// whole. A name longer than the whole viewport is the one case the modal
+  /// cannot grow for, and it flexes rather than pushing the copy button out of
+  /// its own box.
   Widget _refName(
     GitRef ref,
     Color color,
     bool selected, {
     bool ellipsis = true,
   }) {
-    final text = Text(
-      ref.name,
-      maxLines: 1,
-      softWrap: false,
-      overflow: ellipsis ? TextOverflow.ellipsis : TextOverflow.visible,
-      style: _refNameStyle(selected ? _palette.text : color),
-    );
-    return ellipsis ? Expanded(child: text) : Flexible(child: text);
+    final style = _refNameStyle(selected ? _palette.text : color);
+    return ellipsis
+        ? Expanded(child: _fittedRefName(ref.name, style))
+        : Flexible(
+            child: Text(
+              ref.name,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.visible,
+              style: style,
+            ),
+          );
   }
+
+  /// [name] drawn in whatever room it was given. A real branch or tag gives way
+  /// from the front — see [fitRefName] — and the status bar readout, which names
+  /// a line's branch in the width of the chip column, does the same.
+  ///
+  /// A branch preview labels its chips `기준브랜치 · 가상` instead, where the
+  /// branch sits at the front and the annotation after it is what can go, so
+  /// those keep giving way from the right.
+  Widget _fittedRefName(String name, TextStyle style) => _comparison != null
+      ? Text(
+          name,
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.ellipsis,
+          style: style,
+        )
+      : LayoutBuilder(
+          builder: (context, constraints) => Text(
+            fitRefName(
+              name,
+              constraints.maxWidth,
+              (text) => _textWidth(text, style),
+            ),
+            maxLines: 1,
+            softWrap: false,
+            // The string is already cut to the width; clip only guards against
+            // a font that draws a shade wider than it measures.
+            overflow: TextOverflow.clip,
+            style: style,
+          ),
+        );
 
   /// The width the timeline viewport has, for clamping the ref modal.
   double get _timelineViewportWidth {
