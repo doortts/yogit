@@ -2055,6 +2055,29 @@ void main() {
     );
   });
 
+  testWidgets('the author column carries only the name — the graph node '
+      'already wears the avatar', (tester) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository((_, _) async => [commit('1', 'first commit')]),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final stacks = find.byType(CommitAvatarStack);
+    expect(stacks, findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('graph-cell-0')),
+        matching: stacks,
+      ),
+      findsOneWidget,
+      reason: '유일한 아바타는 그래프 노드의 것',
+    );
+    expect(find.text('Ada Author'), findsWidgets);
+  });
+
   testWidgets('merge rows swap the avatar stack for a filled lane dot', (
     tester,
   ) async {
@@ -2094,7 +2117,7 @@ void main() {
     );
     expect(stack.size, 22);
     expect(stack.discColor, AvatarService.branchColor(painterAt(1).row.branch));
-    // Every stack in a row — graph cell and name cell — wears its branch line.
+    // Every remaining stack (the graph cell) wears its branch line.
     expect(
       tester
           .widgetList<CommitAvatarStack>(find.byType(CommitAvatarStack))

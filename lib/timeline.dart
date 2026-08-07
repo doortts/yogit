@@ -7299,18 +7299,10 @@ class _TimelineScreenState extends State<TimelineScreen>
                                 fontSize: 12,
                               ),
                             )
+                          // The graph node already wears this commit's avatar,
+                          // so the author cell spends its width on the name.
                           : Row(
                               children: [
-                                if (_w('name') >= 47) ...[
-                                  CommitAvatarStack(
-                                    commit: commit,
-                                    avatarService: widget.avatarService,
-                                    showRemoteAvatars: widget.showRemoteAvatars,
-                                    discColor: branchColor,
-                                    stacked: _w('name') >= 57,
-                                  ),
-                                  const SizedBox(width: 7),
-                                ],
                                 Expanded(
                                   child: Text(
                                     commit.author.name,
