@@ -15,7 +15,6 @@ List<String> monitorLaunchArguments({
   required String bundlePath,
   required String root,
   required String gitExecutable,
-  required String? ghExecutable,
   required String branch,
 }) => [
   '-n',
@@ -25,7 +24,6 @@ List<String> monitorLaunchArguments({
   root,
   '--git',
   gitExecutable,
-  if (ghExecutable != null) ...['--gh', ghExecutable],
   '--monitor',
   branch,
 ];

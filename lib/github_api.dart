@@ -30,7 +30,7 @@ class GitHubApiException implements Exception {
   String toString() => 'GitHubApiException: $message';
 }
 
-/// One GitHub server, reached over HTTPS instead of through the gh CLI.
+/// One GitHub server, reached over HTTPS.
 ///
 /// [apiBaseUrl] is the full REST base — `https://api.github.com` for
 /// github.com, `https://ghe.host/api/v3` for an enterprise server — and the

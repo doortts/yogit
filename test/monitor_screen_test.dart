@@ -10,6 +10,7 @@ import 'package:yogit/github_api.dart';
 import 'package:yogit/main.dart';
 import 'package:yogit/monitor_screen.dart';
 import 'package:yogit/pr_monitor.dart';
+import 'package:yogit/settings.dart';
 import 'package:yogit/window_frame.dart';
 
 MonitoredPullRequest pr({
@@ -377,7 +378,7 @@ void main() {
           requestedPath: '/repo',
           branch: 'dev',
           gitExecutable: '/usr/bin/git',
-          ghExecutable: null,
+          settingsStore: _FixedSettingsStore(),
           windowFrameController: WindowFrameController(channel: channel),
           runner:
               (executable, arguments, {workingDirectory, environment}) async {
@@ -394,11 +395,10 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('모니터링에는 GitHub CLI(gh)가 필요합니다.'), findsOneWidget);
-      await tester.tap(find.text('https://cli.github.com'));
-      expect(opened, [
-        ['https://cli.github.com'],
-      ]);
+      expect(find.text('GitHub 연결이 필요합니다 — 설정에서 서버에 로그인하세요.'), findsOneWidget);
+      // Outside an .app bundle there is nothing to open, so the button is away.
+      expect(find.byKey(const Key('monitor-open-settings')), findsNothing);
+      expect(opened, isEmpty);
 
       // The notice is a real window: traffic lights, esc, and a drag region.
       calls.clear();
@@ -452,4 +452,13 @@ void main() {
       expect(find.text('#22 feat: palette'), findsOneWidget);
     });
   });
+}
+
+/// Settings that never touch the disk: the boot future gates a spinner, and
+/// real file IO cannot complete while pumpAndSettle animates one.
+class _FixedSettingsStore extends SettingsStore {
+  _FixedSettingsStore() : super(File('/tmp/yogit-monitor-test-unused.json'));
+
+  @override
+  Future<AppSettings> load() async => const AppSettings();
 }

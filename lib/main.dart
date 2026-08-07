@@ -12,7 +12,6 @@ import 'pr_monitor.dart';
 import 'settings.dart';
 import 'timeline.dart';
 import 'timeline_theme.dart';
-import 'typography.dart';
 import 'window_frame.dart';
 
 void main(List<String> args) {
@@ -25,7 +24,6 @@ void main(List<String> args) {
           requestedPath: launch.repositoryPath,
           branch: branch,
           gitExecutable: launch.gitExecutable,
-          ghExecutable: launch.ghExecutable,
         ),
       );
       return;
@@ -34,7 +32,6 @@ void main(List<String> args) {
       YogitBootstrap(
         requestedPath: launch.repositoryPath,
         gitExecutable: launch.gitExecutable,
-        ghExecutable: launch.ghExecutable,
       ),
     );
   } on FormatException catch (error) {
@@ -46,13 +43,11 @@ class LaunchOptions {
   const LaunchOptions({
     required this.repositoryPath,
     required this.gitExecutable,
-    this.ghExecutable,
     this.monitorBranch,
   });
 
   final String repositoryPath;
   final String gitExecutable;
-  final String? ghExecutable;
 
   /// When set, this instance is a monitor window for the branch, not a
   /// timeline.
@@ -61,17 +56,31 @@ class LaunchOptions {
 
 LaunchOptions launchOptionsFromArgs(List<String> args) {
   final suppliedGit = _optionValue(args, '--git');
-  final suppliedGh = _optionValue(args, '--gh');
   return LaunchOptions(
     repositoryPath: repositoryPathFromArgs(args),
     gitExecutable: suppliedGit == null
         ? resolveExecutable('git')
         : _validatedExecutable('--git', suppliedGit),
-    ghExecutable: suppliedGh == null
-        ? resolveOptionalExecutable('gh')
-        : _validatedExecutable('--gh', suppliedGh),
     monitorBranch: _optionValue(args, '--monitor'),
   );
+}
+
+/// The `.app` bundle this instance runs from, or null outside one — a dev run
+/// or a test has no bundle to relaunch or to open.
+String? appBundlePath() {
+  final segments = Platform.resolvedExecutable.split('/');
+  final index = segments.lastIndexWhere((segment) => segment.endsWith('.app'));
+  return index < 0 ? null : segments.sublist(0, index + 1).join('/');
+}
+
+/// Which GitHub server answers for [host]: the one the user selected when the
+/// remote lives on it, and the host's own endpoint otherwise. A monitored
+/// repository is not always on the selected server.
+String apiBaseUrlForHost(String host, AppSettings settings) {
+  final derived = githubApiBaseUrl(host);
+  return Uri.parse(settings.githubApiBaseUrl).host == Uri.parse(derived).host
+      ? settings.githubApiBaseUrl
+      : derived;
 }
 
 String repositoryPathFromArgs(List<String> args) =>
@@ -102,8 +111,8 @@ class MonitorBootstrap extends StatefulWidget {
     required this.requestedPath,
     required this.branch,
     required this.gitExecutable,
-    this.ghExecutable,
     this.runner = runProcess,
+    this.settingsStore,
     this.windowFrameController,
     super.key,
   });
@@ -111,8 +120,10 @@ class MonitorBootstrap extends StatefulWidget {
   final String requestedPath;
   final String branch;
   final String gitExecutable;
-  final String? ghExecutable;
   final CommandRunner runner;
+
+  /// Where the selected GitHub server comes from; the real file by default.
+  final SettingsStore? settingsStore;
   final WindowFrameController? windowFrameController;
 
   @override
@@ -127,6 +138,7 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
       GitRepository repository,
       RemoteRepository? remote,
       String root,
+      String apiBaseUrl,
       String? token,
     })
   >
@@ -137,6 +149,7 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
       GitRepository repository,
       RemoteRepository? remote,
       String root,
+      String apiBaseUrl,
       String? token,
     })
   >
@@ -153,18 +166,20 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
     );
     final url = await repository.loadOriginUrl();
     final remote = url == null ? null : RemoteRepository.tryParse(url);
+    final settings = await (widget.settingsStore ?? SettingsStore()).load();
+    // With no remote there is no host to derive a server from, so the token
+    // question falls back to the selected one; the notice for a missing origin
+    // comes right after the one for a missing login either way.
+    final apiBaseUrl = remote == null
+        ? settings.githubApiBaseUrl
+        : apiBaseUrlForHost(remote.host, settings);
     return (
       repository: repository,
       remote: remote,
       root: root,
-      // ponytail: the token is read here only so build() stays synchronous.
-      // Telling the user there is no token — and letting them pick a server —
-      // belongs with the settings wiring, which still routes through gh.
-      token: remote == null
-          ? null
-          : await GithubTokenStore(
-              runner: widget.runner,
-            ).read(githubApiBaseUrl(remote.host)),
+      apiBaseUrl: apiBaseUrl,
+      // Read here so build() stays synchronous.
+      token: await GithubTokenStore(runner: widget.runner).read(apiBaseUrl),
     );
   }
 
@@ -188,10 +203,10 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
             zoomOnEntry: false,
           );
         }
-        if (widget.ghExecutable == null) {
+        if (boot.token?.isNotEmpty != true) {
           return _monitorNotice(
-            '모니터링에는 GitHub CLI(gh)가 필요합니다.',
-            link: 'https://cli.github.com',
+            'GitHub 연결이 필요합니다 — 설정에서 서버에 로그인하세요.',
+            openBundle: appBundlePath(),
           );
         }
         final remote = boot.remote;
@@ -206,10 +221,7 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
             service: PrMonitorService(
               remote: remote,
               monitoredBranch: widget.branch,
-              api: GitHubApi(
-                apiBaseUrl: githubApiBaseUrl(remote.host),
-                token: boot.token ?? '',
-              ),
+              api: GitHubApi(apiBaseUrl: boot.apiBaseUrl, token: boot.token!),
             ),
           ),
         );
@@ -224,7 +236,9 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
         child: child,
       );
 
-  Widget _monitorNotice(String message, {String? link}) => _monitorWindow(
+  /// [openBundle] is the app bundle the 설정 열기 button relaunches; outside a
+  /// bundle there is nothing to open, so the button stays away.
+  Widget _monitorNotice(String message, {String? openBundle}) => _monitorWindow(
     zoomOnEntry: false,
     Scaffold(
       body: Center(
@@ -232,23 +246,13 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(message, style: const TextStyle(fontSize: 14)),
-            if (link != null) ...[
-              const SizedBox(height: 8),
+            if (openBundle != null) ...[
+              const SizedBox(height: 12),
               TextButton(
+                key: const Key('monitor-open-settings'),
                 onPressed: () =>
-                    unawaited(widget.runner('/usr/bin/open', [link])),
-                child: Text(link, style: const TextStyle(fontSize: 13)),
-              ),
-              Text(
-                '또는 터미널에서: brew install gh',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.onSurface.withValues(alpha: 0.6),
-                  fontFamily: technicalFontFamily,
-                  fontFamilyFallback: technicalFontFallback,
-                ),
+                    unawaited(widget.runner('/usr/bin/open', [openBundle])),
+                child: const Text('설정 열기', style: TextStyle(fontSize: 13)),
               ),
             ],
             const SizedBox(height: 14),
@@ -272,7 +276,6 @@ class YogitBootstrap extends StatefulWidget {
   const YogitBootstrap({
     required this.requestedPath,
     required this.gitExecutable,
-    this.ghExecutable,
     this.runner = runProcess,
     this.rawRunner = runRawProcess,
     this.windowFrameController,
@@ -281,7 +284,6 @@ class YogitBootstrap extends StatefulWidget {
 
   final String requestedPath;
   final String gitExecutable;
-  final String? ghExecutable;
   final CommandRunner runner;
   final RawCommandRunner rawRunner;
   final WindowFrameController? windowFrameController;
@@ -338,7 +340,6 @@ class _YogitBootstrapState extends State<YogitBootstrap> {
             runner: widget.runner,
             rawRunner: widget.rawRunner,
           ),
-          ghExecutable: widget.ghExecutable,
           windowFrameController: _windowFrameController,
         );
       }
@@ -363,7 +364,6 @@ class YogitApp extends StatefulWidget {
     required this.repository,
     this.settingsStore,
     this.avatarService,
-    this.ghExecutable,
     this.discoverAvatars = true,
     this.windowFrameController,
     this.repositoryFactory,
@@ -377,7 +377,6 @@ class YogitApp extends StatefulWidget {
   final GitRepository Function(String root)? repositoryFactory;
   final SettingsStore? settingsStore;
   final AvatarService? avatarService;
-  final String? ghExecutable;
   final bool discoverAvatars;
   final WindowFrameController? windowFrameController;
 
@@ -396,10 +395,14 @@ class _YogitAppState extends State<YogitApp> {
   @override
   void initState() {
     super.initState();
-    unawaited(_loadSettings());
-    if (_avatarService == null && widget.discoverAvatars) {
-      unawaited(_discoverAvatarService());
-    }
+    // Discovery waits for the settings: which server answers for the origin
+    // depends on the one the user selected.
+    unawaited(() async {
+      await _loadSettings();
+      if (_avatarService == null && widget.discoverAvatars) {
+        await _discoverAvatarService();
+      }
+    }());
   }
 
   Future<void> _loadSettings() async {
@@ -447,7 +450,7 @@ class _YogitAppState extends State<YogitApp> {
     final url = await repository.loadOriginUrl();
     final remote = url == null ? null : RemoteRepository.tryParse(url);
     if (remote == null) return;
-    final apiBaseUrl = githubApiBaseUrl(remote.host);
+    final apiBaseUrl = apiBaseUrlForHost(remote.host, _settings);
     final token = await GithubTokenStore(
       runner: repository.runner,
     ).read(apiBaseUrl);
@@ -475,18 +478,14 @@ class _YogitAppState extends State<YogitApp> {
   /// The monitor runs as its own app instance, so it gets a real window of
   /// its own. Outside a bundle (dev runs, tests) there is nothing to launch.
   void _openMonitor(String branch) {
-    final segments = Platform.resolvedExecutable.split('/');
-    final bundleIndex = segments.lastIndexWhere(
-      (segment) => segment.endsWith('.app'),
-    );
-    if (bundleIndex < 0) return;
+    final bundlePath = appBundlePath();
+    if (bundlePath == null) return;
     unawaited(
       _repository.runner('/usr/bin/open', [
         ...monitorLaunchArguments(
-          bundlePath: segments.sublist(0, bundleIndex + 1).join('/'),
+          bundlePath: bundlePath,
           root: _repository.root,
           gitExecutable: _repository.gitExecutable,
-          ghExecutable: widget.ghExecutable,
           branch: branch,
         ),
       ]),

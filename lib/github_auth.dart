@@ -3,12 +3,12 @@ import 'dart:io';
 import 'git.dart';
 
 /// One token per GitHub server, kept in the macOS Keychain through
-/// `/usr/bin/security` so no plugin and no gh CLI is involved.
+/// `/usr/bin/security`: no plugin, and no other tool to install.
 ///
-/// Reads fall back to the environment a machine that used gh already exports,
-/// so the app works before anyone logs in through it — and it follows gh's
-/// split by host, since a github.com token on an enterprise server buys
-/// nothing but a 401.
+/// Reads fall back to the `GH_TOKEN` family a developer machine usually
+/// exports already, so the app works before anyone logs in through it — and it
+/// follows the same split by host, since a github.com token on an enterprise
+/// server buys nothing but a 401.
 class GithubTokenStore {
   GithubTokenStore({this.runner = runProcess, Map<String, String>? environment})
     : _environment = environment ?? Platform.environment;
@@ -50,7 +50,7 @@ class GithubTokenStore {
     return null;
   }
 
-  /// gh's own split: the `GH_TOKEN` pair is github.com's, the enterprise pair
+  /// The conventional split: the `GH_TOKEN` pair is github.com's, the enterprise pair
   /// belongs to every other host. Reading across that line would send a token
   /// the server has never heard of.
   static List<String> _envTokenNames(String apiBaseUrl) {

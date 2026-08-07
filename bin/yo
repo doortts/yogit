@@ -130,15 +130,6 @@ if [ "$force_build" -eq 1 ] || [ ! -d "$app" ]; then
 fi
 
 set -- --repo "$root" --git "$git_bin"
-if gh_bin=$(command -v gh 2>/dev/null); then
-  case "$gh_bin" in
-    /*)
-      if [ -x "$gh_bin" ]; then
-        set -- "$@" --gh "$gh_bin"
-      fi
-      ;;
-  esac
-fi
 
 # YO_OPEN exists so tests can stub the launcher; default stays absolute.
 exec "${YO_OPEN:-/usr/bin/open}" -n "$app" --args "$@"

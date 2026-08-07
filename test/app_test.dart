@@ -12602,7 +12602,6 @@ void main() {
           originUrlCallback: () async => 'https://github.com/team/second.git',
         ),
         settingsStore: MemorySettingsStore(),
-        ghExecutable: 'gh',
         windowFrameController: controller,
       ),
     );
@@ -12739,12 +12738,9 @@ void main() {
       '/tmp/project',
       '--git',
       '/usr/bin/git',
-      '--gh',
-      '/usr/bin/true',
     ]);
     expect(launch.repositoryPath, '/tmp/project');
     expect(launch.gitExecutable, '/usr/bin/git');
-    expect(launch.ghExecutable, '/usr/bin/true');
     expect(launch.monitorBranch, isNull);
     expect(
       launchOptionsFromArgs([
@@ -13071,7 +13067,6 @@ void main() {
     expect(source, contains(r'git_bin=$(command -v git)'));
     expect(source, contains('flutter build macos'));
     expect(source, contains(r'set -- --repo "$root" --git "$git_bin"'));
-    expect(source, contains(r'set -- "$@" --gh "$gh_bin"'));
     expect(source, contains('/usr/bin/open'));
     expect(source, contains(r'-n "$app" --args "$@"'));
     expect(File('README.md').readAsStringSync(), contains('Flutter 3.41.8'));
@@ -16723,7 +16718,6 @@ void main() {
         bundlePath: '/Applications/yogit.app',
         root: '/repos/yonalist',
         gitExecutable: '/usr/bin/git',
-        ghExecutable: '/opt/homebrew/bin/gh',
         branch: 'dev',
       ),
       [
@@ -16734,21 +16728,9 @@ void main() {
         '/repos/yonalist',
         '--git',
         '/usr/bin/git',
-        '--gh',
-        '/opt/homebrew/bin/gh',
         '--monitor',
         'dev',
       ],
-    );
-    expect(
-      monitorLaunchArguments(
-        bundlePath: '/Applications/yogit.app',
-        root: '/repos/yonalist',
-        gitExecutable: '/usr/bin/git',
-        ghExecutable: null,
-        branch: 'dev',
-      ),
-      isNot(contains('--gh')),
     );
   });
 

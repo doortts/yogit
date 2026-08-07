@@ -6,7 +6,8 @@
 
 - macOS와 Flutter 3.41.8 이상
 - Git
-- GitHub 또는 GHE 아바타를 표시하려면 GitHub CLI(`gh`)
+- 커밋 아바타와 PR 모니터링은 앱 설정의 "GitHub 서버"에서 로그인해야 씁니다. 브라우저로
+  로그인하거나 Personal Access Token(스코프 `repo` · `read:org`)을 넣으면 됩니다.
 
 ```sh
 flutter build macos --release
@@ -50,7 +51,7 @@ yo --build
 
 ## GitHub와 GHE 아바타
 
-앱은 현재 저장소의 `origin`만 확인하며 `gh auth login`으로 로그인한 계정을 그대로 사용합니다. 별도 토큰 입력 화면은 없습니다. GitHub와 GHE 커밋 API에서 받은 작성자·커미터 아바타만 표시하고 Gravatar는 조회하지 않습니다. 연결할 수 없으면 이니셜을 즉시 표시합니다.
+앱은 현재 저장소의 `origin`만 확인합니다. `origin`이 설정에서 고른 서버와 같은 호스트에 있으면 그 서버의 토큰을 쓰고, 다른 호스트면 그 호스트의 API 주소를 씁니다. 토큰은 macOS 키체인에 서버별로 저장됩니다. GitHub와 GHE 커밋 API에서 받은 작성자·커미터 아바타만 표시하고 Gravatar는 조회하지 않습니다. 연결할 수 없으면 이니셜을 즉시 표시합니다.
 
 ## 탐색과 성능
 
