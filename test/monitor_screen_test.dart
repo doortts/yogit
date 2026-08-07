@@ -425,7 +425,7 @@ void main() {
       expect(calls, ['startDrag']);
     });
 
-    testWidgets('a gh failure shows the banner and retry reloads', (
+    testWidgets('an API failure shows the banner and retry reloads', (
       tester,
     ) async {
       var failing = true;
