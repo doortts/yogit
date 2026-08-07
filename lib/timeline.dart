@@ -7493,6 +7493,13 @@ class _TimelineScreenState extends State<TimelineScreen>
                     _w('hash'),
                     Text(
                       commit.isWorkingTree ? '·······' : commit.shortSha,
+                      // A sha never folds onto a second line inside a 30px row.
+                      // Clipped rather than ellipsised: the front of a sha is
+                      // the part worth reading, and '…' would spend room on
+                      // saying so.
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.clip,
                       style: _hashStyle.copyWith(
                         color: selected ? _palette.text : _hash,
                       ),
