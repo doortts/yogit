@@ -1204,7 +1204,6 @@ class _TimelineScreenState extends State<TimelineScreen>
   var _sidebarCollapsed = false;
 
   late final Map<String, double> _widths = _widthMap(widget.columnWidths);
-  late double? _commitWidth = widget.columnWidths.commit;
   late double? _graphWidth = widget.columnWidths.graph;
   late double _sidebarWidth = widget.columnWidths.sidebar;
   late bool _showTime = widget.columnWidths.showTime;
@@ -1219,6 +1218,11 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// it. Written while the timeline lays out, read by the status bar built right
   /// after it in the same frame.
   var _hashColumnLeft = 0.0;
+
+  /// How wide the title column is on screen: the leftover the other five leave.
+  /// The layout writes it every frame, and a divider drag spends it — the column
+  /// has no stored width of its own, so this is what a drag or a fit measures
+  /// against, and what stops the two from handing away width that is not there.
   var _commitAvailableWidth = 0.0;
   late double _previewWidth = widget.previewWidth;
   late double _previewHeight = widget.previewHeight;
@@ -1566,7 +1570,6 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
     if (widget.columnWidths != oldWidget.columnWidths) {
       _widths.addAll(_widthMap(widget.columnWidths));
-      _commitWidth = widget.columnWidths.commit;
       _graphWidth = widget.columnWidths.graph;
       _sidebarWidth = widget.columnWidths.sidebar;
       _showTime = widget.columnWidths.showTime;
@@ -1668,8 +1671,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     super.dispose();
   }
 
-  /// Every column except `graph` and `commit`, which size themselves until
-  /// dragged.
+  /// Every column with a width of its own. `graph` fits the deepest loaded lane
+  /// until dragged, and `commit` takes whatever the other five leave.
   static Map<String, double> _widthMap(TimelineColumnWidths widths) => {
     'refs': widths.refs,
     'hash': widths.hash,
@@ -5178,13 +5181,11 @@ class _TimelineScreenState extends State<TimelineScreen>
       final available = constraints.maxWidth - fixed;
       // The title column always swallows the leftover: nothing sits right of
       // the last column, so a narrower title could only ever produce dead
-      // space. A dragged width is still saved, but the viewport decides —
-      // down to the 100px minimum on a narrow window, as before.
+      // space. Its divider therefore moves by resizing Date and Author, and the
+      // viewport decides the rest — down to the 100px minimum on a narrow
+      // window.
       final commitWidth = math.max(timelineColumns['commit']!.min, available);
-      _commitAvailableWidth = math.max(
-        timelineColumns['commit']!.min,
-        available,
-      );
+      _commitAvailableWidth = commitWidth;
       double width(String column) => switch (column) {
         'commit' => commitWidth,
         'graph' => graphWidth,
@@ -6716,12 +6717,6 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// draws right now — its header and every loaded row — clamped to the column's
   /// own range and to the width the other columns leave it.
   void _fitColumn(String column) {
-    // The title column absorbs whatever the other five leave, so the viewport
-    // alone decides it: there is no content width to fit it to. Widening it to
-    // its longest subject would push the row past the viewport and open a
-    // horizontal scroll, which the timeline never has — so a double click here
-    // does nothing.
-    if (column == 'commit') return;
     // The graph column already has a fit of its own — the deepest loaded lane —
     // so a double click hands it back to that instead of measuring text.
     if (column == 'graph') {
@@ -6731,6 +6726,18 @@ class _TimelineScreenState extends State<TimelineScreen>
       return;
     }
     final spec = timelineColumns[column]!;
+    // The title column holds no width to set, so it fits the same way its
+    // divider drags: the difference between what it draws and what it needs goes
+    // to Date and Author, or comes back from them. They may not take more than
+    // their maximums or give up more than their minimums, so a fit narrower than
+    // they can absorb lands as close as they allow — the row stays inside the
+    // viewport either way.
+    if (column == 'commit') {
+      final fitted = _contentWidth('commit').clamp(spec.min, spec.max);
+      _resizeCommit(fitted - _commitAvailableWidth, collapse: false);
+      _saveColumnWidths();
+      return;
+    }
     final taken = timelineColumns.keys
         .where((other) => other != column && _columnVisible(other))
         .fold(
@@ -6783,6 +6790,13 @@ class _TimelineScreenState extends State<TimelineScreen>
     'hash' => _textWidth(
       commit.isWorkingTree ? '·······' : commit.shortSha,
       _hashStyle,
+    ),
+    // Just the subject. The row's badges ride an `Expanded` that only takes room
+    // the subject is not using, so they are decoration the fit does not owe
+    // width to.
+    'commit' => _textWidth(
+      commit.subject,
+      TextStyle(fontFamily: _fontFamily, fontSize: _baseFontSize),
     ),
     'time' => _textWidth(
       commit.isWorkingTree
@@ -6856,15 +6870,19 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// Moves the divider on [column]'s right edge by the distance the cursor just
   /// travelled.
   ///
-  /// Date's divider is the line between the last two columns, so it hands width
-  /// to Author rather than taking it from the title column on its left: the
-  /// title column absorbs whatever the fixed columns leave, so widening Date
-  /// used to shrink the title column by the same amount and leave the dragged
-  /// line exactly where it was, with Author untouched. The column the drag
-  /// shrinks gives up the whole distance — that is what keeps the line under
-  /// the cursor — and the other takes as much of it as its own maximum allows,
-  /// so the row never totals more than it did.
+  /// The two dividers around the title column move by transfer rather than by
+  /// setting a width, because the title column absorbs whatever the fixed
+  /// columns leave. Widening Date used to shrink the title column by the same
+  /// amount and leave the dragged line exactly where it was, with Author
+  /// untouched; narrowing the title column changed a width nothing drew. The
+  /// column the drag shrinks gives up the whole distance — that is what keeps
+  /// the line under the cursor — and the other takes as much of it as its own
+  /// maximum allows, so the row never totals more than it did.
   void _resizeBy(String column, double width, double delta) {
+    if (column == 'commit') {
+      _resizeCommit(delta);
+      return;
+    }
     if (column != 'time' || !_showName) {
       _resize(column, width + delta);
       return;
@@ -6911,10 +6929,6 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// Resizes from the width on screen, so dragging a flexing title column picks
   /// up where it is rather than jumping to a stored value.
   void _resize(String column, double next) {
-    if (column == 'commit') {
-      _resizeCommit(next);
-      return;
-    }
     final spec = timelineColumns[column]!;
     if ((column == 'time' || column == 'name') &&
         next < spec.min &&
@@ -6932,49 +6946,65 @@ class _TimelineScreenState extends State<TimelineScreen>
     });
   }
 
-  void _resizeCommit(double next) {
-    final spec = timelineColumns['commit']!;
-    if (next <= _commitAvailableWidth) {
+  /// Moves the title column's right-hand divider by [delta], the only way that
+  /// column resizes: it holds no width of its own, so the line moves by taking
+  /// width from Date and Author or handing it back to them. Date goes first —
+  /// the divider touches it — and Author takes over once Date is at its limit.
+  /// The line stops where both of them run out.
+  ///
+  /// [collapse] is what separates a drag from a fit: dragging right past Date's
+  /// minimum hides Date and keeps going, while a fit only ever resizes.
+  void _resizeCommit(double delta, {bool collapse = true}) {
+    if (delta > 0) {
+      var taking = delta;
+      var hidColumn = false;
       setState(() {
-        _commitWidth = next.clamp(
-          spec.min,
-          math.max(spec.max, _commitAvailableWidth),
-        );
+        for (final column in const ['time', 'name']) {
+          if (taking <= 0 || !_columnVisible(column)) continue;
+          final spec = timelineColumns[column]!;
+          final shrink = math.min(taking, _w(column) - spec.min);
+          _widths[column] = _w(column) - shrink;
+          taking -= shrink;
+          _commitAvailableWidth += shrink;
+          if (!collapse || taking <= 0 || _w(column) > spec.min) continue;
+          // At its minimum with the drag still going: the column goes, and the
+          // minimum it was holding goes to the title column with it. The width
+          // it had when the drag started is what a later restore hands back.
+          taking = math.max(0, taking - _w(column));
+          _commitAvailableWidth += _w(column);
+          _widths[column] = _resizeStartWidths[column] ?? _w(column);
+          if (column == 'time') {
+            _showTime = false;
+          } else {
+            _showName = false;
+          }
+          hidColumn = true;
+        }
       });
+      if (hidColumn) _saveColumnWidths();
       return;
     }
-
-    var overflow = next - _commitAvailableWidth;
-    var commitWidth = _commitAvailableWidth;
-    var hidColumn = false;
+    // Going the other way the title column is the one that pays, so it may only
+    // hand over what it has above its own minimum — otherwise the row would
+    // outgrow the viewport and open a horizontal scroll the timeline never has.
+    var giving = math.min(
+      -delta,
+      _commitAvailableWidth - timelineColumns['commit']!.min,
+    );
+    if (giving <= 0) return;
     setState(() {
-      void consume(String column) {
-        if (overflow <= 0 || !_columnVisible(column)) return;
-        final columnSpec = timelineColumns[column]!;
-        final current = _w(column);
-        final shrink = math.min(overflow, current - columnSpec.min);
-        _widths[column] = current - shrink;
-        commitWidth += shrink;
-        overflow -= shrink;
-        if (overflow <= 0 || _w(column) > columnSpec.min) return;
-
-        final hiddenWidth = _w(column);
-        commitWidth += hiddenWidth;
-        overflow = math.max(0, overflow - hiddenWidth);
-        _widths[column] = _resizeStartWidths[column] ?? hiddenWidth;
-        if (column == 'time') {
-          _showTime = false;
-        } else {
-          _showName = false;
-        }
-        hidColumn = true;
+      for (final column in const ['time', 'name']) {
+        if (giving <= 0 || !_columnVisible(column)) continue;
+        final grow = math.min(
+          giving,
+          timelineColumns[column]!.max - _w(column),
+        );
+        if (grow <= 0) continue;
+        _widths[column] = _w(column) + grow;
+        giving -= grow;
+        _commitAvailableWidth -= grow;
       }
-
-      consume('time');
-      consume('name');
-      _commitWidth = commitWidth;
     });
-    if (hidColumn) _saveColumnWidths();
   }
 
   void _hideColumn(String column, {double? restoreWidth}) {
@@ -6995,7 +7025,6 @@ class _TimelineScreenState extends State<TimelineScreen>
       refs: _w('refs'),
       graph: _graphWidth,
       hash: _w('hash'),
-      commit: _commitWidth,
       time: _w('time'),
       name: _w('name'),
       showTime: _showTime,

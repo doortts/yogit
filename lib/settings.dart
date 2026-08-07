@@ -48,15 +48,17 @@ class TimelineColumnWidths {
   final double? graph;
   final double hash;
 
-  /// Null until the user drags the title column: the timeline then lets it
-  /// absorb the leftover viewport width instead of pinning it.
+  /// Kept so a settings file written before the title column stopped storing a
+  /// width still parses. The title column absorbs whatever the other five leave
+  /// and its divider moves by resizing Date and Author, so nothing reads this
+  /// and nothing writes it any more.
   final double? commit;
   final double time;
   final double name;
   final bool showTime;
   final bool showName;
 
-  /// [graph] and [commit] only widen: pass a value to pin the column, and use
+  /// [graph] only widens: pass a value to pin the column, and use
   /// `TimelineColumnWidths(...)` directly to clear it back to auto.
   TimelineColumnWidths copyWith({
     double? sidebar,

@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -202,6 +203,86 @@ void main() {
       await dragDivider(tester, 'time', -40);
       expect(dividerX(tester, 'time'), closeTo(mirrorBefore, 1));
       expect(widthOf(tester, 'time'), closeTo(100, 1));
+    });
+
+    testWidgets("the title column's divider transfers leftward too: Date "
+        'takes what the title gives up', (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1500, 800);
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+      await tester.pumpWidget(timeline());
+      await tester.pumpAndSettle();
+
+      final lineBefore = dividerX(tester, 'commit');
+      final commitBefore = widthOf(tester, 'commit');
+
+      await dragDivider(tester, 'commit', -40);
+
+      expect(dividerX(tester, 'commit'), closeTo(lineBefore - 40, 1));
+      expect(widthOf(tester, 'commit'), closeTo(commitBefore - 40, 1));
+      expect(widthOf(tester, 'time'), closeTo(140, 1));
+      expect(widthOf(tester, 'name'), closeTo(120, 1));
+    });
+
+    testWidgets('leftward transfer cascades to Author and stops at the caps', (
+      tester,
+    ) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1500, 800);
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+      await tester.pumpWidget(timeline());
+      await tester.pumpAndSettle();
+
+      final commitBefore = widthOf(tester, 'commit');
+      final lineBefore = dividerX(tester, 'commit');
+      // Date can take 70 (100→170), Author 120 (120→240): 190 in total.
+      await dragDivider(tester, 'commit', -400);
+
+      expect(widthOf(tester, 'time'), timelineColumns['time']!.max);
+      expect(widthOf(tester, 'name'), timelineColumns['name']!.max);
+      expect(widthOf(tester, 'commit'), closeTo(commitBefore - 190, 1));
+      expect(dividerX(tester, 'commit'), closeTo(lineBefore - 190, 1));
+    });
+
+    testWidgets('double-clicking the title divider fits it to the longest '
+        'subject on screen', (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1500, 800);
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+      await tester.pumpWidget(timeline());
+      await tester.pumpAndSettle();
+
+      final pane = tester.getSize(find.byKey(const Key('timeline-viewport')));
+      final before = widthOf(tester, 'commit');
+
+      final resizer = find.byKey(const Key('commit-resizer'));
+      await tester.tap(resizer);
+      await tester.pump(kDoubleTapMinTime);
+      await tester.tap(resizer);
+      await tester.pumpAndSettle();
+
+      // 'first commit' is short: the column compacts, the neighbours take
+      // the difference, and the row still fills the pane exactly.
+      final after = widthOf(tester, 'commit');
+      expect(after, lessThan(before));
+      expect(after, greaterThanOrEqualTo(timelineColumns['commit']!.min));
+      final subject = tester.getSize(find.text('first commit'));
+      expect(after, greaterThanOrEqualTo(subject.width));
+      expect(
+        tester
+            .getSize(find.byKey(const Key('timeline-horizontal-content')))
+            .width,
+        lessThanOrEqualTo(pane.width),
+      );
     });
 
     testWidgets('the total never grows, so no horizontal scroll appears', (

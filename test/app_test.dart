@@ -2130,9 +2130,8 @@ void main() {
     );
   });
 
-  testWidgets('the commit title column flexes until it is dragged', (
-    tester,
-  ) async {
+  testWidgets('the commit title column flexes, and its divider hands width to '
+      'Date and Author', (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1400, 800);
     addTearDown(() {
@@ -2155,8 +2154,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
-    // Default is unset, so the title column takes whatever is left over.
-    expect(const TimelineColumnWidths().commit, isNull);
+    // Nothing pins the title column, so it takes whatever is left over.
     double titleWidth() =>
         tester.getSize(find.byKey(const Key('commit-header'))).width;
     double nameRight() =>
@@ -2180,28 +2178,28 @@ void main() {
     expect(titleWidth(), 246);
     expect(nameRight(), lessThanOrEqualTo(1280 - 288));
 
-    // Dragging narrower saves the width but the screen refills: a narrower
-    // title could only leave dead space right of the last column, so the
-    // viewport keeps deciding what is drawn.
+    // Dragging the divider narrower hands the 100px to Date and Author instead
+    // of storing a width nothing draws: Date fills to its 170 maximum and
+    // Author takes the remaining 46.
     await tester.drag(
       find.byKey(const Key('commit-resizer')),
       const Offset(-100, 0),
     );
     await tester.pumpAndSettle();
-    expect(titleWidth(), 246);
-    expect(saved?.commit, isNotNull);
-    expect(saved!.commit, lessThan(246));
+    expect(titleWidth(), 146);
+    expect(saved?.time, 170);
+    expect(saved?.name, 196);
 
     // A narrow window still compresses the title to the 100px minimum before
     // any other column clips, and widening refills the leftover.
     tester.view.physicalSize = const Size(800, 760);
     await tester.pumpAndSettle();
     expect(titleWidth(), 100);
-    // Same leftover math as the opening 1400px case: the drag changed nothing
-    // on screen.
+    // The opening 1400px case again, now 100px narrower: the width the drag
+    // moved stayed with Date and Author.
     tester.view.physicalSize = const Size(1400, 760);
     await tester.pumpAndSettle();
-    expect(titleWidth(), 366);
+    expect(titleWidth(), 266);
   });
 
   testWidgets('the six columns fill the timeline viewport with no dead strip', (
