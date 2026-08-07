@@ -55,23 +55,51 @@ void main() {
     );
   });
 
-  test('a Keychain miss falls back to GH_TOKEN then GITHUB_TOKEN', () async {
+  test('a Keychain miss falls back to the env token for the right host', () async {
+    // gh semantics: GH_TOKEN belongs to github.com, GH_ENTERPRISE_TOKEN to
+    // enterprise hosts. Handing a github.com token to a GHE server would just
+    // manufacture a 401 banner.
     final missing = {
       'find-generic-password': (List<String> _) =>
           ProcessResult(1, 44, '', 'could not be found'),
     };
+    const env = {
+      'GH_TOKEN': 'dotcom-a',
+      'GITHUB_TOKEN': 'dotcom-b',
+      'GH_ENTERPRISE_TOKEN': 'ghe-a',
+      'GITHUB_ENTERPRISE_TOKEN': 'ghe-b',
+    };
 
-    final gh = storeWith(
-      bySubcommand: missing,
-      environment: const {'GH_TOKEN': 'a', 'GITHUB_TOKEN': 'b'},
-    );
-    expect(await gh.store.read('https://api.github.com'), 'a');
+    final dotcom = storeWith(bySubcommand: missing, environment: env);
+    expect(await dotcom.store.read('https://api.github.com'), 'dotcom-a');
 
-    final github = storeWith(
-      bySubcommand: missing,
-      environment: const {'GITHUB_TOKEN': 'b'},
+    final ghe = storeWith(bySubcommand: missing, environment: env);
+    expect(
+      await ghe.store.read('https://oss.navercorp.com/api/v3'),
+      'ghe-a',
     );
-    expect(await github.store.read('https://api.github.com'), 'b');
+
+    final gheSecondChoice = storeWith(
+      bySubcommand: missing,
+      environment: const {
+        'GH_TOKEN': 'dotcom-a',
+        'GITHUB_ENTERPRISE_TOKEN': 'ghe-b',
+      },
+    );
+    expect(
+      await gheSecondChoice.store.read('https://oss.navercorp.com/api/v3'),
+      'ghe-b',
+    );
+
+    // A github.com-only env never leaks onto an enterprise server.
+    final wrongHost = storeWith(
+      bySubcommand: missing,
+      environment: const {'GH_TOKEN': 'dotcom-a', 'GITHUB_TOKEN': 'dotcom-b'},
+    );
+    expect(
+      await wrongHost.store.read('https://oss.navercorp.com/api/v3'),
+      isNull,
+    );
 
     final none = storeWith(bySubcommand: missing);
     expect(await none.store.read('https://api.github.com'), isNull);

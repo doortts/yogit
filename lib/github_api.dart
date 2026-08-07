@@ -172,9 +172,13 @@ class GitHubApi {
 const _requestTimeout = Duration(seconds: 20);
 
 /// The default transport. Honours `HTTPS_PROXY`/`https_proxy` because an
-/// enterprise server usually sits behind one, and goes direct when neither is
-/// set. Transport failures come back as [GitHubApiException] so callers only
-/// ever catch the one type.
+/// enterprise server usually sits behind one, and `NO_PROXY`/`no_proxy`
+/// alongside it because the same shells exempt the internal host that way.
+///
+/// Headers and body each get their own [_requestTimeout]: a proxy that sends
+/// headers and then stalls the body would otherwise hang the request forever.
+/// Transport failures come back as [GitHubApiException] so callers only ever
+/// catch the one type.
 Future<HttpResponse> sendOverHttps(
   Uri uri, {
   required String method,
@@ -184,11 +188,17 @@ Future<HttpResponse> sendOverHttps(
   final proxy =
       Platform.environment['HTTPS_PROXY'] ??
       Platform.environment['https_proxy'];
+  final noProxy =
+      Platform.environment['NO_PROXY'] ?? Platform.environment['no_proxy'];
   final client = HttpClient()..connectionTimeout = _requestTimeout;
   if (proxy != null && proxy.trim().isNotEmpty) {
+    final proxyEnvironment = {
+      'https_proxy': proxy,
+      if (noProxy != null && noProxy.trim().isNotEmpty) 'no_proxy': noProxy,
+    };
     client.findProxy = (target) => HttpClient.findProxyFromEnvironment(
       target,
-      environment: {'https_proxy': proxy},
+      environment: proxyEnvironment,
     );
   }
   try {
@@ -200,7 +210,10 @@ Future<HttpResponse> sendOverHttps(
       request.add(bytes);
     }
     final response = await request.close().timeout(_requestTimeout);
-    final text = await response.transform(utf8.decoder).join();
+    final text = await response
+        .transform(utf8.decoder)
+        .join()
+        .timeout(_requestTimeout);
     return (status: response.statusCode, body: text);
   } on Exception catch (error) {
     throw GitHubApiException('GitHub($uri)에 연결할 수 없습니다: $error');

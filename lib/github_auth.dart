@@ -5,9 +5,10 @@ import 'git.dart';
 /// One token per GitHub server, kept in the macOS Keychain through
 /// `/usr/bin/security` so no plugin and no gh CLI is involved.
 ///
-/// Reads fall back to `GH_TOKEN` then `GITHUB_TOKEN`, which is what a terminal
-/// already exports on a machine that used gh, so the app works before anyone
-/// logs in through it.
+/// Reads fall back to the environment a machine that used gh already exports,
+/// so the app works before anyone logs in through it — and it follows gh's
+/// split by host, since a github.com token on an enterprise server buys
+/// nothing but a 401.
 class GithubTokenStore {
   GithubTokenStore({this.runner = runProcess, Map<String, String>? environment})
     : _environment = environment ?? Platform.environment;
@@ -42,14 +43,28 @@ class GithubTokenStore {
       final token = found.stdout.toString().trim();
       if (token.isNotEmpty) return token;
     }
-    for (final name in const ['GH_TOKEN', 'GITHUB_TOKEN']) {
+    for (final name in _envTokenNames(apiBaseUrl)) {
       final value = _environment[name]?.trim();
       if (value != null && value.isNotEmpty) return value;
     }
     return null;
   }
 
+  /// gh's own split: the `GH_TOKEN` pair is github.com's, the enterprise pair
+  /// belongs to every other host. Reading across that line would send a token
+  /// the server has never heard of.
+  static List<String> _envTokenNames(String apiBaseUrl) {
+    final host = Uri.tryParse(apiBaseUrl)?.host.toLowerCase();
+    return host == 'api.github.com' || host == 'github.com'
+        ? const ['GH_TOKEN', 'GITHUB_TOKEN']
+        : const ['GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'];
+  }
+
   /// `-U` updates the existing item, so saving twice is not a duplicate error.
+  ///
+  /// The token rides in argv, so it is visible in `ps` for the length of the
+  /// call. Accepted: the alternative is `security`'s interactive prompt, which
+  /// cannot be driven from a GUI app.
   Future<void> save(String apiBaseUrl, String token) async {
     final result = await runner(_security, [
       'add-generic-password',
