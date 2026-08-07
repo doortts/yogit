@@ -1616,8 +1616,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       TextButton(
         key: const Key('timeline-font-size-reset'),
-        onPressed: () =>
-            _change(_settings.copyWith(clearTimelineFontSize: true)),
+        // Already on the family default: resetting would only rewrite the
+        // settings file to say the same thing.
+        onPressed: _settings.timelineFontSize == null
+            ? null
+            : () => _change(_settings.copyWith(clearTimelineFontSize: true)),
         child: const Text('초기화'),
       ),
     ],
