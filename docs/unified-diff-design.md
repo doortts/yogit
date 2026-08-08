@@ -111,10 +111,12 @@ parent 선택기의 새 자리다.
 - `_openFullDiff`의 `MaterialPageRoute` 경로와 `_FullDiffRouteSession`
 - `DiffScreen`의 파일 목록 pane (`_commitFiles`, `_ResponsiveDiffBody`의 files 부분,
   `FullDiffColumnWidths.files` 사용처) — 추출 후 남는 껍데기 전부
-- `timeline.dart`의 인접 미리보기 diff: `_adjacentPreviewDiff`, `_previewDiffOpen`,
-  `_previewDiff*` 폭/높이 필드와 리사이저, `preview-diff-*` 키의 위젯들
-- 설정 `previewDiffLeftWidth` / `previewDiffRightWidth` / `previewDiffBottomHeight` —
-  읽기는 무시, 쓰지 않음 (파싱 호환만 유지). `FullDiffColumnWidths.files`도 같은 취급
+- `timeline.dart`의 인접 미리보기 diff — 단, **일반 커밋 diff 경로만**. 인접 diff는 브랜치
+  미리보기(머지/리베이스 결과·충돌, `loadConflictDiff`/`loadDiffBetween`) diff도 겸하고
+  있고, 그 경로는 FullDiffSessionController가 다루지 못하므로 이번 통합 범위 밖 — 인접
+  diff 기구와 `previewDiff*` 폭/높이 설정은 branch-preview 용도로 남는다. 일반 커밋에서
+  파일을 고르면 인접 diff 대신 임베디드 워크스페이스가 열린다는 것이 계약이다.
+- `FullDiffColumnWidths.files` — 파일 pane과 함께 은퇴 (파싱 호환만 유지)
 
 ### 4.4 설정
 
