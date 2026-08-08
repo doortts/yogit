@@ -9305,8 +9305,13 @@ class _TimelineScreenState extends State<TimelineScreen>
                             maxHeight:
                                 _previewMessageLines * _previewMessageLine,
                           ),
+                          // Always drawn while there is more message than
+                          // room — a bar that fades out leaves the rest of the
+                          // message looking like the whole of it. Flutter
+                          // hides it on its own when nothing can scroll.
                           child: Scrollbar(
                             controller: _previewMessageScrollController,
+                            thumbVisibility: true,
                             child: SingleChildScrollView(
                               key: const Key('preview-commit-body-scroll'),
                               controller: _previewMessageScrollController,

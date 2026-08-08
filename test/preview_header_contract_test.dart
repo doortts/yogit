@@ -252,6 +252,18 @@ void main() {
       findsNothing,
       reason: '전체 해시 줄은 헤더가 대신한다',
     );
+    // 스크롤 막대는 손대기 전부터 보인다 — 넘치는 게 있다는 걸 알려야 하니까.
+    expect(
+      tester
+          .widget<Scrollbar>(
+            find.ancestor(
+              of: find.byKey(const Key('preview-commit-body-scroll')),
+              matching: find.byType(Scrollbar),
+            ),
+          )
+          .thumbVisibility,
+      isTrue,
+    );
   });
 
   testWidgets('a preview that fits does not scroll away', (tester) async {
