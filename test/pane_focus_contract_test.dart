@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/full_diff_workspace.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/timeline.dart';
@@ -255,6 +256,28 @@ void main() {
           .hasFocus,
       isTrue,
     );
+  });
+
+  testWidgets('the current change lights up only for the focused diff', (
+    tester,
+  ) async {
+    await pumpPreview(tester);
+    await press(tester, LogicalKeyboardKey.arrowRight);
+
+    Color marker() => tester
+        .widget<ColoredBox>(
+          find.descendant(
+            of: find.byKey(const Key('code-row-current-marker')),
+            matching: find.byType(ColoredBox),
+          ),
+        )
+        .color;
+
+    // 미리보기가 키보드를 쥔 동안 diff의 현재 변경은 물러나 있다.
+    expect(marker(), fullDiffDivider);
+
+    await press(tester, LogicalKeyboardKey.arrowLeft);
+    expect(marker(), fullDiffAccent, reason: 'diff가 키보드를 쥐면 현재 변경이 액센트로 살아난다');
   });
 
   testWidgets('the diff walks hunks once it holds the keyboard', (

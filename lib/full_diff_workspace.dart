@@ -173,7 +173,17 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
   String? _editorError;
   bool _openingEditor = false;
   bool _commandHeld = false;
+  bool _hasKeyboard = false;
   int _editorRequestSerial = 0;
+
+  /// The current change wears the accent while the diff has the keyboard and
+  /// falls back to the divider's grey when it does not — the same "only the
+  /// focused pane carries colour" rule the lists follow.
+  Color get _currentMarkerColor =>
+      _hasKeyboard ? fullDiffAccent : fullDiffDivider;
+
+  Color? get _currentTint =>
+      _hasKeyboard ? fullDiffAccent.withValues(alpha: 0.10) : null;
 
   FullDiffCommitMessageCache get _commitMessageCache =>
       widget.commitMessageCache ?? FullDiffCommitMessageCache.shared;
@@ -1107,6 +1117,10 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
             autofocus: widget.focusNode == null,
             focusNode: widget.focusNode,
             onKeyEvent: _handleWorkspaceKeyEvent,
+            onFocusChange: (hasFocus) {
+              if (!mounted || _hasKeyboard == hasFocus) return;
+              setState(() => _hasKeyboard = hasFocus);
+            },
             // Square corners: the workspace fills a pane between two others
             // now, and a rounded edge there cuts a notch out of the window.
             child: ClipRect(
@@ -1382,6 +1396,8 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
     }
     final presentation = switch (state.layout) {
       DiffLayout.unified => UnifiedPresentationView(
+        currentMarkerColor: _currentMarkerColor,
+        currentTint: _currentTint,
         document: patch,
         activeAnchor: state.activeAnchor,
         path: selectedFile.path,
@@ -1399,6 +1415,8 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
         scrollTargetKey: _fullFileScrollTargetKey,
       ),
       DiffLayout.sideBySide => SideBySidePresentationView(
+        currentMarkerColor: _currentMarkerColor,
+        currentTint: _currentTint,
         document: patch,
         activeAnchor: state.activeAnchor,
         oldPath: selectedFile.oldPath ?? selectedFile.path,

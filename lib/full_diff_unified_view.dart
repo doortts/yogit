@@ -28,6 +28,7 @@ class UnifiedPresentationView extends StatelessWidget {
     this.showHunkHeaders = true,
     this.compactRows = false,
     this.currentMarkerColor = fullDiffAccent,
+    this.currentTint,
     this.header,
     super.key,
   });
@@ -49,6 +50,7 @@ class UnifiedPresentationView extends StatelessWidget {
   final bool showHunkHeaders;
   final bool compactRows;
   final Color currentMarkerColor;
+  final Color? currentTint;
   final Widget? header;
 
   @override
@@ -117,6 +119,7 @@ class UnifiedPresentationView extends StatelessWidget {
               richRenderingEnabled: richRenderingEnabled,
               compact: compactRows,
               currentMarkerColor: currentMarkerColor,
+              currentTint: currentTint,
               selectionOrder: FullDiffSelectionOrder(row: item.sourceRow!),
             );
           } else {

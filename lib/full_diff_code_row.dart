@@ -270,6 +270,7 @@ class FullDiffCodeRow extends StatelessWidget {
     this.richRenderingEnabled = true,
     this.compact = false,
     this.currentMarkerColor = fullDiffAccent,
+    this.currentTint,
     this.selectionOrder,
     super.key,
   });
@@ -291,6 +292,10 @@ class FullDiffCodeRow extends StatelessWidget {
   final bool richRenderingEnabled;
   final bool compact;
   final Color currentMarkerColor;
+
+  /// Washed over the current change while the diff holds the keyboard, so the
+  /// row the arrows will move reads at a glance.
+  final Color? currentTint;
   final FullDiffSelectionOrder? selectionOrder;
 
   @override
@@ -386,6 +391,12 @@ class FullDiffCodeRow extends StatelessWidget {
                               ),
                       ),
                     ),
+                    if (current && currentTint != null)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: ColoredBox(color: currentTint!),
+                        ),
+                      ),
                     if (current)
                       Positioned(
                         key: const Key('code-row-current-marker'),

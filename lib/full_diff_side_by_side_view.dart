@@ -33,6 +33,7 @@ class SideBySidePresentationView extends StatelessWidget {
     this.showHunkHeaders = true,
     this.compactRows = false,
     this.currentMarkerColor = fullDiffAccent,
+    this.currentTint,
     this.header,
     super.key,
   });
@@ -59,6 +60,7 @@ class SideBySidePresentationView extends StatelessWidget {
   final bool showHunkHeaders;
   final bool compactRows;
   final Color currentMarkerColor;
+  final Color? currentTint;
   final Widget? header;
 
   @override
@@ -128,6 +130,7 @@ class SideBySidePresentationView extends StatelessWidget {
               splitRatio: splitRatio.clamp(0.2, 0.8).toDouble(),
               compactRows: compactRows,
               currentMarkerColor: currentMarkerColor,
+              currentTint: currentTint,
             );
           } else {
             child = showHunkHeaders
@@ -616,6 +619,7 @@ class _SideBySideRow extends StatelessWidget {
     required this.splitRatio,
     required this.compactRows,
     required this.currentMarkerColor,
+    required this.currentTint,
     super.key,
   });
 
@@ -632,6 +636,7 @@ class _SideBySideRow extends StatelessWidget {
   final double splitRatio;
   final bool compactRows;
   final Color currentMarkerColor;
+  final Color? currentTint;
 
   @override
   Widget build(BuildContext context) {
@@ -660,6 +665,7 @@ class _SideBySideRow extends StatelessWidget {
             richRenderingEnabled: richRenderingEnabled,
             compact: compactRows,
             currentMarkerColor: currentMarkerColor,
+            currentTint: currentTint,
             selectionOrder: FullDiffSelectionOrder(
               row: sourceRow,
               column: showOldSide ? 1 : 0,
@@ -682,6 +688,7 @@ class _SideBySideRow extends StatelessWidget {
             richRenderingEnabled: richRenderingEnabled,
             compact: compactRows,
             currentMarkerColor: currentMarkerColor,
+            currentTint: currentTint,
             selectionOrder: FullDiffSelectionOrder(row: sourceRow),
           );
     if (wrapLines) {
