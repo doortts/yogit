@@ -12,7 +12,8 @@ import 'app_test.dart' show FakeGitRepository, app, commit;
 /// docs/unified-diff-design.md §2.1/§3: picking a file swaps the sidebar and
 /// timeline for the embedded workspace; the preview pane stays and remains the
 /// file navigation. The adjacent simplified diff and the full-screen route are
-/// both gone. esc, the header's ←, and ⌘D all come back to the timeline.
+/// both gone. esc, the header's ←, and → out of the preview all come back
+/// to the timeline.
 void main() {
   late WindowFrameController controller;
 
@@ -68,10 +69,8 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> pressCommandD(WidgetTester tester) async {
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+  Future<void> pressArrow(WidgetTester tester, LogicalKeyboardKey key) async {
+    await tester.sendKeyEvent(key);
     await tester.pumpAndSettle();
   }
 
@@ -158,12 +157,12 @@ void main() {
     expect(find.byKey(const Key('timeline-viewport')), findsOneWidget);
   });
 
-  testWidgets('command-D toggles the embedded diff without a route', (
+  testWidgets('the arrows toggle the embedded diff without a route', (
     tester,
   ) async {
     await pumpTimeline(tester);
 
-    await pressCommandD(tester);
+    await pressArrow(tester, LogicalKeyboardKey.arrowRight);
     expect(find.byType(FullDiffWorkspace), findsOneWidget);
     // 전체화면 route가 아니라 제자리 교체다: 본창 툴바가 그대로 보인다.
     expect(
@@ -180,7 +179,7 @@ void main() {
       reason: '선택된 파일이 없으면 첫 파일로 연다',
     );
 
-    await pressCommandD(tester);
+    await pressArrow(tester, LogicalKeyboardKey.arrowRight);
     expect(find.byType(FullDiffWorkspace), findsNothing);
     expect(find.byKey(const Key('timeline-viewport')), findsOneWidget);
   });

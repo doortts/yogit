@@ -2106,10 +2106,6 @@ class _TimelineScreenState extends State<TimelineScreen>
       }
     }
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
-    if (event.logicalKey == LogicalKeyboardKey.keyD && shortcutModifierHeld) {
-      _toggleFullDiff();
-      return KeyEventResult.handled;
-    }
     // The panel's own copy shortcut only fires while the panel holds the
     // keyboard, and the timeline never lets go of it. Hand the selection over
     // ourselves so dragging over the preview and pressing ⌘C does what it says.
@@ -2369,9 +2365,24 @@ class _TimelineScreenState extends State<TimelineScreen>
     _previewFocusNode.requestFocus();
     if (_showsBranchPreviewDiff(commit)) return;
     final key = _previewKey(commit);
-    final path =
+    final known =
         _previewPaths[key] ?? _previewFileLists[key]?.firstOrNull?.path;
-    if (path == null) return;
+    if (known != null) {
+      _showPreviewDiff(commit, known);
+      return;
+    }
+    // A panel that was away has no file list yet; the diff opens as soon as
+    // git answers with one.
+    unawaited(
+      _previewFilesFor(commit).then((files) {
+        if (!mounted || files.isEmpty) return;
+        if (!identical(commit, _selectedCommit)) return;
+        _showPreviewDiff(commit, _previewPaths[key] ?? files.first.path);
+      }),
+    );
+  }
+
+  void _showPreviewDiff(GitCommit commit, String path) {
     if (_fullDiffOpen) {
       _showFullDiffFile(path);
     } else {
@@ -4283,8 +4294,6 @@ class _TimelineScreenState extends State<TimelineScreen>
         ),
         const SizedBox(width: 8),
       ],
-      _toolbarFullDiffButton(),
-      const SizedBox(width: 8),
       _HoverBuilder(
         enabled: widget.onOpenSettings != null,
         builder: (hovered) => Container(
@@ -4312,16 +4321,6 @@ class _TimelineScreenState extends State<TimelineScreen>
         ),
       ),
     ],
-  );
-
-  /// The full-diff shortcut in the toolbar: the name with its key combination
-  /// under it, dimmed while the selection is a date heading with no commit.
-  Widget _toolbarFullDiffButton() => ValueListenableBuilder<int>(
-    valueListenable: _selectedIndex,
-    builder: (context, _, _) => _ShowDiffButton(
-      key: const Key('toolbar-full-diff'),
-      onTap: _selectedCommit == null ? null : _toggleFullDiff,
-    ),
   );
 
   Widget _placementButton(String label, PreviewPlacement placement) {
@@ -11226,21 +11225,6 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// ⌘D and both Full Diff buttons: the diff takes the sidebar and timeline
   /// area, or hands it back. A closed preview opens first — it is the file
   /// navigation the diff mode relies on.
-  void _toggleFullDiff() {
-    if (_fullDiffOpen) {
-      _closeFullDiff();
-      return;
-    }
-    final commit = _selectedCommit;
-    if (commit == null) return;
-    if (_previewController.previewPlacement == PreviewPlacement.closed) {
-      unawaited(
-        _previewController.setPreview(widget.preferredPreviewPlacement),
-      );
-    }
-    _openFullDiff(commit, _previewPaths[_previewKey(commit)]);
-  }
-
   void _openFullDiff(GitCommit commit, String? path, {bool focusDiff = true}) {
     final controller = FullDiffSessionController(
       repository: widget.repository,
@@ -11671,67 +11655,6 @@ class _KeyCapState extends State<_KeyCap> {
           child: Text(
             widget.label,
             style: TextStyle(color: palette.text, fontSize: 13),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ShowDiffButton extends StatelessWidget {
-  const _ShowDiffButton({required this.onTap, super.key});
-
-  static const green = Color(0xFF2EA043);
-  static const hoverGreen = Color(0xFF3FB950);
-
-  final VoidCallback? onTap;
-
-  static const height = 40.0;
-  static const labelSize = 13.0;
-  static const shortcutSize = 10.0;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = context.timelineTheme;
-    final ink = onTap == null ? palette.muted : AvatarService.onColor(green);
-    return _HoverBuilder(
-      enabled: onTap != null,
-      builder: (hovered) => GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: Container(
-          height: height,
-          padding: EdgeInsets.symmetric(horizontal: height * 0.3),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: onTap == null
-                ? palette.raised
-                : hovered
-                ? hoverGreen
-                : green,
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                'Full Diff',
-                style: TextStyle(
-                  color: ink,
-                  fontSize: labelSize,
-                  fontWeight: FontWeight.w600,
-                  height: 1.1,
-                ),
-              ),
-              Text(
-                shortcutLabel('D'),
-                style: TextStyle(
-                  color: ink.withValues(alpha: 0.75),
-                  fontSize: shortcutSize,
-                  height: 1.2,
-                ),
-              ),
-            ],
           ),
         ),
       ),

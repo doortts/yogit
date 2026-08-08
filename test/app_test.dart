@@ -10436,7 +10436,14 @@ void main() {
       YogitApp(
         repository: FakeGitRepository(
           (_, _) async => [commit('1', 'commit')],
-          files: (_, _) async => const [],
+          files: (_, _) async => const [
+            GitFileChange(
+              path: 'lib/a.dart',
+              status: 'M',
+              additions: 1,
+              deletions: 1,
+            ),
+          ],
         ),
         settingsStore: store,
         discoverAvatars: false,
@@ -10445,7 +10452,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
     expect(
       tester
@@ -10466,7 +10473,14 @@ void main() {
       YogitApp(
         repository: FakeGitRepository(
           (_, _) async => [commit('1', 'commit')],
-          files: (_, _) async => const [],
+          files: (_, _) async => const [
+            GitFileChange(
+              path: 'lib/a.dart',
+              status: 'M',
+              additions: 1,
+              deletions: 1,
+            ),
+          ],
         ),
         settingsStore: store,
         discoverAvatars: false,
@@ -10484,7 +10498,7 @@ void main() {
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
     // The workspace keeps the full-diff palette whatever the timeline wears.
     expect(
@@ -10542,7 +10556,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
     }
 
@@ -10555,7 +10569,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('full-diff-back')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
 
     expect(
@@ -10613,7 +10627,14 @@ void main() {
       YogitApp(
         repository: FakeGitRepository(
           (_, _) async => [commit('1', 'commit')],
-          files: (_, _) async => const [],
+          files: (_, _) async => const [
+            GitFileChange(
+              path: 'lib/a.dart',
+              status: 'M',
+              additions: 1,
+              deletions: 1,
+            ),
+          ],
         ),
         settingsStore: store,
         discoverAvatars: false,
@@ -10621,7 +10642,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Side-by-side'));
     await tester.pump();
@@ -10685,7 +10706,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('preview-state-lib/second.dart')));
       await tester.pumpAndSettle();
@@ -10735,7 +10756,7 @@ void main() {
         ),
       );
       await tester.pump();
-      await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Side-by-side'));
@@ -10773,7 +10794,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
 
       expect(
@@ -10822,7 +10843,7 @@ void main() {
         ),
       );
       await tester.pump();
-      await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Side-by-side'));
@@ -10850,7 +10871,7 @@ void main() {
         greaterThan(const FullDiffColumnWidths().sideBySideRatio),
       );
 
-      await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
       expect(
         tester
@@ -11217,7 +11238,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
 
     final workspace = tester.widget<FullDiffWorkspace>(
@@ -11521,7 +11542,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('nearby-column')), findsNothing);
@@ -11780,7 +11801,14 @@ void main() {
       (_, _) async => [
         commit('merge', 'merge', parents: const [firstParent, secondParent]),
       ],
-      files: (_, _) async => const [],
+      files: (_, _) async => const [
+        GitFileChange(
+          path: 'lib/a.dart',
+          status: 'M',
+          additions: 1,
+          deletions: 1,
+        ),
+      ],
     );
 
     await tester.pumpWidget(
@@ -14331,12 +14359,11 @@ void main() {
       tester.getRect(find.text('상세')).left,
       lessThan(tester.getRect(find.byKey(const Key('keycap-Enter'))).left),
     );
-    // Right cluster order: keycaps, caption, placement box, Full Diff, gear.
+    // Right cluster order: keycaps, caption, placement box, gear.
     final lefts = [
       tester.getRect(find.byKey(const Key('shortcut-hint'))).left,
       tester.getRect(find.text('미리보기')).left,
       box.left,
-      tester.getRect(find.byKey(const Key('toolbar-full-diff'))).left,
       tester.getRect(find.byIcon(Icons.settings_outlined)).left,
     ];
     expect(lefts, orderedEquals(([...lefts]..sort())));
@@ -14666,23 +14693,6 @@ void main() {
               as BoxDecoration)
           .color,
       TimelineThemePalette.systemGraphite.selectedRow,
-    );
-
-    final diffButton = find.byKey(const Key('toolbar-full-diff'));
-    await pointer.moveTo(tester.getCenter(diffButton));
-    await tester.pump();
-    expect(
-      (tester
-                  .widget<Container>(
-                    find.descendant(
-                      of: diffButton,
-                      matching: find.byType(Container),
-                    ),
-                  )
-                  .decoration!
-              as BoxDecoration)
-          .color,
-      const Color(0xFF3FB950),
     );
 
     await pointer.moveTo(
@@ -16126,7 +16136,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('history-toggle')));
     await tester.pumpAndSettle();
@@ -16164,7 +16174,7 @@ void main() {
     expect(find.byType(FullDiffWorkspace), findsOneWidget);
   });
 
-  testWidgets('a closed preview opens with the diff, and its button toggles', (
+  testWidgets('a closed preview opens with the diff on the way in', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -16177,23 +16187,21 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('preview-surface')), findsNothing);
 
-    // ⌘D with the panel away opens it first: it is the diff's file list.
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    // → with the panel away opens it first: it is the diff's file list.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
     expect(find.byType(FullDiffWorkspace), findsOneWidget);
     expect(find.byKey(const Key('preview-surface')), findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
     expect(find.byType(FullDiffWorkspace), findsOneWidget);
   });
 
-  // 미리보기 헤더의 Full Diff 버튼은 은퇴했다 — 그 자리는 커밋·부모 해시가 쓴다
-  // (test/preview_header_contract_test.dart). 진입은 ⌘D·툴바·파일 클릭이 맡는다.
+  // Full Diff 버튼은 헤더에서도 툴바에서도 은퇴했다 — diff는 미리보기에서 연다
+  // (test/preview_header_contract_test.dart, test/pane_focus_contract_test.dart).
 
   // ------------------------------------------------------------------ C5/C6
   testWidgets('the commit stamp gives way to the profile instead of hiding', (
@@ -16381,125 +16389,9 @@ void main() {
     );
   });
 
-  testWidgets('the toolbar full-diff button and Cmd+D open the same screen', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1200, 800);
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    await tester.pumpWidget(
-      MaterialApp(
-        home: TimelineScreen(
-          repository: FakeGitRepository(
-            (_, _) async => [
-              commit('a', 'today commit'),
-              commit(
-                'b',
-                'older commit',
-                timestamp:
-                    DateTime.now()
-                        .subtract(const Duration(days: 3))
-                        .millisecondsSinceEpoch ~/
-                    1000,
-              ),
-            ],
-          ),
-          controller: controller,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
+  // 툴바의 Full Diff 버튼과 ⌘D는 은퇴했다 — diff는 미리보기에서 연다
+  // (test/pane_focus_contract_test.dart).
 
-    final button = find.byKey(const Key('toolbar-full-diff'));
-    expect(button, findsOneWidget);
-    // The name with its shortcut underneath, on green.
-    expect(
-      find.descendant(of: button, matching: find.text('Full Diff')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: button, matching: find.text('⌘D')),
-      findsOneWidget,
-    );
-    expect(
-      tester
-          .getRect(find.descendant(of: button, matching: find.text('⌘D')))
-          .top,
-      greaterThan(
-        tester
-            .getRect(
-              find.descendant(of: button, matching: find.text('Full Diff')),
-            )
-            .top,
-      ),
-    );
-    Color background() =>
-        (tester
-                    .widget<Container>(
-                      find.descendant(
-                        of: button,
-                        matching: find.byType(Container),
-                      ),
-                    )
-                    .decoration!
-                as BoxDecoration)
-            .color!;
-    expect(background(), const Color(0xFF2EA043));
-    // Right of the preview control and left of the gear.
-    expect(
-      tester.getRect(button).left,
-      greaterThan(tester.getRect(find.text('하단')).left),
-    );
-    expect(
-      tester.getRect(button).right,
-      lessThan(tester.getRect(find.byIcon(Icons.settings_outlined)).left),
-    );
-
-    await tester.tap(button);
-    await tester.pumpAndSettle();
-    expect(find.byType(FullDiffWorkspace), findsOneWidget);
-
-    // Cmd+D drives the same mode: it closes what the button opened, and opens
-    // it again.
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
-    expect(find.byType(FullDiffWorkspace), findsNothing);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
-    expect(find.byType(FullDiffWorkspace), findsOneWidget);
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-
-    // The first date heading has no commit: the button dims and the shortcut
-    // does nothing.
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('selected-row-a')), findsNothing);
-    expect(background(), TimelineThemePalette.systemGraphite.raised);
-    expect(
-      tester
-          .widget<GestureDetector>(
-            find.descendant(of: button, matching: find.byType(GestureDetector)),
-          )
-          .onTap,
-      isNull,
-    );
-    await tester.tap(button);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
-    expect(find.byType(FullDiffWorkspace), findsNothing);
-  });
-
-  // ------------------------------------------------------------------ D2
   testWidgets('technical data uses mono while prose uses the system font', (
     tester,
   ) async {
@@ -18019,7 +17911,18 @@ void main() {
         });
     await tester.pumpWidget(
       app(
-        FakeGitRepository((_, _) async => [commit('1', 'first commit')]),
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          // The diff opens on a file now, so the commit needs one.
+          files: (_, _) async => const [
+            GitFileChange(
+              path: 'lib/a.dart',
+              status: 'M',
+              additions: 1,
+              deletions: 1,
+            ),
+          ],
+        ),
         controller,
       ),
     );
@@ -18061,7 +17964,7 @@ void main() {
     await tester.tap(find.text('하단'));
     await tester.pumpAndSettle();
     expect(controller.previewPlacement, PreviewPlacement.bottom);
-    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
     expect(find.byType(FullDiffWorkspace), findsOneWidget);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
