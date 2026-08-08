@@ -111,7 +111,7 @@ class FullDiffWorkspace extends StatefulWidget {
     this.commitMessageCache,
     this.showRemoteAvatars = true,
     this.focusNode,
-    this.onMoveRight,
+    this.onMovePane,
     super.key,
   });
 
@@ -135,8 +135,8 @@ class FullDiffWorkspace extends StatefulWidget {
   /// Lets the embedder hand the keyboard to the diff itself.
   final FocusNode? focusNode;
 
-  /// → from the diff, when a pane sits to its right.
-  final VoidCallback? onMoveRight;
+  /// ← and → out of the diff, as the embedder orders its panes.
+  final ValueChanged<int>? onMovePane;
 
   @override
   State<FullDiffWorkspace> createState() => _FullDiffWorkspaceState();
@@ -272,11 +272,12 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
     return false;
   }
 
-  /// The diff's own keys, plus the one step out of it: → hands the keyboard to
-  /// whatever pane the embedder put on its right.
+  /// The diff's own keys, plus the steps out of it: ← and → hand the keyboard
+  /// to whichever pane the embedder put on that side. Consuming them both also
+  /// keeps a stray arrow from reaching the list behind the diff.
   KeyEventResult _handleWorkspaceKeyEvent(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent &&
-        widget.onMoveRight != null &&
+        widget.onMovePane != null &&
         !HardwareKeyboard.instance.isMetaPressed &&
         !HardwareKeyboard.instance.isAltPressed) {
       final key = normalizeNavigationKey(
@@ -285,8 +286,13 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
             HardwareKeyboard.instance.isShiftPressed ||
             HardwareKeyboard.instance.isControlPressed,
       );
-      if (key == LogicalKeyboardKey.arrowRight) {
-        widget.onMoveRight!();
+      final step = switch (key) {
+        LogicalKeyboardKey.arrowLeft => -1,
+        LogicalKeyboardKey.arrowRight => 1,
+        _ => 0,
+      };
+      if (step != 0) {
+        widget.onMovePane!(step);
         return KeyEventResult.handled;
       }
     }
@@ -987,18 +993,16 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
               _StepFileIntent(-1),
           const SingleActivator(LogicalKeyboardKey.arrowDown, meta: true):
               _StepFileIntent(1),
-          if (state.view != FullDiffView.history)
-            const SingleActivator(LogicalKeyboardKey.arrowUp):
-                _StepPrimaryFileIntent(-1),
-          if (state.view != FullDiffView.history)
-            const SingleActivator(LogicalKeyboardKey.arrowDown):
-                _StepPrimaryFileIntent(1),
-          if (state.view != FullDiffView.history)
-            const SingleActivator(LogicalKeyboardKey.keyK):
-                _StepPrimaryFileIntent(-1),
-          if (state.view != FullDiffView.history)
-            const SingleActivator(LogicalKeyboardKey.keyJ):
-                _StepPrimaryFileIntent(1),
+          // Plain arrows walk the change the reader is looking at. Files are
+          // the preview pane's list now, and ⌘↑/↓ still reaches them.
+          const SingleActivator(LogicalKeyboardKey.arrowUp): _StepHunkIntent(
+            -1,
+          ),
+          const SingleActivator(LogicalKeyboardKey.arrowDown): _StepHunkIntent(
+            1,
+          ),
+          const SingleActivator(LogicalKeyboardKey.keyK): _StepHunkIntent(-1),
+          const SingleActivator(LogicalKeyboardKey.keyJ): _StepHunkIntent(1),
         },
         child: Actions(
           actions: <Type, Action<Intent>>{
@@ -1099,6 +1103,7 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
             ),
           },
           child: Focus(
+            key: const Key('diff-focus'),
             autofocus: widget.focusNode == null,
             focusNode: widget.focusNode,
             onKeyEvent: _handleWorkspaceKeyEvent,

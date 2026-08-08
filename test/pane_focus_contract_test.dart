@@ -246,6 +246,59 @@ void main() {
           .hasFocus,
       isFalse,
     );
+    // 키보드는 타임라인이 아니라 diff에 있다.
+    expect(find.byKey(const Key('timeline-viewport')), findsNothing);
+    expect(
+      tester
+          .widget<Focus>(find.byKey(const Key('diff-focus')))
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
+  });
+
+  testWidgets('the diff walks hunks once it holds the keyboard', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          files: (_, _) async => const [
+            GitFileChange(
+              path: 'lib/a.dart',
+              status: 'M',
+              additions: 2,
+              deletions: 0,
+            ),
+          ],
+          diff: (_, _, _, _, _) async => const [
+            DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,1 +1,2 @@ one'),
+            DiffLine(kind: DiffLineKind.add, text: 'first', newNumber: 1),
+            DiffLine(kind: DiffLineKind.hunk, text: '@@ -20,1 +21,2 @@ two'),
+            DiffLine(kind: DiffLineKind.add, text: 'second', newNumber: 21),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    await press(tester, LogicalKeyboardKey.arrowRight);
+    await press(tester, LogicalKeyboardKey.arrowLeft);
+
+    expect(find.text('1 / 2'), findsOneWidget);
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    expect(find.text('2 / 2'), findsOneWidget, reason: 'diff에서 아래로 걷는 건 hunk다');
+    await press(tester, LogicalKeyboardKey.keyK);
+    expect(find.text('1 / 2'), findsOneWidget);
   });
 
   testWidgets('the list starts moving two rows before the edge', (

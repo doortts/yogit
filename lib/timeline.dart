@@ -11459,7 +11459,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         controller: controller,
         onBack: _closeFullDiff,
         focusNode: _diffFocusNode,
-        onMoveRight: () => _movePaneFocus(1),
+        onMovePane: _movePaneFocus,
         columnWidths:
             _pendingFullDiffColumnWidths ?? widget.fullDiffColumnWidths,
         onColumnWidthsChanged: _forwardFullDiffColumnWidths,

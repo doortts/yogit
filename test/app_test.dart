@@ -17301,22 +17301,29 @@ void main() {
     // It opens on the first file of the first commit.
     expect(find.text('body of newer/one.dart'), findsOneWidget);
 
-    // Down walks the file list, loading each diff as it goes.
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pumpAndSettle();
+    // ⌘Down walks the file list, loading each diff as it goes. Plain arrows
+    // belong to the hunks now — the file list is the preview pane's.
+    Future<void> stepFile(
+      LogicalKeyboardKey arrow, {
+      bool repeat = false,
+    }) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyDownEvent(arrow);
+      if (repeat) await tester.sendKeyRepeatEvent(arrow);
+      await tester.sendKeyUpEvent(arrow);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+    }
+
+    await stepFile(LogicalKeyboardKey.arrowDown);
     expect(find.text('body of newer/two.dart'), findsOneWidget);
     // Autorepeat keeps walking.
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
-    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowDown);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pumpAndSettle();
+    await stepFile(LogicalKeyboardKey.arrowDown, repeat: true);
     expect(find.text('body of newer/three.dart'), findsOneWidget);
     // And it stops at the end rather than wrapping.
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pumpAndSettle();
+    await stepFile(LogicalKeyboardKey.arrowDown);
     expect(find.text('body of newer/three.dart'), findsOneWidget);
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-    await tester.pumpAndSettle();
+    await stepFile(LogicalKeyboardKey.arrowUp);
     expect(find.text('body of newer/two.dart'), findsOneWidget);
 
     // Cmd+Down walks the same file list from any focused child.
