@@ -8309,7 +8309,6 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('Working tree changes'), findsOneWidget);
     expect(find.text('Not committed'), findsOneWidget);
     expect(find.text('No commit object or committer'), findsOneWidget);
     expect(find.text('2 files changed'), findsOneWidget);
@@ -15157,7 +15156,8 @@ void main() {
 
     // 헤더 제목은 커밋·부모 해시로 바뀌었다 — 산문 크기는 아래 두 줄이 지킨다.
     expect(sizeOf('first commit'), 14);
-    expect(sizeOf('commit 1'), 12);
+    // 전체 해시 줄은 물러났다 — 해시는 헤더의 것이다.
+    expect(sizeOf('1'), 12);
     expect(sizeOf('Ada Author'), 14);
     expect(sizeOf('Cam Committer'), 14);
     expect(sizeOf('Committer · cam@example.com'), 12);

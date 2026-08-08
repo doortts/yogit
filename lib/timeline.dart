@@ -107,6 +107,11 @@ const _behind = Color(0xFFF0A35E);
 /// its width can be measured from a sample rather than the live value.
 const _statusStampStyle = TextStyle(fontSize: 11, fontFamily: 'monospace');
 const _remoteBehind = Color(0xFFFF453A);
+
+/// How much of a commit message the panel shows before it scrolls in place.
+const _previewMessageLines = 10;
+const _previewMessageLine = 17.4;
+
 const _previewPurple = Color(0xFFC69AFF);
 const _previewPurplePanel = Color(0xFF29243A);
 const _previewConflict = Color(0xFFFF7A84);
@@ -8711,8 +8716,9 @@ class _TimelineScreenState extends State<TimelineScreen>
           SelectionContainer.disabled(
             child: KeyedSubtree(
               key: const Key('preview-sha-copy'),
+              // Seven characters read; the whole hash is what pastes.
               child: _CopyButton(
-                text: commit.shortSha,
+                text: commit.sha,
                 color: _hash,
                 slot: 'preview-sha',
               ),
@@ -9207,31 +9213,31 @@ class _TimelineScreenState extends State<TimelineScreen>
                       if (body.isEmpty) return const SizedBox.shrink();
                       return Padding(
                         padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          body,
-                          key: const Key('preview-commit-body'),
-                          style: TextStyle(
-                            color: _palette.text,
-                            fontSize: 12,
-                            height: 1.45,
+                        // Ten lines is as much room as a message earns here;
+                        // past that it scrolls in place instead of pushing the
+                        // file list off the panel.
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(
+                            maxHeight:
+                                _previewMessageLines * _previewMessageLine,
+                          ),
+                          child: SingleChildScrollView(
+                            key: const Key('preview-commit-body-scroll'),
+                            primary: false,
+                            child: Text(
+                              body,
+                              key: const Key('preview-commit-body'),
+                              style: TextStyle(
+                                color: _palette.text,
+                                fontSize: 12,
+                                height: _previewMessageLine / 12,
+                              ),
+                            ),
                           ),
                         ),
                       );
                     },
                   ),
-                const SizedBox(height: 9),
-                Text(
-                  commit.isWorkingTree
-                      ? 'Working tree changes'
-                      : 'commit ${commit.sha}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _palette.muted,
-                    fontSize: 12,
-                    fontFamily: 'monospace',
-                  ),
-                ),
               ],
               if (branchPreview && _branchPreviewHasConflict) ...[
                 _branchPreviewConflictStatusCard(),

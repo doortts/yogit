@@ -38,10 +38,17 @@ void main() {
         .setMockMethodCallHandler(SystemChannels.platform, null);
   });
 
-  final child = commit(
-    '2280d58',
-    'docs(readme): 최근 작업 반영',
+  // 전체 해시와 7자리 표기가 다른 커밋: 무엇을 보여주고 무엇을 복사하는지 갈린다.
+  const child = GitCommit(
+    sha: '2280d5885a9b36360ebc23f49606a37cfe1b4d90',
+    shortSha: '2280d58',
     parents: ['a9b3636'],
+    author: GitIdentity(name: 'Ada Author', email: 'ada@example.com'),
+    authorTimestamp: 1700000000,
+    committer: GitIdentity(name: 'Cam Committer', email: 'cam@example.com'),
+    committerTimestamp: 1700000120,
+    refs: [],
+    subject: 'docs(readme): 최근 작업 반영',
   );
   final parent = commit('a9b3636', 'feat(app): 메뉴바 밝기를 외양에 맞춘다');
 
@@ -111,12 +118,12 @@ void main() {
     );
   });
 
-  testWidgets('the copy button hands over the short hash', (tester) async {
+  testWidgets('the copy button hands over the whole hash', (tester) async {
     await pumpPreview(tester);
 
     await tester.tap(find.byKey(const Key('preview-sha-copy')));
     await tester.pumpAndSettle();
-    expect(copied, ['2280d58']);
+    expect(copied, [child.sha], reason: '보이는 건 7자리, 붙는 건 전체 해시');
   });
 
   testWidgets('the header line can be dragged and copied', (tester) async {
@@ -184,6 +191,67 @@ void main() {
     expect(card.right, lessThanOrEqualTo(1400));
     expect(card.top, greaterThanOrEqualTo(0));
     expect(card.bottom, lessThanOrEqualTo(800));
+  });
+
+  testWidgets('a long message scrolls in ten lines, with no hash under it', (
+    tester,
+  ) async {
+    // 메시지 캐시는 앱 하나를 살아 있으니, 이 커밋만의 sha를 쓴다.
+    const long = GitCommit(
+      sha: 'f17ac0de5c4b3a2918e7d6c5b4a39281f0e6d5c4',
+      shortSha: 'f17ac0d',
+      parents: ['a9b3636'],
+      author: GitIdentity(name: 'Ada Author', email: 'ada@example.com'),
+      authorTimestamp: 1700000000,
+      committer: GitIdentity(name: 'Cam Committer', email: 'cam@example.com'),
+      committerTimestamp: 1700000120,
+      refs: [],
+      subject: 'docs: 긴 메시지',
+    );
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [long, parent],
+          files: (_, _) async => const [
+            GitFileChange(
+              path: 'lib/a.dart',
+              status: 'M',
+              additions: 1,
+              deletions: 1,
+            ),
+          ],
+          commitMessage: (_) async => [
+            long.subject,
+            '',
+            for (var line = 1; line <= 40; line++) '본문 $line 번째 줄',
+          ].join('\n'),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    final body = find.byKey(const Key('preview-commit-body'));
+    expect(body, findsOneWidget);
+    expect(
+      tester
+          .getSize(find.byKey(const Key('preview-commit-body-scroll')))
+          .height,
+      lessThanOrEqualTo(10 * 17.4),
+      reason: '열 줄 넘게 자리를 차지하지 않는다',
+    );
+    expect(
+      tester.getSize(body).height,
+      greaterThan(10 * 17.4),
+      reason: '나머지는 잘리는 게 아니라 스크롤 안에 남는다',
+    );
+    expect(
+      find.textContaining(long.sha),
+      findsNothing,
+      reason: '전체 해시 줄은 헤더가 대신한다',
+    );
   });
 
   testWidgets('a root commit has no parent to point at', (tester) async {
