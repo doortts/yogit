@@ -160,6 +160,58 @@ void main() {
     );
   });
 
+  testWidgets('re-entering the preview goes straight to the last file', (
+    tester,
+  ) async {
+    final asked = <String>[];
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          files: (_, _) async => const [
+            GitFileChange(
+              path: 'lib/a.dart',
+              status: 'M',
+              additions: 1,
+              deletions: 1,
+            ),
+            GitFileChange(
+              path: 'lib/b.dart',
+              status: 'M',
+              additions: 2,
+              deletions: 0,
+            ),
+          ],
+          diff: (_, _, path, _, _) async {
+            asked.add(path);
+            return const [
+              DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+              DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
+            ];
+          },
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    await press(tester, LogicalKeyboardKey.arrowRight);
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    await press(tester, LogicalKeyboardKey.arrowLeft);
+    asked.clear();
+
+    await press(tester, LogicalKeyboardKey.arrowRight);
+    expect(asked, ['lib/b.dart'], reason: '첫 파일을 거쳐 가면 그 한 프레임이 깜박임으로 보인다');
+  });
+
   testWidgets('the preview walks its files while it holds the keyboard', (
     tester,
   ) async {

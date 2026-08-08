@@ -41,3 +41,7 @@ const fullDiffControlRadius = 12.5;
 const fullDiffChipRadius = 7.5;
 const fullDiffMinimapWidth = 18.0;
 const fullDiffLineNumberWidth = 74.0;
+
+/// Side-by-side carries one number per side, so it needs far less room than
+/// unified's two columns.
+const fullDiffSideLineNumberWidth = 46.0;

@@ -12,6 +12,9 @@ import 'typography.dart';
 
 const fullDiffSourceRowHeight = 21.0;
 
+/// The +/− column beside the numbers in a one-number gutter.
+const _signColumnWidth = 16.0;
+
 const fullDiffSourceTextStyle = TextStyle(
   color: Colors.white,
   fontFamily: technicalFontFamily,
@@ -260,6 +263,7 @@ class FullDiffCodeRow extends StatelessWidget {
     this.current = false,
     this.wordRanges = const [],
     this.compactGutter = false,
+    this.gutterWidth = fullDiffLineNumberWidth,
     this.showGutter = true,
     this.leadingMetadata,
     this.horizontalScroll = true,
@@ -277,6 +281,10 @@ class FullDiffCodeRow extends StatelessWidget {
   final bool current;
   final List<WordRange> wordRanges;
   final bool compactGutter;
+
+  /// How much room the numbers take. Unified spends it on two columns;
+  /// side-by-side carries one number per side and needs far less.
+  final double gutterWidth;
   final bool showGutter;
   final Widget? leadingMetadata;
   final bool horizontalScroll;
@@ -335,7 +343,7 @@ class FullDiffCodeRow extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (showGutter) const SizedBox(width: fullDiffLineNumberWidth),
+              if (showGutter) SizedBox(width: gutterWidth),
               if (leadingMetadata case final Widget metadata)
                 SelectionContainer.disabled(child: metadata),
               Expanded(
@@ -406,12 +414,12 @@ class FullDiffCodeRow extends StatelessWidget {
                     if (compactGutter) ...[
                       _GutterCell(
                         number: line.newNumber ?? line.oldNumber,
-                        width: fullDiffLineNumberWidth - 18,
+                        width: gutterWidth - _signColumnWidth,
                         color: gutterColor,
                         compact: compactSourceRow,
                       ),
                       Container(
-                        width: 18,
+                        width: _signColumnWidth,
                         constraints: BoxConstraints(
                           minHeight: compactSourceRow
                               ? fullDiffSourceRowHeight
@@ -429,13 +437,13 @@ class FullDiffCodeRow extends StatelessWidget {
                       // over to the source so the two columns get the width.
                       _GutterCell(
                         number: line.oldNumber,
-                        width: fullDiffLineNumberWidth / 2,
+                        width: gutterWidth / 2,
                         color: gutterColor,
                         compact: compactSourceRow,
                       ),
                       _GutterCell(
                         number: line.newNumber,
-                        width: fullDiffLineNumberWidth / 2,
+                        width: gutterWidth / 2,
                         color: gutterColor,
                         compact: compactSourceRow,
                       ),

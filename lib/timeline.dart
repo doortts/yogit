@@ -11172,6 +11172,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       initialIndex: math.max(0, _commits.indexOf(commit)),
       initialPreferences:
           _pendingFullDiffPreferences ?? widget.fullDiffPreferences,
+      initialPath: path,
     )..addListener(_followFullDiffSession);
     setState(() {
       _previewDiffOpen = false;
