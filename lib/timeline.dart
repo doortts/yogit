@@ -108,6 +108,9 @@ const _behind = Color(0xFFF0A35E);
 const _statusStampStyle = TextStyle(fontSize: 11, fontFamily: 'monospace');
 const _remoteBehind = Color(0xFFFF453A);
 
+/// How many rows of road the selection keeps ahead of it before the list moves.
+const _selectionScrollMargin = 2;
+
 /// How much of a commit message the panel shows before it scrolls in place.
 const _previewMessageLines = 10;
 const _previewMessageLine = 17.4;
@@ -346,10 +349,17 @@ BranchPreviewGraph layoutRebasePreviewGraph(
   var parent = comparison.baseTip;
   for (final rewrite in preview.rewritten) {
     final original = rewrite.original;
+    // 재배치가 커밋을 그대로 두면 range-diff가 원본 sha를 그대로 돌려준다. 그 sha로
+    // 가상 행을 만들면 원본 행과 키가 겹쳐 원본까지 가상 커밋으로 그려지고 이동
+    // 화살표도 자기 자신을 가리키니, 겹칠 때만 가상 행에 따로 키를 준다.
+    final sameSha = rewrite.rewrittenSha == original.sha;
     virtualOldestFirst.add(
       GitCommit(
-        sha: rewrite.rewrittenSha,
-        shortSha: 'new SHA',
+        sha: sameSha
+            ? 'virtual-rebase-copy-${original.sha}'
+            : rewrite.rewrittenSha,
+        // sha가 그대로면 'new SHA'는 사실과 다르니 원본 해시를 그대로 보여준다.
+        shortSha: sameSha ? original.shortSha : 'new SHA',
         parents: [parent],
         author: original.author,
         authorTimestamp: original.authorTimestamp,
@@ -359,7 +369,7 @@ BranchPreviewGraph layoutRebasePreviewGraph(
         subject: original.subject,
       ),
     );
-    parent = rewrite.rewrittenSha;
+    parent = virtualOldestFirst.last.sha;
   }
   final virtualNewestFirst = virtualOldestFirst.reversed.toList();
   final template = comparison.commits.first.commit;
@@ -498,13 +508,15 @@ BranchPreviewGraph layoutRebasePreviewGraph(
       )
         index: carried,
     },
+    // 짝은 가상 행의 키로 잇는다. sha가 그대로인 재배치에서 원본 sha로 이으면
+    // 화살표가 원본 행에서 원본 행으로 되돌아온다.
     mappings: [
       for (var index = 0; index < preview.rewritten.length; index++)
         (
           originalSha: preview.rewritten[index].original.sha,
-          rewrittenSha: preview.rewritten[index].rewrittenSha,
+          rewrittenSha: virtualOldestFirst[index].sha,
           originalRow: rowBySha[preview.rewritten[index].original.sha]!,
-          rewrittenRow: rowBySha[preview.rewritten[index].rewrittenSha]!,
+          rewrittenRow: rowBySha[virtualOldestFirst[index].sha]!,
           routeLane: index,
           color: colors[math.min(index, colors.length - 1)],
         ),
@@ -1700,6 +1712,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     _sidebarFocusNode.dispose();
     _previewFocusNode.removeListener(_onPaneFocusChanged);
     _previewFocusNode.dispose();
+    _historyPaneFocusNode.dispose();
+    _diffFocusNode.dispose();
     _previewMessageScrollController.dispose();
     super.dispose();
   }
@@ -2165,19 +2179,20 @@ class _TimelineScreenState extends State<TimelineScreen>
     _scrollToSelection(animate: animate);
   }
 
-  /// The selection walks the visible rows without moving the list; only when it
-  /// would step past an edge does the list scroll, and then just far enough to
-  /// hold the row flush against that edge.
+  /// The selection walks the visible rows without moving the list; the list
+  /// starts moving while two rows of road are still ahead, so the cursor never
+  /// runs into the edge before the view answers.
   void _scrollToSelection({bool animate = true}) {
     if (!_scrollController.hasClients) return;
     final position = _scrollController.position;
     final rowTop = _selectedIndex.value * TimelineScreen.rowHeight;
     final rowBottom = rowTop + TimelineScreen.rowHeight;
+    const margin = _selectionScrollMargin * TimelineScreen.rowHeight;
     final double? target =
-        rowBottom > position.pixels + position.viewportDimension
-        ? rowBottom - position.viewportDimension
-        : rowTop < position.pixels
-        ? rowTop
+        rowBottom + margin > position.pixels + position.viewportDimension
+        ? rowBottom + margin - position.viewportDimension
+        : rowTop - margin < position.pixels
+        ? rowTop - margin
         : null;
     if (target == null) return;
     final clamped = target.clamp(
@@ -2334,6 +2349,8 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   final _sidebarFocusNode = FocusNode(debugLabel: 'sidebar');
   final _previewFocusNode = FocusNode(debugLabel: 'preview');
+  final _historyPaneFocusNode = FocusNode(debugLabel: 'history pane');
+  final _diffFocusNode = FocusNode(debugLabel: 'diff');
 
   void _onPaneFocusChanged() {
     if (mounted) setState(() {});
@@ -2358,10 +2375,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (_fullDiffOpen) {
       _showFullDiffFile(path);
     } else {
-      _openFullDiff(commit, path);
-      // The workspace autofocuses itself; the preview keeps the keyboard so
-      // its own arrows keep walking files.
-      _previewFocusNode.requestFocus();
+      // The preview keeps the keyboard so its own arrows keep walking files.
+      _openFullDiff(commit, path, focusDiff: false);
     }
   }
 
@@ -2371,6 +2386,35 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (_fullDiffOpen) _closeFullDiff();
     _focusNode.requestFocus();
   }
+
+  /// Where ← and → land inside diff mode. The panes read left to right as the
+  /// layout draws them, and → off the right end folds the diff away.
+  void _movePaneFocus(int step) {
+    final nodes = <FocusNode>[
+      if (_previewController.previewPlacement == PreviewPlacement.left) ...[
+        _previewFocusNode,
+        if (_historyPaneOpen) _historyPaneFocusNode,
+        _diffFocusNode,
+      ] else ...[
+        _diffFocusNode,
+        if (_historyPaneOpen) _historyPaneFocusNode,
+        _previewFocusNode,
+      ],
+    ];
+    final here = nodes.indexWhere((node) => node.hasFocus);
+    if (here < 0) return;
+    final next = here + step;
+    if (next < 0 || next >= nodes.length) {
+      // Off the end the diff has nothing more to show: hand the keyboard back
+      // to the commit list it came from.
+      _leavePreview();
+      return;
+    }
+    nodes[next].requestFocus();
+  }
+
+  bool get _historyPaneOpen =>
+      _fullDiffOpen && _fullDiffHistoryOpen && !_fullDiffFocusMode;
 
   KeyEventResult _onPreviewKeyEvent(FocusNode _, KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
@@ -2388,7 +2432,17 @@ class _TimelineScreenState extends State<TimelineScreen>
       event.logicalKey,
       hasModifier: keyboard.isShiftPressed || keyboard.isControlPressed,
     );
+    // Inside diff mode the arrows walk the panes; with the diff away, ← still
+    // means "back to the commits" and → has nowhere else to go.
     if (key == LogicalKeyboardKey.arrowLeft) {
+      if (_fullDiffOpen) {
+        _movePaneFocus(-1);
+      } else {
+        _leavePreview();
+      }
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowRight) {
       _leavePreview();
       return KeyEventResult.handled;
     }
@@ -5843,12 +5897,17 @@ class _TimelineScreenState extends State<TimelineScreen>
         final duration = MediaQuery.disableAnimationsOf(context)
             ? Duration.zero
             : const Duration(milliseconds: 220);
-        for (final rewrite in preview.rewritten) {
+        // 훑고 지나가는 건 가상 행이라 그래프가 정한 키로 찾는다.
+        final rebaseMappings = _previewGraph?.mappings ?? const [];
+        for (var index = 0; index < preview.rewritten.length; index++) {
           if (!mounted || request != _branchApplySerial) return;
+          final sha = index < rebaseMappings.length
+              ? rebaseMappings[index].rewrittenSha
+              : preview.rewritten[index].rewrittenSha;
           final row = _comparisonRows.indexWhere(
-            (entry) => entry.commit.sha == rewrite.rewrittenSha,
+            (entry) => entry.commit.sha == sha,
           );
-          setState(() => _rebaseApplyingSha = rewrite.rewrittenSha);
+          setState(() => _rebaseApplyingSha = sha);
           if (row >= 0) _selectedIndex.value = row;
           WidgetsBinding.instance.addPostFrameCallback((_) {
             final rowContext = _rebaseApplyRowContextKey.currentContext;
@@ -8372,9 +8431,17 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
     final preview = _rebasePreview;
     if (preview == null) return null;
-    final rewrittenIndex = preview.rewritten.indexWhere(
-      (rewrite) => rewrite.rewrittenSha == commit.sha,
-    );
+    // 가상 행의 키는 그래프가 정한다. sha가 그대로인 재배치에서 원본 sha로 찾으면
+    // 재작성 라벨이 원본 행에 붙는다. 충돌 미리보기는 가상 행이 없어 짝도 비니, 그때만
+    // 예전대로 재배치 결과에서 찾는다.
+    final rebaseMappings = _previewGraph?.mappings ?? const [];
+    final rewrittenIndex = rebaseMappings.isEmpty
+        ? preview.rewritten.indexWhere(
+            (rewrite) => rewrite.rewrittenSha == commit.sha,
+          )
+        : rebaseMappings.indexWhere(
+            (mapping) => mapping.rewrittenSha == commit.sha,
+          );
     if (rewrittenIndex >= 0) {
       return (
         text: '재작성 ${rewrittenIndex + 1}/${preview.total}',
@@ -11169,7 +11236,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     _openFullDiff(commit, _previewPaths[_previewKey(commit)]);
   }
 
-  void _openFullDiff(GitCommit commit, String? path) {
+  void _openFullDiff(GitCommit commit, String? path, {bool focusDiff = true}) {
     final controller = FullDiffSessionController(
       repository: widget.repository,
       commits: List<GitCommit>.unmodifiable(_commits),
@@ -11184,8 +11251,11 @@ class _TimelineScreenState extends State<TimelineScreen>
       _fullDiffHistoryOpen = controller.state.historySelected;
       _fullDiffFocusMode = controller.state.focusMode;
     });
-    // The workspace carries its own shortcuts, so it needs the keyboard.
-    _focusNode.unfocus();
+    // The workspace carries its own shortcuts, so it needs the keyboard —
+    // unless the caller is handing it to the preview instead. The node is not
+    // attached until the workspace builds, so a request here outlives this
+    // frame and would steal focus back.
+    if (focusDiff) _diffFocusNode.requestFocus();
     unawaited(_startFullDiff(controller, path));
   }
 
@@ -11316,6 +11386,8 @@ class _TimelineScreenState extends State<TimelineScreen>
                           key: ValueKey(state.historyContext),
                           entries: entries,
                           selected: state.selectedHistoryEntry,
+                          focusNode: _historyPaneFocusNode,
+                          onMoveToFiles: () => _movePaneFocus(-1),
                           onSelected: (entry) =>
                               _selectHistoryEntry(controller, entry),
                         ),
@@ -11386,6 +11458,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       FullDiffWorkspace(
         controller: controller,
         onBack: _closeFullDiff,
+        focusNode: _diffFocusNode,
+        onMoveRight: () => _movePaneFocus(1),
         columnWidths:
             _pendingFullDiffColumnWidths ?? widget.fullDiffColumnWidths,
         onColumnWidthsChanged: _forwardFullDiffColumnWidths,

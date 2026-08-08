@@ -21,6 +21,8 @@ import 'full_diff_unified_view.dart';
 import 'full_diff_unavailable_panel.dart';
 import 'git.dart';
 import 'monaco_editor_screen.dart';
+import 'package:yogit/vim_navigation.dart';
+
 import 'page_scroll_shortcuts.dart';
 import 'settings.dart';
 import 'shortcut_modifier.dart';
@@ -108,6 +110,8 @@ class FullDiffWorkspace extends StatefulWidget {
     this.avatarService,
     this.commitMessageCache,
     this.showRemoteAvatars = true,
+    this.focusNode,
+    this.onMoveRight,
     super.key,
   });
 
@@ -127,6 +131,12 @@ class FullDiffWorkspace extends StatefulWidget {
   final AvatarService? avatarService;
   final FullDiffCommitMessageCache? commitMessageCache;
   final bool showRemoteAvatars;
+
+  /// Lets the embedder hand the keyboard to the diff itself.
+  final FocusNode? focusNode;
+
+  /// → from the diff, when a pane sits to its right.
+  final VoidCallback? onMoveRight;
 
   @override
   State<FullDiffWorkspace> createState() => _FullDiffWorkspaceState();
@@ -260,6 +270,27 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
       setState(() => _commandHeld = held);
     }
     return false;
+  }
+
+  /// The diff's own keys, plus the one step out of it: → hands the keyboard to
+  /// whatever pane the embedder put on its right.
+  KeyEventResult _handleWorkspaceKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent &&
+        widget.onMoveRight != null &&
+        !HardwareKeyboard.instance.isMetaPressed &&
+        !HardwareKeyboard.instance.isAltPressed) {
+      final key = normalizeNavigationKey(
+        event.logicalKey,
+        hasModifier:
+            HardwareKeyboard.instance.isShiftPressed ||
+            HardwareKeyboard.instance.isControlPressed,
+      );
+      if (key == LogicalKeyboardKey.arrowRight) {
+        widget.onMoveRight!();
+        return KeyEventResult.handled;
+      }
+    }
+    return _handlePageScrollKeyEvent(node, event);
   }
 
   KeyEventResult _handlePageScrollKeyEvent(FocusNode _, KeyEvent event) {
@@ -1068,8 +1099,9 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
             ),
           },
           child: Focus(
-            autofocus: true,
-            onKeyEvent: _handlePageScrollKeyEvent,
+            autofocus: widget.focusNode == null,
+            focusNode: widget.focusNode,
+            onKeyEvent: _handleWorkspaceKeyEvent,
             // Square corners: the workspace fills a pane between two others
             // now, and a rounded edge there cuts a notch out of the window.
             child: ClipRect(

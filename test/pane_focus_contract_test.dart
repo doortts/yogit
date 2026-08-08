@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/full_diff_workspace.dart';
 import 'package:yogit/git.dart';
+import 'package:yogit/timeline.dart';
 import 'package:yogit/window_frame.dart';
 
 import 'app_test.dart' show FakeGitRepository, app, commit;
@@ -41,6 +42,14 @@ void main() {
     diff: (_, _, _, _, _) async => const [
       DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
       DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
+    ],
+    history: (_, file) async => [
+      GitFileHistoryRecord(
+        commit: commit('1', 'first commit'),
+        path: file.path,
+        oldPath: null,
+        status: 'M',
+      ),
     ],
   );
 
@@ -82,7 +91,7 @@ void main() {
     );
   });
 
-  testWidgets('right opens the diff in the preview, left puts it away', (
+  testWidgets('right opens the diff, and right again puts it away', (
     tester,
   ) async {
     await pumpPreview(tester);
@@ -102,7 +111,8 @@ void main() {
       findsOneWidget,
     );
 
-    await press(tester, LogicalKeyboardKey.arrowLeft);
+    // 오른쪽 끝에서 한 번 더 오른쪽은 나가는 길이다.
+    await press(tester, LogicalKeyboardKey.arrowRight);
     expect(find.byType(FullDiffWorkspace), findsNothing);
     expect(find.byKey(const Key('timeline-viewport')), findsOneWidget);
     expect(
@@ -118,7 +128,7 @@ void main() {
     await press(tester, LogicalKeyboardKey.keyL);
     expect(find.byType(FullDiffWorkspace), findsOneWidget);
 
-    await press(tester, LogicalKeyboardKey.keyH);
+    await press(tester, LogicalKeyboardKey.keyL);
     expect(find.byType(FullDiffWorkspace), findsNothing);
 
     // 타임라인에서 왼쪽은 사이드바, 오른쪽은 다시 타임라인.
@@ -146,7 +156,7 @@ void main() {
       reason: '키보드가 미리보기에 있으면 그 선택은 색을 가진다',
     );
 
-    await press(tester, LogicalKeyboardKey.arrowLeft);
+    await press(tester, LogicalKeyboardKey.arrowRight);
     final resting = fileRow(tester, 'lib/a.dart')!.color!;
     expect(resting, isNot(focused));
     expect(resting.a, lessThan(1), reason: '돌아 나오면 hover 정도의 자국만 남는다');
@@ -197,11 +207,80 @@ void main() {
 
     await press(tester, LogicalKeyboardKey.arrowRight);
     await press(tester, LogicalKeyboardKey.arrowDown);
-    await press(tester, LogicalKeyboardKey.arrowLeft);
+    await press(tester, LogicalKeyboardKey.arrowRight);
     asked.clear();
 
     await press(tester, LogicalKeyboardKey.arrowRight);
     expect(asked, ['lib/b.dart'], reason: '첫 파일을 거쳐 가면 그 한 프레임이 깜박임으로 보인다');
+  });
+
+  testWidgets('the arrows walk diff, history and preview in a row', (
+    tester,
+  ) async {
+    await pumpPreview(tester);
+    await press(tester, LogicalKeyboardKey.arrowRight);
+    await tester.tap(find.byKey(const Key('history-toggle')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('history-pane')), findsOneWidget);
+
+    // 우측 배치: diff · History · 미리보기. 왼쪽으로 한 칸씩.
+    await press(tester, LogicalKeyboardKey.arrowLeft);
+    expect(
+      tester
+          .widget<Focus>(find.byKey(const Key('history-list-focus')))
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
+
+    await press(tester, LogicalKeyboardKey.arrowLeft);
+    expect(
+      find.byType(FullDiffWorkspace),
+      findsOneWidget,
+      reason: 'History에서 한 칸 더 왼쪽은 diff다 — 나가는 게 아니라',
+    );
+    expect(
+      tester
+          .widget<Focus>(find.byKey(const Key('history-list-focus')))
+          .focusNode!
+          .hasFocus,
+      isFalse,
+    );
+  });
+
+  testWidgets('the list starts moving two rows before the edge', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1000, 400);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [
+            for (var index = 0; index < 60; index++)
+              commit('$index', 'commit $index'),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final list = tester.widget<ListView>(
+      find.byKey(const Key('timeline-list')),
+    );
+    final position = list.controller!.position;
+    final rows = position.viewportDimension ~/ TimelineScreen.rowHeight;
+    // Two rows short of the bottom the list has already begun to move.
+    for (var step = 0; step < rows - 2; step++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    }
+    await tester.pumpAndSettle();
+    expect(position.pixels, greaterThan(0));
   });
 
   testWidgets('the preview walks its files while it holds the keyboard', (

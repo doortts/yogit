@@ -502,13 +502,17 @@ void main() {
       index++;
     }
 
-    // Nothing moved until the selected row's bottom passed the viewport bottom,
-    // and then only far enough to hold the row flush against that edge.
+    // Nothing moved until the selection came within two rows of the bottom,
+    // and then only far enough to keep those two rows of road ahead of it.
+    const margin = 2;
     expect(
       index * TimelineScreen.rowHeight,
-      greaterThan(viewport - TimelineScreen.rowHeight),
+      greaterThan(viewport - (1 + margin) * TimelineScreen.rowHeight),
     );
-    expect(position.pixels, (index + 1) * TimelineScreen.rowHeight - viewport);
+    expect(
+      position.pixels,
+      (index + 1 + margin) * TimelineScreen.rowHeight - viewport,
+    );
     final anchored = position.pixels;
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
@@ -523,16 +527,24 @@ void main() {
       index--;
       expect(
         position.pixels,
-        lessThanOrEqualTo(index * TimelineScreen.rowHeight),
+        // The list stops at its own top, so the margin can only ask for less.
+        lessThanOrEqualTo(
+          ((index - margin) * TimelineScreen.rowHeight).clamp(
+            0,
+            double.infinity,
+          ),
+        ),
       );
       expect(
         position.pixels,
-        greaterThanOrEqualTo((index + 1) * TimelineScreen.rowHeight - viewport),
+        greaterThanOrEqualTo(
+          (index + 1 + margin) * TimelineScreen.rowHeight - viewport,
+        ),
       );
     }
-    // The walk ends with the first commit flush at the top; the date heading
-    // above it stays off screen until the user scrolls there.
-    expect(position.pixels, TimelineScreen.rowHeight);
+    // Walking back to the first commit now runs the list to its very top: the
+    // two rows of road it keeps ahead include the date heading.
+    expect(position.pixels, 0);
     expect(find.byKey(const Key('selected-row-0')), findsOneWidget);
   });
 
@@ -9250,6 +9262,47 @@ void main() {
       isNot(contains(PreviewGraphNodeKind.virtualRebase)),
     );
     expect(graph.mappings, isEmpty);
+  });
+
+  test('a rebase that keeps the sha still draws original and copy apart', () {
+    final comparison = branchComparison();
+    final feature = comparison.commits
+        .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
+        .commit;
+    // 기준 브랜치가 조상이면 재배치가 커밋을 그대로 두고, range-diff는 원본 sha를
+    // 그대로 짝지어 돌려준다.
+    final graph = layoutRebasePreviewGraph(
+      comparison,
+      RebasePreviewResult(
+        status: RebasePreviewStatus.clean,
+        baseTip: comparison.baseTip,
+        compareTip: comparison.compareTip,
+        rewritten: [(original: feature, rewrittenSha: feature.sha)],
+        completed: 1,
+        total: 1,
+        virtualTip: feature.sha,
+      ),
+      mergeCommit: true,
+    );
+    final copy = graph.rows[1];
+    // 가상 행과 원본 행이 서로 다른 키를 갖는다: 겹치면 원본까지 가상으로 그려진다.
+    expect(copy.commit.sha, isNot(feature.sha));
+    expect(graph.kinds[copy.commit.sha], PreviewGraphNodeKind.virtualRebase);
+    expect(graph.kinds[feature.sha], isNull);
+    // sha가 그대로니 해시 칸도 'new SHA'가 아니라 원본 해시를 보여준다.
+    expect(copy.commit.shortSha, feature.shortSha);
+    // 이동 화살표는 원본 행에서 나와 가상 행으로 들어간다.
+    final mapping = graph.mappings.single;
+    expect(mapping.originalSha, feature.sha);
+    expect(mapping.rewrittenSha, copy.commit.sha);
+    expect(mapping.rewrittenRow, 1);
+    expect(mapping.originalRow, isNot(mapping.rewrittenRow));
+    expect(graph.rows[mapping.originalRow].commit.sha, feature.sha);
+    // 가상 머지의 두 번째 부모도 가상 행을 가리킨다.
+    expect(graph.rows.first.commit.parents, [
+      comparison.baseTip,
+      copy.commit.sha,
+    ]);
   });
 
   test('the rebase preview graph adds the merge commit only when selected', () {
