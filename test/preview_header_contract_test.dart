@@ -168,6 +168,24 @@ void main() {
     expect(find.byKey(const Key('preview-parent-card')), findsNothing);
   });
 
+  testWidgets('the parent card stays inside the window', (tester) async {
+    await pumpPreview(tester);
+
+    final pointer = TestPointer(1, PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(
+      pointer.hover(tester.getCenter(find.byKey(const Key('preview-parent')))),
+    );
+    await tester.pumpAndSettle();
+
+    // 미리보기는 오른쪽 끝에 붙어 있다 — 카드를 그 자리에서 오른쪽으로 펼치면
+    // 창 밖으로 나간다.
+    final card = tester.getRect(find.byKey(const Key('preview-parent-card')));
+    expect(card.left, greaterThanOrEqualTo(0));
+    expect(card.right, lessThanOrEqualTo(1400));
+    expect(card.top, greaterThanOrEqualTo(0));
+    expect(card.bottom, lessThanOrEqualTo(800));
+  });
+
   testWidgets('a root commit has no parent to point at', (tester) async {
     await pumpPreview(tester, commits: [commit('91d03aa', 'feat: 첫 커밋')]);
 

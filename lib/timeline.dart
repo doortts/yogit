@@ -11585,9 +11585,16 @@ class _PreviewParent extends StatefulWidget {
 
 class _PreviewParentState extends State<_PreviewParent> {
   final _card = OverlayPortalController();
-  final _link = LayerLink();
+  final _anchorKey = GlobalKey(debugLabel: 'preview parent anchor');
   String? _message;
   var _requestSerial = 0;
+
+  /// Where the line sits on screen, so the card can be placed against it.
+  Rect? get _anchorRect {
+    final box = _anchorKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return null;
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
 
   String get _sha => widget.shas.first;
 
@@ -11638,26 +11645,26 @@ class _PreviewParentState extends State<_PreviewParent> {
       onExit: (_) => _card.hide(),
       child: OverlayPortal(
         controller: _card,
-        overlayChildBuilder: (context) => Positioned(
-          width: 280,
-          child: CompositedTransformFollower(
-            link: _link,
-            targetAnchor: Alignment.bottomLeft,
-            followerAnchor: Alignment.topLeft,
-            offset: const Offset(0, 4),
-            child: _PreviewParentCard(
-              key: const Key('preview-parent-card'),
-              sha: _sha,
-              commit: widget.commitOf(_sha),
-              message: _message,
-              fallbackSubject: subject,
+        overlayChildBuilder: (context) {
+          final anchor = _anchorRect;
+          if (anchor == null) return const SizedBox.shrink();
+          return Positioned.fill(
+            child: CustomSingleChildLayout(
+              delegate: _HoverCardLayout(anchor: anchor),
+              child: _PreviewParentCard(
+                key: const Key('preview-parent-card'),
+                sha: _sha,
+                commit: widget.commitOf(_sha),
+                message: _message,
+                fallbackSubject: subject,
+              ),
             ),
-          ),
-        ),
+          );
+        },
         // One line, not a Row: the subject trails the hashes, so a narrow pane
         // eats the subject first and nothing ever overflows its box.
-        child: CompositedTransformTarget(
-          link: _link,
+        child: KeyedSubtree(
+          key: _anchorKey,
           child: Text.rich(
             TextSpan(
               children: [
@@ -11687,6 +11694,44 @@ class _PreviewParentState extends State<_PreviewParent> {
       ),
     );
   }
+}
+
+/// Places a hover card against the line that opened it and keeps it on screen:
+/// below when there is room, above when there is not, and never past an edge.
+class _HoverCardLayout extends SingleChildLayoutDelegate {
+  const _HoverCardLayout({required this.anchor});
+
+  final Rect anchor;
+
+  static const _gap = 4.0;
+  static const _margin = 8.0;
+  static const _maxWidth = 280.0;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
+      BoxConstraints.loose(
+        Size(
+          math.min(_maxWidth, constraints.maxWidth - _margin * 2),
+          math.max(0, constraints.maxHeight - _margin * 2),
+        ),
+      );
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    final below = anchor.bottom + _gap;
+    final above = anchor.top - _gap - childSize.height;
+    final top = below + childSize.height + _margin <= size.height
+        ? below
+        : above >= _margin
+        ? above
+        : math.max(_margin, size.height - childSize.height - _margin);
+    final rightmost = math.max(_margin, size.width - childSize.width - _margin);
+    return Offset(anchor.left.clamp(_margin, rightmost), top);
+  }
+
+  @override
+  bool shouldRelayout(_HoverCardLayout oldDelegate) =>
+      oldDelegate.anchor != anchor;
 }
 
 /// What the hover reveals: the parent's hash and moment on one line, then its
