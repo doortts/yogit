@@ -1284,13 +1284,20 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
         child: Row(
           children: [
             Expanded(
-              child: KeyedSubtree(
-                key: _contentViewportKey,
-                child: PrimaryScrollController(
-                  controller: _contentScroll,
-                  child: KeyedSubtree(
-                    key: const Key('content-scrollable'),
-                    child: _contentFor(state, viewportWidth),
+              // No scrollbar: the minimap beside it already says where the
+              // reader is, and two rulers on one edge is one too many.
+              child: ScrollConfiguration(
+                behavior: ScrollConfiguration.of(
+                  context,
+                ).copyWith(scrollbars: false),
+                child: KeyedSubtree(
+                  key: _contentViewportKey,
+                  child: PrimaryScrollController(
+                    controller: _contentScroll,
+                    child: KeyedSubtree(
+                      key: const Key('content-scrollable'),
+                      child: _contentFor(state, viewportWidth),
+                    ),
                   ),
                 ),
               ),

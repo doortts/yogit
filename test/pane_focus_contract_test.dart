@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yogit/full_diff_minimap.dart';
 import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/full_diff_workspace.dart';
 import 'package:yogit/git.dart';
@@ -278,6 +279,21 @@ void main() {
 
     await press(tester, LogicalKeyboardKey.arrowLeft);
     expect(marker(), fullDiffAccent, reason: 'diff가 키보드를 쥐면 현재 변경이 액센트로 살아난다');
+  });
+
+  testWidgets('the diff leaves the ruler to its minimap', (tester) async {
+    await pumpPreview(tester);
+    await press(tester, LogicalKeyboardKey.arrowRight);
+
+    expect(find.byType(FullDiffMinimap), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(FullDiffWorkspace),
+        matching: find.byType(RawScrollbar),
+      ),
+      findsNothing,
+      reason: '미니맵이 이미 자리를 말한다 — 막대는 하나면 된다',
+    );
   });
 
   testWidgets('the diff walks hunks once it holds the keyboard', (
