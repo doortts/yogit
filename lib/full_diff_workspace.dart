@@ -1070,8 +1070,9 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
           child: Focus(
             autofocus: true,
             onKeyEvent: _handlePageScrollKeyEvent,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(fullDiffOuterRadius),
+            // Square corners: the workspace fills a pane between two others
+            // now, and a rounded edge there cuts a notch out of the window.
+            child: ClipRect(
               child: ColoredBox(
                 color: fullDiffHeader,
                 child: Column(
