@@ -9285,18 +9285,16 @@ class _TimelineScreenState extends State<TimelineScreen>
             ],
           ),
         );
-        return NestedScrollView(
+        // One box, one scroll view. A NestedScrollView used to hold this, and
+        // its empty body let the header scroll clean off the panel even when
+        // everything already fit.
+        return SingleChildScrollView(
           key: const Key('preview-content-scroll'),
           controller: _previewFilesScrollController,
-          headerSliverBuilder: (context, innerBoxIsScrolled) => [
-            SliverToBoxAdapter(
-              child: KeyedSubtree(
-                key: const Key('preview-files-scroll'),
-                child: info,
-              ),
-            ),
-          ],
-          body: const SizedBox.shrink(),
+          child: KeyedSubtree(
+            key: const Key('preview-files-scroll'),
+            child: info,
+          ),
         );
       },
     );

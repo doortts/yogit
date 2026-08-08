@@ -254,6 +254,22 @@ void main() {
     );
   });
 
+  testWidgets('a preview that fits does not scroll away', (tester) async {
+    await pumpPreview(tester);
+
+    final scroll = find.byKey(const Key('preview-content-scroll'));
+    final subject = find.descendant(
+      of: find.byKey(const Key('preview-panel')),
+      matching: find.text(child.subject),
+    );
+    final before = tester.getRect(subject);
+
+    await tester.drag(scroll, const Offset(0, -400));
+    await tester.pumpAndSettle();
+
+    expect(tester.getRect(subject), before, reason: '더 볼 것이 없으면 내용이 제자리에 남는다');
+  });
+
   testWidgets('a root commit has no parent to point at', (tester) async {
     await pumpPreview(tester, commits: [commit('91d03aa', 'feat: 첫 커밋')]);
 

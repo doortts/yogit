@@ -15985,7 +15985,7 @@ void main() {
     await tester.pumpAndSettle();
 
     final previewPosition = tester
-        .widget<NestedScrollView>(
+        .widget<SingleChildScrollView>(
           find.byKey(const Key('preview-content-scroll')),
         )
         .controller!
@@ -17508,10 +17508,18 @@ void main() {
               ),
             ),
           ],
+          // 화면보다 긴 목록이라야 ⇧⌘↓ 로 넘길 것이 있다.
           files: (_, _) async => [
             for (final name in ['one', 'two'])
               GitFileChange(
                 path: 'lib/$name.dart',
+                status: 'M',
+                additions: 1,
+                deletions: 0,
+              ),
+            for (var index = 0; index < 30; index++)
+              GitFileChange(
+                path: 'lib/filler$index.dart',
                 status: 'M',
                 additions: 1,
                 deletions: 0,
@@ -17610,7 +17618,7 @@ void main() {
     expect(find.text('Committer · Cam Committer'), findsNothing);
 
     final scrollable = tester
-        .widget<NestedScrollView>(
+        .widget<SingleChildScrollView>(
           find.byKey(const Key('preview-content-scroll')),
         )
         .controller!
@@ -17755,7 +17763,7 @@ void main() {
     );
     expect(
       tester
-          .widget<NestedScrollView>(
+          .widget<SingleChildScrollView>(
             find.byKey(const Key('preview-content-scroll')),
           )
           .controller
@@ -17831,7 +17839,7 @@ void main() {
 
     final filesViewport = find.byKey(const Key('preview-content-scroll'));
     final filesPosition = tester
-        .widget<NestedScrollView>(filesViewport)
+        .widget<SingleChildScrollView>(filesViewport)
         .controller!
         .position;
 
