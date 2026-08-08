@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import 'git.dart';
 import 'github_api.dart';
+import 'timeline_theme.dart';
 
 bool _isGravatarHost(String host) {
   final normalized = host.toLowerCase();
@@ -338,6 +339,7 @@ class IdentityAvatar extends StatelessWidget {
     this.remoteAvatar,
     this.size = 22,
     this.discColor,
+    this.backdrop,
     this.fontFamily,
     this.fontScale = 1,
     super.key,
@@ -353,20 +355,41 @@ class IdentityAvatar extends StatelessWidget {
   final String? fontFamily;
   final double fontScale;
 
-  /// The branch line this avatar sits on, drawn as a ring around the identity
-  /// fill. Null off the graph — the settings preview, the blame gutter — where
-  /// there is no branch to name and the disc goes unringed.
+  /// The branch line this avatar sits on, drawn as a ring around a disc of the
+  /// same color. Null off the graph — the settings preview, the blame gutter —
+  /// where there is no branch to name and the disc goes unringed.
   final Color? discColor;
+
+  /// The background of the row this disc sits on, which the dimmed fill is
+  /// composited against. Left translucent, the fill would let the lane's rail
+  /// run straight through the face; blending it here keeps the look and hides
+  /// the rail. Defaults to the default theme's row color.
+  final Color? backdrop;
+
+  /// How far the branch color is dimmed inside the ring. The initials sit on
+  /// this fill in the undimmed branch color, so the two share a hue and the
+  /// alpha barely moves their contrast — over the row background (`#1C1C1E`) and
+  /// the selected row (`#234D72`) the worst palette color reads 1.87 at 0.18 and
+  /// 1.70 at 0.40. What the alpha does decide is whether the disc reads as
+  /// filled, which is why it is the mockup's 0.22 and not lower.
+  static const dimmedFillAlpha = 0.22;
 
   @override
   Widget build(BuildContext context) {
     final branch = discColor;
-    // One disc, two facts: a ring at the rail's own weight for the branch, the
-    // person's own color filling it. Off the graph — the settings preview, the
-    // blame gutter — there is no branch to name, so the disc is the fill alone.
+    // A row's disc is its branch line the whole way through: a ring at the
+    // rail's own weight, the same color dimmed inside it, initials in that
+    // color. Off the graph — the settings preview, the blame gutter — there is
+    // no branch to name, so the disc keeps the opaque identity fill and its
+    // contrasting ink.
     final ring = branch == null ? 0.0 : AvatarService.railWidth;
-    final fill = AvatarService.color(identity);
-    final ink = AvatarService.onColor(fill);
+    final fill = branch == null
+        ? AvatarService.color(identity)
+        : Color.alphaBlend(
+            branch.withValues(alpha: dimmedFillAlpha),
+            backdrop ?? TimelineThemePalette.systemGraphite.background,
+          );
+    final ink = branch ?? AvatarService.onColor(fill);
     final inner = size - ring * 2;
     final avatar = _safeAvatar(remoteAvatar);
     return Container(
@@ -434,6 +457,7 @@ class CommitAvatarStack extends StatelessWidget {
     this.stacked = true,
     this.committerOnly = false,
     this.discColor,
+    this.backdrop,
     this.fontFamily,
     this.fontScale = 1,
     super.key,
@@ -449,8 +473,10 @@ class CommitAvatarStack extends StatelessWidget {
   final bool stacked;
   final bool committerOnly;
 
-  /// Passed straight through to both discs: a row's avatars wear its branch.
+  /// Passed straight through to both discs: a row's avatars wear its branch,
+  /// dimmed against the row's own background.
   final Color? discColor;
+  final Color? backdrop;
 
   /// The initials' face and size, passed through to both discs.
   final String? fontFamily;
@@ -480,6 +506,7 @@ class CommitAvatarStack extends StatelessWidget {
         remoteAvatar: avatars?.committer,
         size: size,
         discColor: discColor,
+        backdrop: backdrop,
         fontFamily: fontFamily,
         fontScale: fontScale,
       );
@@ -500,6 +527,7 @@ class CommitAvatarStack extends StatelessWidget {
                 remoteAvatar: avatars?.committer,
                 size: size,
                 discColor: discColor,
+                backdrop: backdrop,
                 fontFamily: fontFamily,
                 fontScale: fontScale,
               ),
@@ -512,6 +540,7 @@ class CommitAvatarStack extends StatelessWidget {
               remoteAvatar: avatars?.author,
               size: size,
               discColor: discColor,
+              backdrop: backdrop,
               fontFamily: fontFamily,
               fontScale: fontScale,
             ),

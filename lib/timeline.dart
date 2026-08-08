@@ -7388,6 +7388,25 @@ class _TimelineScreenState extends State<TimelineScreen>
     final stacked =
         avatarSize * 0.95 <= painter.laneSpacing - CommitGraphPainter.railWidth;
     final mappings = _previewGraph?.mappings ?? const <RebaseGraphMapping>[];
+    final rowColor = mergeConflict
+        ? _previewConflictPanel
+        : rebaseConflict
+        ? const Color(0xFF8F2F3A)
+        : resolvedRebaseConflict
+        ? _previewPurplePanel
+        : rebaseApplying
+        ? const Color(0xFF4D376D)
+        : virtualPreview
+        ? _previewPurplePanel
+        : selected
+        ? _palette.background
+        : hovered
+        ? _palette.neutralChip.withValues(alpha: 0.48)
+        : _palette.background;
+    // What the node's disc is painted over, so its dimmed fill can be
+    // composited opaque and stop the rail there. A hovered row tints itself
+    // translucently, so the blend flattens that before the disc uses it.
+    final rowBackdrop = Color.alphaBlend(rowColor, _palette.background);
     final content = MouseRegion(
       onEnter: (_) => _hoverIndex.value = index,
       onExit: (_) {
@@ -7415,21 +7434,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               : previewKind == PreviewGraphNodeKind.virtualRebase
               ? Key('virtual-rebase-row-${commit.sha}')
               : null,
-          color: mergeConflict
-              ? _previewConflictPanel
-              : rebaseConflict
-              ? const Color(0xFF8F2F3A)
-              : resolvedRebaseConflict
-              ? _previewPurplePanel
-              : rebaseApplying
-              ? const Color(0xFF4D376D)
-              : virtualPreview
-              ? _previewPurplePanel
-              : selected
-              ? _palette.background
-              : hovered
-              ? _palette.neutralChip.withValues(alpha: 0.48)
-              : _palette.background,
+          color: rowColor,
           child: Stack(
             children: [
               if (virtualPreview)
@@ -7496,6 +7501,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                             size: avatarSize,
                             stacked: stacked,
                             branchColor: previewColor,
+                            backdrop: rowBackdrop,
                             conflict: mergeConflict,
                           ),
                   ),
@@ -7707,6 +7713,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     required double size,
     required bool stacked,
     required Color branchColor,
+    required Color backdrop,
     bool conflict = false,
   }) {
     Color? mappingColor;
@@ -7800,6 +7807,7 @@ class _TimelineScreenState extends State<TimelineScreen>
             size: size,
             stacked: stacked,
             discColor: branchColor,
+            backdrop: backdrop,
             fontFamily: _fontFamily,
             fontScale: _initialsFontScale,
           )
@@ -9368,6 +9376,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                 stacked: false,
                 committerOnly: committer,
                 discColor: AvatarService.branchColor(_branchOf(commit)),
+                backdrop: _palette.surface,
               ),
         const SizedBox(width: 10),
         Expanded(

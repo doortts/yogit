@@ -4,16 +4,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/avatars.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/timeline.dart';
+import 'package:yogit/timeline_theme.dart';
 import 'package:yogit/window_frame.dart';
 
 import 'app_test.dart' show FakeGitRepository, commit;
 
-/// Contract for the branch-ringed avatar (승인된 1안).
+/// Contract for the branch-coloured avatar (승인된 3안).
 ///
-/// One disc says two things: a ring at the rail's own weight names the branch,
-/// and the fill inside it is the person's own colour with contrasting ink — so
-/// who wrote a commit is legible again without giving up which branch it sits
-/// on. A photo, which used to hide the branch entirely, sits inside the ring.
+/// A commit's disc is its branch line all the way through: a ring at the rail's
+/// own weight, the same colour dimmed inside it, and the initials in that
+/// colour too. The dimmed fill is composited against the row it sits on rather
+/// than left translucent, so the rail running down the lane stops at the disc
+/// instead of showing through it. A photo sits inside the ring.
 void main() {
   const ada = GitIdentity(name: 'Ada Lovelace', email: 'ada@example.com');
 
@@ -114,9 +116,7 @@ void main() {
     expect((discOf(tester).border! as Border).top.color, isNotNull);
   });
 
-  testWidgets('the ring names the branch, the fill names the person', (
-    tester,
-  ) async {
+  testWidgets('the disc is the branch colour throughout', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         home: TimelineScreen(
@@ -138,17 +138,47 @@ void main() {
             as CommitGraphPainter;
     final branch = AvatarService.branchColor(painter.row.branch);
 
-    final author = tester
-        .widget<IdentityAvatar>(find.byType(IdentityAvatar).first)
-        .identity;
     final disc = discOf(tester);
     expect((disc.border! as Border).top.color, branch);
-    // The fill is the author's own colour, opaque, with ink chosen against it.
-    expect(disc.color, AvatarService.color(author));
+    expect(tester.widget<Text>(find.text('AA').first).style?.color, branch);
+    // Dimmed, but composited — never left translucent, or the lane's rail
+    // would run straight through the disc.
     expect(disc.color!.a, 1.0);
     expect(
-      tester.widget<Text>(find.text('AA').first).style?.color,
-      AvatarService.onColor(AvatarService.color(author)),
+      disc.color,
+      Color.alphaBlend(
+        branch.withValues(alpha: IdentityAvatar.dimmedFillAlpha),
+        TimelineThemePalette.systemGraphite.background,
+      ),
+    );
+  });
+
+  testWidgets('the fill takes the colour of the row under it', (tester) async {
+    const backdrop = Color(0xFF234D72);
+    final branch = AvatarService.branchColor(4);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Center(
+          child: IdentityAvatar(
+            identity: ada,
+            discColor: branch,
+            backdrop: backdrop,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // A selected row is a different backdrop, so the same dimmed branch colour
+    // resolves to a different opaque fill — and still hides the rail.
+    final disc = discOf(tester);
+    expect(disc.color!.a, 1.0);
+    expect(
+      disc.color,
+      Color.alphaBlend(
+        branch.withValues(alpha: IdentityAvatar.dimmedFillAlpha),
+        backdrop,
+      ),
     );
   });
 
