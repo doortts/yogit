@@ -10,14 +10,15 @@ import 'package:flutter/services.dart';
 
 import 'avatars.dart';
 import 'commit_profile_chip.dart';
-import 'diff_screen.dart';
 import 'external_editor.dart';
 import 'full_diff_commit_message_cache.dart';
+import 'full_diff_controller.dart';
 import 'full_diff_model.dart';
 import 'full_diff_shortcut_hint.dart';
 import 'full_diff_side_by_side_view.dart';
 import 'full_diff_syntax.dart';
 import 'full_diff_unified_view.dart';
+import 'full_diff_workspace.dart';
 import 'fuzzy_match.dart';
 import 'git.dart';
 import 'monaco_editor_screen.dart';
@@ -883,7 +884,6 @@ class TimelineScreen extends StatefulWidget {
   const TimelineScreen({
     required this.repository,
     this.controller,
-    this.onOpenFullDiff,
     this.onOpenSettings,
     this.onOpenMonitor,
     this.onOpenRepository,
@@ -932,7 +932,6 @@ class TimelineScreen extends StatefulWidget {
 
   final GitRepository repository;
   final WindowFrameController? controller;
-  final ValueChanged<GitCommit>? onOpenFullDiff;
   final VoidCallback? onOpenSettings;
 
   /// Called with the base branch when the toolbar's monitor button is
@@ -1234,7 +1233,9 @@ class _TimelineScreenState extends State<TimelineScreen>
   var _visiblePreviewDiffExtent = 0.0;
   var _maxPreviewDiffExtent = 0.0;
   var _bottomPreviewMaxHeight = double.maxFinite;
-  _FullDiffRouteSession? _fullDiffRouteSession;
+
+  /// Non-null while the diff takes over the sidebar and timeline area.
+  FullDiffSessionController? _fullDiffSession;
   FullDiffPreferences? _pendingFullDiffPreferences;
   FullDiffColumnWidths? _pendingFullDiffColumnWidths;
   var _fullDiffPersistenceFlushScheduled = false;
@@ -1562,7 +1563,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       _resetBranchApply();
       _dropMergePreview();
       _dropRebasePreview();
-      _clearFullDiffRouteSession();
+      _closeFullDiff();
+      _clearPendingFullDiffPersistence();
     } else if (widget.onFullDiffPreferencesChanged !=
             oldWidget.onFullDiffPreferencesChanged ||
         widget.onFullDiffColumnWidthsChanged !=
@@ -1649,7 +1651,10 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
     _dropMergePreview();
     _dropRebasePreview();
-    _clearFullDiffRouteSession();
+    _fullDiffSession
+      ?..removeListener(_followFullDiffFile)
+      ..dispose();
+    _clearPendingFullDiffPersistence();
     if (_ownsPreviewController) _previewController.dispose();
     _selectedIndex.removeListener(_selectedCommitChanged);
     _selectedIndex.dispose();
@@ -2056,7 +2061,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     if (event.logicalKey == LogicalKeyboardKey.keyD && shortcutModifierHeld) {
-      if (_selectedCommit != null) _openFullDiff();
+      _toggleFullDiff();
       return KeyEventResult.handled;
     }
     // ⌘1 hands the keyboard to the sidebar, expanding it when collapsed; a
@@ -2077,7 +2082,9 @@ class _TimelineScreenState extends State<TimelineScreen>
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.escape) {
-      if (_previewDiffOpen) {
+      if (_fullDiffOpen) {
+        _closeFullDiff();
+      } else if (_previewDiffOpen) {
         _closePreviewDiff();
       } else {
         unawaited(_previewController.setPreview(PreviewPlacement.closed));
@@ -2243,6 +2250,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     final closing =
         _previewController.previewPlacement != PreviewPlacement.closed;
     if (closing && _previewDiffOpen) _closePreviewDiff();
+    if (closing) _closeFullDiff();
     unawaited(
       _previewController.setPreview(
         closing ? PreviewPlacement.closed : widget.preferredPreviewPlacement,
@@ -2697,7 +2705,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           Expanded(
             child: Row(
               children: [
-                _sidebar(),
+                if (!_fullDiffOpen) _sidebar(),
                 Expanded(child: _workspace()),
               ],
             ),
@@ -2717,10 +2725,14 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   Widget _workspaceLayout(BuildContext context, BoxConstraints constraints) {
     final placement = _previewController.previewPlacement;
-    final timeline = Expanded(
-      key: const Key('timeline-viewport'),
-      child: KeyedSubtree(key: _timelineKey, child: _timeline()),
-    );
+    final session = _fullDiffSession;
+    // Diff mode takes the timeline's place; the preview keeps its own.
+    final timeline = session == null
+        ? Expanded(
+            key: const Key('timeline-viewport'),
+            child: KeyedSubtree(key: _timelineKey, child: _timeline()),
+          )
+        : Expanded(child: _embeddedFullDiff(session));
     if (placement == PreviewPlacement.bottom) {
       final timelineChromeHeight =
           _timelineHeaderHeight +
@@ -4105,7 +4117,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     valueListenable: _selectedIndex,
     builder: (context, _, _) => _ShowDiffButton(
       key: const Key('toolbar-full-diff'),
-      onTap: _selectedCommit == null ? null : _openFullDiff,
+      onTap: _selectedCommit == null ? null : _toggleFullDiff,
     ),
   );
 
@@ -8606,7 +8618,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               key: const Key('preview-full-diff'),
               onTap: commit == null || _cherryPickState != null
                   ? null
-                  : _openFullDiff,
+                  : _toggleFullDiff,
               height: 28,
               labelSize: 11,
               shortcutSize: 8,
@@ -8930,6 +8942,12 @@ class _TimelineScreenState extends State<TimelineScreen>
     );
   }
 
+  /// The branch preview's virtual commits have no diff a commit session can
+  /// load, so they keep the adjacent pane; every other commit opens the
+  /// embedded workspace.
+  bool _showsBranchPreviewDiff(GitCommit commit) =>
+      _comparison != null && _usesBranchPreviewResult(commit);
+
   void _selectPreviewFile(
     GitCommit commit,
     String path, {
@@ -8937,15 +8955,24 @@ class _TimelineScreenState extends State<TimelineScreen>
     bool animateReveal = true,
     int? line,
   }) {
+    final adjacent = _showsBranchPreviewDiff(commit);
     setState(() {
       _previewPaths[_previewKey(commit)] = path;
-      _previewDiffOpen = true;
+      _previewDiffOpen = adjacent;
       // 파일 줄을 그냥 누르면 위에서부터, 근접 구역을 누르면 그 줄에서 시작한다.
       _previewDiffLineTarget = line == null ? null : (path: path, line: line);
       // 같은 구역을 다시 누르면 diff가 맨 위로 돌아가니 한 번 더 데려다줘야 한다.
       if (line != null) _previewDiffLineRevealed = null;
     });
-    _focusNode.requestFocus();
+    if (!adjacent) {
+      if (_fullDiffOpen) {
+        _showFullDiffFile(path);
+      } else {
+        _openFullDiff(commit, path);
+      }
+    } else {
+      _focusNode.requestFocus();
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final outerOffset = _previewFilesScrollController.hasClients
@@ -9026,7 +9053,9 @@ class _TimelineScreenState extends State<TimelineScreen>
       builder: (context, snapshot) {
         final changes = snapshot.data;
         final key = _previewKey(commit);
-        final requestedPath = _previewDiffOpen ? _previewPaths[key] : null;
+        final requestedPath = _previewDiffOpen || _fullDiffOpen
+            ? _previewPaths[key]
+            : null;
         GitFileChange? selectedFile;
         if (changes != null && changes.isNotEmpty) {
           selectedFile = changes.firstWhere(
@@ -10841,22 +10870,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     ),
   );
 
-  bool _acceptsFullDiffRouteEvents(_FullDiffRouteSession session) =>
-      mounted &&
-      identical(_fullDiffRouteSession, session) &&
-      identical(widget.repository, session.repository) &&
-      session.route?.isActive == true;
-
-  bool _canFlushFullDiffPersistence(_FullDiffRouteSession session) =>
-      mounted &&
-      identical(_fullDiffRouteSession, session) &&
-      identical(widget.repository, session.repository);
-
-  void _forwardFullDiffPreferences(
-    _FullDiffRouteSession session,
-    FullDiffPreferences preferences,
-  ) {
-    if (!_acceptsFullDiffRouteEvents(session)) return;
+  void _forwardFullDiffPreferences(FullDiffPreferences preferences) {
+    if (!mounted) return;
     if (widget.onFullDiffPreferencesChanged case final callback?
         when _pendingFullDiffPreferences == null &&
             !_fullDiffPersistenceFlushScheduled) {
@@ -10867,11 +10882,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     _scheduleFullDiffPersistenceFlush();
   }
 
-  void _forwardFullDiffColumnWidths(
-    _FullDiffRouteSession session,
-    FullDiffColumnWidths widths,
-  ) {
-    if (!_acceptsFullDiffRouteEvents(session)) return;
+  void _forwardFullDiffColumnWidths(FullDiffColumnWidths widths) {
+    if (!mounted) return;
     if (widget.onFullDiffColumnWidthsChanged case final callback?
         when _pendingFullDiffColumnWidths == null &&
             !_fullDiffPersistenceFlushScheduled) {
@@ -10882,10 +10894,10 @@ class _TimelineScreenState extends State<TimelineScreen>
     _scheduleFullDiffPersistenceFlush();
   }
 
+  /// Options changed before the settings file finished loading have nowhere to
+  /// go yet, so they wait here until a persistence callback arrives.
   void _scheduleFullDiffPersistenceFlush() {
-    final session = _fullDiffRouteSession;
-    if (session == null ||
-        _fullDiffPersistenceFlushScheduled ||
+    if (_fullDiffPersistenceFlushScheduled ||
         (_pendingFullDiffPreferences == null &&
             _pendingFullDiffColumnWidths == null) ||
         (widget.onFullDiffPreferencesChanged == null &&
@@ -10895,10 +10907,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     _fullDiffPersistenceFlushScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fullDiffPersistenceFlushScheduled = false;
-      if (!_canFlushFullDiffPersistence(session)) {
-        _scheduleFullDiffPersistenceFlush();
-        return;
-      }
+      if (!mounted) return;
 
       final preferences = _pendingFullDiffPreferences;
       final preferencesCallback = widget.onFullDiffPreferencesChanged;
@@ -10907,7 +10916,6 @@ class _TimelineScreenState extends State<TimelineScreen>
         preferencesCallback(preferences);
       }
 
-      if (!_canFlushFullDiffPersistence(session)) return;
       final widths = _pendingFullDiffColumnWidths;
       final widthsCallback = widget.onFullDiffColumnWidthsChanged;
       if (widths != null && widthsCallback != null) {
@@ -10917,58 +10925,114 @@ class _TimelineScreenState extends State<TimelineScreen>
     });
   }
 
-  void _clearFullDiffRouteSession([_FullDiffRouteSession? session]) {
-    if (session != null && !identical(_fullDiffRouteSession, session)) return;
-    _fullDiffRouteSession = null;
+  void _clearPendingFullDiffPersistence() {
     _pendingFullDiffPreferences = null;
     _pendingFullDiffColumnWidths = null;
     _fullDiffPersistenceFlushScheduled = false;
   }
 
-  void _openFullDiff() {
-    final commit = _selectedCommit!;
-    if (widget.onOpenFullDiff case final callback?) {
-      callback(commit);
+  bool get _fullDiffOpen => _fullDiffSession != null;
+
+  /// ⌘D and both Full Diff buttons: the diff takes the sidebar and timeline
+  /// area, or hands it back. A closed preview opens first — it is the file
+  /// navigation the diff mode relies on.
+  void _toggleFullDiff() {
+    if (_fullDiffOpen) {
+      _closeFullDiff();
       return;
     }
-    final repository = widget.repository;
-    final commits = List<GitCommit>.unmodifiable(_commits);
-    final initialIndex = _commits.indexOf(commit);
-    final initialPreferences =
-        _pendingFullDiffPreferences ?? widget.fullDiffPreferences;
-    final columnWidths =
-        _pendingFullDiffColumnWidths ?? widget.fullDiffColumnWidths;
-    final avatarService = widget.avatarService;
-    final showRemoteAvatars = widget.showRemoteAvatars;
-    final session = _FullDiffRouteSession(repository);
-    late final MaterialPageRoute<void> route;
-    route = MaterialPageRoute<void>(
-      builder: (context) => DiffScreen(
-        repository: repository,
-        commits: commits,
-        initialIndex: initialIndex,
-        initialPreferences: initialPreferences,
-        onPreferencesChanged: (preferences) =>
-            _forwardFullDiffPreferences(session, preferences),
-        columnWidths: columnWidths,
-        onColumnWidthsChanged: (widths) =>
-            _forwardFullDiffColumnWidths(session, widths),
-        editorService: ExternalEditorService(repositoryRoot: repository.root),
-        avatarService: avatarService,
-        showRemoteAvatars: showRemoteAvatars,
-      ),
-    );
-    session.route = route;
-    _fullDiffRouteSession = session;
-    Navigator.of(context).push(route);
+    final commit = _selectedCommit;
+    if (commit == null) return;
+    if (_previewController.previewPlacement == PreviewPlacement.closed) {
+      unawaited(
+        _previewController.setPreview(widget.preferredPreviewPlacement),
+      );
+    }
+    _openFullDiff(commit, _previewPaths[_previewKey(commit)]);
   }
-}
 
-class _FullDiffRouteSession {
-  _FullDiffRouteSession(this.repository);
+  void _openFullDiff(GitCommit commit, String? path) {
+    final controller = FullDiffSessionController(
+      repository: widget.repository,
+      commits: List<GitCommit>.unmodifiable(_commits),
+      initialIndex: math.max(0, _commits.indexOf(commit)),
+      initialPreferences:
+          _pendingFullDiffPreferences ?? widget.fullDiffPreferences,
+    )..addListener(_followFullDiffFile);
+    setState(() {
+      _previewDiffOpen = false;
+      _fullDiffSession = controller;
+    });
+    // The workspace carries its own shortcuts, so it needs the keyboard.
+    _focusNode.unfocus();
+    unawaited(_startFullDiff(controller, path));
+  }
 
-  final GitRepository repository;
-  Route<void>? route;
+  Future<void> _startFullDiff(
+    FullDiffSessionController controller,
+    String? path,
+  ) async {
+    await controller.initialize();
+    if (!mounted || !identical(_fullDiffSession, controller)) return;
+    _showFullDiffFile(path);
+  }
+
+  void _showFullDiffFile(String? path) {
+    final controller = _fullDiffSession;
+    if (controller == null || path == null) return;
+    for (final file in controller.state.files) {
+      if (file.path == path) {
+        unawaited(controller.selectFile(file));
+        return;
+      }
+    }
+  }
+
+  /// The preview list is the diff's navigation, so its highlight follows
+  /// whatever the workspace's own keyboard selects — and scrolls after it.
+  void _followFullDiffFile() {
+    final controller = _fullDiffSession;
+    final commit = _selectedCommit;
+    final path = controller?.state.selectedFile?.path;
+    if (controller == null || commit == null || path == null || !mounted) {
+      return;
+    }
+    final key = _previewKey(commit);
+    final previous = _previewPaths[key];
+    if (previous == path) return;
+    final files = controller.state.files;
+    final direction =
+        files.indexWhere((file) => file.path == path) <
+            files.indexWhere((file) => file.path == previous)
+        ? -1
+        : 1;
+    setState(() => _previewPaths[key] = path);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _revealSelectedPreviewFile(direction, animate: false);
+    });
+  }
+
+  void _closeFullDiff() {
+    final controller = _fullDiffSession;
+    if (controller == null) return;
+    setState(() => _fullDiffSession = null);
+    controller
+      ..removeListener(_followFullDiffFile)
+      ..dispose();
+    _focusNode.requestFocus();
+  }
+
+  Widget _embeddedFullDiff(FullDiffSessionController controller) =>
+      FullDiffWorkspace(
+        controller: controller,
+        onBack: _closeFullDiff,
+        columnWidths:
+            _pendingFullDiffColumnWidths ?? widget.fullDiffColumnWidths,
+        onColumnWidthsChanged: _forwardFullDiffColumnWidths,
+        onPreferencesChanged: _forwardFullDiffPreferences,
+        avatarService: widget.avatarService,
+        showRemoteAvatars: widget.showRemoteAvatars,
+      );
 }
 
 /// The app's wordmark: one soft pastel per letter, legible on the dark bar, with

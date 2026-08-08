@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -28,8 +26,18 @@ void main() {
   FakeGitRepository repository() => FakeGitRepository(
     (_, _) async => [commit('1', 'first commit')],
     files: (_, _) async => const [
-      GitFileChange(path: 'lib/a.dart', status: 'M', additions: 1, deletions: 1),
-      GitFileChange(path: 'lib/b.dart', status: 'M', additions: 2, deletions: 0),
+      GitFileChange(
+        path: 'lib/a.dart',
+        status: 'M',
+        additions: 1,
+        deletions: 1,
+      ),
+      GitFileChange(
+        path: 'lib/b.dart',
+        status: 'M',
+        additions: 2,
+        deletions: 0,
+      ),
     ],
     diff: (_, _, _, _, _) async => const [
       DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
@@ -53,7 +61,10 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> enterByFile(WidgetTester tester, [String path = 'lib/a.dart']) async {
+  Future<void> enterByFile(
+    WidgetTester tester, [
+    String path = 'lib/a.dart',
+  ]) async {
     await tester.tap(find.byKey(Key('preview-state-$path')));
     await tester.pumpAndSettle();
   }
@@ -155,11 +166,7 @@ void main() {
 
     await pressCommandD(tester);
     expect(find.byType(FullDiffWorkspace), findsOneWidget);
-    expect(
-      find.byType(DiffScreen),
-      findsNothing,
-      reason: '전체화면 route는 은퇴했다',
-    );
+    expect(find.byType(DiffScreen), findsNothing, reason: '전체화면 route는 은퇴했다');
     expect(
       find.descendant(
         of: find.byKey(const Key('file-path-chip')),

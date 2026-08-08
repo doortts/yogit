@@ -325,6 +325,14 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
       shiftPressed: HardwareKeyboard.instance.isShiftPressed,
     );
     if (intent == null) return KeyEventResult.ignored;
+    // At the content's edge the keys travel on, so an embedder can page its own
+    // list once the diff has nothing left to give.
+    if (!_contentScroll.clientsReady) return KeyEventResult.ignored;
+    final position = _contentScroll.position;
+    final room = intent.direction > 0
+        ? position.extentAfter
+        : position.extentBefore;
+    if (room <= 0) return KeyEventResult.ignored;
     applyPageScroll(
       _contentScroll,
       direction: intent.direction,

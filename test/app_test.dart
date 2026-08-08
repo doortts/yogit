@@ -16,6 +16,7 @@ import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/full_diff_side_by_side_view.dart';
 import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/full_diff_unified_view.dart';
+import 'package:yogit/full_diff_workspace.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/github_api.dart';
 import 'package:yogit/main.dart';
@@ -705,7 +706,7 @@ void main() {
   });
 
   testWidgets(
-    'a file click opens an adjacent diff without resizing the preview',
+    'a file click opens the embedded diff without resizing the preview',
     (tester) async {
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = const Size(1200, 700);
@@ -738,7 +739,7 @@ void main() {
 
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('preview-diff')), findsNothing);
+      expect(find.byType(FullDiffWorkspace), findsNothing);
       final previewWidth = tester
           .getSize(find.byKey(const Key('preview-panel')))
           .width;
@@ -746,13 +747,14 @@ void main() {
       await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('preview-diff')), findsOneWidget);
+      final diff = find.byType(FullDiffWorkspace);
+      expect(diff, findsOneWidget);
       expect(
         tester.getSize(find.byKey(const Key('preview-panel'))).width,
         previewWidth,
       );
       expect(
-        tester.getRect(find.byKey(const Key('preview-diff'))).right,
+        tester.getRect(diff).right,
         tester.getRect(find.byKey(const Key('preview-panel'))).left,
       );
 
@@ -760,177 +762,19 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         tester.getRect(find.byKey(const Key('preview-panel'))).right,
-        tester.getRect(find.byKey(const Key('preview-diff'))).left,
+        tester.getRect(diff).left,
       );
 
       await tester.tap(find.text('하단'));
       await tester.pumpAndSettle();
       expect(
-        tester.getRect(find.byKey(const Key('preview-diff'))).bottom,
+        tester.getRect(diff).bottom,
         tester.getRect(find.byKey(const Key('preview-panel'))).top,
       );
     },
   );
 
-  testWidgets('preview diff resizer shows blue line only on hover', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1200, 700);
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    await tester.pumpWidget(
-      app(
-        FakeGitRepository(
-          (_, _) async => [commit('1', 'first commit')],
-          files: (_, _) async => const [
-            GitFileChange(
-              path: 'lib/a.dart',
-              status: 'M',
-              additions: 1,
-              deletions: 1,
-            ),
-          ],
-          diff: (_, _, _, _, _) async => const [
-            DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
-            DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
-          ],
-        ),
-        controller,
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
-    await tester.pumpAndSettle();
-
-    Color lineColor() => tester
-        .widget<ColoredBox>(find.byKey(const Key('preview-diff-hover-line')))
-        .color;
-    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await mouse.addPointer(location: const Offset(1190, 690));
-    expect(lineColor(), Colors.transparent);
-    expect(
-      tester.getRect(find.byKey(const Key('preview-diff-hover-line'))).left,
-      tester.getRect(find.byKey(const Key('preview-diff'))).left,
-    );
-
-    await mouse.moveTo(
-      tester.getCenter(find.byKey(const Key('preview-diff-resizer'))),
-    );
-    await tester.pump();
-    expect(lineColor(), const Color(0xFF5AB0FF));
-
-    await mouse.moveTo(const Offset(1190, 690));
-    await tester.pump();
-    expect(lineColor(), Colors.transparent);
-  });
-
-  testWidgets(
-    'adjacent diff size defaults, persists, and reaches both endpoints',
-    (tester) async {
-      tester.view.devicePixelRatio = 1;
-      tester.view.physicalSize = const Size(1200, 700);
-      addTearDown(() {
-        tester.view.resetDevicePixelRatio();
-        tester.view.resetPhysicalSize();
-      });
-      final store = MemorySettingsStore();
-      final repository = FakeGitRepository(
-        (_, _) async => [commit('1', 'first commit')],
-        files: (_, _) async => const [
-          GitFileChange(
-            path: 'lib/a.dart',
-            status: 'M',
-            additions: 1,
-            deletions: 1,
-          ),
-        ],
-        diff: (_, _, _, _, _) async => const [
-          DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
-          DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
-        ],
-      );
-
-      Future<void> mountAndOpen() async {
-        await tester.pumpWidget(
-          YogitApp(
-            repository: repository,
-            settingsStore: store,
-            discoverAvatars: false,
-            windowFrameController: controller,
-          ),
-        );
-        await tester.pumpAndSettle();
-        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-        await tester.pumpAndSettle();
-        await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
-        await tester.pumpAndSettle();
-      }
-
-      await mountAndOpen();
-      final previewWidth = tester
-          .getSize(find.byKey(const Key('preview-panel')))
-          .width;
-      expect(
-        tester.getSize(find.byKey(const Key('timeline-viewport'))).width,
-        closeTo(100, 0.1),
-      );
-
-      final initialDiffWidth = tester
-          .getSize(find.byKey(const Key('preview-diff')))
-          .width;
-      await tester.drag(
-        find.byKey(const Key('preview-diff-resizer')),
-        Offset(initialDiffWidth - 400, 0),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        tester.getSize(find.byKey(const Key('preview-diff'))).width,
-        closeTo(400, 0.1),
-      );
-      expect(
-        store.current.toJson()['previewDiffRightWidth'],
-        closeTo(400, 0.1),
-      );
-      expect(
-        tester.getSize(find.byKey(const Key('preview-panel'))).width,
-        previewWidth,
-      );
-
-      await tester.pumpWidget(const SizedBox.shrink());
-      await controller.setPreview(PreviewPlacement.closed);
-      await mountAndOpen();
-      expect(
-        tester.getSize(find.byKey(const Key('preview-diff'))).width,
-        closeTo(400, 0.1),
-      );
-
-      await tester.drag(
-        find.byKey(const Key('preview-diff-resizer')),
-        const Offset(-5000, 0),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        tester.getSize(find.byKey(const Key('timeline-viewport'))).width,
-        closeTo(0, 0.1),
-      );
-      await tester.drag(
-        find.byKey(const Key('preview-diff-resizer')),
-        const Offset(5000, 0),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        tester.getSize(find.byKey(const Key('preview-diff'))).width,
-        closeTo(0, 0.1),
-      );
-    },
-  );
-
-  testWidgets('escape closes the adjacent diff before the preview', (
+  testWidgets('escape closes the embedded diff before the preview', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -962,13 +806,11 @@ void main() {
     await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('timeline-viewport')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('preview-diff')), findsOneWidget);
+    expect(find.byType(FullDiffWorkspace), findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('preview-diff')), findsNothing);
+    expect(find.byType(FullDiffWorkspace), findsNothing);
     expect(find.byKey(const Key('preview-panel')), findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
@@ -979,9 +821,9 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('preview-diff-close')));
+    await tester.tap(find.byKey(const Key('full-diff-back')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('preview-diff')), findsNothing);
+    expect(find.byType(FullDiffWorkspace), findsNothing);
     expect(find.byKey(const Key('preview-panel')), findsOneWidget);
   });
 
@@ -1028,22 +870,13 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     expect(find.text('lib/first.dart'), findsOneWidget);
-    expect(find.byKey(const Key('preview-diff')), findsNothing);
+    expect(find.byType(FullDiffWorkspace), findsNothing);
     expect(diffLoads, 0);
 
     await tester.tap(find.byKey(const Key('preview-state-lib/first.dart')));
     await tester.pumpAndSettle();
-    expect(find.text('lib/first.dart'), findsNWidgets(2));
     expect(find.text('README.md'), findsOneWidget);
     expect(find.text('lib/first.dart changed'), findsOneWidget);
-    expect(
-      find.byKey(const Key('branch-preview-diff-toolbar')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const Key('branch-preview-layout-switch')),
-      findsOneWidget,
-    );
     expect(find.byType(UnifiedPresentationView), findsOneWidget);
     expect(find.text('+1 -1'), findsOneWidget);
     expect(
@@ -1055,23 +888,20 @@ void main() {
       isNull,
     );
     expect(
-      tester.getRect(find.byKey(const Key('preview-diff'))).right,
+      tester.getRect(find.byType(FullDiffWorkspace)).right,
       tester.getRect(find.byKey(const Key('preview-panel'))).left,
     );
-
-    await tester.tap(
-      find.byKey(const Key('branch-preview-layout-side-by-side')),
-    );
-    await tester.pump();
-    expect(find.byType(SideBySidePresentationView), findsOneWidget);
+    // The workspace loads the commit's files for its own session; picking the
+    // same file again asks git for nothing new.
+    final settled = (files: fileLoads, diffs: diffLoads);
+    await tester.tap(find.byKey(const Key('preview-state-lib/first.dart')));
+    await tester.pumpAndSettle();
+    expect(fileLoads, settled.files);
+    expect(diffLoads, settled.diffs);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('preview-diff')), findsNothing);
-    await tester.tap(find.byKey(const Key('preview-state-lib/first.dart')));
-    await tester.pumpAndSettle();
-    expect(fileLoads, 1);
-    expect(diffLoads, 1);
+    expect(find.byType(FullDiffWorkspace), findsNothing);
   });
 
   testWidgets('preview is a structural sibling and preserves timeline state', (
@@ -8533,7 +8363,7 @@ void main() {
 
     await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
     await tester.pumpAndSettle();
-    final diff = find.byKey(const Key('preview-diff'));
+    final diff = find.byType(FullDiffWorkspace);
     expect(find.byType(UnifiedPresentationView), findsOneWidget);
     expect(find.byKey(const Key('unified-line-0-0')), findsOneWidget);
     expect(find.byKey(const Key('unified-line-0-1')), findsOneWidget);
@@ -10558,7 +10388,11 @@ void main() {
     await tester.tap(find.byKey(const Key('toolbar-full-diff')));
     await tester.pumpAndSettle();
     expect(
-      tester.widget<DiffScreen>(find.byType(DiffScreen)).initialPreferences,
+      tester
+          .widget<FullDiffWorkspace>(find.byType(FullDiffWorkspace))
+          .controller
+          .state
+          .preferences,
       preferences,
     );
   });
@@ -10592,11 +10426,19 @@ void main() {
 
     await tester.tap(find.byKey(const Key('toolbar-full-diff')));
     await tester.pumpAndSettle();
-    final diffContext = tester.element(find.byType(DiffScreen));
-    expect(Theme.of(diffContext).extension<TimelineThemePalette>(), isNull);
+    // The workspace keeps the full-diff palette whatever the timeline wears.
     expect(
-      tester.widget<Scaffold>(find.byType(Scaffold).last).backgroundColor,
-      fullDiffCanvas,
+      tester
+          .widget<ColoredBox>(
+            find
+                .descendant(
+                  of: find.byType(FullDiffWorkspace),
+                  matching: find.byType(ColoredBox),
+                )
+                .first,
+          )
+          .color,
+      fullDiffHeader,
     );
   });
 
@@ -10785,17 +10627,13 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('toolbar-full-diff')));
       await tester.pumpAndSettle();
-      tester
-          .widget<Focus>(find.byKey(const Key('changed-files-focus')))
-          .focusNode!
-          .requestFocus();
-      await tester.pump();
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.tap(find.byKey(const Key('preview-state-lib/second.dart')));
       await tester.pumpAndSettle();
-      expect(
-        find.byKey(const Key('selected-file-lib/second.dart')),
-        findsOneWidget,
+      Finder openFile() => find.descendant(
+        of: find.byKey(const Key('file-path-chip')),
+        matching: find.text('lib/second.dart'),
       );
+      expect(openFile(), findsOneWidget);
 
       final scrollable = tester.state<ScrollableState>(
         find
@@ -10812,10 +10650,7 @@ void main() {
       await tester.tap(find.text('Side-by-side'));
       await tester.pumpAndSettle();
 
-      expect(
-        find.byKey(const Key('selected-file-lib/second.dart')),
-        findsOneWidget,
-      );
+      expect(openFile(), findsOneWidget);
       expect(scrollable.position.pixels, 100);
       expect(tester.takeException(), isNull);
     },
@@ -10833,10 +10668,7 @@ void main() {
       final store = DelayedMemorySettingsStore();
       await tester.pumpWidget(
         YogitApp(
-          repository: FakeGitRepository(
-            (_, _) async => [commit('1', 'commit')],
-            files: (_, _) async => const [],
-          ),
+          repository: _widthFixtureRepository(),
           settingsStore: store,
           discoverAvatars: false,
           windowFrameController: controller,
@@ -10849,7 +10681,7 @@ void main() {
       await tester.tap(find.text('Side-by-side'));
       await tester.pump();
       await tester.drag(
-        find.byKey(const Key('details-files-column-resizer')),
+        find.byKey(const Key('side-by-side-resizer')),
         const Offset(20, 0),
       );
       await tester.pump();
@@ -10865,16 +10697,16 @@ void main() {
         store.current.fullDiffPreferences,
         const FullDiffPreferences(layout: DiffLayout.sideBySide),
       );
-      expect(store.current.fullDiffColumnWidths.files, 310);
+      expect(
+        store.current.fullDiffColumnWidths.sideBySideRatio,
+        greaterThan(const FullDiffColumnWidths().sideBySideRatio),
+      );
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
       await tester.pumpWidget(
         YogitApp(
-          repository: FakeGitRepository(
-            (_, _) async => [commit('1', 'commit')],
-            files: (_, _) async => const [],
-          ),
+          repository: _widthFixtureRepository(),
           settingsStore: store,
           discoverAvatars: false,
           windowFrameController: controller,
@@ -10892,12 +10724,15 @@ void main() {
         ui.Tristate.isTrue,
       );
       expect(
-        tester.getSize(find.byKey(const Key('details-files-column'))).width,
-        310,
+        tester
+            .widget<FullDiffWorkspace>(find.byType(FullDiffWorkspace))
+            .columnWidths
+            .sideBySideRatio,
+        store.current.fullDiffColumnWidths.sideBySideRatio,
       );
 
       final staleCallback = tester
-          .widget<DiffScreen>(find.byType(DiffScreen))
+          .widget<FullDiffWorkspace>(find.byType(FullDiffWorkspace))
           .onPreferencesChanged!;
       final savedBeforeDispose = store.saveCount;
       await tester.pumpWidget(const SizedBox.shrink());
@@ -10917,10 +10752,7 @@ void main() {
         tester.view.resetPhysicalSize();
       });
       final store = DelayedMemorySettingsStore();
-      final repository = FakeGitRepository(
-        (_, _) async => [commit('1', 'commit')],
-        files: (_, _) async => const [],
-      );
+      final repository = _widthFixtureRepository();
       await tester.pumpWidget(
         YogitApp(
           repository: repository,
@@ -10934,8 +10766,9 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Side-by-side'));
+      await tester.pump();
       await tester.drag(
-        find.byKey(const Key('details-files-column-resizer')),
+        find.byKey(const Key('side-by-side-resizer')),
         const Offset(20, 0),
       );
       await tester.pump();
@@ -10952,7 +10785,10 @@ void main() {
         store.current.fullDiffPreferences,
         const FullDiffPreferences(layout: DiffLayout.sideBySide),
       );
-      expect(store.current.fullDiffColumnWidths.files, 310);
+      expect(
+        store.current.fullDiffColumnWidths.sideBySideRatio,
+        greaterThan(const FullDiffColumnWidths().sideBySideRatio),
+      );
 
       await tester.tap(find.byKey(const Key('toolbar-full-diff')));
       await tester.pumpAndSettle();
@@ -10964,8 +10800,11 @@ void main() {
         ui.Tristate.isTrue,
       );
       expect(
-        tester.getSize(find.byKey(const Key('details-files-column'))).width,
-        310,
+        tester
+            .widget<FullDiffWorkspace>(find.byType(FullDiffWorkspace))
+            .columnWidths
+            .sideBySideRatio,
+        store.current.fullDiffColumnWidths.sideBySideRatio,
       );
     },
   );
@@ -11321,9 +11160,11 @@ void main() {
     await tester.tap(find.byKey(const Key('preview-full-diff')));
     await tester.pumpAndSettle();
 
-    final diffScreen = tester.widget<DiffScreen>(find.byType(DiffScreen));
-    expect(diffScreen.avatarService, same(service));
-    expect(diffScreen.showRemoteAvatars, isFalse);
+    final workspace = tester.widget<FullDiffWorkspace>(
+      find.byType(FullDiffWorkspace),
+    );
+    expect(workspace.avatarService, same(service));
+    expect(workspace.showRemoteAvatars, isFalse);
 
     await tester.tap(find.text('Blame').last);
     await tester.pumpAndSettle();
@@ -11450,7 +11291,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('opens the full diff and preserves timeline state on escape', (
+  testWidgets('the full diff screen walks parents, files, and algorithms', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -11507,12 +11348,15 @@ void main() {
         ]);
       },
     );
-    await tester.pumpWidget(app(repository, controller));
-    await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byKey(const Key('preview-full-diff')));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DiffScreen(
+          repository: repository,
+          commits: await repository.loader(0, 3),
+          initialIndex: 0,
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('nearby-column')), findsNothing);
@@ -11591,18 +11435,6 @@ void main() {
       ),
       findsOneWidget,
     );
-
-    await tester.tap(find.byKey(const Key('full-diff-back')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('selected-row-merge')), findsOneWidget);
-    expect(find.text('Commit & Diff'), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('preview-full-diff')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('code-row-source-text')).first);
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsOneWidget);
   });
 
   testWidgets('full diff starts with saved column widths', (tester) async {
@@ -11842,10 +11674,7 @@ void main() {
       );
     await tester.pumpWidget(
       YogitApp(
-        repository: FakeGitRepository(
-          (_, _) async => [commit('1', 'commit')],
-          files: (_, _) async => const [],
-        ),
+        repository: _widthFixtureRepository(),
         settingsStore: store,
         discoverAvatars: false,
         windowFrameController: controller,
@@ -11856,19 +11685,26 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('nearby-column')), findsNothing);
+    // The stored widths reach the live workspace.
     expect(
-      tester.getSize(find.byKey(const Key('details-files-column'))).width,
-      330,
+      tester
+          .widget<FullDiffWorkspace>(find.byType(FullDiffWorkspace))
+          .columnWidths,
+      const FullDiffColumnWidths(history: 240, files: 330),
     );
 
+    await tester.tap(find.text('Side-by-side'));
+    await tester.pumpAndSettle();
     await tester.drag(
-      find.byKey(const Key('details-files-column-resizer')),
+      find.byKey(const Key('side-by-side-resizer')),
       const Offset(30, 0),
     );
     await tester.pumpAndSettle();
+    expect(store.current.fullDiffColumnWidths.history, 240);
+    expect(store.current.fullDiffColumnWidths.files, 330);
     expect(
-      store.current.fullDiffColumnWidths,
-      const FullDiffColumnWidths(history: 240, files: 360),
+      store.current.fullDiffColumnWidths.sideBySideRatio,
+      greaterThan(const FullDiffColumnWidths().sideBySideRatio),
     );
   });
 
@@ -15710,7 +15546,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     final firstBody = find.descendant(
-      of: find.byKey(const Key('preview-diff')),
+      of: find.byType(FullDiffWorkspace),
       matching: find.text('lib/a.dart body'),
     );
     final firstBodyText = tester.widget<Text>(firstBody);
@@ -15727,7 +15563,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       find.descendant(
-        of: find.byKey(const Key('preview-diff')),
+        of: find.byType(FullDiffWorkspace),
         matching: find.text('lib/b.dart body'),
       ),
       findsOneWidget,
@@ -16472,7 +16308,7 @@ void main() {
     final filesScrollable = find.byKey(const Key('preview-files-scroll'));
     await tester.tap(find.byKey(const Key('preview-state-lib/file0.dart')));
     await tester.pumpAndSettle();
-    final diffScrollable = find.byKey(const Key('preview-diff-scroll'));
+    final diffScrollable = find.byKey(const Key('content-scrollable'));
     expect(filesScrollable, findsOneWidget);
     expect(diffScrollable, findsOneWidget);
 
@@ -16576,18 +16412,49 @@ void main() {
     await page(LogicalKeyboardKey.arrowDown);
     expect(previewPosition.pixels, previewEnd);
     expect(diffPosition.pixels, diffEnd);
-    expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
 
     await page(LogicalKeyboardKey.arrowUp);
     expect(diffPosition.pixels, lessThan(diffEnd));
     expect(previewPosition.pixels, previewEnd);
+
+    // Paging never moved the commit selection underneath the diff.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
   });
 
   // ------------------------------------------------------------------ C3/H2
+  testWidgets('a closed preview opens with the diff, and its button toggles', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(app(_widthFixtureRepository(), controller));
+    await tester.pumpAndSettle();
+    expect(find.text('Commit & Diff'), findsNothing);
+
+    // ⌘D with the panel away opens it first: it is the diff's file list.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(find.byType(FullDiffWorkspace), findsOneWidget);
+    expect(find.text('Commit & Diff'), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('preview-full-diff')));
+    await tester.pumpAndSettle();
+    expect(find.byType(FullDiffWorkspace), findsOneWidget);
+  });
+
   testWidgets('the preview header carries the compact green Full Diff', (
     tester,
   ) async {
-    final opened = <String>[];
     await tester.pumpWidget(
       MaterialApp(
         home: TimelineScreen(
@@ -16595,7 +16462,6 @@ void main() {
             (_, _) async => [commit('1', 'first commit')],
           ),
           controller: controller,
-          onOpenFullDiff: (commit) => opened.add(commit.sha),
         ),
       ),
     );
@@ -16647,7 +16513,7 @@ void main() {
 
     await tester.tap(button);
     await tester.pumpAndSettle();
-    expect(opened, ['1']);
+    expect(find.byType(FullDiffWorkspace), findsOneWidget);
   });
 
   // ------------------------------------------------------------------ C5/C6
@@ -16845,7 +16711,6 @@ void main() {
       tester.view.resetDevicePixelRatio();
       tester.view.resetPhysicalSize();
     });
-    final opened = <String>[];
     await tester.pumpWidget(
       MaterialApp(
         home: TimelineScreen(
@@ -16864,7 +16729,6 @@ void main() {
             ],
           ),
           controller: controller,
-          onOpenFullDiff: (commit) => opened.add(commit.sha),
         ),
       ),
     );
@@ -16917,14 +16781,22 @@ void main() {
 
     await tester.tap(button);
     await tester.pumpAndSettle();
-    expect(opened, ['a']);
+    expect(find.byType(FullDiffWorkspace), findsOneWidget);
 
-    // Cmd+D does the same for the selected commit.
+    // Cmd+D drives the same mode: it closes what the button opened, and opens
+    // it again.
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
-    expect(opened, ['a', 'a']);
+    expect(find.byType(FullDiffWorkspace), findsNothing);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(find.byType(FullDiffWorkspace), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
 
     // The first date heading has no commit: the button dims and the shortcut
     // does nothing.
@@ -16945,7 +16817,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
-    expect(opened, ['a', 'a']);
+    expect(find.byType(FullDiffWorkspace), findsNothing);
   });
 
   // ------------------------------------------------------------------ D2
@@ -18380,11 +18252,11 @@ void main() {
 
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('preview-diff')), findsNothing);
+    expect(find.byType(FullDiffWorkspace), findsNothing);
 
     // Down walks the files, up walks back, and both ends clamp.
     await metaArrow(LogicalKeyboardKey.arrowDown);
-    final diff = find.byKey(const Key('preview-diff'));
+    final diff = find.byType(FullDiffWorkspace);
     expect(
       find.descendant(of: diff, matching: find.text('body of lib/two.dart')),
       findsOneWidget,
@@ -18417,6 +18289,8 @@ void main() {
       findsOneWidget,
     );
     // The commit selection never moved while walking files.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
 
     // Bare arrows still move the commit selection, with its own first file.
@@ -18626,8 +18500,7 @@ void main() {
     expect(controller.previewPlacement, PreviewPlacement.bottom);
     await tester.tap(find.byKey(const Key('toolbar-full-diff')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-commits-list')), findsNothing);
-    expect(find.byKey(const Key('changed-files-list')), findsOneWidget);
+    expect(find.byType(FullDiffWorkspace), findsOneWidget);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(
@@ -19668,3 +19541,18 @@ void _commitProfileTests() {
     expect(joined, contains('config --local user.email doortts@gmail.com'));
   });
 }
+
+/// One commit with one real file: enough for the workspace to draw a diff whose
+/// split can be dragged.
+FakeGitRepository _widthFixtureRepository() => FakeGitRepository(
+  (_, _) async => [commit('1', 'commit')],
+  files: (_, _) async => const [
+    GitFileChange(path: 'lib/a.dart', status: 'M', additions: 1, deletions: 1),
+  ],
+  diff: (_, _, _, _, _) async => const [
+    DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+    DiffLine(kind: DiffLineKind.delete, text: 'old', oldNumber: 1),
+    DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
+  ],
+  content: (_, _, _) async => Uint8List.fromList('new\n'.codeUnits),
+);
