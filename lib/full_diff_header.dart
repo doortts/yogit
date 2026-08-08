@@ -266,7 +266,12 @@ class GlobalDiffToolbar extends StatelessWidget {
       runSpacing: 6,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        const Text('diff 알고리즘', key: Key('diff-algorithm-label')),
+        const Text(
+          'diff 알고리즘',
+          key: Key('diff-algorithm-label'),
+          // 다른 헤더 라벨과 같은 13 — 안 주면 bodyMedium 14를 물려받는다.
+          style: TextStyle(color: Colors.white, fontSize: 13),
+        ),
         FullDiffShortcutHint(
           visible: showShortcutHints,
           label: shortcutLabel('⇧A'),
@@ -728,7 +733,19 @@ class _NavigationButton extends StatelessWidget {
         width: compact ? 22 : fullDiffControlHeight,
         height: fullDiffControlHeight,
       ),
-      visualDensity: VisualDensity.compact,
+      // Material 3 sizes from the style, not from `constraints`, and its 48px
+      // tap target would stand the row up taller than one control.
+      style: IconButton.styleFrom(
+        minimumSize: Size(
+          compact ? 22 : fullDiffControlHeight,
+          fullDiffControlHeight,
+        ),
+        maximumSize: Size(
+          compact ? 22 : fullDiffControlHeight,
+          fullDiffControlHeight,
+        ),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
     ),
   );
 }
