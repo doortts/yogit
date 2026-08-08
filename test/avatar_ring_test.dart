@@ -1,21 +1,23 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/avatars.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/timeline.dart';
-import 'package:yogit/timeline_theme.dart';
 import 'package:yogit/window_frame.dart';
 
 import 'app_test.dart' show FakeGitRepository, commit;
 
-/// Contract for the branch-coloured avatar (승인된 3안).
+/// Contract for the branch-coloured avatar.
 ///
-/// A commit's disc is its branch line all the way through: a ring at the rail's
-/// own weight, the same colour dimmed inside it, and the initials in that
-/// colour too. The dimmed fill is composited against the row it sits on rather
-/// than left translucent, so the rail running down the lane stops at the disc
-/// instead of showing through it. A photo sits inside the ring.
+/// A commit's disc is its branch line: a ring at the rail's own weight, and
+/// inside it the same colour at a slightly lower lightness — dark enough to
+/// tell the disc from the line running into it, light enough to stay the same
+/// branch. The fill is opaque, so the rail stops at the disc instead of
+/// showing through, and the initials take whichever of white or black reads
+/// better on it. A photo sits inside the ring.
 void main() {
   const ada = GitIdentity(name: 'Ada Lovelace', email: 'ada@example.com');
 
@@ -140,46 +142,55 @@ void main() {
 
     final disc = discOf(tester);
     expect((disc.border! as Border).top.color, branch);
-    expect(tester.widget<Text>(find.text('AA').first).style?.color, branch);
-    // Dimmed, but composited — never left translucent, or the lane's rail
-    // would run straight through the disc.
+    expect(disc.color, IdentityAvatar.fillFor(branch));
+    // Opaque, or the lane's rail would run straight through the disc.
     expect(disc.color!.a, 1.0);
-    expect(
-      disc.color,
-      Color.alphaBlend(
-        branch.withValues(alpha: IdentityAvatar.dimmedFillAlpha),
-        TimelineThemePalette.systemGraphite.background,
-      ),
-    );
   });
 
-  testWidgets('the fill takes the colour of the row under it', (tester) async {
-    const backdrop = Color(0xFF234D72);
-    final branch = AvatarService.branchColor(4);
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Center(
-          child: IdentityAvatar(
-            identity: ada,
-            discColor: branch,
-            backdrop: backdrop,
-          ),
-        ),
-      ),
-    );
-    await tester.pump();
+  test('the fill sits just under the line it belongs to', () {
+    for (final branch in AvatarService.defaultColors) {
+      final fill = IdentityAvatar.fillFor(branch);
+      final line = HSLColor.fromColor(branch);
+      final inside = HSLColor.fromColor(fill);
 
-    // A selected row is a different backdrop, so the same dimmed branch colour
-    // resolves to a different opaque fill — and still hides the rail.
-    final disc = discOf(tester);
-    expect(disc.color!.a, 1.0);
-    expect(
-      disc.color,
-      Color.alphaBlend(
-        branch.withValues(alpha: IdentityAvatar.dimmedFillAlpha),
-        backdrop,
-      ),
-    );
+      expect(fill.a, 1.0, reason: '$branch');
+      // Same branch, told by hue and saturation surviving the darkening. The
+      // tolerance is the 8-bit round trip through Color, not slack.
+      expect(inside.hue, closeTo(line.hue, 0.5), reason: '\$branch');
+      expect(
+        inside.saturation,
+        closeTo(line.saturation, 0.02),
+        reason: '\$branch',
+      );
+      // Lower, but only a little: a disc that goes near-black stops reading as
+      // the branch, and one that matches the line stops reading as a disc.
+      expect(inside.lightness, lessThan(line.lightness), reason: '$branch');
+      expect(
+        inside.lightness / line.lightness,
+        inInclusiveRange(0.6, 0.95),
+        reason: '$branch',
+      );
+    }
+  });
+
+  test('the initials take whichever of white or black reads better', () {
+    for (final branch in AvatarService.defaultColors) {
+      final ink = AvatarService.onColor(IdentityAvatar.fillFor(branch));
+      expect(
+        ink,
+        anyOf(const Color(0xFFFFFFFF), const Color(0xFF15171E)),
+        reason: '$branch',
+      );
+      // Whatever it picks has to be the more readable of the two.
+      final fill = IdentityAvatar.fillFor(branch);
+      final white = _contrast(const Color(0xFFFFFFFF), fill);
+      final black = _contrast(const Color(0xFF15171E), fill);
+      expect(
+        _contrast(ink, fill),
+        closeTo(math.max(white, black), 0.001),
+        reason: '$branch: white $white, black $black',
+      );
+    }
   });
 
   testWidgets('a stacked author and committer share one branch ring', (
@@ -221,4 +232,11 @@ void main() {
       expect((discOf(tester, at: at).border! as Border).top.color, branch);
     }
   });
+}
+
+/// WCAG relative contrast between two opaque colours.
+double _contrast(Color ink, Color background) {
+  final a = ink.computeLuminance() + 0.05;
+  final b = background.computeLuminance() + 0.05;
+  return a > b ? a / b : b / a;
 }

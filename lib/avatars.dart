@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 
 import 'git.dart';
 import 'github_api.dart';
-import 'timeline_theme.dart';
 
 bool _isGravatarHost(String host) {
   final normalized = host.toLowerCase();
@@ -276,13 +275,25 @@ class AvatarService {
     return branchColor(hash);
   }
 
-  /// Ink that stays readable on a filled [background] disc. The crossover sits
-  /// where white and near-black swap contrast, not at mid grey, so the brighter
-  /// palette colors get dark letters.
+  static const _lightInk = Color(0xFFFFFFFF);
+  static const _darkInk = Color(0xFF15171E);
+
+  /// Ink that stays readable on a filled [background] disc: whichever of the
+  /// two actually contrasts more. A luminance threshold would be the same
+  /// answer only against pure black, and the dark ink is not pure — near the
+  /// crossover, a mid-bright fill like the dimmed orange reads better in white
+  /// than the threshold would have guessed.
   static Color onColor(Color background) =>
-      background.computeLuminance() > 0.179
-      ? const Color(0xFF15171E)
-      : const Color(0xFFFFFFFF);
+      _contrast(_lightInk, background) >= _contrast(_darkInk, background)
+      ? _lightInk
+      : _darkInk;
+
+  /// WCAG relative contrast, the lighter of the pair over the darker.
+  static double _contrast(Color ink, Color background) {
+    final a = ink.computeLuminance() + 0.05;
+    final b = background.computeLuminance() + 0.05;
+    return a > b ? a / b : b / a;
+  }
 }
 
 class _PermitPool {
@@ -339,7 +350,6 @@ class IdentityAvatar extends StatelessWidget {
     this.remoteAvatar,
     this.size = 22,
     this.discColor,
-    this.backdrop,
     this.fontFamily,
     this.fontScale = 1,
     super.key,
@@ -360,36 +370,38 @@ class IdentityAvatar extends StatelessWidget {
   /// where there is no branch to name and the disc goes unringed.
   final Color? discColor;
 
-  /// The background of the row this disc sits on, which the dimmed fill is
-  /// composited against. Left translucent, the fill would let the lane's rail
-  /// run straight through the face; blending it here keeps the look and hides
-  /// the rail. Defaults to the default theme's row color.
-  final Color? backdrop;
-
   /// How far the branch color is dimmed inside the ring. The initials sit on
   /// this fill in the undimmed branch color, so the two share a hue and the
   /// alpha barely moves their contrast — over the row background (`#1C1C1E`) and
   /// the selected row (`#234D72`) the worst palette color reads 1.87 at 0.18 and
   /// 1.70 at 0.40. What the alpha does decide is whether the disc reads as
   /// filled, which is why it is the mockup's 0.22 and not lower.
-  static const dimmedFillAlpha = 0.22;
+  /// How far under its line a disc sits. Small on purpose: darker than the
+  /// rail so the two read apart where the line meets the disc, and nowhere
+  /// near black, which would cost the disc its branch.
+  static const fillLightnessScale = 0.72;
+
+  /// The disc's interior for a commit on [branch]: the same hue and
+  /// saturation, a little darker, and opaque — a translucent fill would let
+  /// the lane's rail run through the face.
+  static Color fillFor(Color branch) {
+    final line = HSLColor.fromColor(branch);
+    return line.withLightness(line.lightness * fillLightnessScale).toColor();
+  }
 
   @override
   Widget build(BuildContext context) {
     final branch = discColor;
-    // A row's disc is its branch line the whole way through: a ring at the
-    // rail's own weight, the same color dimmed inside it, initials in that
-    // color. Off the graph — the settings preview, the blame gutter — there is
-    // no branch to name, so the disc keeps the opaque identity fill and its
-    // contrasting ink.
+    // A row's disc is its branch line: a ring at the rail's own weight and the
+    // same colour a little darker inside it. Off the graph — the settings
+    // preview, the blame gutter — there is no branch to name, so the disc
+    // keeps the identity fill. Either way the ink is whichever of white or
+    // black reads better on what it sits on.
     final ring = branch == null ? 0.0 : AvatarService.railWidth;
     final fill = branch == null
         ? AvatarService.color(identity)
-        : Color.alphaBlend(
-            branch.withValues(alpha: dimmedFillAlpha),
-            backdrop ?? TimelineThemePalette.systemGraphite.background,
-          );
-    final ink = branch ?? AvatarService.onColor(fill);
+        : fillFor(branch);
+    final ink = AvatarService.onColor(fill);
     final inner = size - ring * 2;
     final avatar = _safeAvatar(remoteAvatar);
     return Container(
@@ -457,7 +469,6 @@ class CommitAvatarStack extends StatelessWidget {
     this.stacked = true,
     this.committerOnly = false,
     this.discColor,
-    this.backdrop,
     this.fontFamily,
     this.fontScale = 1,
     super.key,
@@ -473,10 +484,8 @@ class CommitAvatarStack extends StatelessWidget {
   final bool stacked;
   final bool committerOnly;
 
-  /// Passed straight through to both discs: a row's avatars wear its branch,
-  /// dimmed against the row's own background.
+  /// Passed straight through to both discs: a row's avatars wear its branch.
   final Color? discColor;
-  final Color? backdrop;
 
   /// The initials' face and size, passed through to both discs.
   final String? fontFamily;
@@ -506,7 +515,6 @@ class CommitAvatarStack extends StatelessWidget {
         remoteAvatar: avatars?.committer,
         size: size,
         discColor: discColor,
-        backdrop: backdrop,
         fontFamily: fontFamily,
         fontScale: fontScale,
       );
@@ -527,7 +535,6 @@ class CommitAvatarStack extends StatelessWidget {
                 remoteAvatar: avatars?.committer,
                 size: size,
                 discColor: discColor,
-                backdrop: backdrop,
                 fontFamily: fontFamily,
                 fontScale: fontScale,
               ),
@@ -540,7 +547,6 @@ class CommitAvatarStack extends StatelessWidget {
               remoteAvatar: avatars?.author,
               size: size,
               discColor: discColor,
-              backdrop: backdrop,
               fontFamily: fontFamily,
               fontScale: fontScale,
             ),

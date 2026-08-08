@@ -9829,11 +9829,14 @@ void main() {
     final border = ringed.border! as Border;
     expect(border.top.color, branch);
     expect(border.top.width, CommitGraphPainter.railWidth);
-    // Dimmed inside, but composited against the row rather than translucent:
-    // a see-through disc would let the lane's rail run through the face.
+    // The same colour a little darker, opaque so the lane's rail stops at the
+    // disc, with ink picked for readability against it.
+    expect(ringed.color, IdentityAvatar.fillFor(branch));
     expect(ringed.color!.a, 1.0);
-    expect(ringed.color, isNot(AvatarService.color(ada)));
-    expect(tester.widget<Text>(find.text('AL')).style?.color, branch);
+    expect(
+      tester.widget<Text>(find.text('AL')).style?.color,
+      AvatarService.onColor(IdentityAvatar.fillFor(branch)),
+    );
 
     expect(AvatarService.onColor(const Color(0xFFD29922)), isNot(Colors.white));
     expect(AvatarService.onColor(const Color(0xFF1D2029)), Colors.white);
