@@ -1382,12 +1382,13 @@ void main() {
     expect(tester.widget<Text>(find.text('+')).style?.fontSize, 12);
     final spans = (richText.text as TextSpan).children!.cast<TextSpan>();
     expect(
-      spans.any(
-        (span) =>
-            span.style?.backgroundColor == fullDiffAddedWord &&
-            span.style?.decoration == TextDecoration.underline,
-      ),
+      spans.any((span) => span.style?.backgroundColor == fullDiffAddedWord),
       isTrue,
+    );
+    expect(
+      spans.every((span) => span.style?.decoration != TextDecoration.underline),
+      isTrue,
+      reason: '한글 밑줄이 음절마다 끊겨 보여서 틴트만 남겼다',
     );
   });
 

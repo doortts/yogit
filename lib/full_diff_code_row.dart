@@ -645,12 +645,8 @@ TextSpan _sourceSpan(
   );
   var style = fullDiffSourceTextStyle;
   if (syntax != null) style = style.merge(syntax.style);
-  if (changed) {
-    style = style.copyWith(
-      backgroundColor: wordColor,
-      decoration: TextDecoration.underline,
-      decorationColor: fullDiffAccent,
-    );
-  }
+  // The tint alone marks the changed words. An underline under them too broke
+  // Hangul into per-syllable dashes and read as noise.
+  if (changed) style = style.copyWith(backgroundColor: wordColor);
   return TextSpan(text: source.substring(start, end), style: style);
 }
