@@ -6,7 +6,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:yogit/diff_screen.dart';
+import 'package:yogit/full_diff_workspace.dart';
 import 'package:yogit/full_diff_controller.dart';
 import 'package:yogit/full_diff_header.dart';
 import 'package:yogit/full_diff_minimap.dart';
@@ -560,16 +560,17 @@ class FullDiffQaProductShell extends StatelessWidget {
     key: const Key('full-diff-product-shell'),
     child: detailOnly
         ? FullDiffQaDetail(controller: controller)
-        : DiffScreen(
-            repository: controller.repository,
-            commits: controller.state.nearbyCommits,
-            initialIndex: 0,
-            controller: controller,
-            columnWidths: finalPolishGeometry
-                ? const FullDiffColumnWidths(files: 278)
-                : _qaColumnWidths(viewportWidth),
-            onColumnWidthsChanged: onColumnWidthsChanged,
-            showRemoteAvatars: showRemoteAvatars,
+        : Scaffold(
+            backgroundColor: fullDiffCanvas,
+            body: FullDiffWorkspace(
+              controller: controller,
+              onBack: () {},
+              columnWidths: finalPolishGeometry
+                  ? const FullDiffColumnWidths()
+                  : _qaColumnWidths(viewportWidth),
+              onColumnWidthsChanged: onColumnWidthsChanged,
+              showRemoteAvatars: showRemoteAvatars,
+            ),
           ),
   );
 }

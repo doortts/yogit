@@ -4,7 +4,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:yogit/vim_navigation.dart';
 
 import 'avatars.dart';
 import 'external_editor.dart';
@@ -15,19 +14,17 @@ import 'full_diff_controller.dart';
 import 'full_diff_header.dart';
 import 'full_diff_minimap.dart';
 import 'full_diff_model.dart';
-import 'full_diff_resizable_pane.dart';
 import 'full_diff_side_by_side_view.dart';
 import 'full_diff_syntax.dart';
 import 'full_diff_theme.dart';
 import 'full_diff_unified_view.dart';
 import 'full_diff_unavailable_panel.dart';
-import 'full_history_view.dart';
-import 'full_history_workspace.dart';
 import 'git.dart';
 import 'monaco_editor_screen.dart';
 import 'page_scroll_shortcuts.dart';
 import 'settings.dart';
 import 'shortcut_modifier.dart';
+import 'typography.dart';
 
 class _ReturnToTimelineIntent extends Intent {
   const _ReturnToTimelineIntent();
@@ -81,8 +78,6 @@ class _StepPrimaryFileIntent extends Intent {
   final int delta;
 }
 
-enum _FullDiffNavigationPane { files, history, blame }
-
 @visibleForTesting
 class FullDiffScrollController extends ScrollController {
   FullDiffScrollController({super.onAttach});
@@ -93,30 +88,17 @@ class FullDiffScrollController extends ScrollController {
   bool get clientsReady => debugClientsAvailable && hasClients;
 }
 
-/// Focus wiring the workspace steers on behalf of a navigation pane it does not
-/// build itself: the pane lives beside the content but its arrow keys move the
-/// workspace's selection, and its rows dim while the history or blame list
-/// holds focus.
-typedef FullDiffNavigationPaneSlot = ({
-  FocusNode filesFocus,
-  FocusOnKeyEventCallback onFilesKey,
-  Listenable detailFocus,
-  FocusNode historyFocus,
-  FocusNode blameFocus,
-});
-
-/// The full-diff machinery — both option rows, the diff/blame/history content,
-/// the minimap and the keyboard — with no route, Scaffold or file list of its
-/// own, so any pane can hold it.
+/// The full-diff machinery — both option rows, the commit line, the
+/// diff/blame content, the minimap and the keyboard — with no route, Scaffold,
+/// file list or history list of its own, so any pane can hold it.
 ///
 /// The session belongs to whoever builds this: [controller] is never created or
-/// disposed here, only observed. [navigationPane] draws a list beside the
-/// content; leave it null and the content takes the whole width.
+/// disposed here, only observed. Whoever embeds it draws the navigation —
+/// the file list and the History pane both live outside.
 class FullDiffWorkspace extends StatefulWidget {
   const FullDiffWorkspace({
     required this.controller,
     required this.onBack,
-    this.navigationPane,
     this.columnWidths = const FullDiffColumnWidths(),
     this.onColumnWidthsChanged,
     this.onPreferencesChanged,
@@ -131,7 +113,6 @@ class FullDiffWorkspace extends StatefulWidget {
 
   final FullDiffSessionController controller;
   final VoidCallback onBack;
-  final Widget Function(FullDiffNavigationPaneSlot slot)? navigationPane;
   final FullDiffColumnWidths columnWidths;
   final ValueChanged<FullDiffColumnWidths>? onColumnWidthsChanged;
   final ValueChanged<FullDiffPreferences>? onPreferencesChanged;
@@ -153,11 +134,7 @@ class FullDiffWorkspace extends StatefulWidget {
 
 class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
   late final FullDiffScrollController _contentScroll;
-  final _historyScroll = ScrollController();
-  final _fileListFocus = FocusNode(debugLabel: 'full diff files');
-  final _historyListFocus = FocusNode(debugLabel: 'full diff history');
   final _blameListFocus = FocusNode(debugLabel: 'full diff blame');
-  late final Listenable _detailNavigationFocus;
   final _algorithmChooserKey = GlobalKey<FullDiffAlgorithmChooserState>();
   final _contentViewportKey = GlobalKey();
   final _fullFileScrollTargetKey = GlobalKey(
@@ -171,20 +148,13 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
   late ExternalEditorService _editorService;
   late FullDiffSessionState _observedState;
   late FullDiffPreferences _lastReportedPreferences;
-  late double _filesWidth;
-  late double _historyWidth;
   late double _sideBySideRatio;
-  _FullDiffNavigationPane _lastDiffHistoryNavigationPane =
-      _FullDiffNavigationPane.files;
-  _FullDiffNavigationPane _lastBlameNavigationPane =
-      _FullDiffNavigationPane.files;
   double? _lastResponsiveWidth;
 
   bool _effectScheduled = false;
   bool _scrollSyncScheduled = false;
   bool _programmaticAnchorScroll = false;
   bool _pendingScrollToTop = false;
-  bool _pendingHistoryScrollToTop = false;
   bool _pendingFullFileScrollToTop = false;
   String? _pendingAnchorId;
   DiffSourceTarget? _pendingFullFileScrollTarget;
@@ -205,26 +175,12 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
         loader: () => _controller.repository.loadCommitMessage(sha),
       );
 
-  FullDiffNavigationPaneSlot get _navigationPaneSlot => (
-    filesFocus: _fileListFocus,
-    onFilesKey: _handleFileListKey,
-    detailFocus: _detailNavigationFocus,
-    historyFocus: _historyListFocus,
-    blameFocus: _blameListFocus,
-  );
-
   @override
   void initState() {
     super.initState();
     _contentScroll = FullDiffScrollController(
       onAttach: (_) => _handleContentScrollAttached(),
     );
-    _detailNavigationFocus = Listenable.merge([
-      _historyListFocus,
-      _blameListFocus,
-    ]);
-    _filesWidth = widget.columnWidths.files;
-    _historyWidth = widget.columnWidths.history;
     _sideBySideRatio = widget.columnWidths.sideBySideRatio;
     _editorService =
         widget.editorService ??
@@ -234,9 +190,6 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
     _attachController(widget.controller);
     HardwareKeyboard.instance.addHandler(_handleHardwareKeyEvent);
     _contentScroll.addListener(_handleContentScrolled);
-    _fileListFocus.addListener(_handleFileListFocusChanged);
-    _historyListFocus.addListener(_handleHistoryListFocusChanged);
-    _blameListFocus.addListener(_handleBlameListFocusChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _restoreNavigationFocus();
     });
@@ -255,8 +208,6 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
   void didUpdateWidget(covariant FullDiffWorkspace oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.columnWidths != oldWidget.columnWidths) {
-      _filesWidth = widget.columnWidths.files;
-      _historyWidth = widget.columnWidths.history;
       _sideBySideRatio = widget.columnWidths.sideBySideRatio;
     }
     final controllerChanged = !identical(
@@ -282,7 +233,6 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
     oldWidget.controller.removeListener(_handleControllerChanged);
     _attachController(widget.controller);
     _pendingScrollToTop = true;
-    _pendingHistoryScrollToTop = true;
     _pendingAnchorId = null;
     _clearPendingFullFileScroll();
     _queueAttachedAnchorScroll();
@@ -299,12 +249,6 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
     _contentScroll
       ..removeListener(_handleContentScrolled)
       ..dispose();
-    _historyScroll.dispose();
-    _fileListFocus.removeListener(_handleFileListFocusChanged);
-    _historyListFocus.removeListener(_handleHistoryListFocusChanged);
-    _blameListFocus.removeListener(_handleBlameListFocusChanged);
-    _fileListFocus.dispose();
-    _historyListFocus.dispose();
     _blameListFocus.dispose();
     super.dispose();
   }
@@ -388,15 +332,12 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted ||
             !_controller.state.blame.loading ||
-            _lastBlameNavigationPane != _FullDiffNavigationPane.blame ||
             !_blameListFocus.hasFocus) {
           return;
         }
         _blameListFocus.unfocus();
         scheduleMicrotask(() {
-          if (mounted &&
-              _controller.state.blame.loading &&
-              _lastBlameNavigationPane == _FullDiffNavigationPane.blame) {
+          if (mounted && _controller.state.blame.loading) {
             _blameListFocus.requestFocus();
           }
         });
@@ -404,9 +345,6 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
     }
     if (blameFileBecameReady) {
       _restoreNavigationFocus();
-    }
-    if (previous.historyContext != next.historyContext) {
-      _pendingHistoryScrollToTop = true;
     }
     if (movedContext) {
       _invalidateEditorRequest();
@@ -444,7 +382,6 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
       _pendingAnchorDirection = nextIndex.compareTo(previousIndex);
     }
     if (_pendingScrollToTop ||
-        _pendingHistoryScrollToTop ||
         _pendingFullFileScrollTarget != null ||
         _pendingAnchorId != null) {
       _scheduleScrollEffect();
@@ -525,10 +462,6 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
       if (_pendingScrollToTop && _contentScroll.clientsReady) {
         _contentScroll.jumpTo(_contentScroll.position.minScrollExtent);
         _pendingScrollToTop = false;
-      }
-      if (_pendingHistoryScrollToTop && _historyScroll.hasClients) {
-        _historyScroll.jumpTo(_historyScroll.position.minScrollExtent);
-        _pendingHistoryScrollToTop = false;
       }
 
       if (sourceTarget != null) {
@@ -771,74 +704,14 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
       state.file.data?.kind == FileContentKind.utf8 &&
       (_blameListFocus.context?.mounted ?? false);
 
-  void _handleFileListFocusChanged() {
-    if (!_fileListFocus.hasFocus) return;
-    switch (_controller.state.view) {
-      case FullDiffView.diff:
-        _lastDiffHistoryNavigationPane = _FullDiffNavigationPane.files;
-      case FullDiffView.history:
-        if (_historyListFocus.context?.mounted ?? false) {
-          _lastDiffHistoryNavigationPane = _FullDiffNavigationPane.files;
-        }
-      case FullDiffView.blame:
-        if (_blameDetailConnected(_controller.state)) {
-          _lastBlameNavigationPane = _FullDiffNavigationPane.files;
-        }
-    }
-  }
-
-  void _handleHistoryListFocusChanged() {
-    if (_historyListFocus.hasFocus &&
-        (_fileListFocus.context?.mounted ?? false)) {
-      _lastDiffHistoryNavigationPane = _FullDiffNavigationPane.history;
-    }
-  }
-
-  void _handleBlameListFocusChanged() {
-    if (_blameListFocus.hasFocus &&
-        (_fileListFocus.context?.mounted ?? false)) {
-      _lastBlameNavigationPane = _FullDiffNavigationPane.blame;
-    }
-  }
-
-  FocusNode? _navigationTarget({
-    required _FullDiffNavigationPane remembered,
-    required _FullDiffNavigationPane detailPane,
-    required FocusNode detailFocus,
-    required bool detailConnected,
-    required bool filesConnected,
-  }) {
-    if (remembered == detailPane && detailConnected) return detailFocus;
-    if (filesConnected) return _fileListFocus;
-    return detailConnected ? detailFocus : null;
-  }
-
+  /// The blame list is the only list the workspace still owns, so it is the
+  /// only place the keyboard is handed back to.
   void _restoreNavigationFocus() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _controller.state.focusMode) return;
-      final historyConnected =
-          _controller.state.view == FullDiffView.history &&
-          (_historyListFocus.context?.mounted ?? false);
-      final blameConnected = _blameDetailConnected(_controller.state);
-      final filesConnected = _fileListFocus.context?.mounted ?? false;
-      final target = switch (_controller.state.view) {
-        FullDiffView.history => _navigationTarget(
-          remembered: _lastDiffHistoryNavigationPane,
-          detailPane: _FullDiffNavigationPane.history,
-          detailFocus: _historyListFocus,
-          detailConnected: historyConnected,
-          filesConnected: filesConnected,
-        ),
-        FullDiffView.blame => _navigationTarget(
-          remembered: _lastBlameNavigationPane,
-          detailPane: _FullDiffNavigationPane.blame,
-          detailFocus: _blameListFocus,
-          detailConnected: blameConnected,
-          filesConnected: filesConnected,
-        ),
-        FullDiffView.diff => filesConnected ? _fileListFocus : null,
-      };
-      target?.requestFocus();
+      if (_blameDetailConnected(_controller.state)) {
+        _blameListFocus.requestFocus();
+      }
     });
   }
 
@@ -854,9 +727,6 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
 
   void _selectPrimaryView(FullDiffView view) {
     _controller.setPrimaryView(view);
-    if (_controller.state.view == FullDiffView.diff) {
-      _lastDiffHistoryNavigationPane = _FullDiffNavigationPane.files;
-    }
     _restoreNavigationFocus();
   }
 
@@ -867,56 +737,7 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
 
   void _selectHistory(bool selected) {
     _controller.setHistorySelected(selected);
-    if (!selected) {
-      _lastDiffHistoryNavigationPane = _FullDiffNavigationPane.files;
-    }
     _restoreNavigationFocus();
-  }
-
-  KeyEventResult _handleFileListKey(FocusNode _, KeyEvent event) {
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
-      return KeyEventResult.ignored;
-    }
-    final keyboard = HardwareKeyboard.instance;
-    final key = normalizeNavigationKey(
-      event.logicalKey,
-      hasModifier:
-          keyboard.isMetaPressed ||
-          keyboard.isAltPressed ||
-          keyboard.isShiftPressed ||
-          keyboard.isControlPressed,
-    );
-    if (keyboard.isMetaPressed || keyboard.isAltPressed) {
-      return KeyEventResult.ignored;
-    }
-    if (key == LogicalKeyboardKey.arrowUp) {
-      _stepFile(-1);
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.arrowDown) {
-      _stepFile(1);
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.arrowRight &&
-        _controller.state.view == FullDiffView.history) {
-      final entries = _controller.state.history.data;
-      if (_controller.state.selectedHistoryEntry == null &&
-          entries != null &&
-          entries.isNotEmpty) {
-        unawaited(_controller.selectHistoryEntry(entries.first));
-      }
-      _historyListFocus.requestFocus();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.arrowRight &&
-        _controller.state.view == FullDiffView.blame) {
-      _lastBlameNavigationPane = _FullDiffNavigationPane.blame;
-      if (_blameListFocus.context?.mounted ?? false) {
-        _blameListFocus.requestFocus();
-      }
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
   }
 
   bool _canOpenEditor(FullDiffSessionState state) {
@@ -1316,35 +1137,14 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
                       },
                       onWrapLinesChanged: _controller.setWrapLines,
                     ),
+                    _commitLine(state),
                     Expanded(
                       child: LayoutBuilder(
                         builder: (context, constraints) {
                           _observeResponsiveWidth(constraints.maxWidth);
-                          final viewportWidth = MediaQuery.sizeOf(
-                            context,
-                          ).width;
-                          final pane = widget.navigationPane?.call(
-                            _navigationPaneSlot,
-                          );
-                          final showFiles =
-                              pane != null &&
-                              !state.focusMode &&
-                              viewportWidth > 480 &&
-                              (state.view != FullDiffView.history ||
-                                  constraints.maxWidth >=
-                                      FullDiffColumnWidths.minFiles +
-                                          FullDiffColumnWidths.minHistory +
-                                          320);
-                          return _ResponsiveDiffBody(
-                            filesWidth: _filesWidth,
-                            minimumContentWidth:
-                                state.view == FullDiffView.history
-                                ? FullDiffColumnWidths.minHistory + 320
-                                : 320,
-                            commitFiles: showFiles ? pane : null,
-                            content: _content(state, viewportWidth),
-                            onFilesResized: _resizeFiles,
-                            onResizeEnd: _saveColumnWidths,
+                          return _content(
+                            state,
+                            MediaQuery.sizeOf(context).width,
                           );
                         },
                       ),
@@ -1358,6 +1158,73 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
       );
     },
   );
+
+  /// Names the commit whose diff is showing — after a History pick, that is
+  /// the picked commit, not the one the timeline sits on.
+  Widget _commitLine(FullDiffSessionState state) {
+    final commit = state.selectedCommit;
+    final parent =
+        state.parent ?? (commit.parents.isEmpty ? null : commit.parents.first);
+    final compare = commit.isWorkingTree
+        ? 'WIP · 작업 트리'
+        : '${commit.shortSha} · ${commit.subject}';
+    return Container(
+      key: const Key('full-diff-commit-line'),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: const BoxDecoration(
+        color: fullDiffHeader,
+        border: Border(bottom: BorderSide(color: fullDiffDivider)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '${parent == null ? '—' : _shortSha(parent)} · '
+              '${parent == null ? '빈 트리' : '이전 상태'} ← $compare',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: technicalTextStyle.copyWith(
+                color: fullDiffMuted,
+                fontSize: 10.5,
+              ),
+            ),
+          ),
+          if (commit.parents.length > 1) _parentChooser(state, commit),
+        ],
+      ),
+    );
+  }
+
+  Widget _parentChooser(FullDiffSessionState state, GitCommit commit) =>
+      DropdownButton<String>(
+        key: const Key('merge-parent-chooser'),
+        value: state.parent,
+        isDense: true,
+        underline: const SizedBox.shrink(),
+        style: const TextStyle(color: fullDiffMuted, fontSize: 10.5),
+        items: [
+          for (var index = 0; index < commit.parents.length; index++)
+            DropdownMenuItem(
+              value: commit.parents[index],
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(text: 'Parent ${index + 1} · '),
+                    TextSpan(
+                      text: _shortSha(commit.parents[index]),
+                      style: technicalTextStyle,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+        onChanged: (parent) {
+          if (parent != null && parent != state.parent) {
+            unawaited(_controller.selectParent(parent));
+          }
+        },
+      );
 
   Widget _content(FullDiffSessionState state, double viewportWidth) =>
       ColoredBox(
@@ -1415,7 +1282,7 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
       switch (state.view) {
         FullDiffView.diff => _diffContent(state, viewportWidth),
         FullDiffView.blame => _blameContent(state),
-        FullDiffView.history => _historyContent(state),
+        FullDiffView.history => _historyDetailContent(state, viewportWidth),
       };
 
   Widget _diffContent(FullDiffSessionState state, double viewportWidth) {
@@ -1599,7 +1466,6 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
         avatarService: widget.avatarService,
         showRemoteAvatars: widget.showRemoteAvatars,
         focusNode: _blameListFocus,
-        onMoveToFiles: _fileListFocus.requestFocus,
         loadCommitMessage: _loadCommitMessage,
       );
     }
@@ -1617,37 +1483,7 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
       avatarService: widget.avatarService,
       showRemoteAvatars: widget.showRemoteAvatars,
       focusNode: _blameListFocus,
-      onMoveToFiles: _fileListFocus.requestFocus,
       loadCommitMessage: _loadCommitMessage,
-    );
-  }
-
-  Widget _historyContent(FullDiffSessionState state) {
-    final history = state.history.data;
-    if (history == null) {
-      return _resourceStatus(state.history, 'History를 읽는 중입니다');
-    }
-    return FullHistoryWorkspace(
-      historyWidth: _historyWidth,
-      onHistoryResized: _resizeHistory,
-      onHistoryResizeEnd: _saveColumnWidths,
-      showHistory: !state.focusMode,
-      history: FullHistoryView(
-        entries: history,
-        selected: state.selectedHistoryEntry,
-        onSelected: (entry) {
-          _historyListFocus.requestFocus();
-          unawaited(_controller.selectHistoryEntry(entry));
-        },
-        controller: _historyScroll,
-        focusNode: _historyListFocus,
-        onMoveToFiles: _fileListFocus.requestFocus,
-        loadCommitMessage: _loadCommitMessage,
-      ),
-      detail: LayoutBuilder(
-        builder: (context, constraints) =>
-            _historyDetailContent(state, constraints.maxWidth),
-      ),
     );
   }
 
@@ -1709,24 +1545,6 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
     );
   }
 
-  void _resizeFiles(double width) {
-    setState(() {
-      _filesWidth = width.clamp(
-        FullDiffColumnWidths.minFiles,
-        FullDiffColumnWidths.maxFiles,
-      );
-    });
-  }
-
-  void _resizeHistory(double width) {
-    setState(() {
-      _historyWidth = width.clamp(
-        FullDiffColumnWidths.minHistory,
-        FullDiffColumnWidths.maxHistory,
-      );
-    });
-  }
-
   void _resizeSideBySide(double ratio) {
     setState(() {
       _sideBySideRatio = ratio.clamp(
@@ -1738,62 +1556,11 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
 
   void _saveColumnWidths() => widget.onColumnWidthsChanged?.call(
     FullDiffColumnWidths(
-      history: _historyWidth,
-      files: _filesWidth,
+      history: widget.columnWidths.history,
+      files: widget.columnWidths.files,
       sideBySideRatio: _sideBySideRatio,
     ),
   );
 }
 
-class _ResponsiveDiffBody extends StatelessWidget {
-  const _ResponsiveDiffBody({
-    required this.filesWidth,
-    required this.minimumContentWidth,
-    required this.commitFiles,
-    required this.content,
-    required this.onFilesResized,
-    required this.onResizeEnd,
-  });
-
-  final double filesWidth;
-  final double minimumContentWidth;
-  final Widget? commitFiles;
-  final Widget content;
-  final ValueChanged<double> onFilesResized;
-  final VoidCallback onResizeEnd;
-
-  @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      const minFiles = FullDiffColumnWidths.minFiles;
-      final maxFiles = math
-          .max(minFiles, constraints.maxWidth - minimumContentWidth)
-          .clamp(minFiles, FullDiffColumnWidths.maxFiles)
-          .toDouble();
-      final effectiveFiles = filesWidth.clamp(minFiles, maxFiles);
-      return Row(
-        children: [
-          if (commitFiles case final files?)
-            KeyedSubtree(
-              key: const Key('details-files-column'),
-              child: FullDiffResizablePane(
-                width: effectiveFiles,
-                minWidth: minFiles,
-                maxWidth: maxFiles,
-                label: 'Files pane width',
-                resizerKey: const Key('details-files-column-resizer'),
-                dividerKey: const Key('files-detail-divider'),
-                onChanged: onFilesResized,
-                onChangeEnd: onResizeEnd,
-                child: KeyedSubtree(
-                  key: const Key('commit-files-pane'),
-                  child: files,
-                ),
-              ),
-            ),
-          Expanded(key: const Key('diff-column'), child: content),
-        ],
-      );
-    },
-  );
-}
+String _shortSha(String sha) => sha.length <= 7 ? sha : sha.substring(0, 7);

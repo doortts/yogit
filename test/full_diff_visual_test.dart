@@ -13,6 +13,7 @@ import 'package:yogit/full_diff_minimap.dart';
 import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/full_diff_side_by_side_view.dart';
 import 'package:yogit/full_diff_theme.dart';
+import 'package:yogit/full_history_view.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/settings.dart';
 
@@ -312,19 +313,6 @@ const qaCases = <QaCase>[
     algorithm: DiffAlgorithm.gitSetting,
     detailOnly: false,
   ),
-  (
-    name: '29-history-resizers',
-    size: Size(1280, 842),
-    view: FullDiffView.history,
-    layout: DiffLayout.sideBySide,
-    scope: DiffScope.hunks,
-    focus: false,
-    whitespace: false,
-    wrap: false,
-    hunk: 0,
-    algorithm: DiffAlgorithm.gitSetting,
-    detailOnly: false,
-  ),
 ];
 
 const followupCases = [
@@ -547,41 +535,6 @@ Future<void> prepareFunctionalCapture(
         greaterThan(0),
       );
       expect(tester.getTopLeft(coveredRow).dy, coveredRowTop);
-    case '29-history-resizers':
-      final filesPane = find.byKey(const Key('details-files-column'));
-      final historyPane = find.byKey(const Key('history-list-pane'));
-      final filesBefore = tester.getSize(filesPane).width;
-      final historyBefore = tester.getSize(historyPane).width;
-      await tester.drag(
-        find.byKey(const Key('details-files-column-resizer')),
-        const Offset(20, 0),
-      );
-      await tester.pump();
-      await tester.drag(
-        find.byKey(const Key('history-list-column-resizer')),
-        const Offset(24, 0),
-      );
-      await tester.pump();
-      expect(tester.getSize(filesPane).width, filesBefore + 20);
-      expect(tester.getSize(historyPane).width, historyBefore + 24);
-      expect(savedWidths()?.files, filesBefore + 20);
-      expect(savedWidths()?.history, historyBefore + 24);
-      final selectedSha = controller.state.selectedHistoryEntry!.commit.sha;
-      final nextRow = find.byKey(
-        Key('history-row-${qaHistoryRecords[1].commit.sha}'),
-      );
-      final nextRowTop = tester.getTopLeft(nextRow).dy;
-      final historyFocus = tester
-          .widget<Focus>(find.byKey(const Key('history-list-focus')))
-          .focusNode!;
-      historyFocus.requestFocus();
-      await tester.pump();
-      expect(historyFocus.hasPrimaryFocus, isTrue);
-      expect(
-        find.byKey(Key('history-commit-details-$selectedSha')),
-        findsOneWidget,
-      );
-      expect(tester.getTopLeft(nextRow).dy, nextRowTop);
     default:
       break;
   }
@@ -685,7 +638,6 @@ void main() {
       ),
     );
     expect(find.text('주변 커밋'), findsNothing);
-    expect(find.text('변경 파일'), findsOneWidget);
     final openEditorInk = find
         .ancestor(
           of: find.byKey(const Key('open-editor')),
@@ -788,48 +740,6 @@ void main() {
     expect(
       tester.getRect(find.byKey(const Key('full-diff-product-shell'))).left,
       16,
-    );
-  });
-
-  testWidgets('650px keeps the changed files title to exactly two lines', (
-    tester,
-  ) async {
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    final controller = await qaControllerFor();
-    addTearDown(controller.dispose);
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(650, 549);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: fullDiffQaTheme(),
-        home: FullDiffQaComparisonCanvas(
-          controller: controller,
-          surfaceSize: const Size(650, 549),
-        ),
-      ),
-    );
-    await tester.pump();
-
-    final title = find.text('변경 파일');
-    expect(tester.getSize(title).width, greaterThanOrEqualTo(24));
-    expect(tester.getSize(title).height, lessThanOrEqualTo(33));
-
-    final selectedFile = find.byKey(const Key('selected-file-src/drlua.pas'));
-    final path = find.descendant(
-      of: selectedFile,
-      matching: find.text('src/drlua.pas'),
-    );
-    final stats = find.descendant(
-      of: selectedFile,
-      matching: find.text('+12 −4 · 3.1 KB'),
-    );
-    expect(tester.getSize(path).width, greaterThan(70));
-    expect(
-      tester.getTopLeft(stats).dy,
-      greaterThan(tester.getBottomLeft(path).dy),
     );
   });
 
@@ -957,8 +867,7 @@ void main() {
     final focus = tester.getRect(find.text('탐색 패널'));
     final editor = tester.getRect(find.text('편집기로 열기'));
     expect(focus.right, lessThan(editor.left));
-    expect(find.byKey(const Key('commit-files-pane')), findsNothing);
-    expect(find.byKey(const Key('diff-column')), findsOneWidget);
+    expect(find.byKey(const Key('content-scrollable')), findsOneWidget);
   });
 
   for (final layout in DiffLayout.values) {
@@ -1069,8 +978,11 @@ void main() {
       tester.getRect(find.byKey(const Key('full-diff-product-shell'))),
       const Rect.fromLTWH(0, 0, 1070, 760),
     );
-    final filePane = tester.getRect(find.byKey(const Key('commit-files-pane')));
-    expect(filePane, const Rect.fromLTRB(0, 80, 278, 760));
+    // The header rows and the commit line stack above the diff body.
+    expect(
+      tester.getRect(find.byKey(const Key('full-diff-commit-line'))).top,
+      80,
+    );
   });
 
   testWidgets('final polish Blame rows use the approved 21px height', (
@@ -1228,9 +1140,15 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: fullDiffQaTheme(),
-        home: FullDiffQaComparisonCanvas(
-          controller: controller,
-          surfaceSize: const Size(1070, 842),
+        home: Scaffold(
+          body: SizedBox(
+            width: 280,
+            child: FullHistoryView(
+              entries: controller.state.history.data!,
+              selected: controller.state.history.data!.first,
+              onSelected: (_) {},
+            ),
+          ),
         ),
       ),
     );
@@ -1415,9 +1333,6 @@ void main() {
         await tester.tap(find.text('Diff'));
         await tester.pumpAndSettle();
         expect(controller.state.view, FullDiffView.history);
-        final historyRowFocus = focusQaHistoryRow(tester, 'c78b2ff');
-        await tester.pump();
-        expect(historyRowFocus.hasPrimaryFocus, isTrue);
         final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
         await mouse.addPointer();
         addTearDown(mouse.removePointer);
@@ -1425,10 +1340,6 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
         await tester.pump(const Duration(milliseconds: 100));
         expect(find.text('파일의 변경 이력을 보여줍니다'), findsOneWidget);
-        expect(
-          controller.state.selectedHistoryEntry?.commit.shortSha,
-          '65f4c80',
-        );
         expect(find.byType(HatchedDiffCell), findsWidgets);
       },
       target: find.byType(Overlay),

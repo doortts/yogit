@@ -14,11 +14,14 @@ import 'external_editor.dart';
 import 'full_diff_commit_message_cache.dart';
 import 'full_diff_controller.dart';
 import 'full_diff_model.dart';
+import 'full_diff_resizable_pane.dart';
 import 'full_diff_shortcut_hint.dart';
 import 'full_diff_side_by_side_view.dart';
 import 'full_diff_syntax.dart';
 import 'full_diff_unified_view.dart';
+import 'full_diff_theme.dart';
 import 'full_diff_workspace.dart';
+import 'full_history_view.dart';
 import 'fuzzy_match.dart';
 import 'git.dart';
 import 'monaco_editor_screen.dart';
@@ -41,6 +44,9 @@ const _renamed = Color(0xFFB6A0EA);
 
 /// The date group heading's box and label.
 const _dateGroup = Color(0xFF5AB0FF);
+
+/// Below this the diff has nothing left to show, so History steps aside.
+const _minDiffWidth = 320.0;
 
 /// A ref chip narrower than this is unreadable, so the extra chips hide instead.
 const _minChipWidth = 40.0;
@@ -1236,6 +1242,12 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   /// Non-null while the diff takes over the sidebar and timeline area.
   FullDiffSessionController? _fullDiffSession;
+
+  /// Mirrored from the session so opening History or 집중 모드 relays out the
+  /// panes without rebuilding them on every scroll notification.
+  var _fullDiffHistoryOpen = false;
+  var _fullDiffFocusMode = false;
+  late double _historyWidth = widget.fullDiffColumnWidths.history;
   FullDiffPreferences? _pendingFullDiffPreferences;
   FullDiffColumnWidths? _pendingFullDiffColumnWidths;
   var _fullDiffPersistenceFlushScheduled = false;
@@ -1583,6 +1595,10 @@ class _TimelineScreenState extends State<TimelineScreen>
       _previewWidth = widget.previewWidth;
       _previewHeight = widget.previewHeight;
     }
+    if (widget.fullDiffColumnWidths.history !=
+        oldWidget.fullDiffColumnWidths.history) {
+      _historyWidth = widget.fullDiffColumnWidths.history;
+    }
     if (widget.previewDiffLeftWidth != oldWidget.previewDiffLeftWidth ||
         widget.previewDiffRightWidth != oldWidget.previewDiffRightWidth ||
         widget.previewDiffBottomHeight != oldWidget.previewDiffBottomHeight) {
@@ -1652,7 +1668,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     _dropMergePreview();
     _dropRebasePreview();
     _fullDiffSession
-      ?..removeListener(_followFullDiffFile)
+      ?..removeListener(_followFullDiffSession)
       ..dispose();
     _clearPendingFullDiffPersistence();
     if (_ownsPreviewController) _previewController.dispose();
@@ -2733,6 +2749,16 @@ class _TimelineScreenState extends State<TimelineScreen>
             child: KeyedSubtree(key: _timelineKey, child: _timeline()),
           )
         : Expanded(child: _embeddedFullDiff(session));
+    // 집중 모드 leaves the diff alone on screen; the preview only hides, its
+    // placement setting is untouched.
+    final wantsHistory =
+        session != null && _fullDiffHistoryOpen && !_fullDiffFocusMode;
+    final historyWidth = wantsHistory
+        ? _historyWidth.clamp(
+            FullDiffColumnWidths.minHistory,
+            FullDiffColumnWidths.maxHistory,
+          )
+        : 0.0;
     if (placement == PreviewPlacement.bottom) {
       final timelineChromeHeight =
           _timelineHeaderHeight +
@@ -2746,6 +2772,17 @@ class _TimelineScreenState extends State<TimelineScreen>
         placement,
         math.max(0.0, constraints.maxHeight - extent),
       );
+      final history =
+          wantsHistory && constraints.maxWidth - historyWidth >= _minDiffWidth
+          ? _historyPane(session)
+          : null;
+      final previewWidth = math.max(0.0, constraints.maxWidth - historyWidth);
+      final preview = _animatedPreview(
+        axis: Axis.vertical,
+        extent: extent,
+        width: previewWidth,
+        height: extent,
+      );
       return Column(
         key: const Key('preview-layout-bottom'),
         children: [
@@ -2756,12 +2793,15 @@ class _TimelineScreenState extends State<TimelineScreen>
               width: constraints.maxWidth,
               child: _adjacentPreviewDiff(placement),
             ),
-          _animatedPreview(
-            axis: Axis.vertical,
-            extent: extent,
-            width: constraints.maxWidth,
-            height: extent,
-          ),
+          if (_fullDiffFocusMode)
+            const SizedBox.shrink()
+          else if (history == null)
+            preview
+          else
+            SizedBox(
+              height: extent,
+              child: Row(children: [preview, history]),
+            ),
         ],
       );
     }
@@ -2772,13 +2812,21 @@ class _TimelineScreenState extends State<TimelineScreen>
       MediaQuery.sizeOf(context).width * _previewMaxWidthFraction,
     );
     final extent = beside ? math.min(_previewWidth, maxPreviewWidth) : 0.0;
-    final preview = _animatedPreview(
-      axis: Axis.horizontal,
-      extent: extent,
-      width: extent,
-      height: constraints.maxHeight,
-      visible: beside,
-    );
+    // The diff keeps a working width: History yields before it is squeezed.
+    final history =
+        wantsHistory &&
+            constraints.maxWidth - extent - historyWidth >= _minDiffWidth
+        ? _historyPane(session)
+        : null;
+    final preview = _fullDiffFocusMode
+        ? null
+        : _animatedPreview(
+            axis: Axis.horizontal,
+            extent: extent,
+            width: extent,
+            height: constraints.maxHeight,
+            visible: beside,
+          );
     final diffExtent = _previewDiffExtent(
       placement,
       beside ? math.max(0.0, constraints.maxWidth - extent) : 0.0,
@@ -2791,8 +2839,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     return Row(
       key: Key(onLeft ? 'preview-layout-left' : 'preview-layout-right'),
       children: onLeft
-          ? [preview, if (_previewDiffOpen) diff, timeline]
-          : [timeline, if (_previewDiffOpen) diff, preview],
+          ? [?preview, ?history, if (_previewDiffOpen) diff, timeline]
+          : [timeline, if (_previewDiffOpen) diff, ?history, ?preview],
     );
   }
 
@@ -8917,10 +8965,13 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   Future<String> _previewMessageFor(GitCommit commit) =>
+      _commitMessageFor(commit.sha);
+
+  Future<String> _commitMessageFor(String sha) =>
       FullDiffCommitMessageCache.shared.getOrLoad(
         repositoryRoot: widget.repository.root,
-        sha: commit.sha,
-        loader: () => widget.repository.loadCommitMessage(commit.sha),
+        sha: sha,
+        loader: () => widget.repository.loadCommitMessage(sha),
       );
 
   /// Steps the open preview through the commit's files, clamped at both ends.
@@ -8959,10 +9010,12 @@ class _TimelineScreenState extends State<TimelineScreen>
     setState(() {
       _previewPaths[_previewKey(commit)] = path;
       _previewDiffOpen = adjacent;
-      // 파일 줄을 그냥 누르면 위에서부터, 근접 구역을 누르면 그 줄에서 시작한다.
-      _previewDiffLineTarget = line == null ? null : (path: path, line: line);
-      // 같은 구역을 다시 누르면 diff가 맨 위로 돌아가니 한 번 더 데려다줘야 한다.
-      if (line != null) _previewDiffLineRevealed = null;
+      if (adjacent) {
+        // 파일 줄을 그냥 누르면 위에서부터, 근접 구역을 누르면 그 줄에서 시작한다.
+        _previewDiffLineTarget = line == null ? null : (path: path, line: line);
+        // 같은 구역을 다시 누르면 diff가 맨 위로 돌아가니 한 번 더 데려다줘야 한다.
+        if (line != null) _previewDiffLineRevealed = null;
+      }
     });
     if (!adjacent) {
       if (_fullDiffOpen) {
@@ -8978,7 +9031,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       final outerOffset = _previewFilesScrollController.hasClients
           ? _previewFilesScrollController.offset
           : null;
-      if (_previewDiffScrollController.hasClients) {
+      if (adjacent && _previewDiffScrollController.hasClients) {
         _previewDiffScrollController.jumpTo(0);
       }
       if (outerOffset != null && _previewFilesScrollController.hasClients) {
@@ -10958,10 +11011,12 @@ class _TimelineScreenState extends State<TimelineScreen>
       initialIndex: math.max(0, _commits.indexOf(commit)),
       initialPreferences:
           _pendingFullDiffPreferences ?? widget.fullDiffPreferences,
-    )..addListener(_followFullDiffFile);
+    )..addListener(_followFullDiffSession);
     setState(() {
       _previewDiffOpen = false;
       _fullDiffSession = controller;
+      _fullDiffHistoryOpen = controller.state.historySelected;
+      _fullDiffFocusMode = controller.state.focusMode;
     });
     // The workspace carries its own shortcuts, so it needs the keyboard.
     _focusNode.unfocus();
@@ -10990,17 +11045,26 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   /// The preview list is the diff's navigation, so its highlight follows
   /// whatever the workspace's own keyboard selects — and scrolls after it.
-  void _followFullDiffFile() {
+  /// The History and 집중 모드 flags ride along: both change what the timeline
+  /// lays out beside the diff.
+  void _followFullDiffSession() {
     final controller = _fullDiffSession;
-    final commit = _selectedCommit;
-    final path = controller?.state.selectedFile?.path;
-    if (controller == null || commit == null || path == null || !mounted) {
-      return;
+    if (controller == null || !mounted) return;
+    final state = controller.state;
+    if (_fullDiffHistoryOpen != state.historySelected ||
+        _fullDiffFocusMode != state.focusMode) {
+      setState(() {
+        _fullDiffHistoryOpen = state.historySelected;
+        _fullDiffFocusMode = state.focusMode;
+      });
     }
+    final commit = _selectedCommit;
+    final path = state.selectedFile?.path;
+    if (commit == null || path == null) return;
     final key = _previewKey(commit);
     final previous = _previewPaths[key];
     if (previous == path) return;
-    final files = controller.state.files;
+    final files = state.files;
     final direction =
         files.indexWhere((file) => file.path == path) <
             files.indexWhere((file) => file.path == previous)
@@ -11017,9 +11081,135 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (controller == null) return;
     setState(() => _fullDiffSession = null);
     controller
-      ..removeListener(_followFullDiffFile)
+      ..removeListener(_followFullDiffSession)
       ..dispose();
     _focusNode.requestFocus();
+  }
+
+  /// History rides beside the preview, not inside the diff: the two panes
+  /// together are the navigation the diff mode reads from.
+  Widget _historyPane(FullDiffSessionController controller) => KeyedSubtree(
+    key: const Key('history-pane'),
+    child: FullDiffResizablePane(
+      width: _historyWidth,
+      minWidth: FullDiffColumnWidths.minHistory,
+      maxWidth: FullDiffColumnWidths.maxHistory,
+      label: 'History pane width',
+      resizerKey: const Key('history-pane-resizer'),
+      dividerKey: const Key('history-pane-divider'),
+      onChanged: (width) => setState(
+        () => _historyWidth = width.clamp(
+          FullDiffColumnWidths.minHistory,
+          FullDiffColumnWidths.maxHistory,
+        ),
+      ),
+      onChangeEnd: () {
+        // 설정이 아직 로딩 중이면 pending이 최신이다 — widget 값으로 되돌리면
+        // 같은 세션에서 바꾼 side-by-side 비율을 지워 버린다.
+        final base =
+            _pendingFullDiffColumnWidths ?? widget.fullDiffColumnWidths;
+        _forwardFullDiffColumnWidths(
+          FullDiffColumnWidths(
+            history: _historyWidth,
+            files: base.files,
+            sideBySideRatio: base.sideBySideRatio,
+          ),
+        );
+      },
+      child: AnimatedBuilder(
+        animation: controller,
+        builder: (context, _) {
+          final state = controller.state;
+          final entries = state.history.data;
+          return ColoredBox(
+            color: fullDiffHeader,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _historyPaneHeader(state, entries?.length ?? 0),
+                Expanded(
+                  child: entries == null
+                      ? Center(
+                          child: Text(
+                            state.history.error?.toString() ??
+                                'History를 읽는 중입니다',
+                            style: const TextStyle(
+                              color: fullDiffMuted,
+                              fontSize: 10,
+                            ),
+                          ),
+                        )
+                      : FullHistoryView(
+                          // A new file or commit is a new list: rebuilding it
+                          // under a fresh key parks it back at the top.
+                          key: ValueKey(state.historyContext),
+                          entries: entries,
+                          selected: state.selectedHistoryEntry,
+                          onSelected: (entry) =>
+                              _selectHistoryEntry(controller, entry),
+                          loadCommitMessage: _commitMessageFor,
+                        ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    ),
+  );
+
+  Widget _historyPaneHeader(FullDiffSessionState state, int count) {
+    final path = state.selectedFile?.path ?? '';
+    final name = path.isEmpty ? '' : path.split('/').last;
+    return Container(
+      key: const Key('history-pane-header'),
+      padding: const EdgeInsets.fromLTRB(11, 8, 11, 6),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: fullDiffDivider)),
+      ),
+      child: Row(
+        children: [
+          const Text(
+            'History',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '$name · $count',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
+              style: technicalTextStyle.copyWith(
+                color: fullDiffMuted,
+                fontSize: 10,
+                fontWeight: FontWeight.normal,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Picking an entry points all three at that commit: the diff reloads it, and
+  /// the timeline selection moves so the preview pane follows along. The move
+  /// goes first, so the session's own notifications land on the new commit.
+  void _selectHistoryEntry(
+    FullDiffSessionController controller,
+    FileHistoryEntry entry,
+  ) {
+    final index = _entries.indexWhere(
+      (candidate) =>
+          candidate.rowIndex >= 0 &&
+          candidate.row.commit.sha == entry.commit.sha,
+    );
+    if (index >= 0) _selectedIndex.value = index;
+    unawaited(controller.selectHistoryEntry(entry));
   }
 
   Widget _embeddedFullDiff(FullDiffSessionController controller) =>

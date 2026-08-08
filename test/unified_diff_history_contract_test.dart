@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -28,44 +26,43 @@ void main() {
   final newer = commit('1', 'first commit', parents: ['2']);
   final older = commit('2', 'second commit');
 
-  FakeGitRepository repository({List<GitCommit>? commits}) =>
-      FakeGitRepository(
-        (_, _) async => commits ?? [newer, older],
-        files: (_, _) async => const [
-          GitFileChange(
-            path: 'lib/a.dart',
-            status: 'M',
-            additions: 1,
-            deletions: 1,
-          ),
-          GitFileChange(
-            path: 'lib/b.dart',
-            status: 'M',
-            additions: 2,
-            deletions: 0,
-          ),
-        ],
-        diff: (_, _, _, _, _) async => const [
-          DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
-          DiffLine(kind: DiffLineKind.delete, text: 'old', oldNumber: 1),
-          DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
-        ],
-        content: (_, _, _) async => Uint8List.fromList('new\n'.codeUnits),
-        history: (_, file) async => [
-          GitFileHistoryRecord(
-            commit: newer,
-            path: file.path,
-            oldPath: null,
-            status: 'M',
-          ),
-          GitFileHistoryRecord(
-            commit: older,
-            path: file.path,
-            oldPath: null,
-            status: 'M',
-          ),
-        ],
-      );
+  FakeGitRepository repository({List<GitCommit>? commits}) => FakeGitRepository(
+    (_, _) async => commits ?? [newer, older],
+    files: (_, _) async => const [
+      GitFileChange(
+        path: 'lib/a.dart',
+        status: 'M',
+        additions: 1,
+        deletions: 1,
+      ),
+      GitFileChange(
+        path: 'lib/b.dart',
+        status: 'M',
+        additions: 2,
+        deletions: 0,
+      ),
+    ],
+    diff: (_, _, _, _, _) async => const [
+      DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+      DiffLine(kind: DiffLineKind.delete, text: 'old', oldNumber: 1),
+      DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
+    ],
+    content: (_, _, _) async => Uint8List.fromList('new\n'.codeUnits),
+    history: (_, file) async => [
+      GitFileHistoryRecord(
+        commit: newer,
+        path: file.path,
+        oldPath: null,
+        status: 'M',
+      ),
+      GitFileHistoryRecord(
+        commit: older,
+        path: file.path,
+        oldPath: null,
+        status: 'M',
+      ),
+    ],
+  );
 
   Future<void> pumpDiffMode(
     WidgetTester tester, {
@@ -137,9 +134,7 @@ void main() {
     );
   });
 
-  testWidgets('the history pane follows the placement mirrors', (
-    tester,
-  ) async {
+  testWidgets('the history pane follows the placement mirrors', (tester) async {
     await pumpDiffMode(tester);
     await toggleHistory(tester);
 
@@ -193,49 +188,50 @@ void main() {
     expect(find.byKey(const Key('preview-panel')), findsOneWidget);
   });
 
-  testWidgets('a history entry points diff, preview and timeline at its commit', (
-    tester,
-  ) async {
-    await pumpDiffMode(tester);
-    await toggleHistory(tester);
+  testWidgets(
+    'a history entry points diff, preview and timeline at its commit',
+    (tester) async {
+      await pumpDiffMode(tester);
+      await toggleHistory(tester);
 
-    await tester.tap(
-      find.descendant(
-        of: find.byKey(const Key('history-pane')),
-        matching: find.text('second commit'),
-      ),
-    );
-    await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const Key('history-pane')),
+          matching: find.text('second commit'),
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('full-diff-commit-line')),
-        matching: find.textContaining('second commit'),
-      ),
-      findsOneWidget,
-      reason: 'diff가 그 커밋의 이 파일을 보여준다',
-    );
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('preview-panel')),
-        matching: find.textContaining('second commit'),
-      ),
-      findsWidgets,
-      reason: '미리보기도 그 커밋으로 넘어간다',
-    );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('full-diff-commit-line')),
+          matching: find.textContaining('second commit'),
+        ),
+        findsOneWidget,
+        reason: 'diff가 그 커밋의 이 파일을 보여준다',
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('preview-panel')),
+          matching: find.textContaining('second commit'),
+        ),
+        findsWidgets,
+        reason: '미리보기도 그 커밋으로 넘어간다',
+      );
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('timeline-viewport')), findsOneWidget);
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('preview-panel')),
-        matching: find.textContaining('second commit'),
-      ),
-      findsWidgets,
-      reason: '복귀한 타임라인의 선택도 그 커밋이다',
-    );
-  });
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('timeline-viewport')), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('preview-panel')),
+          matching: find.textContaining('second commit'),
+        ),
+        findsWidgets,
+        reason: '복귀한 타임라인의 선택도 그 커밋이다',
+      );
+    },
+  );
 
   testWidgets('command-arrow file steps drive the preview highlight', (
     tester,

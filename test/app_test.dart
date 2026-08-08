@@ -9,8 +9,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/avatars.dart';
-import 'package:yogit/diff_screen.dart';
 import 'package:yogit/full_blame_view.dart';
+import 'package:yogit/external_editor.dart';
+import 'package:yogit/full_diff_commit_message_cache.dart';
 import 'package:yogit/full_diff_controller.dart';
 import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/full_diff_side_by_side_view.dart';
@@ -11350,7 +11351,7 @@ void main() {
     );
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: repository,
           commits: await repository.loader(0, 3),
           initialIndex: 0,
@@ -11362,12 +11363,6 @@ void main() {
     expect(find.byKey(const Key('nearby-column')), findsNothing);
     expect(find.byKey(const Key('nearby-commits-list')), findsNothing);
     expect(find.byKey(const Key('nearby-column-resizer')), findsNothing);
-    expect(
-      tester.getSize(find.byKey(const Key('details-files-column'))).width,
-      290,
-    );
-    expect(find.byKey(const Key('nearby-commits-list')), findsNothing);
-    expect(find.byKey(const Key('changed-files-list')), findsOneWidget);
     expect(find.byKey(const Key('unified-list')), findsOneWidget);
     expect(find.textContaining('change 1 of 1'), findsOneWidget);
     expect(find.text('1 / 1'), findsWidgets);
@@ -11383,10 +11378,12 @@ void main() {
       findsOneWidget,
     );
     expect(
-      tester.getTopLeft(find.byKey(const Key('changed-files-list'))).dx,
-      lessThan(tester.getTopLeft(find.byKey(const Key('unified-list'))).dx),
+      find.descendant(
+        of: find.byKey(const Key('full-diff-commit-line')),
+        matching: find.byKey(const Key('merge-parent-chooser')),
+      ),
+      findsOneWidget,
     );
-    expect(find.byKey(const Key('merge-parent-chooser')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('merge-parent-chooser')));
     await tester.pumpAndSettle();
@@ -11394,9 +11391,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(calls.last.parent, 'feature');
 
-    await tester.tap(find.text('lib/b.dart'));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('selected-file-lib/b.dart')), findsOneWidget);
+    Finder openFile(String path) => find.descendant(
+      of: find.byKey(const Key('file-path-chip')),
+      matching: find.text(path),
+    );
+    expect(openFile('lib/b.dart'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('diff-algorithm')));
     await tester.pumpAndSettle();
@@ -11415,7 +11418,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.byKey(const Key('selected-file-lib/b.dart')), findsOneWidget);
+    expect(openFile('lib/b.dart'), findsOneWidget);
 
     histogram.complete([
       const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
@@ -11435,228 +11438,6 @@ void main() {
       ),
       findsOneWidget,
     );
-  });
-
-  testWidgets('full diff starts with saved column widths', (tester) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1200, 800);
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    final repository = FakeGitRepository(
-      (_, _) async => [commit('1', 'commit')],
-      files: (_, _) async => const [],
-    );
-    await tester.pumpWidget(
-      MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: [commit('1', 'commit')],
-          initialIndex: 0,
-          columnWidths: const FullDiffColumnWidths(history: 240, files: 330),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const Key('nearby-column')), findsNothing);
-    expect(
-      tester.getSize(find.byKey(const Key('details-files-column'))).width,
-      330,
-    );
-  });
-
-  testWidgets('full diff restores and saves exact minimum column widths', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1200, 800);
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    final repository = FakeGitRepository(
-      (_, _) async => [commit('1', 'commit')],
-      files: (_, _) async => const [],
-    );
-    final restored = AppSettings.fromJson({
-      'fullDiffColumnWidths': {'commits': 126, 'files': 158},
-    }).fullDiffColumnWidths;
-    FullDiffColumnWidths? saved;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: [commit('1', 'commit')],
-          initialIndex: 0,
-          columnWidths: restored,
-          onColumnWidthsChanged: (value) => saved = value,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const Key('nearby-column')), findsNothing);
-    expect(
-      tester.getSize(find.byKey(const Key('details-files-column'))).width,
-      158,
-    );
-
-    await tester.drag(
-      find.byKey(const Key('details-files-column-resizer')),
-      const Offset(-80, 0),
-    );
-    await tester.pumpAndSettle();
-
-    expect(saved, const FullDiffColumnWidths(history: 180, files: 158));
-  });
-
-  testWidgets('focus mode hides navigation and restores saved widths', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1200, 800);
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    final repository = FakeGitRepository(
-      (_, _) async => [commit('1', 'commit')],
-      files: (_, _) async => const [],
-    );
-    FullDiffColumnWidths? saved;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: [commit('1', 'commit')],
-          initialIndex: 0,
-          columnWidths: const FullDiffColumnWidths(history: 240, files: 330),
-          onColumnWidthsChanged: (value) => saved = value,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const Key('nearby-column')), findsNothing);
-    await tester.tap(find.byKey(const Key('focus-mode')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-column')), findsNothing);
-    expect(find.byKey(const Key('details-files-column')), findsNothing);
-    expect(tester.getSize(find.byKey(const Key('diff-column'))).width, 1200);
-    expect(saved, isNull);
-
-    await tester.tap(find.byKey(const Key('focus-mode')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-column')), findsNothing);
-    expect(
-      tester.getSize(find.byKey(const Key('details-files-column'))).width,
-      330,
-    );
-    expect(saved, isNull);
-  });
-
-  testWidgets(
-    'full diff resizes files and preserves the stored History width',
-    (tester) async {
-      tester.view.devicePixelRatio = 1;
-      tester.view.physicalSize = const Size(1200, 800);
-      addTearDown(() {
-        tester.view.resetDevicePixelRatio();
-        tester.view.resetPhysicalSize();
-      });
-      final repository = FakeGitRepository(
-        (_, _) async => [commit('1', 'commit')],
-        files: (_, _) async => const [],
-      );
-      FullDiffColumnWidths? saved;
-      await tester.pumpWidget(
-        MaterialApp(
-          home: DiffScreen(
-            repository: repository,
-            commits: [commit('1', 'commit')],
-            initialIndex: 0,
-            onColumnWidthsChanged: (value) => saved = value,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.drag(
-        find.byKey(const Key('details-files-column-resizer')),
-        const Offset(40, 0),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        tester.getSize(find.byKey(const Key('details-files-column'))).width,
-        330,
-      );
-      expect(saved, const FullDiffColumnWidths(history: 280, files: 330));
-    },
-  );
-
-  testWidgets('narrow full diff uses exact pane thresholds without saving', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1200, 800);
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    final repository = FakeGitRepository(
-      (_, _) async => [commit('1', 'commit')],
-      files: (_, _) async => const [],
-    );
-    FullDiffColumnWidths? saved;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: [commit('1', 'commit')],
-          initialIndex: 0,
-          columnWidths: const FullDiffColumnWidths(history: 240, files: 330),
-          onColumnWidthsChanged: (value) => saved = value,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    tester.view.physicalSize = const Size(1070, 800);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-commits-pane')), findsNothing);
-    expect(find.byKey(const Key('nearby-commits-list')), findsNothing);
-    expect(find.byKey(const Key('nearby-column-resizer')), findsNothing);
-    expect(find.byKey(const Key('commit-files-pane')), findsOneWidget);
-    expect(saved, isNull);
-
-    tester.view.physicalSize = const Size(650, 800);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-commits-pane')), findsNothing);
-    expect(find.byKey(const Key('commit-files-pane')), findsOneWidget);
-    expect(saved, isNull);
-
-    tester.view.physicalSize = const Size(481, 800);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-commits-pane')), findsNothing);
-    expect(find.byKey(const Key('commit-files-pane')), findsOneWidget);
-    expect(saved, isNull);
-
-    tester.view.physicalSize = const Size(480, 800);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-commits-pane')), findsNothing);
-    expect(find.byKey(const Key('commit-files-pane')), findsNothing);
-    expect(saved, isNull);
-
-    tester.view.physicalSize = const Size(1200, 800);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-column')), findsNothing);
-    expect(
-      tester.getSize(find.byKey(const Key('details-files-column'))).width,
-      330,
-    );
-    expect(saved, isNull);
   });
 
   testWidgets('full diff widths load from and save to app settings', (
@@ -11737,7 +11518,7 @@ void main() {
     );
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: repository,
           commits: [
             commit('1', 'commit', parents: const ['0']),
@@ -11767,33 +11548,6 @@ void main() {
     expect(find.textContaining('minimal failed'), findsOneWidget);
   });
 
-  testWidgets('initial file loading has a distinct pending state', (
-    tester,
-  ) async {
-    final files = Completer<List<GitFileChange>>();
-    final repository = FakeGitRepository(
-      (_, _) async => [commit('1', 'commit')],
-      files: (_, _) => files.future,
-    );
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: [commit('1', 'commit')],
-          initialIndex: 0,
-        ),
-      ),
-    );
-    await tester.pump();
-
-    expect(find.byKey(const Key('diff-pending-files')), findsOneWidget);
-    expect(find.text('현재 옵션으로 표시할 변경이 없습니다'), findsNothing);
-
-    files.complete(const []);
-    await tester.pumpAndSettle();
-  });
-
   testWidgets('initial diff loading has a distinct pending state', (
     tester,
   ) async {
@@ -11813,7 +11567,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: repository,
           commits: [commit('1', 'commit')],
           initialIndex: 0,
@@ -11848,7 +11602,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: repository,
           commits: [commit('1', 'commit')],
           initialIndex: 0,
@@ -11883,7 +11637,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: repository,
           commits: [commit('1', 'commit')],
           initialIndex: 0,
@@ -11917,7 +11671,7 @@ void main() {
     );
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: repository,
           commits: [commit('1', 'commit')],
           initialIndex: 0,
@@ -11972,7 +11726,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: repository,
           commits: [
             commit(
@@ -12031,12 +11785,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: commits,
-          initialIndex: 0,
-          controller: session,
-        ),
+        home: FullDiffWorkspace(controller: session, onBack: () {}),
       ),
     );
     await tester.pumpAndSettle();
@@ -12048,138 +11797,6 @@ void main() {
 
     expect(session.state.wrapLines, isFalse);
     expect(fileLoads, 1);
-  });
-
-  testWidgets('full diff replaces its owned session when inputs change', (
-    tester,
-  ) async {
-    final oldCommits = [
-      commit('old', 'old commit', parents: const ['base']),
-    ];
-    final newCommits = [
-      commit('new', 'new commit', parents: const ['base']),
-    ];
-    final oldRepository = FakeGitRepository(
-      (_, _) async => oldCommits,
-      files: (_, _) async => const [
-        GitFileChange(path: 'old.txt', status: 'M', additions: 1, deletions: 0),
-      ],
-      diff: (_, _, _, _, _) async => const [
-        DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,0 +1 @@'),
-        DiffLine(kind: DiffLineKind.add, text: 'old body', newNumber: 1),
-      ],
-    );
-    final newRepository = FakeGitRepository(
-      (_, _) async => newCommits,
-      files: (_, _) async => const [
-        GitFileChange(path: 'new.txt', status: 'M', additions: 1, deletions: 0),
-      ],
-      diff: (_, _, _, _, _) async => const [
-        DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,0 +1 @@'),
-        DiffLine(kind: DiffLineKind.add, text: 'new body', newNumber: 1),
-      ],
-    );
-
-    Widget screen(
-      FullDiffRepository repository,
-      List<GitCommit> screenCommits,
-      FullDiffPreferences preferences,
-    ) => MaterialApp(
-      home: DiffScreen(
-        repository: repository,
-        commits: screenCommits,
-        initialIndex: 0,
-        initialPreferences: preferences,
-      ),
-    );
-
-    await tester.pumpWidget(
-      screen(oldRepository, oldCommits, const FullDiffPreferences()),
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('old body'), findsOneWidget);
-
-    await tester.pumpWidget(
-      screen(
-        newRepository,
-        newCommits,
-        const FullDiffPreferences(layout: DiffLayout.sideBySide),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('new body'), findsOneWidget);
-    expect(find.text('old body'), findsNothing);
-    expect(
-      tester
-          .getSemantics(find.bySemanticsLabel('Side-by-side'))
-          .flagsCollection
-          .isSelected,
-      ui.Tristate.isTrue,
-    );
-  });
-
-  testWidgets('initial preferences do not reset a live owned session', (
-    tester,
-  ) async {
-    final commits = [
-      commit('one', 'commit', parents: const ['base']),
-    ];
-    final repository = FakeGitRepository(
-      (_, _) async => commits,
-      files: (_, _) async => const [
-        GitFileChange(
-          path: 'first.txt',
-          status: 'M',
-          additions: 1,
-          deletions: 0,
-        ),
-        GitFileChange(
-          path: 'second.txt',
-          status: 'M',
-          additions: 1,
-          deletions: 0,
-        ),
-      ],
-      diff: (_, _, path, _, _) async => [
-        const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,0 +1 @@'),
-        DiffLine(kind: DiffLineKind.add, text: path, newNumber: 1),
-      ],
-    );
-
-    Widget screen(FullDiffPreferences preferences) => MaterialApp(
-      home: DiffScreen(
-        repository: repository,
-        commits: commits,
-        initialIndex: 0,
-        initialPreferences: preferences,
-      ),
-    );
-
-    await tester.pumpWidget(screen(const FullDiffPreferences()));
-    await tester.pumpAndSettle();
-    tester
-        .widget<Focus>(find.byKey(const Key('changed-files-focus')))
-        .focusNode!
-        .requestFocus();
-    await tester.pump();
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('selected-file-second.txt')), findsOneWidget);
-
-    await tester.pumpWidget(
-      screen(const FullDiffPreferences(layout: DiffLayout.sideBySide)),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const Key('selected-file-second.txt')), findsOneWidget);
-    expect(
-      tester
-          .getSemantics(find.bySemanticsLabel('Unified'))
-          .flagsCollection
-          .isSelected,
-      ui.Tristate.isTrue,
-    );
   });
 
   testWidgets('file and parent changes reset the hunk list to the top', (
@@ -12207,7 +11824,7 @@ void main() {
     );
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: repository,
           commits: [
             commit('merge', 'merge', parents: const ['main', 'feature']),
@@ -12244,8 +11861,11 @@ void main() {
     }
 
     await scrollDown();
-    await tester.tap(find.text('two.txt'));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
+    expect(find.text('two.txt line 1'), findsOneWidget);
     expect(contentPosition().pixels, 0);
 
     await scrollDown();
@@ -16424,6 +16044,64 @@ void main() {
   });
 
   // ------------------------------------------------------------------ C3/H2
+  testWidgets('the history pane loads, saves, and yields its width', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final store = MemorySettingsStore()
+      ..current = const AppSettings(
+        fullDiffColumnWidths: FullDiffColumnWidths(history: 240),
+      );
+    await tester.pumpWidget(
+      YogitApp(
+        repository: _widthFixtureRepository(),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('history-toggle')));
+    await tester.pumpAndSettle();
+
+    final pane = find.byKey(const Key('history-pane'));
+    expect(tester.getSize(pane).width, 240);
+
+    await tester.drag(
+      find.byKey(const Key('history-pane-resizer')),
+      const Offset(30, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getSize(pane).width, 270);
+    expect(store.current.fullDiffColumnWidths.history, 270);
+
+    // The pane follows the file the diff is showing.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('history-pane-header')),
+        matching: find.textContaining('b.dart'),
+      ),
+      findsOneWidget,
+    );
+
+    // Too narrow for both, and the diff keeps the room.
+    tester.view.physicalSize = const Size(700, 800);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('history-pane')), findsNothing);
+    expect(find.byType(FullDiffWorkspace), findsOneWidget);
+  });
+
   testWidgets('a closed preview opens with the diff, and its button toggles', (
     tester,
   ) async {
@@ -17258,12 +16936,7 @@ void main() {
     await session.initialize();
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: commits,
-          initialIndex: 0,
-          controller: session,
-        ),
+        home: FullDiffWorkspace(controller: session, onBack: () {}),
       ),
     );
     await tester.pumpAndSettle();
@@ -17352,12 +17025,7 @@ void main() {
     await session.initialize();
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: commits,
-          initialIndex: 0,
-          controller: session,
-        ),
+        home: FullDiffWorkspace(controller: session, onBack: () {}),
       ),
     );
     await tester.pumpAndSettle();
@@ -17440,12 +17108,7 @@ void main() {
     session.setLayout(DiffLayout.unified);
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: commits,
-          initialIndex: 0,
-          controller: session,
-        ),
+        home: FullDiffWorkspace(controller: session, onBack: () {}),
       ),
     );
     await tester.pumpAndSettle();
@@ -17520,104 +17183,6 @@ void main() {
     expect(scroll.offset, lessThanOrEqualTo(maximum));
   });
 
-  testWidgets('history page scrolling targets the detail diff, not its list', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1200, 700);
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    final commits = [
-      commit('current', 'current commit', parents: const ['previous']),
-    ];
-    final historyCommits = [
-      commits.single,
-      for (var index = 1; index <= 30; index++)
-        commit(
-          'history-$index',
-          'history commit $index',
-          parents: ['history-${index + 1}'],
-        ),
-    ];
-    final repository = FakeGitRepository(
-      (_, _) async => commits,
-      files: (_, _) async => const [
-        GitFileChange(
-          path: 'lib/a.dart',
-          status: 'M',
-          additions: 1,
-          deletions: 1,
-        ),
-      ],
-      diff: (_, _, path, _, _) async => [
-        const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,80 +1,80 @@'),
-        for (var index = 1; index <= 80; index++)
-          DiffLine(
-            kind: DiffLineKind.context,
-            text: '$path line $index',
-            oldNumber: index,
-            newNumber: index,
-          ),
-      ],
-      history: (_, file) async => [
-        for (final historyCommit in historyCommits)
-          GitFileHistoryRecord(
-            commit: historyCommit,
-            path: file.path,
-            oldPath: null,
-            status: 'M',
-          ),
-      ],
-    );
-    final session = FullDiffSessionController(
-      repository: repository,
-      commits: commits,
-      initialIndex: 0,
-    );
-    addTearDown(session.dispose);
-    await session.initialize();
-    session
-      ..setView(FullDiffView.history)
-      ..setLayout(DiffLayout.unified);
-    await tester.pumpWidget(
-      MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: commits,
-          initialIndex: 0,
-          controller: session,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    final historyScroll = tester
-        .widget<ListView>(find.byKey(const Key('history-list')))
-        .controller!;
-    final detailScroll = tester
-        .widget<ListView>(
-          find
-              .descendant(
-                of: find.byKey(const Key('history-detail-pane')),
-                matching: find.byType(ListView),
-              )
-              .first,
-        )
-        .controller!;
-
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
-
-    expect(detailScroll.offset, detailScroll.position.viewportDimension * 0.5);
-    expect(historyScroll.offset, 0);
-  });
-
   testWidgets('full diff popup handles arrows before screen shortcuts', (
     tester,
   ) async {
@@ -17666,12 +17231,7 @@ void main() {
     await session.initialize();
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: commits,
-          initialIndex: 0,
-          controller: session,
-        ),
+        home: FullDiffWorkspace(controller: session, onBack: () {}),
       ),
     );
     await tester.pumpAndSettle();
@@ -17696,7 +17256,9 @@ void main() {
     expect(find.byKey(const Key('algorithm-details-minimal')), findsOneWidget);
   });
 
-  testWidgets('the diff screen walks files from the keyboard', (tester) async {
+  testWidgets('the diff workspace walks files from the keyboard', (
+    tester,
+  ) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1400, 900);
     addTearDown(() {
@@ -17724,7 +17286,7 @@ void main() {
     );
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: repository,
           commits: [
             commit('newer', 'newer commit', parents: const ['older']),
@@ -17735,27 +17297,13 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    tester
-        .widget<Focus>(find.byKey(const Key('changed-files-focus')))
-        .focusNode!
-        .requestFocus();
-    await tester.pump();
-
     // It opens on the first file of the first commit.
     expect(find.text('body of newer/one.dart'), findsOneWidget);
-    expect(
-      find.byKey(const Key('selected-file-newer/one.dart')),
-      findsOneWidget,
-    );
 
     // Down walks the file list, loading each diff as it goes.
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
     expect(find.text('body of newer/two.dart'), findsOneWidget);
-    expect(
-      find.byKey(const Key('selected-file-newer/two.dart')),
-      findsOneWidget,
-    );
     // Autorepeat keeps walking.
     await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowDown);
@@ -17813,7 +17361,7 @@ void main() {
     });
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: FakeGitRepository(
             (_, _) async => [commit('1', 'commit')],
             files: (_, _) async => [
@@ -17878,7 +17426,7 @@ void main() {
     );
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: FakeGitRepository(
             (_, _) async => [commit('1', 'commit')],
             files: (_, _) async => [
@@ -17985,7 +17533,6 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
     expect(find.text('alpha lib/two.dart'), findsOneWidget);
-    expect(find.byKey(const Key('selected-file-lib/two.dart')), findsOneWidget);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
@@ -19548,6 +19095,7 @@ FakeGitRepository _widthFixtureRepository() => FakeGitRepository(
   (_, _) async => [commit('1', 'commit')],
   files: (_, _) async => const [
     GitFileChange(path: 'lib/a.dart', status: 'M', additions: 1, deletions: 1),
+    GitFileChange(path: 'lib/b.dart', status: 'M', additions: 2, deletions: 0),
   ],
   diff: (_, _, _, _, _) async => const [
     DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
@@ -19555,4 +19103,91 @@ FakeGitRepository _widthFixtureRepository() => FakeGitRepository(
     DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
   ],
   content: (_, _, _) async => Uint8List.fromList('new\n'.codeUnits),
+  history: (_, file) async => [
+    GitFileHistoryRecord(
+      commit: commit('1', 'commit'),
+      path: file.path,
+      oldPath: null,
+      status: 'M',
+    ),
+  ],
 );
+
+/// Mounts a [FullDiffWorkspace] over a session it owns and initializes, the way
+/// the retired full-diff route did, so screen-level tests can drive one
+/// without threading a controller through every case.
+class OwnedFullDiffWorkspace extends StatefulWidget {
+  const OwnedFullDiffWorkspace({
+    required this.repository,
+    required this.commits,
+    this.initialIndex = 0,
+    this.initialPreferences = const FullDiffPreferences(),
+    this.columnWidths = const FullDiffColumnWidths(),
+    this.onColumnWidthsChanged,
+    this.onPreferencesChanged,
+    this.editorService,
+    this.editorForTesting,
+    this.documentLoaderForTesting,
+    this.avatarService,
+    this.commitMessageCache,
+    this.showRemoteAvatars = true,
+    super.key,
+  });
+
+  final FullDiffRepository repository;
+  final List<GitCommit> commits;
+  final int initialIndex;
+  final FullDiffPreferences initialPreferences;
+  final FullDiffColumnWidths columnWidths;
+  final ValueChanged<FullDiffColumnWidths>? onColumnWidthsChanged;
+  final ValueChanged<FullDiffPreferences>? onPreferencesChanged;
+  final ExternalEditorService? editorService;
+  final Widget? editorForTesting;
+  final Future<WorkingTreeTextDocument> Function(String relativePath)?
+  documentLoaderForTesting;
+  final AvatarService? avatarService;
+  final FullDiffCommitMessageCache? commitMessageCache;
+  final bool showRemoteAvatars;
+
+  @override
+  State<OwnedFullDiffWorkspace> createState() => _OwnedFullDiffWorkspaceState();
+}
+
+class _OwnedFullDiffWorkspaceState extends State<OwnedFullDiffWorkspace> {
+  late final FullDiffSessionController _controller = FullDiffSessionController(
+    repository: widget.repository,
+    commits: widget.commits,
+    initialIndex: widget.initialIndex,
+    initialPreferences: widget.initialPreferences,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_controller.initialize());
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: fullDiffCanvas,
+    body: FullDiffWorkspace(
+      controller: _controller,
+      onBack: () {},
+      columnWidths: widget.columnWidths,
+      onColumnWidthsChanged: widget.onColumnWidthsChanged,
+      onPreferencesChanged: widget.onPreferencesChanged,
+      editorService: widget.editorService,
+      editorForTesting: widget.editorForTesting,
+      documentLoaderForTesting: widget.documentLoaderForTesting,
+      avatarService: widget.avatarService,
+      commitMessageCache: widget.commitMessageCache,
+      showRemoteAvatars: widget.showRemoteAvatars,
+    ),
+  );
+}
