@@ -353,31 +353,20 @@ class IdentityAvatar extends StatelessWidget {
   final String? fontFamily;
   final double fontScale;
 
-  /// The disc color for an avatar sitting in a row: its branch line. Without one
-  /// — the settings preview, the blame gutter — the disc falls back to the
-  /// identity color.
+  /// The branch line this avatar sits on, drawn as a ring around the identity
+  /// fill. Null off the graph — the settings preview, the blame gutter — where
+  /// there is no branch to name and the disc goes unringed.
   final Color? discColor;
-
-  /// How far the branch color is dimmed inside the ring. The initials sit on
-  /// this fill in the undimmed branch color, so the two share a hue and the
-  /// alpha barely moves their contrast — over the row background (`#1C1C1E`) and
-  /// the selected row (`#234D72`) the worst palette color reads 1.87 at 0.18 and
-  /// 1.70 at 0.40. What the alpha does decide is whether the disc reads as
-  /// filled, which is why it is the mockup's 0.22 and not lower.
-  static const dimmedFillAlpha = 0.22;
 
   @override
   Widget build(BuildContext context) {
     final branch = discColor;
-    // A row's disc is its branch line the whole way through: a ring at the
-    // rail's own weight, the same color dimmed inside it, initials in that
-    // color. Off the graph there is no branch to wear, so the disc keeps the
-    // opaque identity fill and its contrasting ink.
+    // One disc, two facts: a ring at the rail's own weight for the branch, the
+    // person's own color filling it. Off the graph — the settings preview, the
+    // blame gutter — there is no branch to name, so the disc is the fill alone.
     final ring = branch == null ? 0.0 : AvatarService.railWidth;
-    final fill =
-        branch?.withValues(alpha: dimmedFillAlpha) ??
-        AvatarService.color(identity);
-    final ink = branch ?? AvatarService.onColor(fill);
+    final fill = AvatarService.color(identity);
+    final ink = AvatarService.onColor(fill);
     final inner = size - ring * 2;
     final avatar = _safeAvatar(remoteAvatar);
     return Container(

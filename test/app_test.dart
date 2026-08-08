@@ -9812,9 +9812,8 @@ void main() {
       AvatarService.onColor(AvatarService.color(ada)),
     );
 
-    // In a row the disc becomes the branch's own colour throughout: a ring at
-    // the rail's weight, the same colour dimmed inside it, and ink to match.
-    // One branch reads as one thing, photo or not.
+    // In a row the disc gains a ring at the rail's weight naming the branch,
+    // and keeps the identity fill inside it: one disc, two facts.
     final branch = AvatarService.branchColor(2);
     await tester.pumpWidget(
       MaterialApp(
@@ -9830,13 +9829,13 @@ void main() {
     final border = ringed.border! as Border;
     expect(border.top.color, branch);
     expect(border.top.width, CommitGraphPainter.railWidth);
-    // The interior is the same colour, dimmed — never opaque, never the ink.
-    expect(ringed.color, isNotNull);
-    expect(ringed.color!.a, lessThan(1.0));
-    expect(ringed.color!.r, branch.r);
-    expect(ringed.color!.g, branch.g);
-    expect(ringed.color!.b, branch.b);
-    expect(tester.widget<Text>(find.text('AL')).style?.color, branch);
+    // The interior is the person, unchanged by the ring around it.
+    expect(ringed.color, AvatarService.color(ada));
+    expect(ringed.color!.a, 1.0);
+    expect(
+      tester.widget<Text>(find.text('AL')).style?.color,
+      AvatarService.onColor(AvatarService.color(ada)),
+    );
 
     expect(AvatarService.onColor(const Color(0xFFD29922)), isNot(Colors.white));
     expect(AvatarService.onColor(const Color(0xFF1D2029)), Colors.white);

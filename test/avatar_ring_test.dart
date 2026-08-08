@@ -8,12 +8,12 @@ import 'package:yogit/window_frame.dart';
 
 import 'app_test.dart' show FakeGitRepository, commit;
 
-/// Contract for the branch-coloured avatar (승인된 3안).
+/// Contract for the branch-ringed avatar (승인된 1안).
 ///
-/// A commit's disc is its branch line, all the way through: a ring at the
-/// rail's own weight, the same colour dimmed inside it, and the initials in
-/// that colour too. One branch reads as one thing down the column — and a
-/// photo, which used to hide the branch entirely, now sits inside the ring.
+/// One disc says two things: a ring at the rail's own weight names the branch,
+/// and the fill inside it is the person's own colour with contrasting ink — so
+/// who wrote a commit is legible again without giving up which branch it sits
+/// on. A photo, which used to hide the branch entirely, sits inside the ring.
 void main() {
   const ada = GitIdentity(name: 'Ada Lovelace', email: 'ada@example.com');
 
@@ -114,7 +114,9 @@ void main() {
     expect((discOf(tester).border! as Border).top.color, isNotNull);
   });
 
-  testWidgets('a row draws the disc in its own branch colour', (tester) async {
+  testWidgets('the ring names the branch, the fill names the person', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       MaterialApp(
         home: TimelineScreen(
@@ -136,10 +138,18 @@ void main() {
             as CommitGraphPainter;
     final branch = AvatarService.branchColor(painter.row.branch);
 
+    final author = tester
+        .widget<IdentityAvatar>(find.byType(IdentityAvatar).first)
+        .identity;
     final disc = discOf(tester);
     expect((disc.border! as Border).top.color, branch);
-    expect(disc.color!.a, lessThan(1.0));
-    expect(tester.widget<Text>(find.text('AA').first).style?.color, branch);
+    // The fill is the author's own colour, opaque, with ink chosen against it.
+    expect(disc.color, AvatarService.color(author));
+    expect(disc.color!.a, 1.0);
+    expect(
+      tester.widget<Text>(find.text('AA').first).style?.color,
+      AvatarService.onColor(AvatarService.color(author)),
+    );
   });
 
   testWidgets('a stacked author and committer share one branch ring', (
