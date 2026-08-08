@@ -324,6 +324,64 @@ void main() {
     expect(find.text('1 / 2'), findsOneWidget);
   });
 
+  testWidgets('coming back from the diff leaves the list where it was', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 400);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [
+            for (var index = 0; index < 60; index++)
+              commit('$index', 'commit $index'),
+          ],
+          files: (_, _) async => const [
+            GitFileChange(
+              path: 'lib/a.dart',
+              status: 'M',
+              additions: 1,
+              deletions: 1,
+            ),
+          ],
+          diff: (_, _, _, _, _) async => const [
+            DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+            DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    ScrollPosition listPosition() => tester
+        .state<ScrollableState>(
+          find.descendant(
+            of: find.byKey(const Key('timeline-list')),
+            matching: find.byType(Scrollable),
+          ),
+        )
+        .position;
+
+    for (var step = 0; step < 25; step++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    }
+    await tester.pumpAndSettle();
+    final before = listPosition().pixels;
+    expect(before, greaterThan(0));
+
+    await press(tester, LogicalKeyboardKey.arrowRight);
+    await press(tester, LogicalKeyboardKey.arrowRight);
+    expect(find.byKey(const Key('timeline-viewport')), findsOneWidget);
+    expect(listPosition().pixels, before, reason: '돌아오면 보던 자리 그대로여야 한다');
+  });
+
   testWidgets('the list starts moving two rows before the edge', (
     tester,
   ) async {

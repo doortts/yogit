@@ -11218,6 +11218,11 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   bool get _fullDiffOpen => _fullDiffSession != null;
 
+  /// Where the commit list stood when the diff took its place, so returning
+  /// lands on the same rows instead of at the top of the repository.
+  double? _timelineOffsetBeforeDiff;
+  int? _timelineIndexBeforeDiff;
+
   /// ⌘D and both Full Diff buttons: the diff takes the sidebar and timeline
   /// area, or hands it back. A closed preview opens first — it is the file
   /// navigation the diff mode relies on.
@@ -11245,6 +11250,10 @@ class _TimelineScreenState extends State<TimelineScreen>
           _pendingFullDiffPreferences ?? widget.fullDiffPreferences,
       initialPath: path,
     )..addListener(_followFullDiffSession);
+    if (_scrollController.hasClients) {
+      _timelineOffsetBeforeDiff = _scrollController.offset;
+      _timelineIndexBeforeDiff = _selectedIndex.value;
+    }
     setState(() {
       _previewDiffOpen = false;
       _fullDiffSession = controller;
@@ -11320,6 +11329,29 @@ class _TimelineScreenState extends State<TimelineScreen>
       ..removeListener(_followFullDiffSession)
       ..dispose();
     _focusNode.requestFocus();
+    _restoreTimelineOffset();
+  }
+
+  /// The list is rebuilt from scratch when it comes back, so it starts at the
+  /// top; put it back where the reader left it — unless the diff moved the
+  /// selection, in which case the new row is what they want to see.
+  void _restoreTimelineOffset() {
+    final offset = _timelineOffsetBeforeDiff;
+    final index = _timelineIndexBeforeDiff;
+    _timelineOffsetBeforeDiff = null;
+    _timelineIndexBeforeDiff = null;
+    if (offset == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      if (index != _selectedIndex.value) {
+        _scrollToSelection(animate: false);
+        return;
+      }
+      final position = _scrollController.position;
+      _scrollController.jumpTo(
+        offset.clamp(position.minScrollExtent, position.maxScrollExtent),
+      );
+    });
   }
 
   /// History rides beside the preview, not inside the diff: the two panes
