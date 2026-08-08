@@ -1070,7 +1070,7 @@ void main() {
       const Rect.fromLTWH(0, 0, 1070, 760),
     );
     final filePane = tester.getRect(find.byKey(const Key('commit-files-pane')));
-    expect(filePane, const Rect.fromLTRB(0, 116, 278, 760));
+    expect(filePane, const Rect.fromLTRB(0, 80, 278, 760));
   });
 
   testWidgets('final polish Blame rows use the approved 21px height', (

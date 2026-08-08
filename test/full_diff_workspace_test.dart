@@ -3484,6 +3484,7 @@ void main() {
               widget.key is ValueKey<String> &&
               (widget.key! as ValueKey<String>).value.startsWith('blame-line-'),
         )
+        .hitTestable()
         .first;
     first.controller.setPrimaryView(FullDiffView.blame);
     await pumpWorkspace(

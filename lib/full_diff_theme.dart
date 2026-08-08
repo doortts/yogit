@@ -36,7 +36,7 @@ const fullDiffDeletedMark = Color(0xFFF68B59);
 
 const fullDiffOuterPadding = 12.0;
 const fullDiffOuterRadius = 20.0;
-const fullDiffControlHeight = 28.0;
+const fullDiffControlHeight = 24.0;
 const fullDiffControlRadius = 12.5;
 const fullDiffChipRadius = 7.5;
 const fullDiffMinimapWidth = 18.0;
