@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert' show LineSplitter;
 import 'dart:io'
     show Directory, FileSystemEvent, FileSystemException, ProcessException;
 import 'dart:math' as math;
@@ -1215,8 +1216,8 @@ class _TimelineScreenState extends State<TimelineScreen>
   late bool _showTime = widget.columnWidths.showTime;
   late bool _showName = widget.columnWidths.showName;
 
-  /// Test hook: the preview text the user last selected, so a test can prove that
-  /// dragging over the panel really selects.
+  /// The preview text the user last selected. ⌘C copies it, and a test can read
+  /// it to prove that dragging over the panel really selects.
   @visibleForTesting
   String? debugPreviewSelection;
 
@@ -2078,6 +2079,17 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     if (event.logicalKey == LogicalKeyboardKey.keyD && shortcutModifierHeld) {
       _toggleFullDiff();
+      return KeyEventResult.handled;
+    }
+    // The panel's own copy shortcut only fires while the panel holds the
+    // keyboard, and the timeline never lets go of it. Hand the selection over
+    // ourselves so dragging over the preview and pressing ⌘C does what it says.
+    if (event.logicalKey == LogicalKeyboardKey.keyC && shortcutModifierHeld) {
+      final selection = debugPreviewSelection;
+      if (selection == null || selection.isEmpty) {
+        return KeyEventResult.ignored;
+      }
+      unawaited(Clipboard.setData(ClipboardData(text: selection)));
       return KeyEventResult.handled;
     }
     // ⌘1 hands the keyboard to the sidebar, expanding it when collapsed; a
@@ -8628,67 +8640,119 @@ class _TimelineScreenState extends State<TimelineScreen>
             BranchApplyStatus.failed => '작업 실패',
             BranchApplyStatus.idle => '아직 적용하지 않음',
           };
+    final namesCommit =
+        !branchPreview && _cherryPickState == null && commit != null;
     return Container(
+      key: const Key('preview-header'),
       height: 36,
       padding: const EdgeInsets.only(left: 12, right: 6),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: _palette.border)),
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              _cherryPickState != null
-                  ? '체리픽 충돌'
-                  : branchPreview
-                  ? branchTitle
-                  : _comparison != null
-                  ? '선택한 커밋의 diff'
-                  : 'Commit & Diff',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: branchPreview ? _palette.text : _palette.muted,
-                fontSize: 12,
-                fontWeight: branchPreview ? FontWeight.w700 : FontWeight.w500,
-                letterSpacing: branchPreview ? 0 : 0.66,
+      child: namesCommit
+          ? _previewCommitLine(commit)
+          : Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _cherryPickState != null
+                        ? '체리픽 충돌'
+                        : branchPreview
+                        ? branchTitle
+                        : '선택한 커밋의 diff',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: branchPreview ? _palette.text : _palette.muted,
+                      fontSize: 12,
+                      fontWeight: branchPreview
+                          ? FontWeight.w700
+                          : FontWeight.w500,
+                      letterSpacing: branchPreview ? 0 : 0.66,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (branchPreview)
+                  Text(
+                    branchStatus,
+                    style: TextStyle(color: _palette.muted, fontSize: 10),
+                  ),
+              ],
+            ),
+    );
+  }
+
+  /// `커밋 <7자리> ⧉ · 부모 <7자리> <부모 제목>`. The hashes and the parent's
+  /// subject are the header now: Full Diff still opens from ⌘D, the toolbar and
+  /// any file in the list.
+  Widget _previewCommitLine(GitCommit commit) {
+    final parentSha = commit.parents.isEmpty ? null : commit.parents.first;
+    final label = TextStyle(color: _palette.muted, fontSize: 10);
+    final mono = TextStyle(
+      fontFamily: technicalFontFamily,
+      fontFamilyFallback: technicalFontFallback,
+      fontSize: 12,
+      color: commit.isWorkingTree ? _palette.muted : _hash,
+    );
+    return Row(
+      children: [
+        Text('커밋', style: label),
+        const SizedBox(width: 6),
+        Text(
+          commit.isWorkingTree ? 'WIP' : commit.shortSha,
+          key: commit.isWorkingTree
+              ? const Key('preview-working-tree')
+              : const Key('preview-sha'),
+          style: mono,
+        ),
+        if (!commit.isWorkingTree) ...[
+          const SizedBox(width: 6),
+          SelectionContainer.disabled(
+            child: KeyedSubtree(
+              key: const Key('preview-sha-copy'),
+              child: _CopyButton(
+                text: commit.shortSha,
+                color: _hash,
+                slot: 'preview-sha',
               ),
             ),
           ),
-          const SizedBox(width: 8),
-          if (branchPreview)
-            Text(
-              branchStatus,
-              style: TextStyle(color: _palette.muted, fontSize: 10),
-            )
-          else ...[
-            _ShowDiffButton(
-              key: const Key('preview-full-diff'),
-              onTap: commit == null || _cherryPickState != null
-                  ? null
-                  : _toggleFullDiff,
-              height: 28,
-              labelSize: 11,
-              shortcutSize: 8,
-            ),
-            if (_cherryPickState == null &&
-                (commit?.isWorkingTree ?? false)) ...[
-              const SizedBox(width: 8),
-              Text(
-                'WIP',
-                key: const Key('preview-working-tree'),
-                style: TextStyle(
-                  color: _palette.muted,
-                  fontSize: 11,
-                  fontFamily: technicalFontFamily,
-                  fontFamilyFallback: technicalFontFallback,
-                ),
-              ),
-            ],
-          ],
         ],
-      ),
+        const SizedBox(width: 6),
+        Text('·', style: label),
+        const SizedBox(width: 6),
+        Expanded(
+          child: parentSha == null
+              ? Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(text: '부모 ', style: label),
+                      TextSpan(
+                        text: '루트 커밋',
+                        style: TextStyle(color: _palette.muted, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                )
+              : _PreviewParent(
+                  key: const Key('preview-parent'),
+                  shas: commit.parents,
+                  commitOf: _commitBySha,
+                  loadMessage: _commitMessageFor,
+                ),
+        ),
+      ],
     );
+  }
+
+  GitCommit? _commitBySha(String sha) {
+    for (final candidate in _commits) {
+      if (candidate.sha == sha) return candidate;
+    }
+    return null;
   }
 
   Widget _cherryPickPanel() {
@@ -11407,21 +11471,16 @@ class _KeyCapState extends State<_KeyCap> {
 }
 
 class _ShowDiffButton extends StatelessWidget {
-  const _ShowDiffButton({
-    required this.onTap,
-    this.height = 40,
-    this.labelSize = 13,
-    this.shortcutSize = 10,
-    super.key,
-  });
+  const _ShowDiffButton({required this.onTap, super.key});
 
   static const green = Color(0xFF2EA043);
   static const hoverGreen = Color(0xFF3FB950);
 
   final VoidCallback? onTap;
-  final double height;
-  final double labelSize;
-  final double shortcutSize;
+
+  static const height = 40.0;
+  static const labelSize = 13.0;
+  static const shortcutSize = 10.0;
 
   @override
   Widget build(BuildContext context) {
@@ -11504,6 +11563,237 @@ class _PaneToggleIconPainter extends CustomPainter {
   bool shouldRepaint(covariant _PaneToggleIconPainter oldDelegate) =>
       oldDelegate.opens != opens || oldDelegate.color != color;
 }
+
+/// The parent side of the preview header: its hash — both of them on a merge —
+/// and its subject in whatever width is left. Hovering anywhere on it opens a
+/// card with that commit's message and moment.
+class _PreviewParent extends StatefulWidget {
+  const _PreviewParent({
+    required this.shas,
+    required this.commitOf,
+    required this.loadMessage,
+    super.key,
+  });
+
+  final List<String> shas;
+  final GitCommit? Function(String sha) commitOf;
+  final Future<String> Function(String sha) loadMessage;
+
+  @override
+  State<_PreviewParent> createState() => _PreviewParentState();
+}
+
+class _PreviewParentState extends State<_PreviewParent> {
+  final _card = OverlayPortalController();
+  final _link = LayerLink();
+  String? _message;
+  var _requestSerial = 0;
+
+  String get _sha => widget.shas.first;
+
+  @override
+  void didUpdateWidget(covariant _PreviewParent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.shas.first == _sha) return;
+    _message = null;
+    if (_card.isShowing) unawaited(_load());
+  }
+
+  @override
+  void dispose() {
+    _requestSerial++;
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final serial = ++_requestSerial;
+    final sha = _sha;
+    try {
+      final message = await widget.loadMessage(sha);
+      if (!mounted || serial != _requestSerial) return;
+      setState(() => _message = message);
+    } catch (_) {
+      // The card still names the commit from the row the timeline already has.
+    }
+  }
+
+  /// The subject the header shows: from the loaded row when the timeline holds
+  /// that commit, and otherwise the first line of the message it fetched.
+  String? get _subject =>
+      widget.commitOf(_sha)?.subject ??
+      (_message == null || _message!.isEmpty
+          ? null
+          : const LineSplitter().convert(_message!).first);
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.timelineTheme;
+    final label = TextStyle(color: palette.muted, fontSize: 10);
+    final subject = _subject;
+    return MouseRegion(
+      onEnter: (_) {
+        _card.show();
+        if (_message == null) unawaited(_load());
+      },
+      onExit: (_) => _card.hide(),
+      child: OverlayPortal(
+        controller: _card,
+        overlayChildBuilder: (context) => Positioned(
+          width: 280,
+          child: CompositedTransformFollower(
+            link: _link,
+            targetAnchor: Alignment.bottomLeft,
+            followerAnchor: Alignment.topLeft,
+            offset: const Offset(0, 4),
+            child: _PreviewParentCard(
+              key: const Key('preview-parent-card'),
+              sha: _sha,
+              commit: widget.commitOf(_sha),
+              message: _message,
+              fallbackSubject: subject,
+            ),
+          ),
+        ),
+        // One line, not a Row: the subject trails the hashes, so a narrow pane
+        // eats the subject first and nothing ever overflows its box.
+        child: CompositedTransformTarget(
+          link: _link,
+          child: Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(text: '부모 ', style: label),
+                TextSpan(
+                  text: [
+                    for (final sha in widget.shas) _shortSha(sha),
+                  ].join(' · '),
+                  style: TextStyle(
+                    fontFamily: technicalFontFamily,
+                    fontFamilyFallback: technicalFontFallback,
+                    fontSize: 11,
+                    color: palette.muted,
+                  ),
+                ),
+                if (subject != null)
+                  TextSpan(
+                    text: '  $subject',
+                    style: TextStyle(color: palette.muted, fontSize: 11),
+                  ),
+              ],
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// What the hover reveals: the parent's hash and moment on one line, then its
+/// message as written.
+class _PreviewParentCard extends StatelessWidget {
+  const _PreviewParentCard({
+    required this.sha,
+    required this.commit,
+    required this.message,
+    required this.fallbackSubject,
+    super.key,
+  });
+
+  final String sha;
+  final GitCommit? commit;
+  final String? message;
+  final String? fallbackSubject;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.timelineTheme;
+    final lines = message == null
+        ? const <String>[]
+        : const LineSplitter().convert(message!);
+    final subject = lines.isEmpty ? fallbackSubject : lines.first;
+    final body = lines.length > 1 ? lines.sublist(1).join('\n').trim() : '';
+    final mono = TextStyle(
+      fontFamily: technicalFontFamily,
+      fontFamilyFallback: technicalFontFallback,
+      fontSize: 10,
+      color: palette.muted,
+    );
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(11, 9, 11, 10),
+        decoration: BoxDecoration(
+          color: palette.background,
+          border: Border.all(color: palette.border),
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x8C000000),
+              blurRadius: 24,
+              offset: Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Text(_shortSha(sha), style: mono.copyWith(color: _hash)),
+                const SizedBox(width: 8),
+                if (commit case final parent?)
+                  Expanded(
+                    child: Text(
+                      exactCommitTime(parent.committerTimestamp),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.end,
+                      style: mono,
+                    ),
+                  ),
+              ],
+            ),
+            if (subject != null) ...[
+              const SizedBox(height: 5),
+              Text(
+                subject,
+                style: TextStyle(
+                  color: palette.text,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  height: 1.4,
+                ),
+              ),
+            ],
+            if (body.isNotEmpty) ...[
+              const SizedBox(height: 5),
+              Text(
+                body,
+                style: TextStyle(
+                  color: palette.muted,
+                  fontSize: 11,
+                  height: 1.5,
+                ),
+              ),
+            ],
+            if (commit case final parent?) ...[
+              const SizedBox(height: 7),
+              Text(
+                parent.author.name,
+                style: TextStyle(color: palette.muted, fontSize: 10),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The seven characters git itself prints for a full hash.
+String _shortSha(String sha) => sha.length <= 7 ? sha : sha.substring(0, 7);
 
 /// Copies a ref name and answers with a check for a moment, so the click has
 /// feedback without a snackbar.

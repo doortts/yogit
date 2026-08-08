@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>미리보기 pane 헤더 — 커밋·부모 해시 (2안 확정)</title>
+<style>
+  :root {
+    --surface:#242426; --panel:#202022; --raised:#2C2C2E; --border:#38383A;
+    --text:#F2F2F7; --muted:#AEAEB2; --hash:#EF6C63; --green:#3FB950;
+    --mono:Menlo,"D2Coding",Monaco,monospace;
+  }
+  body { margin:0; padding:26px 24px 80px; background:#101012; color:var(--text);
+         font:13px/1.6 -apple-system,"Apple SD Gothic Neo",sans-serif; }
+  h1 { font-size:19px; font-weight:600; margin:0 0 4px; }
+  h2 { font-size:14px; font-weight:600; margin:30px 0 2px; }
+  p.note { margin:0 0 10px; color:#98989F; font-size:12px; max-width:900px; }
+  .cap { font-size:11.5px; color:#8E8E93; padding:6px 2px 0; max-width:900px; }
+  code { font-family:var(--mono); font-size:11px; background:#2C2C2E; padding:1px 5px; border-radius:4px; }
+
+  .pane { width:420px; background:var(--surface); border:1px solid var(--border);
+          border-radius:8px; margin-bottom:4px; position:relative; }
+  .pane.narrow { width:262px; }
+  .head { height:36px; padding:0 6px 0 12px; display:flex; align-items:center; gap:6px;
+          border-bottom:1px solid var(--border); min-width:0; }
+  .hint { height:24px; padding:0 12px; display:flex; align-items:center;
+          color:var(--muted); font-family:var(--mono); font-size:10px; }
+  .body { padding:10px 14px 14px; }
+  .subject { font-size:13px; font-weight:600; line-height:1.45; }
+  .msg { color:var(--muted); font-size:11.5px; line-height:1.5; margin-top:6px; }
+
+  .label { color:var(--muted); font-size:10px; flex:none; }
+  .sha { font-family:var(--mono); font-size:12px; color:var(--hash); flex:none; }
+  .sha.wip { color:var(--muted); }
+  .psha { font-family:var(--mono); font-size:11px; color:var(--muted); flex:none; }
+  .dot { color:var(--muted); font-size:11px; flex:none; }
+  .copy { width:16px; display:inline-flex; align-items:center; justify-content:center;
+          color:var(--muted); font-size:12px; flex:none; }
+  .copy.on { color:var(--green); }
+  /* 부모 hover 영역: 라벨+해시+제목이 한 덩어리 */
+  .parent { display:flex; align-items:center; gap:6px; min-width:0; flex:1;
+            border-radius:5px; padding:2px 4px; margin-left:-4px; }
+  .parent.hover { background:var(--raised); }
+  .ptitle { color:var(--muted); font-size:11px; min-width:0; overflow:hidden;
+            text-overflow:ellipsis; white-space:nowrap; }
+
+  /* 툴팁 */
+  .tip { position:absolute; top:40px; left:96px; width:280px; background:#1C1C1E;
+         border:1px solid var(--border); border-radius:8px; padding:9px 11px 10px;
+         box-shadow:0 8px 24px rgba(0,0,0,.55); z-index:5; }
+  .tip .tsha { font-family:var(--mono); font-size:10px; color:var(--hash); }
+  .tip .tdate { font-family:var(--mono); font-size:10px; color:var(--muted); float:right; }
+  .tip .tsubject { font-size:12px; font-weight:600; margin-top:5px; line-height:1.4; }
+  .tip .tbody { color:var(--muted); font-size:11px; line-height:1.5; margin-top:5px;
+                white-space:pre-wrap; }
+  .tip .tauthor { color:var(--muted); font-size:10px; margin-top:7px; }
+
+  table { border-collapse:collapse; font-size:12px; margin-top:6px; }
+  td { padding:3px 16px 3px 0; vertical-align:top; }
+  .k { color:#8E8E93; white-space:nowrap; }
+  .row2 { display:flex; gap:24px; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+
+<h1>미리보기 pane 헤더 — 2안 + 부모 제목 + hover 툴팁</h1>
+<p class="note"><code>커밋 &lt;7자리&gt; ⧉ · 부모 &lt;7자리&gt; &lt;부모 제목&gt;</code>. 부모 제목은 남는 폭만큼만 보이고 넘치면 <code>…</code>.
+<b>부모</b> 라벨부터 제목까지가 한 덩어리 hover 영역이고, 올리면 부모 커밋의 메시지·날짜 툴팁이 바로 뜬다(지연 없음).</p>
+
+<h2>기본 — 넓을 때</h2>
+<div class="pane">
+  <div class="head">
+    <span class="label">커밋</span>
+    <span class="sha">2280d58</span>
+    <span class="copy">⧉</span>
+    <span class="dot">·</span>
+    <div class="parent">
+      <span class="label">부모</span>
+      <span class="psha">a9b3636</span>
+      <span class="ptitle">feat(app): 메뉴바 밝기를 외양에 맞춘다</span>
+    </div>
+  </div>
+  <div class="hint">파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓</div>
+  <div class="body">
+    <div class="subject">docs(readme): 최근 작업 반영</div>
+    <div class="msg">색 구간을 코드와 맞춘다 (무채색 시작 50% -&gt; 30%, 빨강은 5% 이하).</div>
+  </div>
+</div>
+<div class="cap">부모 제목은 남는 폭을 그대로 먹는다 — 커밋 해시·복사·부모 해시가 먼저 자리를 잡고, 남은 만큼만 제목이 쓴다.</div>
+
+<h2>부모에 hover — 툴팁</h2>
+<div class="pane">
+  <div class="head">
+    <span class="label">커밋</span>
+    <span class="sha">2280d58</span>
+    <span class="copy">⧉</span>
+    <span class="dot">·</span>
+    <div class="parent hover">
+      <span class="label">부모</span>
+      <span class="psha">a9b3636</span>
+      <span class="ptitle">feat(app): 메뉴바 밝기를 외양에 맞춘다</span>
+    </div>
+  </div>
+  <div class="hint">파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓</div>
+  <div class="body">
+    <div class="subject">docs(readme): 최근 작업 반영</div>
+    <div class="msg">색 구간을 코드와 맞춘다 (무채색 시작 50% -&gt; 30%, 빨강은 5% 이하).</div>
+  </div>
+  <div class="tip">
+    <span class="tsha">a9b3636</span><span class="tdate">2026-08-05 15:28</span>
+    <div class="tsubject">feat(app): 메뉴바 밝기를 외양에 맞춘다</div>
+    <div class="tbody">막대는 파랑이고 팝오버는 민트라 같은 창이 두 색으로 보였다. 팝오버도 파랑으로 맞춘다.
+
+알약은 눈금과 같은 0x40c8ff 다.</div>
+    <div class="tauthor">Suwon Chae</div>
+  </div>
+</div>
+<div class="cap">첫 줄 = 부모 해시 + 날짜, 그 아래 제목, 그 아래 본문(여러 줄 그대로), 맨 아래 작성자.
+hover 영역에 옅은 배경이 깔려 어디가 반응하는지 보인다. 커서가 벗어나면 사라진다.</div>
+
+<h2>좁을 때 · 가장자리 상태 (실제 pane 폭 262px)</h2>
+<div class="row2">
+  <div>
+    <div class="pane narrow">
+      <div class="head">
+        <span class="label">커밋</span>
+        <span class="sha">2280d58</span>
+        <span class="copy">⧉</span>
+        <span class="dot">·</span>
+        <div class="parent">
+          <span class="label">부모</span>
+          <span class="psha">a9b3636</span>
+          <span class="ptitle">feat(app): 메뉴바 밝기…</span>
+        </div>
+      </div>
+      <div class="hint">파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓</div>
+    </div>
+    <div class="cap">좁으면 제목만 줄어든다. 해시 두 개와 복사는 절대 잘리지 않는다.</div>
+  </div>
+
+  <div>
+    <div class="pane narrow">
+      <div class="head">
+        <span class="label">커밋</span>
+        <span class="sha wip">WIP</span>
+        <span class="dot">·</span>
+        <div class="parent">
+          <span class="label">부모</span>
+          <span class="psha">2280d58</span>
+          <span class="ptitle">docs(readme): 최근…</span>
+        </div>
+      </div>
+      <div class="hint">파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓</div>
+    </div>
+    <div class="cap">작업 트리: 해시가 없으니 <code>WIP</code>, 복사 아이콘도 없다. 부모는 HEAD.</div>
+  </div>
+
+  <div>
+    <div class="pane narrow">
+      <div class="head">
+        <span class="label">커밋</span>
+        <span class="sha">6f3a41c</span>
+        <span class="copy">⧉</span>
+        <span class="dot">·</span>
+        <div class="parent">
+          <span class="label">부모</span>
+          <span class="psha">a9b3636 · 71c0d92</span>
+          <span class="ptitle">fix: 눈금…</span>
+        </div>
+      </div>
+      <div class="hint">파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓</div>
+    </div>
+    <div class="cap">머지 커밋: 부모 둘을 잇고, 제목은 <b>첫 부모</b>의 것. 툴팁도 첫 부모를 말한다.</div>
+  </div>
+
+  <div>
+    <div class="pane narrow">
+      <div class="head">
+        <span class="label">커밋</span>
+        <span class="sha">91d03aa</span>
+        <span class="copy">⧉</span>
+        <span class="dot">·</span>
+        <div class="parent">
+          <span class="label">부모</span>
+          <span class="ptitle">루트 커밋</span>
+        </div>
+      </div>
+      <div class="hint">파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓</div>
+    </div>
+    <div class="cap">첫 커밋: 부모 자리에 <code>루트 커밋</code>, hover해도 툴팁 없음.</div>
+  </div>
+</div>
+
+<h2>덧붙임 — 결정에 걸린 것</h2>
+<table>
+  <tr><td class="k">툴팁 지연</td><td>없음 — 올리면 바로. 나갈 때도 바로 사라진다.</td></tr>
+  <tr><td class="k">메시지 로딩</td><td>부모 메시지는 필요할 때 <code>git log -1</code>로 읽고 캐시한다(Full Diff가 쓰는 캐시 그대로). 읽는 동안 툴팁은 제목·날짜만 먼저 보여준다.</td></tr>
+  <tr><td class="k">부모 제목 출처</td><td>부모가 타임라인에 이미 있으면 그 제목을 즉시 쓰고, 없으면(범위 밖) 메시지 캐시로 채운다.</td></tr>
+  <tr><td class="k">복사 대상</td><td>표시도 복사도 <b>7자리</b>(<code>2280d58</code>).</td></tr>
+  <tr><td class="k">텍스트 선택</td><td>헤더 줄 전체가 드래그로 선택·복사된다 — 복사 아이콘은 손 안 대고 해시만 집을 때의 지름길.</td></tr>
+  <tr><td class="k">Full Diff 진입</td><td><code>⌘D</code> · 상단 툴바 버튼 · 파일 클릭 — 헤더 버튼만 사라진다.</td></tr>
+  <tr><td class="k">브랜치 미리보기</td><td>머지·리베이스 미리보기 헤더는 지금 그대로. 이 변경은 일반 커밋 헤더만.</td></tr>
+</table>
+
+</body>
+</html>

@@ -356,7 +356,7 @@ void main() {
     expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
 
     // The preview starts hidden and only a key opens it.
-    expect(find.text('Commit & Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pump();
     expect(find.text('second commit'), findsOneWidget);
@@ -385,15 +385,15 @@ void main() {
 
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsOneWidget);
+    expect(find.byKey(const Key('preview-surface')), findsOneWidget);
 
     // Enter toggles: a second press closes what the first opened.
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsOneWidget);
+    expect(find.byKey(const Key('preview-surface')), findsOneWidget);
 
     await tester.tap(find.text('하단'));
     await tester.pumpAndSettle();
@@ -401,22 +401,22 @@ void main() {
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
 
     // A click selects; it no longer opens the panel.
     await tester.tap(find.text('third commit'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-3')), findsOneWidget);
-    expect(find.text('Commit & Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
 
     // Space no longer opens the panel; Enter is the only toggle.
     await tester.sendKeyEvent(LogicalKeyboardKey.space);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsOneWidget);
+    expect(find.byKey(const Key('preview-surface')), findsOneWidget);
     expect(
       find.descendant(
         of: find.byKey(const Key('preview-panel')),
@@ -426,7 +426,7 @@ void main() {
     );
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
   });
 
   testWidgets('selection moves rebuild only the rows that changed', (
@@ -581,7 +581,7 @@ void main() {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
     await tester.sendKeyRepeatEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsOneWidget);
+    expect(find.byKey(const Key('preview-surface')), findsOneWidget);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
   });
 
@@ -816,7 +816,7 @@ void main() {
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
@@ -4496,7 +4496,14 @@ void main() {
     ]);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
-    expect(find.text('선택한 커밋의 diff'), findsOneWidget);
+    // 비교 중에도 실제 커밋을 고르면 헤더는 그 커밋의 해시를 말한다.
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('preview-header')),
+        matching: find.text('main-tip'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('main-tip.dart'), findsWidgets);
     expect(commitCalls, [(sha: 'main-tip', path: 'main-tip.dart')]);
     expect(rangeCalls, hasLength(1));
@@ -11155,7 +11162,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('preview-full-diff')));
+    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
     await tester.pumpAndSettle();
 
     final workspace = tester.widget<FullDiffWorkspace>(
@@ -14288,13 +14295,13 @@ void main() {
     // The Enter chip is the same toggle the key runs, by mouse.
     await tester.tap(find.byKey(const Key('keycap-Enter')));
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsOneWidget);
+    expect(find.byKey(const Key('preview-surface')), findsOneWidget);
     await tester.tap(find.byKey(const Key('keycap-Enter')));
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsOneWidget);
+    expect(find.byKey(const Key('preview-surface')), findsOneWidget);
 
     // The placement buttons grew but still respond.
     await tester.tap(find.text('하단'));
@@ -15148,7 +15155,7 @@ void main() {
           DefaultTextStyle.of(tester.element(finder.first)).style.fontSize!;
     }
 
-    expect(sizeOf('Commit & Diff'), 12);
+    // 헤더 제목은 커밋·부모 해시로 바뀌었다 — 산문 크기는 아래 두 줄이 지킨다.
     expect(sizeOf('first commit'), 14);
     expect(sizeOf('commit 1'), 12);
     expect(sizeOf('Ada Author'), 14);
@@ -16112,7 +16119,7 @@ void main() {
     });
     await tester.pumpWidget(app(_widthFixtureRepository(), controller));
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
 
     // ⌘D with the panel away opens it first: it is the diff's file list.
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
@@ -16120,78 +16127,17 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
     expect(find.byType(FullDiffWorkspace), findsOneWidget);
-    expect(find.text('Commit & Diff'), findsOneWidget);
+    expect(find.byKey(const Key('preview-surface')), findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('preview-full-diff')));
+    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
     await tester.pumpAndSettle();
     expect(find.byType(FullDiffWorkspace), findsOneWidget);
   });
 
-  testWidgets('the preview header carries the compact green Full Diff', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        home: TimelineScreen(
-          repository: FakeGitRepository(
-            (_, _) async => [commit('1', 'first commit')],
-          ),
-          controller: controller,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-
-    // The full-width blue CTA is gone.
-    expect(find.byKey(const Key('open-full-diff')), findsNothing);
-    expect(find.text('Open full diff'), findsNothing);
-
-    // A compact green twin of the toolbar's button sits at the header's right.
-    final button = find.byKey(const Key('preview-full-diff'));
-    final header = tester.getRect(find.text('Commit & Diff'));
-    final rect = tester.getRect(button);
-    expect(rect.height, 28);
-    expect(rect.left, greaterThan(header.right));
-    expect(
-      find.descendant(of: button, matching: find.text('Full Diff')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: button, matching: find.text('⌘D')),
-      findsOneWidget,
-    );
-    expect(find.byKey(const Key('preview-hash')), findsNothing);
-    expect(
-      (tester
-                  .widget<Container>(
-                    find.descendant(
-                      of: button,
-                      matching: find.byType(Container),
-                    ),
-                  )
-                  .decoration!
-              as BoxDecoration)
-          .color,
-      const Color(0xFF2EA043),
-    );
-    expect(
-      tester
-          .widget<Text>(
-            find.descendant(of: button, matching: find.text('Full Diff')),
-          )
-          .style
-          ?.fontSize,
-      11,
-    );
-
-    await tester.tap(button);
-    await tester.pumpAndSettle();
-    expect(find.byType(FullDiffWorkspace), findsOneWidget);
-  });
+  // 미리보기 헤더의 Full Diff 버튼은 은퇴했다 — 그 자리는 커밋·부모 해시가 쓴다
+  // (test/preview_header_contract_test.dart). 진입은 ⌘D·툴바·파일 클릭이 맡는다.
 
   // ------------------------------------------------------------------ C5/C6
   testWidgets('the commit stamp gives way to the profile instead of hiding', (
@@ -16875,7 +16821,7 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('selected-row-500')), findsOneWidget);
-      expect(find.text('Commit & Diff'), findsOneWidget);
+      expect(find.byKey(const Key('preview-surface')), findsOneWidget);
       final before = scrollable.position.pixels;
 
       await tester.tap(find.byKey(const Key('base-branch-selector')));
@@ -16885,7 +16831,7 @@ void main() {
 
       expect(historyCalls, [0, 500]);
       expect(find.byKey(const Key('selected-row-500')), findsOneWidget);
-      expect(find.text('Commit & Diff'), findsOneWidget);
+      expect(find.byKey(const Key('preview-surface')), findsOneWidget);
       expect(scrollable.position.pixels, before);
       expect(find.text('feature'), findsWidgets);
     },
@@ -17794,7 +17740,7 @@ void main() {
     expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
     await metaArrow(LogicalKeyboardKey.arrowDown);
     expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
-    expect(find.text('Commit & Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
