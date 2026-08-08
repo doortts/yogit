@@ -126,7 +126,7 @@ void main() {
                   .child!
               as DecoratedBox;
       final fileRowDecoration = fileRow.decoration as BoxDecoration;
-      expect(fileRowDecoration.color, TimelineThemePalette.carbon.neutralChip);
+      expect(fileRowDecoration.color, TimelineThemePalette.carbon.selectedRow);
       expect(fileRowDecoration.border, isNull);
       expect(fileRowDecoration.borderRadius, BorderRadius.circular(6));
       expect(
@@ -16074,9 +16074,11 @@ void main() {
     final pane = find.byKey(const Key('history-pane'));
     expect(tester.getSize(pane).width, 240);
 
+    // The handle sits on the diff seam, so dragging towards the diff — left,
+    // in this placement — is what widens History.
     await tester.drag(
       find.byKey(const Key('history-pane-resizer')),
-      const Offset(30, 0),
+      const Offset(-30, 0),
     );
     await tester.pumpAndSettle();
     expect(tester.getSize(pane).width, 270);

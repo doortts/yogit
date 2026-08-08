@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yogit/full_diff_commit_info_card.dart';
+import 'package:yogit/full_diff_minimap.dart';
+import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/full_diff_workspace.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/window_frame.dart';
@@ -165,6 +168,64 @@ void main() {
       tester.getRect(preview).right,
       lessThanOrEqualTo(tester.getRect(pane).left),
       reason: '하단 배치: 아래 줄은 미리보기 · History 순',
+    );
+  });
+
+  testWidgets('the minimap stays while the history pane is open', (
+    tester,
+  ) async {
+    await pumpDiffMode(tester);
+    expect(find.byType(FullDiffMinimap), findsOneWidget);
+
+    await toggleHistory(tester);
+    expect(
+      find.byType(FullDiffMinimap),
+      findsOneWidget,
+      reason: 'History가 열려도 diff는 여전히 한 파일의 diff다',
+    );
+    final workspace = tester.getRect(find.byType(FullDiffWorkspace));
+    final minimap = tester.getRect(find.byType(FullDiffMinimap));
+    expect(minimap.right, closeTo(workspace.right, 1));
+    expect(
+      minimap.width,
+      fullDiffMinimapWidth,
+      reason: '자리만 잡고 폭이 0이면 사라진 것과 같다',
+    );
+  });
+
+  testWidgets('the history pane widens towards the diff', (tester) async {
+    await pumpDiffMode(tester);
+    await toggleHistory(tester);
+
+    final pane = find.byKey(const Key('history-pane'));
+    final before = tester.getSize(pane).width;
+    // 핸들은 diff와 맞닿은 쪽에 있다 — 미리보기의 손잡이와 같은 자리에 겹치면
+    // 위에 놓인 쪽만 잡히고 History는 영영 못 잡는다.
+    await tester.drag(
+      find.byKey(const Key('history-pane-resizer')),
+      const Offset(-40, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getSize(pane).width, before + 40);
+  });
+
+  testWidgets('a focused history row keeps its message to itself', (
+    tester,
+  ) async {
+    await pumpDiffMode(tester);
+    await toggleHistory(tester);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('history-pane')),
+        matching: find.text('second commit'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byType(FullDiffCommitInfoCard),
+      findsNothing,
+      reason: '선택 행 아래 뜨던 커밋 메시지 팝오버는 은퇴했다',
     );
   });
 

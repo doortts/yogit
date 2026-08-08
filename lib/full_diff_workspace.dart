@@ -1243,20 +1243,21 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
                 ),
               ),
             ),
-            if (state.view != FullDiffView.history)
-              SizedBox(
-                width: fullDiffMinimapWidth,
-                child: FullDiffMinimap(
-                  document: state.patch.data ?? DiffDocument.empty,
-                  activeAnchor: state.activeAnchor,
-                  sourceLineCount: _minimapSourceLineCount(state),
-                  sourceSide: _minimapSourceSide(state),
-                  view: state.view,
-                  scrollController: _contentScroll,
-                  onAnchorSelected: _controller.selectAnchor,
-                  onScrollFractionChanged: _scrollContentToFraction,
-                ),
+            // Every view here is a diff of one file now that History reads
+            // from its own pane, so the map always has something to map.
+            SizedBox(
+              width: fullDiffMinimapWidth,
+              child: FullDiffMinimap(
+                document: state.patch.data ?? DiffDocument.empty,
+                activeAnchor: state.activeAnchor,
+                sourceLineCount: _minimapSourceLineCount(state),
+                sourceSide: _minimapSourceSide(state),
+                view: state.view,
+                scrollController: _contentScroll,
+                onAnchorSelected: _controller.selectAnchor,
+                onScrollFractionChanged: _scrollContentToFraction,
               ),
+            ),
           ],
         ),
       );

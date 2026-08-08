@@ -10480,7 +10480,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         borderRadius: BorderRadius.circular(6),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: selected ? _palette.neutralChip : null,
+            color: selected ? _palette.selectedRow : null,
             borderRadius: selected ? BorderRadius.circular(6) : null,
           ),
           child: Row(
@@ -11097,6 +11097,11 @@ class _TimelineScreenState extends State<TimelineScreen>
       label: 'History pane width',
       resizerKey: const Key('history-pane-resizer'),
       dividerKey: const Key('history-pane-divider'),
+      // The seam this pane widens across is the diff's, except at the bottom
+      // where the diff is overhead and the preview is the neighbour. The other
+      // seam belongs to the preview's own handle.
+      handleOnLeft:
+          _previewController.previewPlacement != PreviewPlacement.left,
       onChanged: (width) => setState(
         () => _historyWidth = width.clamp(
           FullDiffColumnWidths.minHistory,
@@ -11147,7 +11152,6 @@ class _TimelineScreenState extends State<TimelineScreen>
                           selected: state.selectedHistoryEntry,
                           onSelected: (entry) =>
                               _selectHistoryEntry(controller, entry),
-                          loadCommitMessage: _commitMessageFor,
                         ),
                 ),
               ],

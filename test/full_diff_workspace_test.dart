@@ -1233,9 +1233,7 @@ void main() {
       );
       expect(
         tester
-            .widget<Text>(
-              find.descendant(of: row, matching: find.textContaining('ago')),
-            )
+            .widget<Text>(find.descendant(of: row, matching: _dateText))
             .style
             ?.fontSize,
         10,
@@ -1436,9 +1434,9 @@ void main() {
     );
 
     final authorText = tester.widget<Text>(find.text(author));
-    final timeText = tester.widget<Text>(find.textContaining('ago'));
+    final dateText = tester.widget<Text>(_dateText);
     expect(authorText.overflow, TextOverflow.ellipsis);
-    expect(timeText.overflow, TextOverflow.ellipsis);
+    expect(dateText.overflow, TextOverflow.ellipsis);
     expect(tester.takeException(), isNull);
   });
 
@@ -3596,3 +3594,9 @@ void main() {
     },
   );
 }
+
+/// The MM-DD stamp a History row puts opposite its sha.
+final _dateText = find.byWidgetPredicate(
+  (widget) =>
+      widget is Text && RegExp(r'^\d\d-\d\d$').hasMatch(widget.data ?? ''),
+);

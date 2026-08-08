@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:yogit/vim_navigation.dart';
 
-import 'full_diff_commit_info_card.dart';
 import 'full_diff_model.dart';
 import 'full_diff_selectable_row.dart';
 import 'full_diff_theme.dart';
@@ -16,7 +15,6 @@ class FullHistoryView extends StatefulWidget {
     this.controller,
     this.focusNode,
     this.onMoveToFiles,
-    this.loadCommitMessage,
     super.key,
   });
 
@@ -26,7 +24,6 @@ class FullHistoryView extends StatefulWidget {
   final ScrollController? controller;
   final FocusNode? focusNode;
   final VoidCallback? onMoveToFiles;
-  final FullDiffCommitMessageLoader? loadCommitMessage;
 
   @override
   State<FullHistoryView> createState() => _FullHistoryViewState();
@@ -35,7 +32,6 @@ class FullHistoryView extends StatefulWidget {
 class _FullHistoryViewState extends State<FullHistoryView> {
   final _ownedFocusNode = FocusNode(debugLabel: 'full history list');
   final _ownedScrollController = ScrollController();
-  final _selectedLink = LayerLink();
   final Map<String, GlobalKey> _rowKeys = {};
   bool _hasFocus = false;
 
@@ -147,94 +143,53 @@ class _FullHistoryViewState extends State<FullHistoryView> {
       },
       onKeyEvent: _handleKey,
       child: FocusTraversalGroup(
-        child: Stack(
-          clipBehavior: Clip.hardEdge,
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              child: ListView.builder(
-                key: const Key('history-list'),
-                controller: _scrollController,
-                primary: false,
-                padding: EdgeInsets.zero,
-                itemCount: widget.entries.length,
-                itemBuilder: (context, index) {
-                  final entry = widget.entries[index];
-                  final isSelected = identical(entry, selected);
-                  void activate() {
-                    _focusNode.requestFocus();
-                    widget.onSelected(entry);
-                  }
+        child: ColoredBox(
+          color: fullDiffCanvas,
+          child: ListView.builder(
+            key: const Key('history-list'),
+            controller: _scrollController,
+            primary: false,
+            padding: EdgeInsets.zero,
+            itemCount: widget.entries.length,
+            itemBuilder: (context, index) {
+              final entry = widget.entries[index];
+              final isSelected = identical(entry, selected);
+              void activate() {
+                _focusNode.requestFocus();
+                widget.onSelected(entry);
+              }
 
-                  Widget row = HistoryRow(
-                    entry: entry,
+              return KeyedSubtree(
+                key: _rowKeys.putIfAbsent(
+                  entry.commit.sha,
+                  () => GlobalKey(debugLabel: 'history ${entry.commit.sha}'),
+                ),
+                child: Focus(
+                  onKeyEvent: (_, event) {
+                    if (event is KeyDownEvent &&
+                        event.logicalKey == LogicalKeyboardKey.enter) {
+                      activate();
+                      return KeyEventResult.handled;
+                    }
+                    return KeyEventResult.ignored;
+                  },
+                  child: Semantics(
                     selected: isSelected,
-                    focused: isSelected && _hasFocus,
-                  );
-                  if (isSelected) {
-                    row = CompositedTransformTarget(
-                      link: _selectedLink,
-                      child: row,
-                    );
-                  }
-
-                  return KeyedSubtree(
-                    key: _rowKeys.putIfAbsent(
-                      entry.commit.sha,
-                      () =>
-                          GlobalKey(debugLabel: 'history ${entry.commit.sha}'),
-                    ),
-                    child: Focus(
-                      onKeyEvent: (_, event) {
-                        if (event is KeyDownEvent &&
-                            event.logicalKey == LogicalKeyboardKey.enter) {
-                          activate();
-                          return KeyEventResult.handled;
-                        }
-                        return KeyEventResult.ignored;
-                      },
-                      child: Semantics(
+                    button: true,
+                    onTap: activate,
+                    child: InkWell(
+                      onTap: activate,
+                      child: HistoryRow(
+                        entry: entry,
                         selected: isSelected,
-                        button: true,
-                        onTap: activate,
-                        child: InkWell(onTap: activate, child: row),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-            if (_hasFocus && selected != null)
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: ClipRect(
-                    child: CompositedTransformFollower(
-                      link: _selectedLink,
-                      showWhenUnlinked: false,
-                      targetAnchor: Alignment.bottomLeft,
-                      followerAnchor: Alignment.topLeft,
-                      offset: const Offset(0, 4),
-                      child: Align(
-                        alignment: Alignment.topLeft,
-                        child: FullDiffCommitInfoCard(
-                          key: Key(
-                            'history-commit-details-${selected.commit.sha}',
-                          ),
-                          info: FullDiffCommitInfo(
-                            sha: selected.commit.sha,
-                            shortSha: selected.commit.shortSha,
-                            fallbackMessage: selected.commit.subject,
-                            author: selected.commit.author.name,
-                            timestamp: selected.commit.authorTimestamp,
-                          ),
-                          loadMessage: widget.loadCommitMessage,
-                        ),
+                        focused: isSelected && _hasFocus,
                       ),
                     ),
                   ),
                 ),
-              ),
-          ],
+              );
+            },
+          ),
         ),
       ),
     );
@@ -254,103 +209,76 @@ class HistoryRow extends StatelessWidget {
   final bool focused;
 
   @override
-  Widget build(BuildContext context) => FullDiffSelectableRowSurface(
-    key: Key('history-row-${entry.commit.sha}'),
-    selected: selected,
-    focused: focused,
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 76,
-            child: Align(
-              alignment: Alignment.topLeft,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                decoration: BoxDecoration(
-                  color: fullDiffChip,
-                  borderRadius: BorderRadius.circular(fullDiffChipRadius),
-                ),
-                child: Text(
+  Widget build(BuildContext context) {
+    final secondary = selected ? Colors.white70 : fullDiffMuted;
+    return FullDiffSelectableRowSurface(
+      key: Key('history-row-${entry.commit.sha}'),
+      selected: selected,
+      focused: focused,
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border(
+            // The bar names the selected commit even where the row's own fill
+            // is hidden under a scrollbar or a neighbouring pane.
+            left: BorderSide(
+              color: selected ? fullDiffAccent : Colors.transparent,
+              width: 2,
+            ),
+            bottom: BorderSide(color: fullDiffDivider.withValues(alpha: 0.4)),
+          ),
+        ),
+        padding: const EdgeInsets.fromLTRB(9, 7, 11, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text(
                   entry.commit.shortSha,
                   maxLines: 1,
                   overflow: TextOverflow.clip,
-                  style: const TextStyle(
-                    fontFamily: technicalFontFamily,
-                    fontFamilyFallback: technicalFontFallback,
+                  style: technicalTextStyle.copyWith(
+                    color: fullDiffAccent,
                     fontSize: 10,
                   ),
                 ),
-              ),
-            ),
-          ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+                const Spacer(),
                 Text(
-                  entry.commit.subject,
+                  _shortDate(entry.commit.committerTimestamp),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: selected ? fullDiffAccent : Colors.white,
-                    fontSize: 11,
+                  style: technicalTextStyle.copyWith(
+                    color: secondary,
+                    fontSize: 10,
                   ),
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        entry.commit.author.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: selected ? Colors.white70 : fullDiffMuted,
-                          fontSize: 10,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      ' · ',
-                      style: TextStyle(
-                        color: selected ? Colors.white70 : fullDiffMuted,
-                        fontSize: 10,
-                      ),
-                    ),
-                    Flexible(
-                      child: Text(
-                        _relativeTime(entry.commit.committerTimestamp),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: selected ? Colors.white70 : fullDiffMuted,
-                          fontSize: 10,
-                        ),
-                      ),
-                    ),
-                  ],
                 ),
               ],
             ),
-          ),
-        ],
+            const SizedBox(height: 3),
+            Text(
+              entry.commit.subject,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white, fontSize: 11),
+            ),
+            const SizedBox(height: 1),
+            Text(
+              entry.commit.author.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: secondary, fontSize: 10),
+            ),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
-String _relativeTime(int timestamp) {
+String _shortDate(int timestamp) {
   final time = DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
-  final elapsed = DateTime.now().difference(time);
-  String ago(int value, String unit) =>
-      '$value $unit${value == 1 ? '' : 's'} ago';
-  if (elapsed.inMinutes < 1) return 'just now';
-  if (elapsed.inHours < 1) return ago(elapsed.inMinutes, 'minute');
-  if (elapsed.inHours < 48) return ago(elapsed.inHours, 'hour');
-  if (elapsed.inDays < 30) return ago(elapsed.inDays, 'day');
-  if (elapsed.inDays < 365) return ago(elapsed.inDays ~/ 30, 'month');
-  return ago(elapsed.inDays ~/ 365, 'year');
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${two(time.month)}-${two(time.day)}';
 }
