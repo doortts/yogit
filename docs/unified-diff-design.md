@@ -29,7 +29,7 @@ diff 모드가 켜지면 사이드바와 타임라인이 사라지고 그 자리
 |---|---|
 | 우측 (기본) | diff+미니맵 · History · 미리보기 |
 | 좌측 | 미리보기 · History · diff+미니맵 |
-| 하단 | 위 = diff+미니맵 (전체 폭) / 아래 줄 = History · 미리보기 |
+| 하단 | 위 = diff+미니맵 (전체 폭) / 아래 줄 = 미리보기 · History |
 
 - 하단 배치의 아래 줄 높이는 지금 미리보기 하단 배치의 높이 조절을 그대로 쓴다.
 - 미리보기가 닫혀 있을 때 ⌘D를 누르면 미리보기를 먼저 열고 진입한다.
@@ -45,6 +45,10 @@ diff 모드가 켜지면 사이드바와 타임라인이 사라지고 그 자리
 
 2줄 (GlobalDiffToolbar): `diff 알고리즘` + 선택기(⇧A) · 공백 무시(⇧Space) · 줄바꿈(⇧L) ·
 `↑ n / m ↓` hunk 이동 · Unified|Side-by-side(⌘U) · Hunk(⇧H) · History(⌘3)
+
+헤더는 원판보다 컴팩트하게 조인다: `fullDiffControlHeight` 28→24, `_HeaderBar` 상하 패딩
+7→4, 컨트롤 간격(Wrap spacing) 5. 전체화면 route가 사라지므로 토큰 자체를 바꾸면 되고,
+헤더 부품 테스트의 치수 단언도 함께 갱신한다.
 
 ### 2.3 커밋 컨텍스트 라인
 
@@ -122,8 +126,8 @@ parent 선택기의 새 자리다.
 
 시안(`docs/unified-diff-mockup.html`)과 앱이 같은 토큰을 써야 한다. 시안 하단 충실도 표가
 검수 기준표다: diff 팔레트(`full_diff_theme.dart` 전 토큰), 소스 폰트 Menlo 12/행높이 21/
-거터 10/줄번호 폭 74, 컨트롤 높이 28·라운드 12.5·선택=흰 배경, 배지 필 Menlo 11, 경로 칩
-#3A3A3A 라운드 7.5, History 카드 11px/Menlo 10px, 미니맵 폭 18과 5색.
+거터 10/줄번호 폭 74, 컨트롤 높이 24·행 상하 패딩 4·컨트롤 간격 5·라운드 12.5·선택=흰 배경,
+배지 필 Menlo 11, 경로 칩 #3A3A3A 라운드 7.5, History 카드 11px/Menlo 10px, 미니맵 폭 18과 5색.
 
 검증 루프 (사용자 요구사항): 구현 후 실행 화면을 시안과 대조 → 다른 항목을 표로 정리 →
 재작업 지시 → 같아질 때까지 반복. 토큰 수준은 위젯 테스트로 고정하고, 배치·비례는 스크린샷
@@ -139,7 +143,7 @@ parent 선택기의 새 자리다.
    `history-toggle` · 미니맵이 모두 존재한다.
 3. **배치 — 우측**: diff.left < history.left < preview.left (History 켠 상태).
 4. **배치 — 좌측**: preview.left < history.left < diff.left.
-5. **배치 — 하단**: diff.bottom ≤ history.top, 아래 줄에서 history.left < preview.left.
+5. **배치 — 하단**: diff.bottom ≤ history.top, 아래 줄에서 preview.left < history.left.
 6. **History 토글**: 끄면 pane이 사라지고 diff 폭이 그만큼 늘어난다.
 7. **집중 모드**: History·미리보기가 숨고 diff만 남는다. 해제하면 복원.
 8. **복귀**: esc/←/⌘D 로 타임라인+사이드바 복귀, 미리보기 유지.
