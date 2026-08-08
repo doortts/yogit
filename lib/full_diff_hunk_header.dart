@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'full_diff_code_row.dart';
 import 'full_diff_model.dart';
 import 'full_diff_theme.dart';
 import 'typography.dart';
@@ -17,25 +18,21 @@ class FullDiffHunkHeader extends StatelessWidget {
   final int hunkCount;
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-    decoration: const BoxDecoration(
-      color: fullDiffHunkHeader,
-      border: Border(
-        top: BorderSide(color: fullDiffDivider),
-        bottom: BorderSide(color: fullDiffDivider),
-      ),
-    ),
-    child: Text(
-      '${hunk.context.isEmpty ? path : hunk.context} · '
-      'lines ${hunk.displayRange} · '
-      'change ${hunk.index + 1} of $hunkCount',
-      style: const TextStyle(
-        fontFamily: technicalFontFamily,
-        fontFamilyFallback: technicalFontFallback,
-        fontSize: 12,
-        height: 21 / 12,
-        color: fullDiffMuted,
+  Widget build(BuildContext context) => ColoredBox(
+    color: fullDiffHunkHeader,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Text(
+        hunk.unifiedHeader(hunk.context.isEmpty ? path : hunk.context),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontFamily: technicalFontFamily,
+          fontFamilyFallback: technicalFontFallback,
+          fontSize: 11,
+          height: fullDiffSourceRowHeight / 11,
+          color: fullDiffAccent,
+        ),
       ),
     ),
   );

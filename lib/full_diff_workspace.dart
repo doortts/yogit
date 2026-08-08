@@ -1347,6 +1347,9 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
         document: patch,
         activeAnchor: state.activeAnchor,
         path: selectedFile.path,
+        // 21px rows, per the approved mockup: the diff sits beside two panes
+        // now, so every row it can show is one the reader keeps.
+        compactRows: true,
         wrapLines: state.wrapLines,
         highlighter: _highlighter,
         anchorKeys: _anchorKeys,
@@ -1362,6 +1365,7 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
         activeAnchor: state.activeAnchor,
         oldPath: selectedFile.oldPath ?? selectedFile.path,
         newPath: selectedFile.path,
+        compactRows: true,
         wrapLines: state.wrapLines,
         showOldSide: viewportWidth > 480,
         highlighter: _highlighter,

@@ -4847,10 +4847,7 @@ void main() {
       find.descendant(of: sideTitles, matching: find.text('비교 브랜치')),
       findsOneWidget,
     );
-    expect(
-      find.text('lib/shared.dart · lines 1 · change 1 of 1'),
-      findsNothing,
-    );
+    expect(find.textContaining('@@ -1,1 +1,1 @@'), findsNothing);
     final conflictActions = find.byKey(
       const Key('branch-preview-conflict-actions'),
     );
@@ -11364,7 +11361,7 @@ void main() {
     expect(find.byKey(const Key('nearby-commits-list')), findsNothing);
     expect(find.byKey(const Key('nearby-column-resizer')), findsNothing);
     expect(find.byKey(const Key('unified-list')), findsOneWidget);
-    expect(find.textContaining('change 1 of 1'), findsOneWidget);
+    expect(find.textContaining('@@ -'), findsOneWidget);
     expect(find.text('1 / 1'), findsWidgets);
     expect(find.text('Unified'), findsOneWidget);
     expect(find.text('Side-by-side'), findsOneWidget);
@@ -17398,7 +17395,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.byKey(const Key('unified-list')), findsOneWidget);
-    expect(find.textContaining('change 1 of 1'), findsOneWidget);
+    expect(find.textContaining('@@ -'), findsOneWidget);
     expect(find.text('diff --git a/x b/x'), findsNothing);
     expect(tester.takeException(), isNull);
   });

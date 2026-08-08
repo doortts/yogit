@@ -111,7 +111,9 @@ class UnifiedPresentationView extends StatelessWidget {
                   (line.kind == DiffLineKind.add ||
                       line.kind == DiffLineKind.delete),
               wordRanges: wordRanges,
-              compactGutter: true,
+              // Unified shows where a line sat and where it landed, so it
+              // carries both numbers and lets the sign ride with the source.
+              compactGutter: false,
               richRenderingEnabled: richRenderingEnabled,
               compact: compactRows,
               currentMarkerColor: currentMarkerColor,

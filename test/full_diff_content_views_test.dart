@@ -8,6 +8,7 @@ import 'package:yogit/avatars.dart';
 import 'package:yogit/full_diff_anchor_probe.dart';
 import 'package:yogit/full_blame_view.dart';
 import 'package:yogit/full_diff_code_row.dart';
+import 'package:yogit/full_diff_hunk_header.dart';
 import 'package:yogit/full_diff_commit_info_card.dart';
 import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/full_diff_selectable_row.dart';
@@ -220,17 +221,18 @@ void main() {
         ),
       );
 
-      final header = find.text('replace value · lines 1–3 · change 1 of 1');
+      final header = find.byType(FullDiffHunkHeader);
       final leadingContext = find.byKey(const Key('unified-line-0-0'));
       final changedRow = find.byKey(const Key('unified-line-0-2'));
-      expect(header, findsOneWidget);
+      expect(find.text('@@ -1,3 +1,3 @@ replace value'), findsOneWidget);
+      // The header sits flush between them — it is one source row tall now.
       expect(
         tester.getBottomLeft(leadingContext).dy,
-        lessThan(tester.getTopLeft(header).dy),
+        lessThanOrEqualTo(tester.getTopLeft(header).dy),
       );
       expect(
         tester.getBottomLeft(header).dy,
-        lessThan(tester.getTopLeft(changedRow).dy),
+        lessThanOrEqualTo(tester.getTopLeft(changedRow).dy),
       );
       final renderedLine = tester.widget<FullDiffCodeRow>(changedRow);
       expect(renderedLine.line.kind, DiffLineKind.add);
