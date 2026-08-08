@@ -1074,6 +1074,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   final _scrollController = ScrollController();
   final _previewFilesScrollController = ScrollController();
   final _previewDiffScrollController = ScrollController();
+  final _previewMessageScrollController = ScrollController();
   final _selectedPreviewFileKey = GlobalKey(
     debugLabel: 'selected preview file',
   );
@@ -1284,6 +1285,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     // The sidebar cursor and the timeline selection dim whichever of the two
     // panes does not hold the keyboard, so both repaint on focus flips.
     _sidebarFocusNode.addListener(_onPaneFocusChanged);
+    _previewFocusNode.addListener(_onPaneFocusChanged);
     _focusNode.addListener(_onPaneFocusChanged);
     HardwareKeyboard.instance.addHandler(_handleModifierKeyEvent);
     // Refs load beside the first page, and neither blocks the first paint. The
@@ -1696,6 +1698,9 @@ class _TimelineScreenState extends State<TimelineScreen>
     _filterController.dispose();
     _focusNode.dispose();
     _sidebarFocusNode.dispose();
+    _previewFocusNode.removeListener(_onPaneFocusChanged);
+    _previewFocusNode.dispose();
+    _previewMessageScrollController.dispose();
     super.dispose();
   }
 
@@ -2080,6 +2085,11 @@ class _TimelineScreenState extends State<TimelineScreen>
         if (_sidebarCursor == null) _moveSidebarCursor(1);
         return KeyEventResult.handled;
       }
+      // → (or l) walks the other way, into the preview and its diff.
+      if (key == LogicalKeyboardKey.arrowRight && event is KeyDownEvent) {
+        _enterPreview();
+        return KeyEventResult.handled;
+      }
     }
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     if (event.logicalKey == LogicalKeyboardKey.keyD && shortcutModifierHeld) {
@@ -2323,9 +2333,73 @@ class _TimelineScreenState extends State<TimelineScreen>
   // ------------------------------------------- sidebar keyboard navigation
 
   final _sidebarFocusNode = FocusNode(debugLabel: 'sidebar');
+  final _previewFocusNode = FocusNode(debugLabel: 'preview');
 
   void _onPaneFocusChanged() {
     if (mounted) setState(() {});
+  }
+
+  /// → (or l) from the timeline: the preview takes the keyboard and shows the
+  /// diff of whatever file it is pointing at, opening the panel if it is away.
+  void _enterPreview() {
+    final commit = _selectedCommit;
+    if (commit == null) return;
+    if (_previewController.previewPlacement == PreviewPlacement.closed) {
+      unawaited(
+        _previewController.setPreview(widget.preferredPreviewPlacement),
+      );
+    }
+    _previewFocusNode.requestFocus();
+    if (_showsBranchPreviewDiff(commit)) return;
+    final key = _previewKey(commit);
+    final path =
+        _previewPaths[key] ?? _previewFileLists[key]?.firstOrNull?.path;
+    if (path == null) return;
+    if (_fullDiffOpen) {
+      _showFullDiffFile(path);
+    } else {
+      _openFullDiff(commit, path);
+      // The workspace autofocuses itself; the preview keeps the keyboard so
+      // its own arrows keep walking files.
+      _previewFocusNode.requestFocus();
+    }
+  }
+
+  /// ← (or h) from the preview: the diff folds away and the timeline takes the
+  /// keyboard back, with the panel itself left alone.
+  void _leavePreview() {
+    if (_fullDiffOpen) _closeFullDiff();
+    _focusNode.requestFocus();
+  }
+
+  KeyEventResult _onPreviewKeyEvent(FocusNode _, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isMetaPressed || keyboard.isAltPressed) {
+      return KeyEventResult.ignored;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      _leavePreview();
+      return KeyEventResult.handled;
+    }
+    final key = normalizeNavigationKey(
+      event.logicalKey,
+      hasModifier: keyboard.isShiftPressed || keyboard.isControlPressed,
+    );
+    if (key == LogicalKeyboardKey.arrowLeft) {
+      _leavePreview();
+      return KeyEventResult.handled;
+    }
+    final step = switch (key) {
+      LogicalKeyboardKey.arrowDown => 1,
+      LogicalKeyboardKey.arrowUp => -1,
+      _ => 0,
+    };
+    if (step == 0) return KeyEventResult.ignored;
+    _stepPreviewFile(step, animate: event is KeyDownEvent);
+    return KeyEventResult.handled;
   }
 
   /// The unfocused pane keeps its selection, drained of color: same
@@ -2335,10 +2409,16 @@ class _TimelineScreenState extends State<TimelineScreen>
     return Color.from(alpha: color.a, red: gray, green: gray, blue: gray);
   }
 
-  /// The timeline's selection color, gray while the sidebar has the keyboard.
-  Color get _timelineSelectionColor => _sidebarFocusNode.hasFocus
+  /// The timeline's selection color, gray while another pane has the keyboard.
+  Color get _timelineSelectionColor =>
+      _sidebarFocusNode.hasFocus || _previewFocusNode.hasFocus
       ? _achromatic(_palette.selectedRow)
       : _palette.selectedRow;
+
+  /// The preview's, under the same rule.
+  Color get _previewSelectionColor => _previewFocusNode.hasFocus
+      ? _palette.selectedRow
+      : _achromatic(_palette.selectedRow);
 
   /// The row the sidebar's keyboard cursor sits on, highlighted like a hover.
   (_RefSection, String)? _sidebarCursor;
@@ -8573,49 +8653,53 @@ class _TimelineScreenState extends State<TimelineScreen>
       // Everything in here is text worth copying; taps still reach the buttons.
       child: Stack(
         children: [
-          SelectionArea(
-            onSelectionChanged: (selection) =>
-                debugPreviewSelection = selection?.plainText,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _previewHeader(commit),
-                if (!_usesBranchPreviewResult(commit))
-                  Container(
-                    key: const Key('preview-shortcut-hint'),
-                    height: 24,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      _cherryPickState == null
-                          ? '파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓'
-                          : '충돌 파일을 해결한 뒤 계속할 수 있습니다',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: _palette.muted,
-                        fontSize: 10,
-                        fontFamily: technicalFontFamily,
-                        fontFamilyFallback: technicalFontFallback,
+          Focus(
+            focusNode: _previewFocusNode,
+            onKeyEvent: _onPreviewKeyEvent,
+            child: SelectionArea(
+              onSelectionChanged: (selection) =>
+                  debugPreviewSelection = selection?.plainText,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _previewHeader(commit),
+                  if (!_usesBranchPreviewResult(commit))
+                    Container(
+                      key: const Key('preview-shortcut-hint'),
+                      height: 24,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        _cherryPickState == null
+                            ? '파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓'
+                            : '충돌 파일을 해결한 뒤 계속할 수 있습니다',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: _palette.muted,
+                          fontSize: 10,
+                          fontFamily: technicalFontFamily,
+                          fontFamilyFallback: technicalFontFallback,
+                        ),
                       ),
                     ),
-                  ),
-                Expanded(
-                  child: _cherryPickState != null
-                      ? _cherryPickPanel()
-                      : commit == null
-                      ? Center(
-                          child: Text(
-                            'No commit selected',
-                            style: TextStyle(
-                              color: _palette.muted,
-                              fontSize: 13,
+                  Expanded(
+                    child: _cherryPickState != null
+                        ? _cherryPickPanel()
+                        : commit == null
+                        ? Center(
+                            child: Text(
+                              'No commit selected',
+                              style: TextStyle(
+                                color: _palette.muted,
+                                fontSize: 13,
+                              ),
                             ),
-                          ),
-                        )
-                      : _previewBody(commit),
-                ),
-              ],
+                          )
+                        : _previewBody(commit),
+                  ),
+                ],
+              ),
             ),
           ),
           _previewResizer(placement),
@@ -9176,11 +9260,11 @@ class _TimelineScreenState extends State<TimelineScreen>
       builder: (context, snapshot) {
         final changes = snapshot.data;
         final key = _previewKey(commit);
-        final requestedPath = _previewDiffOpen || _fullDiffOpen
-            ? _previewPaths[key]
-            : null;
+        // Nothing is chosen until the panel has actually been walked into: a
+        // highlight on a pane the keyboard never visited reads as focus.
+        final requestedPath = _previewPaths[key];
         GitFileChange? selectedFile;
-        if (changes != null && changes.isNotEmpty) {
+        if (requestedPath != null && changes != null && changes.isNotEmpty) {
           selectedFile = changes.firstWhere(
             (file) => file.path == requestedPath,
             orElse: () => changes.first,
@@ -9221,16 +9305,20 @@ class _TimelineScreenState extends State<TimelineScreen>
                             maxHeight:
                                 _previewMessageLines * _previewMessageLine,
                           ),
-                          child: SingleChildScrollView(
-                            key: const Key('preview-commit-body-scroll'),
-                            primary: false,
-                            child: Text(
-                              body,
-                              key: const Key('preview-commit-body'),
-                              style: TextStyle(
-                                color: _palette.text,
-                                fontSize: 12,
-                                height: _previewMessageLine / 12,
+                          child: Scrollbar(
+                            controller: _previewMessageScrollController,
+                            child: SingleChildScrollView(
+                              key: const Key('preview-commit-body-scroll'),
+                              controller: _previewMessageScrollController,
+                              primary: false,
+                              child: Text(
+                                body,
+                                key: const Key('preview-commit-body'),
+                                style: TextStyle(
+                                  color: _palette.text,
+                                  fontSize: 12,
+                                  height: _previewMessageLine / 12,
+                                ),
                               ),
                             ),
                           ),
@@ -10548,7 +10636,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         borderRadius: BorderRadius.circular(6),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: selected ? _palette.selectedRow : null,
+            color: selected ? _previewSelectionColor : null,
             borderRadius: selected ? BorderRadius.circular(6) : null,
           ),
           child: Row(

@@ -115,6 +115,9 @@ void main() {
             .color,
         TimelineThemePalette.carbon.surface,
       );
+      // 미리보기는 들어가 봐야 파일을 고른다.
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
       final fileRow =
           tester
                   .widget<InkWell>(
