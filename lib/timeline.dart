@@ -2409,16 +2409,20 @@ class _TimelineScreenState extends State<TimelineScreen>
     return Color.from(alpha: color.a, red: gray, green: gray, blue: gray);
   }
 
-  /// The timeline's selection color, gray while another pane has the keyboard.
+  /// What a selection fades to while its pane has no keyboard: the same weight
+  /// a hovered row carries, enough to keep the place without claiming focus.
+  Color get _restingSelection => _palette.neutralChip.withValues(alpha: 0.48);
+
+  /// The timeline's selection color, resting while another pane has the
+  /// keyboard.
   Color get _timelineSelectionColor =>
       _sidebarFocusNode.hasFocus || _previewFocusNode.hasFocus
-      ? _achromatic(_palette.selectedRow)
+      ? _restingSelection
       : _palette.selectedRow;
 
   /// The preview's, under the same rule.
-  Color get _previewSelectionColor => _previewFocusNode.hasFocus
-      ? _palette.selectedRow
-      : _achromatic(_palette.selectedRow);
+  Color get _previewSelectionColor =>
+      _previewFocusNode.hasFocus ? _palette.selectedRow : _restingSelection;
 
   /// The row the sidebar's keyboard cursor sits on, highlighted like a hover.
   (_RefSection, String)? _sidebarCursor;
@@ -4946,7 +4950,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                     final sidebarFocused = _sidebarFocusNode.hasFocus;
                     final cursorFill = sidebarFocused
                         ? _palette.selectedRow
-                        : _achromatic(_palette.selectedRow);
+                        : _restingSelection;
                     final cursorEdge = sidebarFocused
                         ? iconColor
                         : _achromatic(iconColor);

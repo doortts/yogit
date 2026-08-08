@@ -66,12 +66,6 @@ void main() {
     return tester.widget<DecoratedBox>(row.first).decoration as BoxDecoration;
   }
 
-  /// The mockup's 1안: same luminance, no chroma.
-  Color drained(Color color) {
-    final gray = 0.299 * color.r + 0.587 * color.g + 0.114 * color.b;
-    return Color.from(alpha: color.a, red: gray, green: gray, blue: gray);
-  }
-
   Future<void> press(WidgetTester tester, LogicalKeyboardKey key) async {
     await tester.sendKeyEvent(key);
     await tester.pumpAndSettle();
@@ -153,11 +147,9 @@ void main() {
     );
 
     await press(tester, LogicalKeyboardKey.arrowLeft);
-    expect(
-      fileRow(tester, 'lib/a.dart')?.color,
-      drained(focused),
-      reason: '돌아 나오면 자국만 무채색으로 남는다',
-    );
+    final resting = fileRow(tester, 'lib/a.dart')!.color!;
+    expect(resting, isNot(focused));
+    expect(resting.a, lessThan(1), reason: '돌아 나오면 hover 정도의 자국만 남는다');
   });
 
   testWidgets('re-entering the preview goes straight to the last file', (
