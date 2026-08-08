@@ -18,6 +18,7 @@ import 'package:yogit/full_diff_side_by_side_view.dart';
 import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/full_diff_unified_view.dart';
 import 'package:yogit/full_diff_workspace.dart';
+import 'package:yogit/commit_time.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/github_api.dart';
 import 'package:yogit/main.dart';
@@ -10219,32 +10220,24 @@ void main() {
   );
 
   test('full diff column widths round-trip and clamp damaged settings', () {
-    const widths = FullDiffColumnWidths(history: 240, files: 330);
+    const widths = FullDiffColumnWidths(history: 240);
     final decoded = AppSettings.fromJson(
       const AppSettings(fullDiffColumnWidths: widths).toJson(),
     );
 
     expect(decoded.fullDiffColumnWidths, widths);
+    // A settings file from the era of the file column still loads; the key it
+    // no longer knows is simply dropped.
     expect(
       AppSettings.fromJson({
         'fullDiffColumnWidths': {'history': 1, 'files': 9999},
       }).fullDiffColumnWidths,
-      const FullDiffColumnWidths(history: 180, files: 520),
-    );
-    expect(
-      FullDiffColumnWidths.fromJson(
-        const FullDiffColumnWidths(history: 180, files: 158).toJson(),
-      ),
-      const FullDiffColumnWidths(history: 180, files: 158),
+      const FullDiffColumnWidths(history: 180),
     );
   });
 
   test('side-by-side ratio round-trips and clamps damaged settings', () {
-    const widths = FullDiffColumnWidths(
-      history: 240,
-      files: 330,
-      sideBySideRatio: 0.65,
-    );
+    const widths = FullDiffColumnWidths(history: 240, sideBySideRatio: 0.65);
     expect(FullDiffColumnWidths.fromJson(widths.toJson()), widths);
 
     expect(
@@ -10265,12 +10258,7 @@ void main() {
     });
 
     expect(widths.history, 244);
-    expect(widths.files, 318);
-    expect(widths.toJson(), {
-      'history': 244.0,
-      'files': 318.0,
-      'sideBySideRatio': 0.5,
-    });
+    expect(widths.toJson(), {'history': 244.0, 'sideBySideRatio': 0.5});
   });
 
   test('legacy full diff initial view is ignored', () {
@@ -11531,7 +11519,7 @@ void main() {
     });
     final store = MemorySettingsStore()
       ..current = const AppSettings(
-        fullDiffColumnWidths: FullDiffColumnWidths(history: 240, files: 330),
+        fullDiffColumnWidths: FullDiffColumnWidths(history: 240),
       );
     await tester.pumpWidget(
       YogitApp(
@@ -11551,7 +11539,7 @@ void main() {
       tester
           .widget<FullDiffWorkspace>(find.byType(FullDiffWorkspace))
           .columnWidths,
-      const FullDiffColumnWidths(history: 240, files: 330),
+      const FullDiffColumnWidths(history: 240),
     );
 
     await tester.tap(find.text('Side-by-side'));
@@ -11562,7 +11550,6 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(store.current.fullDiffColumnWidths.history, 240);
-    expect(store.current.fullDiffColumnWidths.files, 330);
     expect(
       store.current.fullDiffColumnWidths.sideBySideRatio,
       greaterThan(const FullDiffColumnWidths().sideBySideRatio),

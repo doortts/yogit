@@ -74,12 +74,6 @@ class _StepFileIntent extends Intent {
   final int delta;
 }
 
-class _StepPrimaryFileIntent extends Intent {
-  const _StepPrimaryFileIntent(this.delta);
-
-  final int delta;
-}
-
 @visibleForTesting
 class FullDiffScrollController extends ScrollController {
   FullDiffScrollController({super.onAttach});
@@ -1103,14 +1097,6 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
                 return null;
               },
             ),
-            _StepPrimaryFileIntent: CallbackAction<_StepPrimaryFileIntent>(
-              onInvoke: (intent) {
-                if (_controller.state.view != FullDiffView.history) {
-                  _stepFile(intent.delta);
-                }
-                return null;
-              },
-            ),
           },
           child: Focus(
             key: const Key('diff-focus'),
@@ -1625,7 +1611,6 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
   void _saveColumnWidths() => widget.onColumnWidthsChanged?.call(
     FullDiffColumnWidths(
       history: widget.columnWidths.history,
-      files: widget.columnWidths.files,
       sideBySideRatio: _sideBySideRatio,
     ),
   );

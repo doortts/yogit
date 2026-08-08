@@ -155,22 +155,17 @@ class TimelineColumnWidths {
   );
 }
 
+/// The two widths the diff still keeps: its History pane, and the split
+/// between the two sides. The file column left with the file pane.
 class FullDiffColumnWidths {
-  const FullDiffColumnWidths({
-    this.history = 280,
-    this.files = 290,
-    this.sideBySideRatio = 0.5,
-  });
+  const FullDiffColumnWidths({this.history = 280, this.sideBySideRatio = 0.5});
 
   static const minHistory = 180.0;
   static const maxHistory = 420.0;
-  static const minFiles = 158.0;
-  static const maxFiles = 520.0;
   static const minSideBySideRatio = 0.2;
   static const maxSideBySideRatio = 0.8;
 
   final double history;
-  final double files;
   final double sideBySideRatio;
 
   factory FullDiffColumnWidths.fromJson(Object? value) {
@@ -189,7 +184,6 @@ class FullDiffColumnWidths {
         minHistory,
         maxHistory,
       ),
-      files: width('files', 290, minFiles, maxFiles),
       sideBySideRatio: width(
         'sideBySideRatio',
         0.5,
@@ -201,7 +195,6 @@ class FullDiffColumnWidths {
 
   Map<String, Object> toJson() => {
     'history': history,
-    'files': files,
     'sideBySideRatio': sideBySideRatio,
   };
 
@@ -209,11 +202,10 @@ class FullDiffColumnWidths {
   bool operator ==(Object other) =>
       other is FullDiffColumnWidths &&
       history == other.history &&
-      files == other.files &&
       sideBySideRatio == other.sideBySideRatio;
 
   @override
-  int get hashCode => Object.hash(history, files, sideBySideRatio);
+  int get hashCode => Object.hash(history, sideBySideRatio);
 }
 
 /// `#RRGGBB` (or bare `RRGGBB`) to a color, or null when malformed.

@@ -19,6 +19,12 @@ import 'package:yogit/settings.dart';
 
 import 'full_diff_fixtures.dart';
 
+/// The card this harness draws around the workspace for its captures. The app
+/// itself fills a pane edge to edge, so these live here rather than in the
+/// theme.
+const fullDiffOuterPadding = 12.0;
+const fullDiffOuterRadius = 20.0;
+
 final qaCommits = <GitCommit>[
   _qaCommit(
     sha: '2db06c0',
@@ -773,7 +779,6 @@ FullDiffColumnWidths _qaColumnWidths(double? surfaceWidth) {
   final unit = mainWidth / 6.02;
   return FullDiffColumnWidths(
     history: math.max(FullDiffColumnWidths.minHistory, unit * 0.82),
-    files: math.max(FullDiffColumnWidths.minFiles, unit),
   );
 }
 

@@ -1335,7 +1335,7 @@ void main() {
         tester,
         controller: controller,
         size: const Size(1200, 842),
-        columnWidths: const FullDiffColumnWidths(history: 244, files: 318),
+        columnWidths: const FullDiffColumnWidths(history: 244),
         onColumnWidthsChanged: (value) => saved = value,
       );
 
@@ -1364,7 +1364,6 @@ void main() {
         size: const Size(1200, 842),
         columnWidths: const FullDiffColumnWidths(
           history: 244,
-          files: 318,
           sideBySideRatio: 0.7,
         ),
       );
