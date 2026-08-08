@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:yogit/diff_screen.dart';
 import 'package:yogit/full_diff_workspace.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/window_frame.dart';
@@ -166,7 +165,12 @@ void main() {
 
     await pressCommandD(tester);
     expect(find.byType(FullDiffWorkspace), findsOneWidget);
-    expect(find.byType(DiffScreen), findsNothing, reason: '전체화면 route는 은퇴했다');
+    // 전체화면 route가 아니라 제자리 교체다: 본창 툴바가 그대로 보인다.
+    expect(
+      find.byKey(const Key('preview-placement')),
+      findsOneWidget,
+      reason: '전체화면 route는 은퇴했다',
+    );
     expect(
       find.descendant(
         of: find.byKey(const Key('file-path-chip')),

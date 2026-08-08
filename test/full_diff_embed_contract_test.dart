@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:yogit/diff_screen.dart';
 import 'package:yogit/full_diff_controller.dart';
 import 'package:yogit/full_diff_header.dart';
 import 'package:yogit/full_diff_minimap.dart';
@@ -84,29 +83,9 @@ void main() {
     );
   });
 
-  testWidgets('the route still stands, now wrapped around the workspace', (
-    tester,
-  ) async {
-    final controller = await session();
-    addTearDown(controller.dispose);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: ThemeData.dark(),
-        home: DiffScreen(
-          repository: controller.repository,
-          commits: controller.state.nearbyCommits,
-          initialIndex: 0,
-          controller: controller,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.byType(FullDiffWorkspace), findsOneWidget);
-    // W1 changes no behaviour: the route keeps its file pane beside the
-    // workspace until W2 retires the route altogether.
-    expect(find.byKey(const Key('commit-files-pane')), findsOneWidget);
-  });
+  // W1에는 route가 워크스페이스를 감싸 그대로 동작한다는 세 번째 계약이
+  // 있었다. W3에서 DiffScreen 자체가 은퇴하면서 그 계약도 함께 은퇴했다 —
+  // 임베드 동작은 unified_diff_embed_contract_test.dart 가 지킨다.
 
   testWidgets('the header wears the compact measurements', (tester) async {
     tester.view.devicePixelRatio = 1;
