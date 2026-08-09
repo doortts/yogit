@@ -409,6 +409,29 @@ extension _TimelineSidebar on _TimelineScreenState {
     ),
   );
 
+  /// A sidebar row's name, with a tooltip only when the row is too narrow to
+  /// hold it. A tooltip over a name already fully on screen is just in the way.
+  Widget _refLabel(
+    String segment, {
+    required String whole,
+    required TextStyle style,
+  }) => LayoutBuilder(
+    builder: (context, constraints) {
+      // Measure the style the row actually paints with: a bare TextStyle
+      // resolves to a different font than the inherited one and mismeasures.
+      final resolved = DefaultTextStyle.of(context).style.merge(style);
+      final label = Text(
+        segment,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: resolved,
+      );
+      return _textWidth(segment, resolved) <= constraints.maxWidth
+          ? label
+          : Tooltip(message: whole, child: label);
+    },
+  );
+
   /// How far a ref sits from the one it tracks: what only it has in green,
   /// what only the other has in red. [against] names the other side.
   ///
@@ -516,10 +539,11 @@ extension _TimelineSidebar on _TimelineScreenState {
           Row(
             children: [
               Flexible(
-                child: Text(
+                child: _refLabel(
                   node.segment,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  // A ref says its whole path; a folder has nothing beyond the
+                  // segment the row already draws.
+                  whole: name ?? node.segment,
                   style: TextStyle(
                     color: current || hovered ? _palette.text : _palette.muted,
                     fontSize: 13,
