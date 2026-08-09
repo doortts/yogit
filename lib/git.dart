@@ -1967,7 +1967,9 @@ RemotePullState? remotePullState(RepoRefs refs, String remoteBranch) {
 }
 
 String? resolveBaseBranch(RepoRefs refs, String? savedBranch) {
-  if (savedBranch != null && refs.local.contains(savedBranch)) {
+  // 원격 브랜치를 기준으로 골라 뒀다면 그대로 되살린다.
+  if (savedBranch != null &&
+      (refs.local.contains(savedBranch) || refs.remote.contains(savedBranch))) {
     return savedBranch;
   }
   final current = refs.current;

@@ -3539,6 +3539,43 @@ void main() {
     ], reason: '기준 브랜치를 바꾸면 다시 한 바퀴 돌지만, 도는 대상은 그대로다');
   });
 
+  testWidgets('the base branch menu offers remote branches too', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(
+            local: ['main'],
+            remote: ['origin/main'],
+            current: 'main',
+            tips: {'main': '1', 'origin/main': '1'},
+            localTips: {'main': '1'},
+          ),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('base-branch-selector')));
+    await tester.pumpAndSettle();
+    final remote = find.byKey(const Key('base-branch-menu-origin/main'));
+    expect(remote, findsOneWidget);
+    await tester.tap(remote);
+    await tester.pumpAndSettle();
+
+    // 원격을 기준으로 세워야 로컬 브랜치를 그 위로 재배치하는 방향이 나온다.
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('base-branch-selector')),
+        matching: find.text('origin/main'),
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('remote refresh failure keeps the selected branch count', (
     tester,
   ) async {
@@ -6425,6 +6462,113 @@ void main() {
       find.byKey(const Key('branch-preview-rebase-merge-caption')),
       findsNothing,
     );
+  });
+
+  testWidgets('rebasing onto a tracking branch swaps the sides instead', (
+    tester,
+  ) async {
+    // 기준 main, 비교 origin/main. 재배치 결과를 받을 로컬 브랜치가 기준 자신이라
+    // 그대로는 적용할 수 없고, 기준을 origin/main으로 옮겨야 방향이 선다.
+    final comparison = branchComparison(
+      compareRef: 'origin/main',
+      compareTip: 'remote-tip',
+    );
+    final swapped = BranchComparisonResult(
+      baseRef: 'origin/main',
+      compareRef: 'main',
+      baseTip: 'remote-tip',
+      compareTip: 'main-tip',
+      baseParent: 'root',
+      compareParent: 'root',
+      mergeBases: const ['root'],
+      commits: [
+        BranchComparisonCommit(
+          commit: commit('remote-tip', 'remote only', parents: const ['root']),
+          side: BranchCommitSide.baseOnly,
+        ),
+        BranchComparisonCommit(
+          commit: commit('main-tip', 'main only', parents: const ['root']),
+          side: BranchCommitSide.compareOnly,
+        ),
+        BranchComparisonCommit(
+          commit: commit('root', 'shared commit'),
+          side: BranchCommitSide.commonBoundary,
+        ),
+      ],
+      files: const [],
+      merge: const MergeConflictCheck(status: MergeConflictStatus.clean),
+    );
+    RebasePreviewResult previewFor(BranchComparisonResult result) =>
+        RebasePreviewResult(
+          status: RebasePreviewStatus.clean,
+          baseTip: result.baseTip,
+          compareTip: result.compareTip,
+          rewritten: [
+            (
+              original: result.commits
+                  .singleWhere(
+                    (entry) => entry.side == BranchCommitSide.compareOnly,
+                  )
+                  .commit,
+              rewrittenSha: 'rewritten-${result.compareRef}',
+            ),
+          ],
+          completed: 1,
+          total: 1,
+          virtualTip: 'rewritten-${result.compareRef}',
+        );
+    late FakeGitRepository repository;
+    repository = FakeGitRepository(
+      (_, _) async => [commit('normal', 'normal history')],
+      refs: const RepoRefs(
+        local: ['main'],
+        remote: ['origin/main'],
+        current: 'main',
+        tips: {'main': 'main-tip', 'origin/main': 'remote-tip'},
+        localTips: {'main': 'main-tip'},
+      ),
+      compareBranchesCallback: (base, _) async =>
+          base == 'origin/main' ? swapped : comparison,
+      openRebasePreviewCallback:
+          ({required baseRef, required compareRef}) async =>
+              FakeRebasePreviewSession(
+                repository,
+                previewFor(baseRef == 'origin/main' ? swapped : comparison),
+              ),
+      filesBetween: (_, _) async => const [],
+    );
+    await tester.pumpWidget(
+      app(repository, controller, branchPreviewMode: BranchPreviewMode.rebase),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-origin/main')));
+    await tester.pumpAndSettle();
+
+    // 죽은 재계산 버튼 대신, 무엇을 하는지 적힌 버튼이 선다.
+    expect(find.text('origin/main 기준으로 다시 계산'), findsOneWidget);
+    expect(find.text('실제 적용하기'), findsNothing);
+
+    await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
+    await tester.tap(find.byKey(const Key('branch-preview-apply')));
+    await tester.pumpAndSettle();
+
+    // 기준이 원격으로 넘어가고 로컬 main이 비교 대상이 된다: pull --rebase 방향.
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('base-branch-selector')),
+        matching: find.text('origin/main'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('실제 적용하기'), findsOneWidget);
+    // 원격 기준은 옮길 수 없으니 머지 커밋을 얹는 착지는 사라진다.
+    expect(
+      find.byKey(const Key('branch-preview-option-rebase-merge')),
+      findsNothing,
+    );
+    expect(find.byKey(const Key('branch-preview-option-rebase')), findsOneWidget);
   });
 
   testWidgets('the merge preview keeps the rebase-then-merge option away', (

@@ -208,7 +208,7 @@ extension _TimelineBranchPreview on _TimelineScreenState {
         if (count > 0) {
           details.add(detail('가상 커밋 $count개'));
           // 선택에 따라 타임라인에 머지 커밋이 하나 더 그려지면 요약에서도 센다.
-          if (_rebaseApplyMerge) {
+          if (_rebaseApplyMergeEffective) {
             details.add(detail('머지 커밋 1개', color: previewPurple));
           }
         }
@@ -405,24 +405,46 @@ extension _TimelineBranchPreview on _TimelineScreenState {
   bool get _branchPreviewCanApply =>
       _branchPreviewCanPrepare && !_branchPreviewTarget!.needsRecalculation;
 
+  /// 재계산이 사실은 기준과 비교를 맞바꾸는 경우. 비교 대상이 기준 브랜치의 추적
+  /// 브랜치라, 재배치 결과를 받을 로컬 브랜치가 기준 브랜치 자신이다. 다시 계산할
+  /// 다른 브랜치가 없으니 기준을 그 원격으로 옮겨야 방향이 선다.
+  bool get _recalculateBySwappingSides {
+    final comparison = _comparison;
+    final target = _branchPreviewTarget;
+    return comparison != null &&
+        target != null &&
+        target.needsRecalculation &&
+        target.localBranch == comparison.baseRef;
+  }
+
   String get _branchPreviewApplyLabel {
     final comparison = _comparison!;
     final target = _branchPreviewTarget;
-    if (target?.needsRecalculation == true) {
-      return '로컬 ${target!.localBranch} 기준으로 다시 계산';
+    // 받을 로컬 브랜치가 없으면 무엇을 적용한다고 적을 수도 없다.
+    if (target == null) return '실제 적용 불가';
+    if (target.needsRecalculation) {
+      return _recalculateBySwappingSides
+          ? '${comparison.compareRef} 기준으로 다시 계산'
+          : '로컬 ${target.localBranch} 기준으로 다시 계산';
     }
     // Rebase 쪽은 무엇을 적용할지 카드의 선택이 말하니 버튼 문구는 고정이다.
     return _branchPreviewMode == BranchPreviewMode.merge
-        ? '${comparison.compareRef}를 ${target?.localBranch ?? comparison.baseRef}에 Merge 실제 적용'
+        ? '${comparison.compareRef}를 ${target.localBranch}에 Merge 실제 적용'
         : '실제 적용하기';
   }
 
   String get _branchPreviewApplyHelp {
     final comparison = _comparison!;
     final target = _branchPreviewTarget;
-    if (target == null) return '적용할 로컬 브랜치를 찾을 수 없습니다.';
+    if (target == null) {
+      return _baseBranchIsRemote
+          ? '기준 ${comparison.baseRef}은 원격 브랜치라 결과를 받을 로컬 브랜치가 없습니다.'
+          : '적용할 로컬 브랜치를 찾을 수 없습니다.';
+    }
     if (target.needsRecalculation) {
-      return '기존 로컬 ${target.localBranch} 기준으로 다시 계산해야 합니다.';
+      return _recalculateBySwappingSides
+          ? '${comparison.compareRef} 기준으로 다시 계산하면 로컬 ${target.localBranch} 브랜치를 그 위로 재배치합니다.'
+          : '기존 로컬 ${target.localBranch} 기준으로 다시 계산해야 합니다.';
     }
     if (target.createsBranch) {
       return '로컬 ${target.localBranch}를 ${target.selectedRef}에서 만든 뒤 결과를 적용합니다.';
@@ -527,7 +549,7 @@ extension _TimelineBranchPreview on _TimelineScreenState {
           painter: RebaseMergeResultPainter(
             commitCount: _rebasePreview?.rewritten.length ?? 0,
             baseLabel: comparison.baseRef,
-            mergeCommit: _rebaseApplyMerge,
+            mergeCommit: _rebaseApplyMergeEffective,
             railColor: _palette.border,
             mutedColor: _palette.muted,
           ),
@@ -1695,7 +1717,7 @@ extension _TimelineBranchPreviewFlows on _TimelineScreenState {
     final graph = layoutRebasePreviewGraph(
       comparison,
       result,
-      mergeCommit: _rebaseApplyMerge,
+      mergeCommit: _rebaseApplyMergeEffective,
     );
     final conflictIndex = graph.rows.indexWhere(
       (row) => row.commit.sha == result.currentCommit?.sha,
@@ -1816,12 +1838,24 @@ extension _TimelineBranchPreviewFlows on _TimelineScreenState {
     final target = _branchPreviewTarget;
     if (target == null || !_branchPreviewReady || _branchApplyBusy) return;
     if (target.needsRecalculation) {
+      // 맞바꾸는 쪽은 재계산할 상대가 기준 브랜치 자신이라, 기준을 원격으로 옮기고
+      // 그 로컬 브랜치를 비교 대상으로 세운다. 알림은 실제로 옮긴 뒤에 띄운다.
+      final swap = _recalculateBySwappingSides;
+      final comparison = _comparison!;
+      final nextBase = swap ? comparison.compareRef : _baseBranch;
+      final nextCompare = swap ? comparison.baseRef : target.localBranch;
+      if (swap) _selectBaseBranch(nextBase!);
+      await _selectComparison(nextCompare);
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('기존 로컬 ${target.localBranch} 기준으로 미리보기를 다시 계산했습니다.'),
+          content: Text(
+            swap
+                ? '$nextBase 기준으로 미리보기를 다시 계산했습니다.'
+                : '기존 로컬 $nextCompare 기준으로 미리보기를 다시 계산했습니다.',
+          ),
         ),
       );
-      await _selectComparison(target.localBranch);
       return;
     }
     await _confirmBranchPreviewApply();
@@ -2040,7 +2074,7 @@ extension _TimelineBranchPreviewFlows on _TimelineScreenState {
       required String description,
       Key? descriptionKey,
     }) {
-      final selected = _rebaseApplyMerge == mergeCommit;
+      final selected = _rebaseApplyMergeEffective == mergeCommit;
       return Padding(
         padding: const EdgeInsets.only(top: 7),
         child: InkWell(
@@ -2130,15 +2164,17 @@ extension _TimelineBranchPreviewFlows on _TimelineScreenState {
             '${comparison.compareRef}를 ${comparison.baseRef} 위로 재배치합니다. '
             '${comparison.baseRef}은 움직이지 않습니다.',
       ),
-      option(
-        key: const Key('branch-preview-option-rebase-merge'),
-        mergeCommit: true,
-        title: 'Rebase 후 Merge 커밋으로 병합',
-        descriptionKey: const Key('branch-preview-rebase-merge-caption'),
-        description:
-            '재배치한 커밋 위에 머지 커밋 하나를 만들어 ${comparison.baseRef}을 옮깁니다. '
-            '${comparison.baseRef}이 체크아웃돼 있지 않으면 포인터만 이동합니다.',
-      ),
+      // 기준이 원격이면 머지 커밋을 얹어도 옮길 로컬 기준 브랜치가 없다.
+      if (!_baseBranchIsRemote)
+        option(
+          key: const Key('branch-preview-option-rebase-merge'),
+          mergeCommit: true,
+          title: 'Rebase 후 Merge 커밋으로 병합',
+          descriptionKey: const Key('branch-preview-rebase-merge-caption'),
+          description:
+              '재배치한 커밋 위에 머지 커밋 하나를 만들어 ${comparison.baseRef}을 옮깁니다. '
+              '${comparison.baseRef}이 체크아웃돼 있지 않으면 포인터만 이동합니다.',
+        ),
     ];
   }
 

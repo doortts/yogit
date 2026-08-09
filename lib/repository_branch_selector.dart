@@ -78,11 +78,13 @@ class RepositoryBranchSelector extends StatelessWidget {
         ? '불러오기 실패'
         : refsLoading
         ? '불러오는 중'
-        : localBranches.isEmpty
+        : localBranches.isEmpty && remoteBranches.isEmpty
         ? '브랜치 없음'
         : selectedBranch ?? localBranches.first;
     final branchEnabled =
-        !refsLoading && !refsLoadFailed && localBranches.isNotEmpty;
+        !refsLoading &&
+        !refsLoadFailed &&
+        (localBranches.isNotEmpty || remoteBranches.isNotEmpty);
 
     return Material(
       color: Colors.transparent,
@@ -101,6 +103,7 @@ class RepositoryBranchSelector extends StatelessWidget {
           Expanded(
             child: _BaseBranchSelector(
               localBranches: localBranches,
+              remoteBranches: remoteBranches,
               branchTimes: branchTimes,
               selectedBranch: selectedBranch,
               enabled: branchEnabled,
@@ -515,9 +518,46 @@ String relativeCommitLabel(int timestamp, DateTime now) {
   return '${elapsed.inDays ~/ 365}년 전 커밋';
 }
 
+/// 한 메뉴 안의 브랜치 묶음: 제목 한 줄과 그 아래 행들. 기준 브랜치와 브랜치 diff가
+/// 같은 모양을 쓴다.
+List<Widget> _branchGroup(
+  BuildContext context, {
+  required String label,
+  required List<String> branches,
+  required Map<String, int> times,
+  required String? checked,
+  required String keyPrefix,
+  required ValueChanged<String> onPressed,
+}) => [
+  if (branches.isNotEmpty)
+    SizedBox(
+      width: _repositoryMenuWidth,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: TimelineThemePalette.of(context).muted,
+          ),
+        ),
+      ),
+    ),
+  for (final branch in branches)
+    _BranchRow(
+      key: Key('$keyPrefix$branch'),
+      name: branch,
+      time: times[branch],
+      checked: branch == checked,
+      onPressed: () => onPressed(branch),
+    ),
+];
+
 class _BaseBranchSelector extends StatefulWidget {
   const _BaseBranchSelector({
     required this.localBranches,
+    required this.remoteBranches,
     required this.branchTimes,
     required this.selectedBranch,
     required this.enabled,
@@ -526,6 +566,7 @@ class _BaseBranchSelector extends StatefulWidget {
   });
 
   final List<String> localBranches;
+  final List<String> remoteBranches;
   final Map<String, int> branchTimes;
   final String? selectedBranch;
   final bool enabled;
@@ -544,13 +585,16 @@ class _BaseBranchSelectorState extends State<_BaseBranchSelector> {
   Widget build(BuildContext context) {
     final palette = TimelineThemePalette.of(context);
     final query = _query.trim().toLowerCase();
-    final visible = [
-      for (final branch in widget.localBranches)
+    List<String> matching(List<String> branches) => [
+      for (final branch in branches)
         if (fuzzyMatch(branch, query)) branch,
     ];
-    final notice = visible.isEmpty
-        ? '일치하는 브랜치 없음'
-        : '브랜치 ${visible.length}개 · 최근 커밋순';
+    final local = matching(widget.localBranches);
+    // 원격 브랜치도 기준으로 고를 수 있다. 로컬 브랜치를 그 위로 재배치하는(pull
+    // --rebase와 같은) 방향은 기준이 원격일 때만 나온다.
+    final remote = matching(widget.remoteBranches);
+    final total = local.length + remote.length;
+    final notice = total == 0 ? '일치하는 브랜치 없음' : '브랜치 $total개 · 최근 커밋순';
     return MenuAnchor(
       controller: _controller,
       onClose: () {
@@ -564,13 +608,18 @@ class _BaseBranchSelectorState extends State<_BaseBranchSelector> {
           onChanged: (value) => setState(() => _query = value),
         ),
         _MenuRowsScroller([
-          for (final branch in visible)
-            _BranchRow(
-              key: Key('base-branch-menu-$branch'),
-              name: branch,
-              time: widget.branchTimes[branch],
-              checked: branch == widget.selectedBranch,
-              onPressed: () {
+          for (final group in [
+            (label: 'LOCAL', branches: local),
+            (label: 'REMOTE', branches: remote),
+          ])
+            ..._branchGroup(
+              context,
+              label: group.label,
+              branches: group.branches,
+              times: widget.branchTimes,
+              checked: widget.selectedBranch,
+              keyPrefix: 'base-branch-menu-',
+              onPressed: (branch) {
                 _controller.close();
                 widget.onSelected(branch);
               },
@@ -686,34 +735,18 @@ class _ComparisonSelectorState extends State<_ComparisonSelector> {
     String label,
     List<String> branches,
     Map<String, int> times,
-  ) => [
-    if (branches.isNotEmpty)
-      SizedBox(
-        width: _repositoryMenuWidth,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: TimelineThemePalette.of(context).muted,
-            ),
-          ),
-        ),
-      ),
-    for (final branch in branches)
-      _BranchRow(
-        key: Key('branch-diff-menu-$branch'),
-        name: branch,
-        time: times[branch],
-        checked: branch == widget.comparedBranch,
-        onPressed: () {
-          _controller.close();
-          widget.onSelected?.call(branch);
-        },
-      ),
-  ];
+  ) => _branchGroup(
+    context,
+    label: label,
+    branches: branches,
+    times: times,
+    checked: widget.comparedBranch,
+    keyPrefix: 'branch-diff-menu-',
+    onPressed: (branch) {
+      _controller.close();
+      widget.onSelected?.call(branch);
+    },
+  );
 }
 
 class _SelectorField extends StatelessWidget {

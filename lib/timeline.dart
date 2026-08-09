@@ -1714,9 +1714,12 @@ class _TimelineScreenState extends State<TimelineScreen>
     },
   );
 
+  /// 기준은 원격 브랜치도 될 수 있다. 로컬 브랜치를 원격 위로 재배치하는 방향은
+  /// 그렇게 골라야만 나온다. 대신 기준이 원격이면 기준을 옮기는 적용(Merge, Rebase
+  /// 후 Merge)은 받을 로컬 브랜치가 없어 막힌다.
   void _selectBaseBranch(String branch) {
     if (_branchApplyBusy ||
-        !_refs.local.contains(branch) ||
+        !(_refs.local.contains(branch) || _refs.remote.contains(branch)) ||
         branch == _baseBranch) {
       return;
     }
@@ -2187,9 +2190,24 @@ class _TimelineScreenState extends State<TimelineScreen>
       _branchApplyStatus == BranchApplyStatus.applying ||
       _branchApplyStatus == BranchApplyStatus.reverting;
 
+  /// 기준 브랜치가 원격 추적 브랜치인지. 그러면 기준을 옮기는 적용은 받을 로컬
+  /// 브랜치가 없어 성립하지 않는다: Merge도, 재배치 위에 머지 커밋을 얹는 쪽도.
+  bool get _baseBranchIsRemote {
+    final base = _comparison?.baseRef ?? _baseBranch;
+    return base != null &&
+        !_refs.local.contains(base) &&
+        _refs.remote.contains(base);
+  }
+
+  /// 카드가 고른 착지. 기준이 원격이면 머지 커밋을 얹을 수 없으니 'Rebase만'으로
+  /// 고정된다.
+  bool get _rebaseApplyMergeEffective =>
+      _rebaseApplyMerge && !_baseBranchIsRemote;
+
   /// Which rebase apply path the card has selected. Merge mode never asks.
   bool get _rebaseThenMergeSelected =>
-      _branchPreviewMode == BranchPreviewMode.rebase && _rebaseApplyMerge;
+      _branchPreviewMode == BranchPreviewMode.rebase &&
+      _rebaseApplyMergeEffective;
 
   static String _applyModeLabel(BranchApplyMode mode) => switch (mode) {
     BranchApplyMode.merge => 'Merge',

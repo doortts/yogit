@@ -171,6 +171,59 @@ void main() {
       'release',
     );
     expect(resolveBaseBranch(const RepoRefs(), null), isNull);
+    // 기준을 원격 브랜치로 골라 뒀으면 그대로 되살린다.
+    const withRemote = RepoRefs(
+      local: ['main'],
+      remote: ['origin/main'],
+      current: 'main',
+    );
+    expect(resolveBaseBranch(withRemote, 'origin/main'), 'origin/main');
+    expect(resolveBaseBranch(withRemote, 'origin/gone'), 'main');
+  });
+
+  test('a remote base rebases the local branch onto it', () {
+    // 기준이 origin/main, 비교가 로컬 main. pull --rebase와 같은 방향이라 재배치
+    // 결과를 받을 브랜치는 로컬 main 자신이고, 그 tip이 곧 비교 tip이다.
+    const comparison = BranchComparisonResult(
+      baseRef: 'origin/main',
+      compareRef: 'main',
+      baseTip: 'remote-tip',
+      compareTip: 'local-tip',
+      baseParent: null,
+      compareParent: null,
+      mergeBases: [],
+      commits: [],
+      files: [],
+      merge: MergeConflictCheck(
+        status: MergeConflictStatus.clean,
+        treeSha: 'merge-tree',
+      ),
+    );
+    const refs = RepoRefs(
+      local: ['main'],
+      remote: ['origin/main'],
+      tips: {'main': 'local-tip', 'origin/main': 'remote-tip'},
+      localTips: {'main': 'local-tip'},
+    );
+
+    final rebase = resolveBranchApplyTarget(
+      mode: BranchApplyMode.rebase,
+      comparison: comparison,
+      refs: refs,
+    );
+    expect(rebase?.localBranch, 'main');
+    expect(rebase?.createsBranch, isFalse);
+    expect(rebase?.needsRecalculation, isFalse);
+
+    // 원격 기준을 옮길 수는 없으니 Merge 쪽은 받을 브랜치가 없다.
+    expect(
+      resolveBranchApplyTarget(
+        mode: BranchApplyMode.merge,
+        comparison: comparison,
+        refs: refs,
+      ),
+      isNull,
+    );
   });
 
   const remoteComparison = BranchComparisonResult(
