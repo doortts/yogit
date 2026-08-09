@@ -142,8 +142,13 @@ extension _TimelineDataFlows on _TimelineScreenState {
     }
   }
 
-  /// Widens the ratchet when deeper lanes scroll into view. Rows off screen do
-  /// not count, so a shallow head of history opens at its snuggest width.
+  /// Measures the lanes the reader can actually see. Rows off screen do not
+  /// count, so a shallow head of history opens at its snuggest width.
+  ///
+  /// Two depths come out of one measurement. [_visibleLane] is this screen and
+  /// decides when squeezing the column starts pushing lanes left. The ratchet
+  /// is the deepest screen so far and only ever widens, so auto-fit does not
+  /// make the column boundary bob up and down as the reader scrolls.
   void _updateRatchet() {
     if (!mounted ||
         _comparison != null ||
@@ -156,19 +161,28 @@ extension _TimelineDataFlows on _TimelineScreenState {
       0,
       _entries.length - 1,
     );
+    // The row sitting on the bottom edge is `ceil(...) - 1`; without the -1
+    // this reaches one row past the fold, and one merge row there opens lanes
+    // nobody can see.
     final last =
-        ((position.pixels + position.viewportDimension) /
-                TimelineScreen.rowHeight)
-            .ceil()
+        (((position.pixels + position.viewportDimension) /
+                        TimelineScreen.rowHeight)
+                    .ceil() -
+                1)
             .clamp(0, _entries.length - 1);
-    var deepest = _ratchetLane;
+    var visible = 0;
     for (var index = first; index <= last; index++) {
       final row = _entries[index].row;
       for (final lane in [row.lane, ...row.activeLanes, ...row.nextLanes]) {
-        if (lane > deepest) deepest = lane;
+        if (lane > visible) visible = lane;
       }
     }
-    if (deepest != _ratchetLane) _rebuild(() => _ratchetLane = deepest);
+    final ratchet = math.max(_ratchetLane, visible);
+    if (visible == _visibleLane && ratchet == _ratchetLane) return;
+    _rebuild(() {
+      _visibleLane = visible;
+      _ratchetLane = ratchet;
+    });
   }
 
   Future<void> _fetchNextPage() async {

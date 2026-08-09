@@ -489,6 +489,10 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// Deepest lane the viewport has shown so far. It only grows, so the column
   /// never shrinks under the user mid-session; a new repository remounts.
   var _ratchetLane = 0;
+
+  /// Deepest lane on screen right now. Squeezing measures against this, so a
+  /// depth left behind further down the list never pushes these lanes left.
+  var _visibleLane = 0;
   final _resizerFocus = {
     for (final column in timelineColumns.keys) column: FocusNode(),
   };
@@ -829,6 +833,12 @@ class _TimelineScreenState extends State<TimelineScreen>
     final mappings = _previewGraph?.mappings.length ?? 0;
     return mappings == 0 ? deepest : deepest + ((mappings + 2) ~/ 2);
   }
+
+  /// The depth a narrowing column measures itself against: what is drawn on
+  /// this screen, so lanes hold still until the deepest node the reader can
+  /// see reaches the column boundary.
+  int get _graphSqueezeDepth =>
+      _comparison == null ? _visibleLane : _graphLayoutDepth;
 
   double get _graphLayoutSpacing => _comparison == null
       ? CommitGraphPainter.defaultLaneSpacing
@@ -2689,7 +2699,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     committersBySha: _committersBySha,
     laneSpacing: CommitGraphPainter.spacingFor(
       graphWidth,
-      _graphLayoutDepth,
+      _graphSqueezeDepth,
       maxLaneSpacing: _graphLayoutSpacing,
     ),
     compact: graphWidth <= CommitGraphPainter.compactWidth,

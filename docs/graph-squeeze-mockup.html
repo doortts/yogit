@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>그래프 컬럼 폭 — 보이는 레인만 밀어야 한다</title>
+<style>
+  :root {
+    --bg:#1C1C1E; --panel:#151517; --border:#38383A; --text:#F2F2F7;
+    --muted:#AEAEB2; --hash:#EF6C63; --divider:#4A90D9;
+    --l0:#C9B8F0; --l1:#FF2D95; --l2:#00E5FF; --l3:#FFD60A; --l4:#FF9F0A; --l5:#39FF14;
+    --mono:Menlo,"D2Coding",Monaco,monospace;
+  }
+  body { margin:0; padding:26px 24px 70px; background:#0E0E10; color:var(--text);
+         font:13px/1.6 -apple-system,"Apple SD Gothic Neo",sans-serif; }
+  h1 { font-size:19px; font-weight:600; margin:0 0 6px; }
+  h2 { font-size:14px; font-weight:600; margin:30px 0 4px; }
+  p.note { margin:0 0 14px; color:#98989F; font-size:12px; max-width:980px; }
+  code { font-family:var(--mono); font-size:11px; background:#2C2C2E; padding:1px 5px; border-radius:4px; }
+  .row2 { display:flex; gap:26px; flex-wrap:wrap; align-items:flex-start; }
+  .cap { font-size:11.5px; color:#8E8E93; padding:8px 2px 0; max-width:430px; }
+  .bad { color:#FF7A84; } .good { color:#7CE0A0; }
+
+  /* 화면 한 장. 2배 확대(레인 간격 30 → 60, 아바타 20 → 40). */
+  .screen { width:430px; background:var(--panel); border:1px solid var(--border);
+            border-radius:8px; overflow:hidden; }
+  .head { display:flex; height:26px; align-items:center; font-size:10px; letter-spacing:.09em;
+          color:#8E8E93; border-bottom:1px solid var(--border); }
+  .head span { padding-left:12px; }
+  .body { position:relative; height:300px; background:var(--bg); overflow:hidden; }
+  .graph { position:absolute; top:0; bottom:0; left:0; border-right:2px solid var(--divider); }
+  .rail { position:absolute; width:4px; border-radius:2px; }
+  .node { position:absolute; width:26px; height:26px; border-radius:50%; box-sizing:border-box;
+          border:4px solid; background:#241f2e; }
+  .hashcol { position:absolute; top:0; bottom:0; right:0; font-family:var(--mono);
+             font-size:10px; color:var(--hash); padding-left:12px; }
+  .hashcol div { height:44px; line-height:44px; }
+  /* 화면 아래 경계 */
+  .fold { position:absolute; left:0; right:0; height:0; border-top:2px dashed #FF7A84; }
+  .foldtag { position:absolute; right:6px; font-size:9.5px; color:#FF7A84;
+             background:rgba(0,0,0,.6); padding:0 4px; border-radius:3px; }
+  .below { position:absolute; left:0; right:0; bottom:0; background:rgba(255,122,132,.07); }
+  .gap { position:absolute; background:repeating-linear-gradient(
+           45deg, rgba(255,255,255,.07) 0 4px, transparent 4px 8px); }
+  .tick { position:absolute; font-size:9.5px; color:#9C9CA4; font-family:var(--mono); }
+  table { border-collapse:collapse; font-size:12px; margin-top:10px; }
+  td, th { padding:5px 18px 5px 0; vertical-align:top; text-align:left; }
+  th { color:#8E8E93; font-weight:600; font-size:11px; }
+  .k { color:#8E8E93; white-space:nowrap; }
+</style>
+</head>
+<body>
+
+<h1>그래프 컬럼을 좁힐 때 — 무엇이 밀리는 시점을 정하나</h1>
+<p class="note">아래는 <b>2배 확대</b>. 실제 값은 레인 간격 30, 아바타 지름 20, 첫 레인 중심 28.
+파란 굵은 선이 <b>컬럼 구분선</b>(사용자가 끄는 그 선), 빨간 점선이 <b>화면 아래 경계</b>다.
+경계 아래 붉은 영역은 사용자에게 보이지 않는다.</p>
+
+<h2>지금 — 화면 밖 레인이 밀리는 시점을 정한다</h2>
+<p class="note">폭 계산에 들어가는 깊이가 화면 밖 행에서 온다. 보이는 것은 레인 3개인데
+계산은 레인 6개 기준이라, 구분선이 마지막 노드에서 <b>90pt 떨어져 있을 때</b> 이미 압축이
+시작된다.</p>
+
+<div class="row2">
+  <div>
+    <div class="screen">
+      <div class="head"><span style="width:250px">GRAPH</span><span>HASH</span></div>
+      <div class="body">
+        <div class="graph" style="width:250px">
+          <span class="rail" style="left:54px;top:0;bottom:0;background:var(--l0)"></span>
+          <span class="rail" style="left:114px;top:0;bottom:0;background:var(--l1)"></span>
+          <span class="rail" style="left:174px;top:132px;bottom:0;background:var(--l2)"></span>
+          <span class="rail" style="left:234px;top:220px;bottom:0;background:var(--l3)"></span>
+          <span class="node" style="left:43px;top:31px;border-color:var(--l0)"></span>
+          <span class="node" style="left:103px;top:75px;border-color:var(--l1)"></span>
+          <span class="node" style="left:163px;top:163px;border-color:var(--l2)"></span>
+          <span class="node" style="left:223px;top:251px;border-color:var(--l3)"></span>
+          <span class="gap" style="left:196px;top:0;bottom:0;width:54px"></span>
+          <span class="tick" style="left:200px;top:6px">빈 자리</span>
+        </div>
+        <div class="hashcol">
+          <div>82371b5</div><div>56a88fb</div><div>20ffc83</div><div>a6855f3</div>
+          <div>84cf337</div><div>5ac278b</div><div>b703bc9</div>
+        </div>
+        <div class="fold" style="top:276px"></div>
+        <div class="foldtag" style="top:280px">화면 아래 경계</div>
+        <div class="below" style="height:24px"></div>
+      </div>
+    </div>
+    <div class="cap">경계 바로 아래 행이 머지 커밋이라 레인 4·5·6이 한꺼번에 열린다.
+    그 행은 보이지 않는데 폭 계산에는 들어간다.</div>
+  </div>
+
+  <div>
+    <div class="screen">
+      <div class="head"><span style="width:214px">GRAPH</span><span>HASH</span></div>
+      <div class="body">
+        <div class="graph" style="width:214px">
+          <span class="rail" style="left:54px;top:0;bottom:0;background:var(--l0)"></span>
+          <span class="rail" style="left:110px;top:0;bottom:0;background:var(--l1)"></span>
+          <span class="rail" style="left:166px;top:132px;bottom:0;background:var(--l2)"></span>
+          <span class="rail" style="left:222px;top:220px;bottom:0;background:var(--l3)"></span>
+          <span class="node" style="left:43px;top:31px;border-color:var(--l0)"></span>
+          <span class="node" style="left:99px;top:75px;border-color:var(--l1)"></span>
+          <span class="node" style="left:155px;top:163px;border-color:var(--l2)"></span>
+          <span class="node" style="left:211px;top:251px;border-color:var(--l3)"></span>
+          <span class="gap" style="left:188px;top:0;bottom:0;width:26px"></span>
+        </div>
+        <div class="hashcol">
+          <div>82371b5</div><div>56a88fb</div><div>20ffc83</div><div>a6855f3</div>
+          <div>84cf337</div><div>5ac278b</div><div>b703bc9</div>
+        </div>
+        <div class="fold" style="top:276px"></div>
+        <div class="below" style="height:24px"></div>
+      </div>
+    </div>
+    <div class="cap"><span class="bad">아직 빈 자리가 남았는데 레인이 벌써 좁아졌다.</span>
+    빗금(빈 자리)만 줄어야 하는 구간인데 노드가 함께 왼쪽으로 움직인다.</div>
+  </div>
+</div>
+
+<h2>바라는 모습 — 보이는 노드가 선에 닿을 때부터 밀린다</h2>
+<p class="note">압축 계산은 <b>지금 화면에 그려진 깊이</b>만 본다. 그 전까지는 빈 자리만
+잘려 나가고 레인은 제자리, 닿는 순간부터 함께 밀린다. 자동 맞춤 폭(최초·더블클릭)은 지금처럼
+래칫 깊이를 써서 스크롤마다 경계가 흔들리지 않게 한다.</p>
+
+<div class="row2">
+  <div>
+    <div class="screen">
+      <div class="head"><span style="width:250px">GRAPH</span><span>HASH</span></div>
+      <div class="body">
+        <div class="graph" style="width:250px">
+          <span class="rail" style="left:54px;top:0;bottom:0;background:var(--l0)"></span>
+          <span class="rail" style="left:114px;top:0;bottom:0;background:var(--l1)"></span>
+          <span class="rail" style="left:174px;top:132px;bottom:0;background:var(--l2)"></span>
+          <span class="rail" style="left:234px;top:220px;bottom:0;background:var(--l3)"></span>
+          <span class="node" style="left:43px;top:31px;border-color:var(--l0)"></span>
+          <span class="node" style="left:103px;top:75px;border-color:var(--l1)"></span>
+          <span class="node" style="left:163px;top:163px;border-color:var(--l2)"></span>
+          <span class="node" style="left:223px;top:251px;border-color:var(--l3)"></span>
+          <span class="gap" style="left:196px;top:0;bottom:0;width:54px"></span>
+        </div>
+        <div class="hashcol">
+          <div>82371b5</div><div>56a88fb</div><div>20ffc83</div><div>a6855f3</div>
+          <div>84cf337</div><div>5ac278b</div><div>b703bc9</div>
+        </div>
+        <div class="fold" style="top:276px"></div>
+        <div class="below" style="height:24px"></div>
+      </div>
+    </div>
+    <div class="cap">폭 250 → 196: <span class="good">레인 제자리.</span> 빗금만 줄어든다.</div>
+  </div>
+
+  <div>
+    <div class="screen">
+      <div class="head"><span style="width:170px">GRAPH</span><span>HASH</span></div>
+      <div class="body">
+        <div class="graph" style="width:170px">
+          <span class="rail" style="left:54px;top:0;bottom:0;background:var(--l0)"></span>
+          <span class="rail" style="left:92px;top:0;bottom:0;background:var(--l1)"></span>
+          <span class="rail" style="left:130px;top:132px;bottom:0;background:var(--l2)"></span>
+          <span class="rail" style="left:168px;top:220px;bottom:0;background:var(--l3)"></span>
+          <span class="node" style="left:43px;top:31px;border-color:var(--l0)"></span>
+          <span class="node" style="left:81px;top:75px;border-color:var(--l1)"></span>
+          <span class="node" style="left:119px;top:163px;border-color:var(--l2)"></span>
+          <span class="node" style="left:157px;top:251px;border-color:var(--l3)"></span>
+        </div>
+        <div class="hashcol">
+          <div>82371b5</div><div>56a88fb</div><div>20ffc83</div><div>a6855f3</div>
+          <div>84cf337</div><div>5ac278b</div><div>b703bc9</div>
+        </div>
+        <div class="fold" style="top:276px"></div>
+        <div class="below" style="height:24px"></div>
+      </div>
+    </div>
+    <div class="cap">폭 196 아래부터: <span class="good">노드가 선을 밀며 함께 왼쪽으로.</span>
+    마지막 노드의 오른쪽 끝은 계속 경계에 붙어 있다.</div>
+  </div>
+</div>
+
+<h2>세 단계 정리</h2>
+<table>
+  <tr><th>단계</th><th>폭 범위 (화면에 레인 3개, 간격 30 기준)</th><th>보이는 일</th></tr>
+  <tr><td class="k">1. 여유</td><td>≥ 131 (= 28 + 3×30 + 13)</td><td>레인 제자리. 빈 자리만 줄어든다.</td></tr>
+  <tr><td class="k">2. 압축</td><td>131 → 56</td><td>노드가 선에 닿은 채로 함께 밀린다. 간격은 12까지.</td></tr>
+  <tr><td class="k">3. 접힘</td><td>≤ 56</td><td>모든 레인이 첫 레인 자리로. 곡선은 그리지 않는다.</td></tr>
+</table>
+<p class="note" style="margin-top:12px">바뀌는 것은 <b>2단계 시작점을 정하는 깊이</b>다. 지금은
+래칫 깊이(화면 밖 한 행까지 센 값, 위 실측에서 6), 바꾸면 <b>지금 화면에 그려진 깊이</b>(3).
+자동 맞춤 폭은 래칫 깊이 그대로 — 스크롤할 때 컬럼 경계가 흔들리지 않는다.</p>
+
+</body>
+</html>
