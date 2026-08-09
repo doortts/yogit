@@ -683,9 +683,11 @@ extension _TimelineSidebar on _TimelineScreenState {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: hovered
-                    ? _palette.text.withValues(alpha: 0.72)
-                    : _palette.muted,
+                // A step under the name in either state, so the two lines read
+                // as a name with a note rather than one block of grey.
+                color: (hovered ? _palette.text : _palette.muted).withValues(
+                  alpha: 0.55,
+                ),
                 fontSize: 11,
               ),
             ),

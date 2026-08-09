@@ -155,6 +155,36 @@ void main() {
     );
   });
 
+  testWidgets('the time reads a step under the name it sits below', (
+    tester,
+  ) async {
+    await pump(tester);
+
+    Color? colorOf(Finder finder) => tester.widget<Text>(finder).style?.color;
+
+    final name = colorOf(
+      find.descendant(of: row('alpha'), matching: find.text('alpha')),
+    );
+    final time = colorOf(
+      find.descendant(
+        of: row('origin/alpha'),
+        matching: find.text(
+          socialTimeLabel(
+            DateTime.fromMillisecondsSinceEpoch(remoteTip * 1000),
+            DateTime.now(),
+          ),
+        ),
+      ),
+    );
+
+    expect(time!.a, lessThan(name!.a), reason: '시각이 이름보다 흐려야 한다');
+    expect(
+      time.withValues(alpha: 1),
+      name.withValues(alpha: 1),
+      reason: '같은 회색을 알파로만 낮춘다 — 새 색을 만들지 않는다',
+    );
+  });
+
   testWidgets('a remote branch and a tag say when they last moved', (
     tester,
   ) async {

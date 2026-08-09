@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>사이드바 — 갱신 시각을 이름과 구분하기 (시안 3)</title>
+<style>
+  :root {
+    --bg:#1C1C1E; --panel:#202022; --border:#38383A;
+    --text:#F2F2F7; --muted:#AEAEB2;
+    --lane1:#5AC8FA; --lane2:#FFD60A; --lane3:#C9B8F0;
+    --mono:Menlo,"D2Coding",Monaco,monospace;
+  }
+  body { margin:0; padding:26px 24px 80px; background:#0E0E10; color:var(--text);
+         font:13px/1.55 -apple-system,"Apple SD Gothic Neo",sans-serif; }
+  h1 { font-size:19px; font-weight:600; margin:0 0 6px; }
+  h2 { font-size:14px; font-weight:600; margin:0 0 2px; }
+  p.note { margin:0 0 18px; color:#98989F; font-size:12px; max-width:1000px; }
+  p.sub { margin:0 0 10px; color:#98989F; font-size:11.5px; min-height:48px; }
+  code { font-family:var(--mono); font-size:11px; background:#2C2C2E; padding:1px 5px; border-radius:4px; }
+  .row3 { display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start; }
+  .col { width:300px; }
+
+  .side { width:250px; background:var(--panel); border:1px solid var(--border);
+          border-radius:8px; overflow:hidden; padding:6px 0; }
+  .r { display:flex; align-items:center; gap:8px; height:40px; padding:0 10px 0 30px; }
+  .r:hover { background:#232326; }
+  .ic { width:14px; height:14px; flex:none; }
+  .nm { display:flex; flex-direction:column; min-width:0; flex:1; }
+  .nm b { font-weight:400; font-size:13px; color:var(--muted); white-space:nowrap;
+          overflow:hidden; text-overflow:ellipsis; }
+  .nm small { font-size:11px; }
+
+  /* 세 시안의 시각 색 */
+  .a small { color:#7E7E86; }              /* 한 단계 어둡게 */
+  .b small { color:rgba(174,174,178,.55); } /* 같은 회색을 반투명으로 */
+  .c small { color:#6A6A70; font-size:10px; letter-spacing:.02em; } /* 더 어둡고 더 작게 */
+
+  .swatchrow { display:flex; gap:10px; margin-top:10px; font-size:11px; color:#8E8E93; }
+  .sw { width:14px; height:14px; border-radius:3px; border:1px solid #444; }
+  table { border-collapse:collapse; font-size:12px; margin-top:16px; }
+  td, th { padding:5px 18px 5px 0; vertical-align:top; text-align:left; }
+  th { color:#8E8E93; font-weight:600; font-size:11px; }
+  .k { color:#8E8E93; white-space:nowrap; }
+</style>
+</head>
+<body>
+
+<h1>갱신 시각을 이름과 구분하기</h1>
+<p class="note">지금은 이름과 시각이 <b>같은 <code>muted</code>(#AEAEB2)</b>라 한 덩어리로 읽힌다.
+아래 셋은 시각만 낮추는 세 가지 방법이다. 이름은 셋 다 그대로 <code>muted</code>이고,
+hover·현재 브랜치일 때 이름이 <code>text</code>(#F2F2F7)로 올라오는 동작도 그대로다.</p>
+
+<div class="row3">
+
+  <div class="col">
+    <h2>1안 — 한 단계 어두운 회색</h2>
+    <p class="sub"><code>#7E7E86</code>. 팔레트에 고정색을 하나 더 두는 방식.
+    배경이 어떤 테마든 같은 값이라 예측 가능하다.</p>
+    <div class="side a">
+      <div class="r"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--lane1)" stroke-width="2"><path d="M6 3v12a3 3 0 003 3h9M18 3v3"/></svg>
+        <div class="nm"><b>v2-core-remove…</b><small>7 hours ago</small></div></div>
+      <div class="r"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--lane1)" stroke-width="2"><path d="M6 3v12a3 3 0 003 3h9M18 3v3"/></svg>
+        <div class="nm"><b>v2-core-window…</b><small>8 hours ago</small></div></div>
+      <div class="r"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--lane2)" stroke-width="2"><path d="M6 3v12a3 3 0 003 3h9M18 3v3"/></svg>
+        <div class="nm"><b>monaco-image-li…</b><small>19 hours ago</small></div></div>
+      <div class="r"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--lane3)" stroke-width="2"><path d="M6 3v12a3 3 0 003 3h9M18 3v3"/></svg>
+        <div class="nm"><b>monaco-native-…</b><small>20 hours ago</small></div></div>
+    </div>
+    <div class="swatchrow"><span class="sw" style="background:#AEAEB2"></span>이름 #AEAEB2
+      <span class="sw" style="background:#7E7E86"></span>시각 #7E7E86</div>
+  </div>
+
+  <div class="col">
+    <h2>2안 — 같은 회색을 반투명으로</h2>
+    <p class="sub"><code>muted.withValues(alpha: .55)</code>. 새 색을 만들지 않고 팔레트를
+    그대로 쓴다. 테마를 바꿔도 그 테마의 회색을 따라간다.</p>
+    <div class="side b">
+      <div class="r"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--lane1)" stroke-width="2"><path d="M6 3v12a3 3 0 003 3h9M18 3v3"/></svg>
+        <div class="nm"><b>v2-core-remove…</b><small>7 hours ago</small></div></div>
+      <div class="r"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--lane1)" stroke-width="2"><path d="M6 3v12a3 3 0 003 3h9M18 3v3"/></svg>
+        <div class="nm"><b>v2-core-window…</b><small>8 hours ago</small></div></div>
+      <div class="r"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--lane2)" stroke-width="2"><path d="M6 3v12a3 3 0 003 3h9M18 3v3"/></svg>
+        <div class="nm"><b>monaco-image-li…</b><small>19 hours ago</small></div></div>
+      <div class="r"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--lane3)" stroke-width="2"><path d="M6 3v12a3 3 0 003 3h9M18 3v3"/></svg>
+        <div class="nm"><b>monaco-native-…</b><small>20 hours ago</small></div></div>
+    </div>
+    <div class="swatchrow"><span class="sw" style="background:#AEAEB2"></span>이름 #AEAEB2
+      <span class="sw" style="background:#6B6B70"></span>시각 alpha .55</div>
+  </div>
+
+  <div class="col">
+    <h2>3안 — 더 어둡게, 한 급 작게</h2>
+    <p class="sub"><code>#6A6A70</code> + 10px. 색만이 아니라 크기로도 층을 나눠, 훑을 때
+    이름 줄만 눈에 걸린다. 가장 뚜렷하지만 시각은 그만큼 읽기 어려워진다.</p>
+    <div class="side c">
+      <div class="r"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--lane1)" stroke-width="2"><path d="M6 3v12a3 3 0 003 3h9M18 3v3"/></svg>
+        <div class="nm"><b>v2-core-remove…</b><small>7 hours ago</small></div></div>
+      <div class="r"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--lane1)" stroke-width="2"><path d="M6 3v12a3 3 0 003 3h9M18 3v3"/></svg>
+        <div class="nm"><b>v2-core-window…</b><small>8 hours ago</small></div></div>
+      <div class="r"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--lane2)" stroke-width="2"><path d="M6 3v12a3 3 0 003 3h9M18 3v3"/></svg>
+        <div class="nm"><b>monaco-image-li…</b><small>19 hours ago</small></div></div>
+      <div class="r"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--lane3)" stroke-width="2"><path d="M6 3v12a3 3 0 003 3h9M18 3v3"/></svg>
+        <div class="nm"><b>monaco-native-…</b><small>20 hours ago</small></div></div>
+    </div>
+    <div class="swatchrow"><span class="sw" style="background:#AEAEB2"></span>이름 #AEAEB2
+      <span class="sw" style="background:#6A6A70"></span>시각 #6A6A70 · 10px</div>
+  </div>
+</div>
+
+<h2 style="margin-top:34px">지금 (견주어 보기)</h2>
+<p class="note" style="margin-bottom:10px">이름과 시각이 같은 색이라 두 줄이 한 덩어리로 붙어 읽힌다.</p>
+<div class="side" style="width:250px">
+  <div class="r"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--lane1)" stroke-width="2"><path d="M6 3v12a3 3 0 003 3h9M18 3v3"/></svg>
+    <div class="nm"><b>v2-core-remove…</b><small style="color:var(--muted)">7 hours ago</small></div></div>
+  <div class="r"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="var(--lane2)" stroke-width="2"><path d="M6 3v12a3 3 0 003 3h9M18 3v3"/></svg>
+    <div class="nm"><b>monaco-image-li…</b><small style="color:var(--muted)">19 hours ago</small></div></div>
+</div>
+
+<h2 style="margin-top:30px">셋 비교</h2>
+<table>
+  <tr><th></th><th>1안 고정 회색</th><th>2안 반투명</th><th>3안 더 어둡게 + 작게</th></tr>
+  <tr><td class="k">대비 (배경 #1C1C1E 대비)</td><td>중간</td><td>중간 (1안과 거의 같음)</td><td>낮음</td></tr>
+  <tr><td class="k">테마를 바꾸면</td><td>팔레트에 값 추가 필요</td><td>그 테마 회색을 자동으로 따라감</td><td>팔레트에 값 추가 필요</td></tr>
+  <tr><td class="k">코드 변경</td><td>팔레트 필드 1개</td><td>한 줄</td><td>팔레트 필드 1개 + 글자 크기</td></tr>
+  <tr><td class="k">훑을 때</td><td>이름이 먼저 읽힘</td><td>이름이 먼저 읽힘</td><td>이름만 읽힘</td></tr>
+  <tr><td class="k">시각 자체의 가독성</td><td>충분</td><td>충분</td><td>떨어짐</td></tr>
+</table>
+<p class="note" style="margin-top:12px">hover와 현재 브랜치에서 이름이 밝아지는 동작은 셋 다
+지금 그대로다. 시각도 hover 때 한 단계 밝아지게 할지는 고른 뒤 정하자 — 지금 코드는 hover에서
+<code>text</code>의 72%로 올린다.</p>
+
+</body>
+</html>
