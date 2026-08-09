@@ -27,6 +27,7 @@ import 'package:yogit/monaco_editor_screen.dart';
 import 'package:yogit/settings.dart';
 import 'package:yogit/shortcut_modifier.dart';
 import 'package:yogit/timeline.dart';
+import 'package:yogit/timeline_palette.dart';
 import 'package:yogit/timeline_theme.dart';
 import 'package:yogit/typography.dart';
 import 'package:yogit/window_frame.dart';
