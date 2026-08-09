@@ -2235,6 +2235,10 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// A chip's own horizontal padding, and the room its ✓/◇ glyph takes with the
   /// gap after it — the same allowance the ref modal sizes itself by.
   static const _refChipPadding = 10.0;
+
+  /// The room a fitted ref name keeps clear of its box, for the ink a glyph
+  /// draws beyond the width it reports.
+  static const _refNameInkCushion = 1.0;
   static const _refGlyphWidth = 16.0;
 
   /// Every box a row draws inside itself — a ref chip, a date heading — is this
@@ -2843,7 +2847,10 @@ class _TimelineScreenState extends State<TimelineScreen>
           builder: (context, constraints) => Text(
             fitRefName(
               name,
-              constraints.maxWidth,
+              // A glyph can ink a hair past the advance width it measures, so
+              // a name cut to exactly its box loses the last letter's tail to
+              // the chip's border. Stop one point short of the edge.
+              constraints.maxWidth - _refNameInkCushion,
               (text) => _textWidth(text, style),
             ),
             maxLines: 1,

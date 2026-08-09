@@ -109,6 +109,41 @@ void main() {
       );
     });
 
+    testWidgets('a fitted name leaves room for the ink it draws', (
+      tester,
+    ) async {
+      // A glyph can paint a hair past the advance width it measures, so a name
+      // cut to exactly the room it has loses its last letter's tail to the
+      // chip's border. Every column width has to stop short of the edge, not
+      // just the convenient ones.
+      for (var width = 90.0; width <= 200; width += 1) {
+        await tester.pumpWidget(timeline(refsWidth: width));
+        await tester.pumpAndSettle();
+
+        final chip = find.byKey(
+          const Key('ref-chip-1-codex/branch-lane-palette-assignments'),
+        );
+        if (chip.evaluate().isEmpty) continue;
+        final label = find.descendant(
+          of: chip,
+          matching: find.byWidgetPredicate(
+            (widget) => widget is Text && (widget.data?.isNotEmpty ?? false),
+          ),
+        );
+        final text = tester.widget<Text>(label);
+        final painter = TextPainter(
+          text: TextSpan(text: text.data, style: text.style),
+          textDirection: TextDirection.ltr,
+        )..layout();
+
+        expect(
+          painter.width,
+          lessThanOrEqualTo(tester.getSize(label).width - 1),
+          reason: 'refs 폭 $width: 글자가 칸 끝에 닿아 마지막 획이 깎인다',
+        );
+      }
+    });
+
     testWidgets('the ✓ and ◇ glyphs survive the narrowest chip', (
       tester,
     ) async {
