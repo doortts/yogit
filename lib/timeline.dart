@@ -537,12 +537,10 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   List<String> get _remotesToRefresh {
-    final remotes = <String>{};
-    final branch = _baseBranch;
-    final upstreamRemote = branch == null
-        ? null
-        : _refs.upstreamRemotes[branch];
-    if (upstreamRemote != null) remotes.add(upstreamRemote);
+    // Every local branch's badge has to stay current, so every remote some
+    // branch tracks gets fetched — including an upstream under another name,
+    // which the same-name sweep below would never reach.
+    final remotes = <String>{..._refs.upstreamRemotes.values};
     for (final remoteBranch in _refs.remote) {
       final split = splitRemoteBranchName(remoteBranch, _refs.remoteNames);
       if (split == null || !_refs.local.contains(split.branch)) {

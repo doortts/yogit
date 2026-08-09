@@ -3082,75 +3082,6 @@ void main() {
   });
 
   testWidgets(
-    'selected local branch shows only its nonzero upstream behind count',
-    (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: TimelineScreen(
-            repository: FakeGitRepository(
-              (_, _) async => [commit('1', 'first commit')],
-              refs: const RepoRefs(
-                local: ['main', 'release', 'local-only'],
-                current: 'main',
-                upstreams: {
-                  'main': 'origin/main',
-                  'release': 'company/release',
-                },
-                upstreamRemotes: {'main': 'origin', 'release': 'company'},
-                aheadBehind: {
-                  'main': BranchAheadBehind(ahead: 2, behind: 4),
-                  'release': BranchAheadBehind(ahead: 0, behind: 3),
-                },
-              ),
-            ),
-            preferredBranch: 'release',
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const Key('base-branch-selector')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('base-branch-menu-release')));
-      await tester.pumpAndSettle();
-
-      expect(find.byKey(const Key('sidebar-ahead-main')), findsNothing);
-      expect(find.byKey(const Key('sidebar-behind-main')), findsNothing);
-      final badge = find.byKey(const Key('sidebar-behind-release'));
-      expect(badge, findsOneWidget);
-      expect(
-        find.descendant(of: badge, matching: find.text('3')),
-        findsOneWidget,
-      );
-      expect(
-        tester
-            .widget<Tooltip>(
-              find.ancestor(of: badge, matching: find.byType(Tooltip)),
-            )
-            .message,
-        '원격보다 3개 커밋 뒤처져 있습니다',
-      );
-      expect(find.byKey(const Key('sidebar-ahead-local-only')), findsNothing);
-      expect(find.byKey(const Key('sidebar-behind-local-only')), findsNothing);
-      expect(
-        tester
-            .widget<Text>(find.descendant(of: badge, matching: find.text('3')))
-            .style
-            ?.color,
-        const Color(0xFFFF453A),
-      );
-      final label = find.descendant(
-        of: find.byKey(const Key('sidebar-ref-release')),
-        matching: find.text('release'),
-      );
-      expect(
-        tester.getRect(badge).left - tester.getRect(label).right,
-        lessThanOrEqualTo(4),
-      );
-    },
-  );
-
-  testWidgets(
     'remote branches show divergence from same-named local branches',
     (tester) async {
       await tester.pumpWidget(
@@ -3669,7 +3600,7 @@ void main() {
     expect(remotes, ['origin', 'origin']);
   });
 
-  testWidgets('changing the base branch refreshes its upstream remote', (
+  testWidgets('every branch\'s upstream remote refreshes, base or not', (
     tester,
   ) async {
     final remotes = <String>[];
@@ -3692,13 +3623,20 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(remotes, ['origin']);
+    // Every local branch wears its own divergence badge, so every remote one
+    // of them tracks is fetched — not just the base branch's.
+    expect(remotes, ['company', 'origin']);
 
     await tester.tap(find.byKey(const Key('base-branch-selector')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('base-branch-menu-release')));
     await tester.pumpAndSettle();
-    expect(remotes, ['origin', 'company']);
+    expect(remotes, [
+      'company',
+      'origin',
+      'company',
+      'origin',
+    ], reason: '기준 브랜치를 바꾸면 다시 한 바퀴 돌지만, 도는 대상은 그대로다');
   });
 
   testWidgets('remote refresh failure keeps the selected branch count', (
@@ -3731,11 +3669,11 @@ void main() {
 
     expect(find.text('원격 갱신 실패'), findsOneWidget);
     expect(
-      find.descendant(
-        of: find.byKey(const Key('sidebar-behind-main')),
-        matching: find.text('1'),
-      ),
-      findsOneWidget,
+      tester
+          .widget<Text>(find.byKey(const Key('sidebar-local-divergence-main')))
+          .textSpan!
+          .toPlainText(),
+      '−1',
     );
     await tester.tap(find.byKey(const Key('retry-origin-fetch')));
     await tester.pumpAndSettle();
@@ -3743,11 +3681,11 @@ void main() {
     expect(fetches, 2);
     expect(find.text('원격 갱신 실패'), findsNothing);
     expect(
-      find.descendant(
-        of: find.byKey(const Key('sidebar-behind-main')),
-        matching: find.text('2'),
-      ),
-      findsOneWidget,
+      tester
+          .widget<Text>(find.byKey(const Key('sidebar-local-divergence-main')))
+          .textSpan!
+          .toPlainText(),
+      '−2',
     );
   });
 
@@ -12476,8 +12414,10 @@ void main() {
     await tester.tap(find.byKey(const Key('base-branch-menu-release')));
     await tester.pumpAndSettle();
 
-    expect(refLoads, 2);
-    expect(fetched, ['company']);
+    // release's upstream is fetched from the first pass now — its badge needs
+    // it whether or not release is the base — and again on the base change.
+    expect(refLoads, 3);
+    expect(fetched, ['company', 'company']);
     expect(
       find.descendant(
         of: find.byKey(const Key('base-branch-selector')),

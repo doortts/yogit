@@ -409,6 +409,59 @@ extension _TimelineSidebar on _TimelineScreenState {
     ),
   );
 
+  /// How far a ref sits from the one it tracks: what only it has in green,
+  /// what only the other has in red. [against] names the other side.
+  ///
+  /// [reserveSlot] holds the box open at its full width — a remote row does
+  /// that because the hover ↓ button takes the same slot and the row should not
+  /// twitch. A local row lets the box shrink to its numbers instead, so they
+  /// sit against the name rather than floating a stop away from it. Either way
+  /// the [FittedBox] scales a three-digit pair down rather than clipping it.
+  Widget _divergenceBadge({
+    required Key key,
+    required int ahead,
+    required int behind,
+    required String against,
+    bool reserveSlot = false,
+  }) => Flexible(
+    child: Tooltip(
+      message: [
+        if (ahead > 0) '$against보다 $ahead개 커밋 앞서 있습니다',
+        if (behind > 0) '$against보다 $behind개 커밋 뒤처져 있습니다',
+      ].join(' · '),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minWidth: reserveSlot ? 36 : 0,
+          maxWidth: 36,
+        ),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerRight,
+          child: Text.rich(
+            key: key,
+            TextSpan(
+              children: [
+                if (ahead > 0)
+                  TextSpan(
+                    text: '+$ahead',
+                    style: const TextStyle(color: successGreen),
+                  ),
+                if (ahead > 0 && behind > 0) const TextSpan(text: ' '),
+                if (behind > 0)
+                  TextSpan(
+                    text: '−$behind',
+                    style: const TextStyle(color: remoteBehindRed),
+                  ),
+              ],
+            ),
+            maxLines: 1,
+            style: const TextStyle(fontSize: 11),
+          ),
+        ),
+      ),
+    ),
+  );
+
   Widget _refTreeRow(
     _RefSection section,
     RefTreeNode node,
@@ -431,14 +484,17 @@ extension _TimelineSidebar on _TimelineScreenState {
     final iconColor = name != null && section != _RefSection.tags
         ? _refTipColor(name)
         : _palette.muted;
-    final selectedLocal =
-        section == _RefSection.local && name != null && name == _baseBranch;
-    final behind = selectedLocal ? _refs.aheadBehind[name]?.behind ?? 0 : 0;
-    final remoteDifference = section == _RefSection.remote && name != null
-        ? _refs.remoteAheadBehind[name]
-        : null;
-    final remoteAhead = remoteDifference?.ahead ?? 0;
-    final remoteBehind = remoteDifference?.behind ?? 0;
+    // Both maps hold the difference from their own ref's point of view — the
+    // remote side is flipped when it is loaded — so one badge reads either.
+    final difference = name == null
+        ? null
+        : switch (section) {
+            _RefSection.local => _refs.aheadBehind[name],
+            _RefSection.remote => _refs.remoteAheadBehind[name],
+            _RefSection.tags => null,
+          };
+    final ahead = difference?.ahead ?? 0;
+    final behind = difference?.behind ?? 0;
     final pullState = section == _RefSection.remote && name != null
         ? remotePullState(_refs, name)
         : null;
@@ -500,60 +556,23 @@ extension _TimelineSidebar on _TimelineScreenState {
                     ),
                   ),
                 ),
-              if (behind > 0) const SizedBox(width: 4),
-              if (behind > 0)
-                Tooltip(
-                  message: '원격보다 $behind개 커밋 뒤처져 있습니다',
-                  child: SizedBox(
-                    key: Key('sidebar-behind-$name'),
-                    child: Text(
-                      '$behind',
-                      style: const TextStyle(
-                        color: remoteBehindRed,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ),
-                ),
-              // On hover the ↓ button takes this slot; the menu header
-              // repeats the divergence, so the badge can yield to it.
-              if ((remoteAhead > 0 || remoteBehind > 0) &&
+              // On a remote row the hover ↓ button takes this slot; the menu
+              // header repeats the divergence, so the badge can yield to it.
+              if ((ahead > 0 || behind > 0) &&
                   !(pullState != null &&
                       (hovered || _pullingRemote == name))) ...[
                 const SizedBox(width: 4),
-                Tooltip(
-                  message: [
-                    if (remoteAhead > 0) '로컬보다 $remoteAhead개 커밋 앞서 있습니다',
-                    if (remoteBehind > 0) '로컬보다 $remoteBehind개 커밋 뒤처져 있습니다',
-                  ].join(' · '),
-                  child: SizedBox(
-                    width: 36,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerRight,
-                      child: Text.rich(
-                        key: Key('sidebar-remote-divergence-$name'),
-                        TextSpan(
-                          children: [
-                            if (remoteAhead > 0)
-                              TextSpan(
-                                text: '+$remoteAhead',
-                                style: const TextStyle(color: successGreen),
-                              ),
-                            if (remoteAhead > 0 && remoteBehind > 0)
-                              const TextSpan(text: ' '),
-                            if (remoteBehind > 0)
-                              TextSpan(
-                                text: '−$remoteBehind',
-                                style: const TextStyle(color: remoteBehindRed),
-                              ),
-                          ],
-                        ),
-                        maxLines: 1,
-                        style: const TextStyle(fontSize: 11),
-                      ),
-                    ),
-                  ),
+                // On a row too narrow for the name, the HEAD chip and the
+                // badge together, the badge gives ground rather than letting
+                // the row overflow — its FittedBox scales the pair down.
+                _divergenceBadge(
+                  key: Key('sidebar-${section.name}-divergence-$name'),
+                  ahead: ahead,
+                  behind: behind,
+                  // Each side names the other: a local row is measured against
+                  // its remote, a remote row against its local.
+                  against: section == _RefSection.local ? '원격' : '로컬',
+                  reserveSlot: section == _RefSection.remote,
                 ),
               ],
             ],
