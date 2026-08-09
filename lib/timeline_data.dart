@@ -318,12 +318,19 @@ extension _TimelineDataFlows on _TimelineScreenState {
     }
   }
 
-  String? _deletedBranchTipSha(int branch) {
-    for (final row in _normalRows) {
-      if (row.branch != branch || row.commit.isWorkingTree) continue;
-      return _rowRefs(row.commit).isEmpty ? row.commit.sha : null;
-    }
-    return null;
+  String? _deletedBranchTipSha(int branch) => _branchLineTips[branch];
+
+  /// The name of a ref-less line, from what is already in memory: what an
+  /// earlier lookup saved, what a merge commit in the loaded history says, and
+  /// what the folded reflog remembers. Null means nobody in memory knows —
+  /// never that the name cannot be found, which is what selecting the row goes
+  /// on to try.
+  String? _knownDeletedLineName(int branch) {
+    final tip = _branchLineTips[branch];
+    if (tip == null) return null;
+    return _deletedBranchNames[tip] ??
+        _mergedBranchNames[tip] ??
+        _reflogBranchNames[tip];
   }
 
   /// Asks the engine what the git facts lean towards. Nothing waits on this: the

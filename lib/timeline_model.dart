@@ -799,3 +799,22 @@ Map<int, String> branchLineNames(List<GraphRow> rows) {
   }
   return names;
 }
+
+/// The tip SHA of every line no ref points at — the lines whose name, if they
+/// have one at all, has to be recovered. The tip is where a line is born, so it
+/// is also the key the recovered name is filed under.
+///
+/// Built with the graph rather than asked for per row: a row is asked whose
+/// line it sits on every time the mouse crosses it, and walking the rows for
+/// each of those would be a scan per hovered row.
+Map<int, String> branchLineTips(List<GraphRow> rows, RepoRefs refs) {
+  final tips = <int, String>{};
+  final seen = <int>{};
+  for (final row in rows) {
+    if (row.commit.isWorkingTree || !seen.add(row.branch)) continue;
+    if (timelineRefsForCommit(row.commit, refs).isEmpty) {
+      tips[row.branch] = row.commit.sha;
+    }
+  }
+  return tips;
+}

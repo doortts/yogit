@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -85,6 +87,51 @@ void main() {
       ]);
 
       expect(branchLineNames(rows)[rows.first.branch], 'main');
+    });
+  });
+
+  // ── 순수 함수: 이름 없는 선의 tip ──────────────────────────────────
+  group('branchLineTips', () {
+    test('a line whose tip wears no ref reports that tip', () {
+      final rows = layoutGraph([
+        commit(
+          'merge',
+          'merge',
+          parents: ['main-parent', 'gone-tip'],
+          refs: const [GitRef(name: 'main')],
+        ),
+        commit('gone-tip', 'gone tip', parents: ['root']),
+        commit('main-parent', 'older main', parents: ['root']),
+        commit('root', 'root'),
+      ]);
+
+      final tips = branchLineTips(rows, const RepoRefs());
+      final gone = rows.firstWhere((row) => row.commit.sha == 'gone-tip');
+      expect(tips[gone.branch], 'gone-tip');
+    });
+
+    test('a named line is left out — its ref already speaks', () {
+      final rows = layoutGraph([
+        commit(
+          'a',
+          'tip',
+          parents: ['b'],
+          refs: const [GitRef(name: 'main')],
+        ),
+        commit('b', 'root'),
+      ]);
+
+      expect(branchLineTips(rows, const RepoRefs()), isEmpty);
+    });
+
+    test('the working tree row is never a line tip', () {
+      final rows = layoutGraph([
+        commit('', 'working tree', parents: ['a']),
+        commit('a', 'tip', parents: ['b']),
+        commit('b', 'root'),
+      ]);
+
+      expect(branchLineTips(rows, const RepoRefs()).values, ['a']);
     });
   });
 
@@ -236,6 +283,287 @@ void main() {
     await tester.pumpAndSettle();
     expect(rowName(1), findsNothing, reason: '떠난 행에서는 사라진다');
     expect(rowName(2), findsOneWidget);
+  });
+
+  testWidgets('a deleted line the merge remembers names itself on hover', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [
+            commit(
+              'merge',
+              "Merge branch 'gone' into main",
+              parents: ['main-parent', 'gone-tip'],
+              refs: const [GitRef(name: 'main')],
+            ),
+            commit('gone-tip', 'finish the feature', parents: ['root']),
+            commit('main-parent', 'older main', parents: ['root']),
+            commit('root', 'root'),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 지운 브랜치라 ref가 없지만, 머지 커밋 제목이 이름을 기억하고 있다.
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(find.byKey(const Key('refs-cell-1'))));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(of: rowName(1), matching: find.text('gone')),
+      findsOneWidget,
+      reason: '메모리가 아는 이름은 hover만으로 나온다',
+    );
+  });
+
+  testWidgets('hovering a nameless line asks git nothing', (tester) async {
+    var reflogReads = 0;
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [
+            commit('a', 'tip', parents: ['b']),
+            commit('b', 'root'),
+          ],
+          refs: const RepoRefs(),
+          runner: (executable, args, {workingDirectory, environment}) async {
+            if (args.contains('reflog')) reflogReads++;
+            return ProcessResult(1, 0, '', '');
+          },
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    final atRest = reflogReads;
+
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    for (final row in [0, 1, 0, 1]) {
+      await mouse.moveTo(
+        tester.getCenter(find.byKey(Key('refs-cell-$row'))),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    // 마우스가 지나가는 것은 요청이 아니다.
+    expect(reflogReads, atRest);
+    expect(rowName(1), findsNothing);
+  });
+
+  testWidgets('the folded reflog names a line no merge remembers', (
+    tester,
+  ) async {
+    var reflogReads = 0;
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [
+            commit('gone-tip', 'finish the feature', parents: ['root']),
+            commit('root', 'root'),
+          ],
+          refs: const RepoRefs(),
+          runner: (executable, args, {workingDirectory, environment}) async {
+            if (!args.contains('reflog')) return ProcessResult(1, 0, '', '');
+            reflogReads++;
+            return ProcessResult(
+              1,
+              0,
+              'main-tip\x00checkout: moving from gone to main\n'
+                  'gone-tip\x00commit: finish the feature\n',
+              '',
+            );
+          },
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(reflogReads, 0, reason: '첫 화면은 reflog를 기다리지 않는다');
+    expect(rowName(0), findsNothing);
+
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(reflogReads, 1, reason: '한 번만 읽어 접어 둔다');
+
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(find.byKey(const Key('refs-cell-0'))));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(of: rowName(0), matching: find.text('gone')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('another repository folds its own reflog, not the last one', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    FakeGitRepository repositoryNaming(String branch) => FakeGitRepository(
+      (_, _) async => [
+        commit('gone-tip', 'finish the feature', parents: ['root']),
+        commit('root', 'root'),
+      ],
+      refs: const RepoRefs(),
+      runner: (executable, args, {workingDirectory, environment}) async =>
+          args.contains('reflog')
+          ? ProcessResult(
+              1,
+              0,
+              'main-tip\x00checkout: moving from $branch to main\n'
+                  'gone-tip\x00commit: finish the feature\n',
+              '',
+            )
+          : ProcessResult(1, 0, '', ''),
+    );
+
+    Future<void> hoverTip() async {
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      await mouse.moveTo(
+        tester.getCenter(find.byKey(const Key('refs-cell-0'))),
+      );
+      await tester.pumpAndSettle();
+      await mouse.removePointer();
+    }
+
+    await tester.pumpWidget(app(repositoryNaming('first'), controller));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    await hoverTip();
+    expect(
+      find.descendant(of: rowName(0), matching: find.text('first')),
+      findsOneWidget,
+    );
+
+    // 저장소를 갈아 끼우면 앞 저장소의 이름이 남아 있어서는 안 되고, 새 저장소의
+    // reflog를 다시 접어야 한다.
+    await tester.pumpWidget(app(repositoryNaming('second'), controller));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    await hoverTip();
+    expect(find.text('first'), findsNothing);
+    expect(
+      find.descendant(of: rowName(0), matching: find.text('second')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('a branch comparison never borrows a name by line id', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    // 비교 화면은 레이아웃을 따로 잡아 선 id가 평소 그래프와 다른 것을 가리킨다.
+    // 그 id로 이름을 꺼내면 엉뚱한 브랜치 이름이 붙는다.
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [
+            commit(
+              'merge',
+              "Merge branch 'gone' into main",
+              parents: ['main-parent', 'gone-tip'],
+              refs: const [GitRef(name: 'main')],
+            ),
+            commit('gone-tip', 'finish the feature', parents: ['root']),
+            commit('main-parent', 'older main', parents: ['root']),
+            commit('root', 'root'),
+          ],
+          refs: const RepoRefs(
+            local: ['main', 'feature'],
+            current: 'main',
+            tips: {'main': 'merge', 'feature': 'main-parent'},
+          ),
+          compareBranchesCallback: (_, _) async => BranchComparisonResult(
+            baseRef: 'main',
+            compareRef: 'feature',
+            baseTip: 'merge',
+            compareTip: 'main-parent',
+            baseParent: 'root',
+            compareParent: 'root',
+            mergeBases: const ['root'],
+            commits: [
+              BranchComparisonCommit(
+                commit: commit('merge', 'merge', parents: const ['root']),
+                side: BranchCommitSide.baseOnly,
+              ),
+              BranchComparisonCommit(
+                commit: commit(
+                  'main-parent',
+                  'older main',
+                  parents: const ['root'],
+                ),
+                side: BranchCommitSide.compareOnly,
+              ),
+              BranchComparisonCommit(
+                commit: commit('root', 'root'),
+                side: BranchCommitSide.commonBoundary,
+              ),
+            ],
+            files: const [],
+            merge: const MergeConflictCheck(status: MergeConflictStatus.clean),
+          ),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-menu-feature')));
+    await tester.pumpAndSettle();
+
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    for (final row in [0, 1, 2]) {
+      final cell = find.byKey(Key('refs-cell-$row'));
+      if (cell.evaluate().isEmpty) continue;
+      await mouse.moveTo(tester.getCenter(cell));
+      await tester.pumpAndSettle();
+    }
+
+    expect(find.text('gone'), findsNothing);
   });
 
   testWidgets('a row wearing its own chip is left alone', (tester) async {

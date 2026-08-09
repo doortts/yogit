@@ -320,6 +320,26 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// down a line can still say which branch it sits on.
   var _branchLineNames = <int, String>{};
 
+  /// Branch line id → tip SHA, for the lines no ref points at. The key the
+  /// recovered names below are filed under, and the reason a hovered row can
+  /// ask whose line it is on without walking the rows.
+  var _branchLineTips = <int, String>{};
+
+  /// Tip SHA → the branch name a merge commit in the loaded history gave it.
+  /// Rebuilt with the graph, so reading another page widens it.
+  var _mergedBranchNames = <String, String>{};
+
+  /// Tip SHA → the branch name the `HEAD` reflog remembers. Read once in the
+  /// background per repository; empty until it lands, and empty forever where
+  /// there is no reflog left.
+  var _reflogBranchNames = <String, String>{};
+
+  /// Long enough that the reflog read lands behind the first page and the refs
+  /// rather than beside them, short enough that a reader looking around still
+  /// finds the names waiting.
+  static const _reflogFoldDelay = Duration(seconds: 2);
+  Timer? _reflogFoldTimer;
+
   /// Refs the reader has closed the eye on. Held here rather than read from the
   /// widget so a press redraws at once instead of waiting for the round trip
   /// through settings.
@@ -561,6 +581,39 @@ class _TimelineScreenState extends State<TimelineScreen>
       _localWatchInterval,
       (_) => unawaited(_checkLocalChanges()),
     );
+    _scheduleReflogFold();
+  }
+
+  /// Reads the reflog once, after the picture is up and a beat has passed. The
+  /// names it holds are worth having for every row at once, but not worth
+  /// making the first paint wait — nobody is asking for them yet at that
+  /// moment.
+  void _scheduleReflogFold() {
+    _reflogFoldTimer?.cancel();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // 저장소가 연달아 바뀌면 앞선 콜백이 여기 먼저 닿는다. 그때 세워 둔 타이머를
+      // 여기서 한 번 더 걷어야 같은 reflog를 두 번 읽지 않는다.
+      _reflogFoldTimer?.cancel();
+      _reflogFoldTimer = Timer(_reflogFoldDelay, () {
+        unawaited(_foldReflogBranchNames());
+      });
+    });
+  }
+
+  Future<void> _foldReflogBranchNames() async {
+    final generation = _deletedBranchLookupGeneration;
+    final repository = widget.repository;
+    final names = await repository.loadReflogBranchNames();
+    // 저장소가 바뀌었으면 앞 저장소의 이름을 새 화면에 얹지 않는다.
+    if (!mounted ||
+        names.isEmpty ||
+        generation != _deletedBranchLookupGeneration ||
+        !identical(widget.repository, repository)) {
+      return;
+    }
+    _reflogBranchNames = names;
+    _deletedBranchRevision.value++;
   }
 
   List<String> get _remotesToRefresh {
@@ -681,6 +734,10 @@ class _TimelineScreenState extends State<TimelineScreen>
       _deletedBranchLookupGeneration++;
       _deletedBranchLookupAttempts.clear();
       _resolvingDeletedBranchTips.clear();
+      // 접어 둔 reflog는 저장소 하나의 기억이다. 새 저장소로 넘어가면 버리고
+      // 그쪽 것을 다시 접는다.
+      _reflogBranchNames = const {};
+      _scheduleReflogFold();
     }
     // A new repository has its own identity; an edited profile list can rename
     // the one already in force.
@@ -796,6 +853,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     _fetchTimer?.cancel();
     _localWatchTimer?.cancel();
     _localWatchDebounceTimer?.cancel();
+    _reflogFoldTimer?.cancel();
     for (final watcher in _refWatchers) {
       unawaited(watcher.cancel());
     }
@@ -914,6 +972,10 @@ class _TimelineScreenState extends State<TimelineScreen>
       refPaletteAssignments: widget.refPaletteAssignments,
     );
     _branchLineNames = branchLineNames(_normalRows);
+    _branchLineTips = branchLineTips(_normalRows, _refs);
+    // 머지 제목이 기억하는 이름은 이미 읽어 둔 커밋 안에 있다. 줄 하나를 물을
+    // 때마다 훑는 대신 그래프를 만드는 이 자리에서 한 번에 색인한다.
+    _mergedBranchNames = mergedBranchNamesByTip(_normalCommits);
     AvatarService.branchAssignments = {
       for (final entry in _branchPaletteIndexes.entries)
         entry.key: refPaletteColorsAt(entry.value, widget.refPalette).text,

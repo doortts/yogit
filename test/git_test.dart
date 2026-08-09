@@ -112,6 +112,34 @@ void main() {
     },
   );
 
+  test('one pass over the commits names every merged-in line at once', () {
+    // 줄 하나를 물을 때마다 커밋 전체를 훑는 대신 한 번에 색인을 만든다.
+    final names = mergedBranchNamesByTip([
+      _commit('merge', ['main', 'tip'], subject: "Merge branch 'feature/one'"),
+      _commit(
+        'octopus',
+        ['main', 'left', 'right'],
+        subject: "Merge branch 'feature/many'",
+      ),
+      _commit('plain', ['main'], subject: "Merge branch 'not/a/merge'"),
+      _commit('noisy', ['main', 'other'], subject: 'Merge feature'),
+    ]);
+
+    // 두 부모짜리 머지만, 그리고 알아보는 제목만 색인에 들어간다. 제목 하나는
+    // 브랜치 하나를 말하므로, 부모 셋을 그 이름으로 함께 부르면 지어내는 것이다.
+    expect(names, {'tip': 'feature/one'});
+  });
+
+  test('the merge index keeps the newest name for a reused tip', () {
+    // 같은 커밋이 두 번 머지됐으면 위에 있는(더 최근) 제목이 이긴다.
+    final names = mergedBranchNamesByTip([
+      _commit('newer', ['main', 'tip'], subject: "Merge branch 'renamed'"),
+      _commit('older', ['main', 'tip'], subject: "Merge branch 'original'"),
+    ]);
+
+    expect(names['tip'], 'renamed');
+  });
+
   test(
     'deleted branch reflog finds the checkout source before the matching tip',
     () {
@@ -122,6 +150,32 @@ void main() {
       expect(deletedBranchNameFromReflog(output, 'gone-tip'), 'feature/gone');
     },
   );
+
+  test('one reflog read names every branch it was ever checked out from', () {
+    const output =
+        'main-tip\x00checkout: moving from feature/newest to main\n'
+        'newest-tip\x00commit: finish the newest\n'
+        'other-tip\x00checkout: moving from feature/older to main\n'
+        'older-tip\x00commit: finish the older\n'
+        'older-tip\x00checkout: moving from HEAD to main\n'
+        'detached-tip\x00commit: on a detached head\n';
+
+    // 접어 두면 그 뒤로는 tip 하나를 물을 때마다 reflog를 다시 읽지 않는다.
+    expect(deletedBranchNamesFromReflog(output), {
+      'newest-tip': 'feature/newest',
+      'older-tip': 'feature/older',
+    });
+  });
+
+  test('the folded reflog keeps the newest name for a reused tip', () {
+    const output =
+        'a\x00checkout: moving from renamed to main\n'
+        'tip\x00commit: work\n'
+        'b\x00checkout: moving from original to main\n'
+        'tip\x00commit: work\n';
+
+    expect(deletedBranchNamesFromReflog(output)['tip'], 'renamed');
+  });
 
   test('deleted branch reflog lookup rejects detached checkout sources', () {
     for (final source in ['HEAD', '-', '307fc8b']) {
@@ -158,6 +212,46 @@ void main() {
       expect(arguments, ['reflog', 'show', '--format=%H%x00%gs', 'HEAD']);
     },
   );
+
+  test('the reflog is read once, with a ceiling on how far back', () async {
+    late List<String> arguments;
+    final repository = GitRepository(
+      '/repo',
+      runner: (executable, args, {workingDirectory, environment}) async {
+        arguments = args;
+        return ProcessResult(
+          1,
+          0,
+          'main-tip\x00checkout: moving from feature/gone to main\n'
+              'gone-tip\x00commit: finish feature\n',
+          '',
+        );
+      },
+    );
+
+    expect(await repository.loadReflogBranchNames(limit: 500), {
+      'gone-tip': 'feature/gone',
+    });
+    // 오래된 저장소의 reflog는 수십 MB까지 자란다. 상한이 그 바닥을 막는다.
+    expect(arguments, [
+      'reflog',
+      'show',
+      '--format=%H%x00%gs',
+      '-n',
+      '500',
+      'HEAD',
+    ]);
+  });
+
+  test('a repository with no reflog folds to nothing, not an error', () async {
+    final repository = GitRepository(
+      '/repo',
+      runner: (executable, args, {workingDirectory, environment}) async =>
+          throw const ProcessException('git', ['reflog']),
+    );
+
+    expect(await repository.loadReflogBranchNames(), isEmpty);
+  });
 
   test('resolves a saved local branch before current and first local', () {
     const refs = RepoRefs(local: ['main', 'release'], current: 'main');

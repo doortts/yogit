@@ -298,50 +298,97 @@ final _mergedBranchPatterns = <RegExp>[
   RegExp(r'^Merge pull request #\d+ from [^/]+/(.+)$'),
 ];
 
-String? deletedBranchNameFromMerge(Iterable<GitCommit> commits, String tipSha) {
-  for (final commit in commits) {
-    if (!commit.parents.skip(1).contains(tipSha)) continue;
-    for (final pattern in _mergedBranchPatterns) {
-      final name = pattern.firstMatch(commit.subject)?.group(1)?.trim();
-      if (name != null && name.isNotEmpty) return name;
-    }
+String? _mergedBranchName(String subject) {
+  for (final pattern in _mergedBranchPatterns) {
+    final name = pattern.firstMatch(subject)?.group(1)?.trim();
+    if (name != null && name.isNotEmpty) return name;
   }
   return null;
 }
 
-String? deletedBranchNameFromReflog(String output, String tipSha) {
-  final entries = output
-      .split('\n')
-      .where((line) => line.isNotEmpty)
-      .map((line) {
-        final separator = line.indexOf('\x00');
-        return separator < 0
-            ? null
-            : (
-                sha: line.substring(0, separator),
-                subject: line.substring(separator + 1),
-              );
-      })
-      .whereType<({String sha, String subject})>()
-      .toList();
-  final checkout = RegExp(r'^checkout: moving from (.+) to .+$');
-  final detached = RegExp(r'^[0-9a-fA-F]{7,40}$');
-  for (var index = 0; index + 1 < entries.length; index++) {
-    if (entries[index + 1].sha != tipSha) continue;
-    final source = checkout
-        .firstMatch(entries[index].subject)
-        ?.group(1)
-        ?.trim();
-    if (source == null ||
-        source.isEmpty ||
-        source == 'HEAD' ||
-        source == '-' ||
-        detached.hasMatch(source)) {
-      continue;
-    }
-    return source;
+String? deletedBranchNameFromMerge(Iterable<GitCommit> commits, String tipSha) {
+  for (final commit in commits) {
+    if (!commit.parents.skip(1).contains(tipSha)) continue;
+    final name = _mergedBranchName(commit.subject);
+    if (name != null) return name;
   }
   return null;
+}
+
+/// Every line a merge in [commits] named, keyed by the line's tip. One walk
+/// answers for all of them, so a row asking whose line it sits on costs a map
+/// lookup rather than a scan. [commits] comes newest first, which makes the
+/// first name found for a tip the most recent one to have claimed it.
+///
+/// Only two-parent merges count. One subject names one branch, so an octopus
+/// merge would have to hand the same name to every side it pulled in, and git
+/// writes those as `Merge branches 'a' and 'b'` anyway.
+Map<String, String> mergedBranchNamesByTip(Iterable<GitCommit> commits) {
+  final names = <String, String>{};
+  for (final commit in commits) {
+    if (commit.parents.length != 2) continue;
+    final name = _mergedBranchName(commit.subject);
+    if (name == null) continue;
+    names.putIfAbsent(commit.parents[1], () => name);
+  }
+  return names;
+}
+
+List<({String sha, String subject})> _reflogEntries(String output) => output
+    .split('\n')
+    .where((line) => line.isNotEmpty)
+    .map((line) {
+      final separator = line.indexOf('\x00');
+      return separator < 0
+          ? null
+          : (
+              sha: line.substring(0, separator),
+              subject: line.substring(separator + 1),
+            );
+    })
+    .whereType<({String sha, String subject})>()
+    .toList();
+
+final _reflogCheckout = RegExp(r'^checkout: moving from (.+) to .+$');
+final _reflogDetached = RegExp(r'^[0-9a-fA-F]{7,40}$');
+
+/// The branch a `checkout: moving from …` entry left behind, or null when it
+/// left no branch at all — a detached head, a bare SHA, or `-`.
+String? _reflogCheckoutSource(String subject) {
+  final source = _reflogCheckout.firstMatch(subject)?.group(1)?.trim();
+  if (source == null ||
+      source.isEmpty ||
+      source == 'HEAD' ||
+      source == '-' ||
+      _reflogDetached.hasMatch(source)) {
+    return null;
+  }
+  return source;
+}
+
+String? deletedBranchNameFromReflog(String output, String tipSha) {
+  final entries = _reflogEntries(output);
+  for (var index = 0; index + 1 < entries.length; index++) {
+    if (entries[index + 1].sha != tipSha) continue;
+    final source = _reflogCheckoutSource(entries[index].subject);
+    if (source != null) return source;
+  }
+  return null;
+}
+
+/// Every branch this repository was checked out from, keyed by the commit it
+/// sat on at the time — the tip that branch had. Folding the whole reflog once
+/// answers for all of them, so no later question re-reads it. [output] comes
+/// newest first, so the first name found for a commit is the most recent.
+Map<String, String> deletedBranchNamesFromReflog(String output) {
+  final entries = _reflogEntries(output);
+  final names = <String, String>{};
+  for (var index = 0; index + 1 < entries.length; index++) {
+    final source = _reflogCheckoutSource(entries[index].subject);
+    if (source == null) continue;
+    names.putIfAbsent(entries[index + 1].sha, () => source);
+  }
+  return names;
 }
 
 /// A lane change happening across this row's lower half: the rail in [from]
@@ -2091,6 +2138,33 @@ class GitRepository implements FullDiffRepository {
       ...revisions,
     ];
     return parseGitLog(await _run(args));
+  }
+
+  /// Every branch name the `HEAD` reflog still remembers, keyed by the commit
+  /// that branch was sitting on. Read once and kept, so the rows asking whose
+  /// line they are on never send git anything. A repository with no reflog —
+  /// expired, or never written — folds to nothing rather than failing.
+  ///
+  /// [limit] caps how far back the read goes: an old repository's reflog runs
+  /// to tens of megabytes, and the oldest entries name branches nobody is
+  /// looking at.
+  Future<Map<String, String>> loadReflogBranchNames({int limit = 20000}) async {
+    try {
+      return deletedBranchNamesFromReflog(
+        await _run([
+          'reflog',
+          'show',
+          '--format=%H%x00%gs',
+          '-n',
+          '$limit',
+          'HEAD',
+        ]),
+      );
+    } on ProcessException {
+      return const {};
+    } on GitRepositoryException {
+      return const {};
+    }
   }
 
   Future<String?> loadLocalDeletedBranchName(

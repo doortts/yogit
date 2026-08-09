@@ -192,9 +192,12 @@ extension _TimelineRows on _TimelineScreenState {
         deletedBranchLoading:
             lineTip != null && _resolvingDeletedBranchTips.contains(lineTip),
         // A commit partway down a line says which branch it sits on. The tip
-        // itself already wears the chip, so it is not asked twice.
+        // itself already wears the chip, so it is not asked twice. A line no
+        // ref points at falls back to the name memory already holds — and only
+        // to that: hovering a line must never start a lookup.
         lineName: (selected || hovered) && refs.isEmpty
-            ? _branchLineNames[row.branch]
+            ? _branchLineNames[row.branch] ??
+                  _knownDeletedLineName(row.branch)
             : null,
       );
       if (mergeConflict) {
