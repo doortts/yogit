@@ -116,9 +116,16 @@ class AvatarService {
   final RemoteRepository remote;
   final GitHubApi api;
   final _cache = <String, Future<CommitAvatars>>{};
+
+  /// What a finished lookup found, kept beside the future so a rebuild can
+  /// paint the photo in the same frame instead of flashing initials first.
+  final _resolved = <String, CommitAvatars>{};
   final _permits = _PermitPool(4, maxQueued: 32);
   final _saturated = Future.value(const CommitAvatars());
   Future<String?>? _account;
+
+  /// The answer for [sha] if one has already arrived, without waiting a frame.
+  CommitAvatars? cachedFor(String sha) => _resolved[sha];
 
   Future<CommitAvatars> resolve(String sha) {
     final cached = _cache.remove(sha);
@@ -126,7 +133,12 @@ class AvatarService {
       _cache[sha] = cached;
       return cached;
     }
-    final pending = _permits.tryRun(() => _load(sha));
+    final pending = _permits.tryRun(
+      () => _load(sha).then((avatars) {
+        _resolved[sha] = avatars;
+        return avatars;
+      }),
+    );
     if (pending == null) return _saturated;
     _cache[sha] = pending;
     if (_cache.length > 256) _cache.remove(_cache.keys.first);
@@ -503,6 +515,7 @@ class CommitAvatarStack extends StatelessWidget {
     if (service == null) return _stack(null);
     return FutureBuilder<CommitAvatars>(
       future: service.resolve(commit.sha),
+      initialData: service.cachedFor(commit.sha),
       builder: (context, snapshot) => _stack(snapshot.data),
     );
   }

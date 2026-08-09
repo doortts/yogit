@@ -1093,7 +1093,7 @@ void main() {
     expect(workingTree.refArrowTipX, 16.0);
     expect(compact.laneX(compact.row.lane), CommitGraphPainter.laneInset);
     expect(compact.refMarkerRadius, CommitGraphPainter.avatarRadius);
-    expect(compact.refArrowTipX, 15.0);
+    expect(compact.refArrowTipX, 14.0);
   });
 
   test('preview rail inherits the previous row dash above its node', () {
@@ -2268,16 +2268,18 @@ void main() {
   test('graph lane spacing compresses in stages', () {
     // Lanes hold their coordinates while the cell still shows the last node,
     // which is all the width the content needs.
-    expect(CommitGraphPainter.contentWidth(2), 100);
-    expect(CommitGraphPainter.contentWidth(0), 40);
+    // The numbers follow the disc: nodeExtent is half of it plus the rail's
+    // clearance, so a 20pt avatar puts every stage one point further out.
+    expect(CommitGraphPainter.contentWidth(2), 101);
+    expect(CommitGraphPainter.contentWidth(0), 41);
     expect(CommitGraphPainter.spacingFor(260, 2), 30);
     expect(CommitGraphPainter.spacingFor(118, 2), 30);
-    expect(CommitGraphPainter.spacingFor(100, 2), 30);
+    expect(CommitGraphPainter.spacingFor(101, 2), 30);
     expect(CommitGraphPainter.spacingFor(58, 0), 30);
     // Below that the lanes squeeze so the last node stays just inside.
-    expect(CommitGraphPainter.spacingFor(99, 2), 29.5);
-    expect(CommitGraphPainter.spacingFor(98, 2), 29);
-    expect(CommitGraphPainter.spacingFor(68, 2), 14);
+    expect(CommitGraphPainter.spacingFor(100, 2), 29.5);
+    expect(CommitGraphPainter.spacingFor(99, 2), 29);
+    expect(CommitGraphPainter.spacingFor(68, 2), 13.5);
     expect(CommitGraphPainter.spacingFor(40, 2), 12);
     expect(CommitGraphPainter.compactWidth, 56);
     expect(timelineColumns['graph']!.min, 40);
@@ -2327,12 +2329,12 @@ void main() {
     await tester.pumpWidget(screen(68));
     await tester.pumpAndSettle();
     expect(painterAt(0).compact, isFalse);
-    expect(painterAt(0).laneSpacing, 14);
+    expect(painterAt(0).laneSpacing, 13.5);
     expect(painterAt(1).laneX(0), CommitGraphPainter.laneInset);
-    expect(painterAt(1).laneX(1) - painterAt(1).laneX(0), 14);
+    expect(painterAt(1).laneX(1) - painterAt(1).laneX(0), 13.5);
     expect(
       painterAt(0).transitionPath(0, 2, 18, const Size(68, 36)).getBounds(),
-      const Rect.fromLTRB(28, 18, 56, 54),
+      const Rect.fromLTRB(28, 18, 55, 54),
     );
     // Nodes keep their full size at every width; the overhang just clips.
     expect(avatarSize(1), CommitGraphPainter.avatarDiameter);

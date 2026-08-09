@@ -288,7 +288,7 @@ class CommitGraphPainter extends CustomPainter {
   static const previewLaneSpacing = 49.0;
   static const railWidth = AvatarService.railWidth;
   static const previewRailWidth = 1.0;
-  static const avatarDiameter = 18.0;
+  static const avatarDiameter = 20.0;
   static const hashRailClearance = 3.0;
 
   /// Stage 3: at or below this cell width the graph collapses to one lane.
