@@ -269,16 +269,28 @@ List<GitCommit> parseGitLog(String output) {
 
 List<GitRef> _parseRefs(String decorations) {
   if (decorations.isEmpty) return const [];
-  return decorations.split(', ').map((decoration) {
-    if (decoration.startsWith('HEAD -> ')) {
-      return GitRef(name: decoration.substring(8), isHead: true);
-    }
-    if (decoration.startsWith('tag: ')) {
-      return GitRef(name: decoration.substring(5), isTag: true);
-    }
-    return GitRef(name: decoration);
-  }).toList();
+  return decorations
+      .split(', ')
+      .map((decoration) {
+        if (decoration.startsWith('HEAD -> ')) {
+          return GitRef(name: decoration.substring(8), isHead: true);
+        }
+        if (decoration.startsWith('tag: ')) {
+          return GitRef(name: decoration.substring(5), isTag: true);
+        }
+        return GitRef(name: decoration);
+      })
+      // `origin/HEAD` is a symbolic alias for another remote branch, and that
+      // branch decorates the same commit, so drawing it only doubles the chip.
+      // The ref listing leaves it out for the same reason.
+      .where((ref) => ref.isHead || ref.isTag || !_isRemoteHeadAlias(ref.name))
+      .toList();
 }
+
+/// `origin/HEAD`, `upstream/HEAD` — a remote's symbolic default, not a branch.
+/// A branch merely *named* `HEADroom` keeps its place.
+bool _isRemoteHeadAlias(String name) =>
+    name.endsWith('/HEAD') && name.indexOf('/') == name.length - 5;
 
 final _mergedBranchPatterns = <RegExp>[
   RegExp(r"^Merge branch '([^']+)'(?: into .+)?$"),
@@ -4291,7 +4303,7 @@ class GitRepository implements FullDiffRepository {
         if (!name.startsWith(bucket.key)) continue;
         final short = name.substring(bucket.key.length);
         // `origin/HEAD` is an alias for another branch, not a branch of its own.
-        if (bucket.value == remote && short.endsWith('/HEAD')) break;
+        if (bucket.value == remote && _isRemoteHeadAlias(short)) break;
         bucket.value.add(short);
         tips[short] = sha;
         if (bucket.value == local) {

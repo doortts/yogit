@@ -50,6 +50,40 @@ void main() {
     ]);
   });
 
+  test('drops origin/HEAD, an alias for a branch already listed', () {
+    const log =
+        'b561300abcde0000000000000000000000000000\x1f'
+        'b561300abcde\x1f'
+        '1111111111111111111111111111111111111111\x1f'
+        'Ada Author\x1fada@example.com\x1f1700000000\x1f'
+        'Cam Committer\x1fcam@example.com\x1f1700000100\x1f'
+        'origin/HEAD, origin/main, upstream/HEAD, upstream/main\x1f'
+        'A commit\x1e';
+
+    // `origin/HEAD` is a symbolic alias; whatever it points at is decorated on
+    // the same commit, so showing it only doubles the chip.
+    expect(parseGitLog(log).single.refs.map((ref) => ref.name), [
+      'origin/main',
+      'upstream/main',
+    ]);
+  });
+
+  test('keeps a branch merely named HEAD-something', () {
+    const log =
+        'b561300abcde0000000000000000000000000000\x1f'
+        'b561300abcde\x1f'
+        '1111111111111111111111111111111111111111\x1f'
+        'Ada Author\x1fada@example.com\x1f1700000000\x1f'
+        'Cam Committer\x1fcam@example.com\x1f1700000100\x1f'
+        'origin/HEADroom, HEAD -> HEADless\x1f'
+        'A commit\x1e';
+
+    expect(parseGitLog(log).single.refs.map((ref) => ref.name), [
+      'origin/HEADroom',
+      'HEADless',
+    ]);
+  });
+
   test('finds a deleted branch from recognized merge subjects', () {
     for (final entry in {
       "Merge branch 'feature/local'": 'feature/local',
@@ -3261,6 +3295,29 @@ void main() {
           .where((argument) => !argument.startsWith('--format=')),
       everyElement(isNot(contains(' '))),
     );
+  });
+
+  test('loadRefs leaves origin/HEAD out of the remote list', () async {
+    final root = await Directory.systemTemp.createTemp('yogit_remote_head_');
+    final remote = await Directory.systemTemp.createTemp('yogit_origin_head_');
+    addTearDown(() => root.delete(recursive: true));
+    addTearDown(() => remote.delete(recursive: true));
+
+    await _git(remote, ['init', '--bare']);
+    await _initRepository(root);
+    await File('${root.path}/file.txt').writeAsString('base\n');
+    await _git(root, ['add', 'file.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+    await _git(root, ['remote', 'add', 'origin', remote.path]);
+    await _git(root, ['push', '-u', 'origin', 'main']);
+    await _git(root, ['remote', 'set-head', 'origin', 'main']);
+
+    final refs = await GitRepository(root.path).loadRefs();
+
+    // The alias points at a branch that is already in the list; showing it
+    // would only name the same thing twice.
+    expect(refs.remote, contains('origin/main'));
+    expect(refs.remote, isNot(contains('origin/HEAD')));
   });
 
   test('loadRefs reports local and origin divergence by direction', () async {
