@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -627,3 +628,119 @@ class _LegendDotPainter extends CustomPainter {
   ),
   _ => (background: palette.neutralChip, letter: palette.text),
 };
+
+/// A tooltip that opens to the RIGHT of what it labels instead of below it.
+///
+/// A list of clipped names is the case Flutter's own tooltip reads badly: it
+/// drops under the row it belongs to and covers the next name, which is the
+/// one the reader was comparing against. This one keeps to the row's own line
+/// and steps aside — to the left when the right edge has no room.
+class SideTooltip extends StatefulWidget {
+  const SideTooltip({
+    required this.message,
+    required this.child,
+    this.cardKey,
+    super.key,
+  });
+
+  final String message;
+  final Widget child;
+
+  /// Key on the card itself, so a test can find and measure it.
+  final Key? cardKey;
+
+  @override
+  State<SideTooltip> createState() => _SideTooltipState();
+}
+
+class _SideTooltipState extends State<SideTooltip> {
+  final _card = OverlayPortalController();
+  final _anchorKey = GlobalKey(debugLabel: 'side tooltip anchor');
+
+  Rect? get _anchorRect {
+    final box = _anchorKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return null;
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    onEnter: (_) => _card.show(),
+    onExit: (_) => _card.hide(),
+    child: OverlayPortal(
+      controller: _card,
+      overlayChildBuilder: (context) {
+        final anchor = _anchorRect;
+        if (anchor == null) return const SizedBox.shrink();
+        return Positioned.fill(
+          child: IgnorePointer(
+            child: CustomSingleChildLayout(
+              delegate: _SideTooltipLayout(anchor: anchor),
+              child: Container(
+                key: widget.cardKey,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.92),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  widget.message,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.black, fontSize: 13),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+      child: KeyedSubtree(key: _anchorKey, child: widget.child),
+    ),
+  );
+}
+
+/// Right of the anchor on the anchor's own line, left of it when the right
+/// edge is out of room, and never past a window edge either way.
+class _SideTooltipLayout extends SingleChildLayoutDelegate {
+  const _SideTooltipLayout({required this.anchor});
+
+  final Rect anchor;
+
+  static const _gap = 6.0;
+  static const _margin = 8.0;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
+      BoxConstraints.loose(
+        Size(
+          math.max(0, constraints.maxWidth - _margin * 2),
+          math.max(0, constraints.maxHeight - _margin * 2),
+        ),
+      );
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    final right = anchor.right + _gap;
+    final left = anchor.left - _gap - childSize.width;
+    final x = right + childSize.width + _margin <= size.width
+        ? right
+        : left >= _margin
+        ? left
+        : math.max(_margin, size.width - childSize.width - _margin);
+    final centered = anchor.center.dy - childSize.height / 2;
+    return Offset(
+      x,
+      centered.clamp(
+        _margin,
+        math.max(_margin, size.height - childSize.height - _margin),
+      ),
+    );
+  }
+
+  @override
+  bool shouldRelayout(_SideTooltipLayout oldDelegate) =>
+      oldDelegate.anchor != anchor;
+}

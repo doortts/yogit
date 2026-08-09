@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -45,33 +46,65 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// 행에 보이는 조각 — 폴더 아래 브랜치는 마지막 마디만 그린다.
-  String segmentOf(String ref) => ref.split('/').last;
+  Finder card() => find.byKey(const Key('sidebar-name-tooltip'));
 
-  Tooltip? tooltipOn(WidgetTester tester, String ref) {
-    final candidates = find.ancestor(
-      of: find.descendant(
-        of: find.byKey(Key('sidebar-ref-$ref')),
-        matching: find.text(segmentOf(ref)),
-      ),
-      matching: find.byType(Tooltip),
-    );
-    return candidates.evaluate().isEmpty
-        ? null
-        : tester.widget<Tooltip>(candidates.first);
+  /// 마우스를 행에 올리고, 그때 뜬 카드의 문구를 돌려준다 — 아무것도 안 뜨면 null.
+  Future<String?> hoverAndRead(WidgetTester tester, String ref) async {
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(find.byKey(Key('sidebar-ref-$ref'))));
+    await tester.pumpAndSettle();
+    if (card().evaluate().isEmpty) return null;
+    return tester
+        .widget<Text>(find.descendant(of: card(), matching: find.byType(Text)))
+        .data;
   }
 
   testWidgets('a name cut short says its whole self on hover', (tester) async {
     await pumpSidebar(tester);
 
-    final tooltip = tooltipOn(tester, long);
-    expect(tooltip, isNotNull, reason: '잘린 이름에는 툴팁이 있어야 한다');
-    expect(tooltip!.message, long, reason: '행에 보이는 조각이 아니라 폴더까지 붙은 전체 이름이다');
+    expect(
+      await hoverAndRead(tester, long),
+      long,
+      reason: '행에 보이는 조각이 아니라 폴더까지 붙은 전체 이름이다',
+    );
+  });
+
+  testWidgets('the card opens to the right, clear of the next row', (
+    tester,
+  ) async {
+    await pumpSidebar(tester);
+
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(find.byKey(Key('sidebar-ref-$long'))));
+    await tester.pumpAndSettle();
+
+    expect(card(), findsOneWidget);
+
+    final rowRect = tester.getRect(find.byKey(Key('sidebar-ref-$long')));
+    final cardRect = tester.getRect(card());
+    expect(
+      cardRect.left,
+      greaterThanOrEqualTo(rowRect.right),
+      reason: '이름 오른쪽에 선다',
+    );
+    expect(
+      cardRect.top,
+      lessThan(rowRect.bottom),
+      reason: '아래 행을 덮지 않는다 — 같은 줄 높이에 머문다',
+    );
   });
 
   testWidgets('a name that already fits gets no tooltip', (tester) async {
     await pumpSidebar(tester);
 
-    expect(tooltipOn(tester, 'main'), isNull, reason: '다 보이는 이름 위의 툴팁은 방해다');
+    expect(
+      await hoverAndRead(tester, 'main'),
+      isNull,
+      reason: '다 보이는 이름 위의 툴팁은 방해다',
+    );
   });
 }

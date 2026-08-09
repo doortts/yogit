@@ -468,7 +468,11 @@ extension _TimelineSidebar on _TimelineScreenState {
       );
       return _textWidth(segment, resolved) <= constraints.maxWidth
           ? label
-          : Tooltip(message: whole, child: label);
+          : SideTooltip(
+              message: whole,
+              cardKey: const Key('sidebar-name-tooltip'),
+              child: label,
+            );
     },
   );
 
