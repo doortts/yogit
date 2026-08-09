@@ -1418,3 +1418,1019 @@ extension _TimelineBranchPreview on _TimelineScreenState {
     ),
   );
 }
+
+extension _TimelineBranchPreviewFlows on _TimelineScreenState {
+  /// A merge or rebase preview is worth seeing the moment it exists, so the
+  /// detail pane opens itself rather than waiting for a conflict to force it.
+  /// A pane the user already placed is left where it is.
+  Future<void> _openPaneForBranchPreview() async {
+    if (_comparison == null || !mounted) return;
+    if (_previewController.previewPlacement != PreviewPlacement.closed) return;
+    await _previewController.setPreview(widget.preferredPreviewPlacement);
+  }
+
+  Future<void> _selectComparison(
+    String compareRef, {
+    bool preserveCurrent = false,
+  }) async {
+    final baseRef = _baseBranch;
+    if (_branchApplyBusy || baseRef == null || compareRef == baseRef) return;
+    final serial = ++_comparisonSerial;
+    if (!preserveCurrent) {
+      _dropMergePreview();
+      _dropRebasePreview();
+      _rebuild(() {
+        _compareRef = compareRef;
+        _resetBranchApply();
+        _comparison = null;
+        _comparisonRows = [];
+        _comparisonEntries = [];
+        _previewGraph = null;
+        _rebaseCheck = null;
+        _dropRecommendation();
+        _dropCommitBadges();
+        _comparisonError = null;
+        _selectedIndex.value = 0;
+      });
+    }
+    try {
+      final result = await widget.repository.compareBranches(
+        baseRef,
+        compareRef,
+      );
+      if (!mounted ||
+          serial != _comparisonSerial ||
+          _baseBranch != baseRef ||
+          _compareRef != compareRef) {
+        return;
+      }
+      final rows = layoutBranchComparison(result.commits);
+      if (preserveCurrent) {
+        _dropMergePreview();
+        _dropRebasePreview();
+      }
+      _rebuild(() {
+        _compareRef = compareRef;
+        _resetBranchApply();
+        _comparison = result;
+        _previewGraph = _branchPreviewMode == BranchPreviewMode.merge
+            ? layoutMergePreviewGraph(result)
+            : null;
+        _comparisonRows = _previewGraph?.rows ?? rows;
+        _comparisonEntries = [
+          for (var index = 0; index < _comparisonRows.length; index++)
+            (rowIndex: index, label: null, row: _comparisonRows[index]),
+        ];
+        _rebaseCheck = null;
+        _dropRecommendation();
+        _dropCommitBadges();
+        _comparisonError = null;
+        _selectedIndex.value = 0;
+      });
+      _scheduleRatchetUpdate();
+      _showFirstComparisonRow();
+      unawaited(_loadDuplicateCommits(result, serial));
+      unawaited(_loadConflictForecast(result, serial));
+      unawaited(_openPaneForBranchPreview());
+      if (_branchPreviewMode == BranchPreviewMode.rebase) {
+        unawaited(_startRebasePreview());
+      } else if (result.merge.status == MergeConflictStatus.conflicts) {
+        unawaited(_startMergePreview());
+        // 이 경로에는 재배치 실측이 없으니 추천 엔진이 직접 시뮬레이션한다.
+        unawaited(_loadRecommendation(result, serial));
+      } else {
+        unawaited(_checkRebase(baseRef, compareRef, serial));
+      }
+    } catch (error) {
+      if (!mounted ||
+          serial != _comparisonSerial ||
+          _compareRef != compareRef) {
+        return;
+      }
+      _rebuild(() => _comparisonError = error);
+    }
+  }
+
+  /// P3 — 충돌 파일마다 '양쪽 유지' 자격을 미리 물어 둔다. 자격이 있는 파일만
+  /// 지도에 남고 그 파일에만 세 번째 버튼이 생긴다.
+  Future<void> _loadKeepBothCandidates(
+    Future<KeepBothCandidate?> Function(String path) probe,
+    List<String> paths,
+    bool Function() stale,
+  ) async {
+    final request = ++_keepBothSerial;
+    for (final path in paths) {
+      try {
+        final candidate = await probe(path);
+        if (!mounted || request != _keepBothSerial || stale()) return;
+        if (candidate == null) continue;
+        _rebuild(() => _keepBothCandidates[path] = candidate);
+      } catch (_) {
+        // 제안은 부가 기능이라 실패하면 버튼 없이 기존 선택지만 남는다.
+      }
+    }
+  }
+
+  Future<void> _startMergePreview() async {
+    final comparison = _comparison;
+    if (_branchPreviewMode != BranchPreviewMode.merge ||
+        comparison == null ||
+        comparison.merge.status != MergeConflictStatus.conflicts) {
+      return;
+    }
+    final request = ++_mergePreviewSerial;
+    final previous = _mergePreviewSession;
+    _mergePreviewSession = null;
+    _mergePreview = null;
+    if (previous != null) await previous.dispose();
+    if (!mounted ||
+        request != _mergePreviewSerial ||
+        _branchPreviewMode != BranchPreviewMode.merge) {
+      return;
+    }
+    try {
+      final session = await widget.repository.openMergePreview(
+        baseRef: comparison.baseRef,
+        compareRef: comparison.compareRef,
+      );
+      if (!mounted ||
+          request != _mergePreviewSerial ||
+          _comparison != comparison ||
+          _branchPreviewMode != BranchPreviewMode.merge) {
+        await session.dispose();
+        return;
+      }
+      _mergePreviewSession = session;
+      final result = await session.start();
+      if (!mounted ||
+          request != _mergePreviewSerial ||
+          _comparison != comparison ||
+          _branchPreviewMode != BranchPreviewMode.merge) {
+        await session.dispose();
+        return;
+      }
+      if (result.baseTip != comparison.baseTip ||
+          result.compareTip != comparison.compareTip) {
+        _mergePreviewSession = null;
+        await session.dispose();
+        if (!mounted || request != _mergePreviewSerial) return;
+        _rebuild(() {
+          _mergePreview = MergePreviewResult(
+            status: MergePreviewStatus.failed,
+            baseTip: result.baseTip,
+            compareTip: result.compareTip,
+            error: '브랜치가 변경되었습니다. 미리보기를 다시 선택해 주세요.',
+          );
+          _mergePreviewError = _mergePreview!.error;
+        });
+        return;
+      }
+      _rebuild(() {
+        _mergePreview = result;
+        _mergePreviewError = null;
+        _mergeResolvedFiles.clear();
+        _dropKeepBoth();
+      });
+      if (result.status == MergePreviewStatus.conflict) {
+        unawaited(
+          _loadKeepBothCandidates(
+            session.keepBothCandidate,
+            result.conflictFiles,
+            () => !identical(_mergePreviewSession, session),
+          ),
+        );
+      }
+      if (result.status == MergePreviewStatus.conflict &&
+          _previewController.previewPlacement == PreviewPlacement.closed) {
+        await _previewController.setPreview(widget.preferredPreviewPlacement);
+      }
+    } catch (error) {
+      if (mounted && request == _mergePreviewSerial) {
+        _rebuild(() => _mergePreviewError = error);
+      }
+    }
+  }
+
+  Future<void> _startRebasePreview() async {
+    final comparison = _comparison;
+    if (_branchPreviewMode != BranchPreviewMode.rebase || comparison == null) {
+      return;
+    }
+    final request = ++_rebasePreviewSerial;
+    final previous = _rebasePreviewSession;
+    _rebasePreviewSession = null;
+    _rebasePreview = null;
+    if (previous != null) await previous.dispose();
+    if (!mounted ||
+        request != _rebasePreviewSerial ||
+        _branchPreviewMode != BranchPreviewMode.rebase) {
+      return;
+    }
+    _rebuild(() => _rebaseCheck = null);
+    try {
+      final session = await widget.repository.openRebasePreview(
+        baseRef: comparison.baseRef,
+        compareRef: comparison.compareRef,
+      );
+      if (!mounted ||
+          request != _rebasePreviewSerial ||
+          _comparison != comparison ||
+          _branchPreviewMode != BranchPreviewMode.rebase) {
+        await session.dispose();
+        return;
+      }
+      _rebasePreviewSession = session;
+      final result = await session.start();
+      if (!mounted ||
+          request != _rebasePreviewSerial ||
+          _comparison != comparison ||
+          _branchPreviewMode != BranchPreviewMode.rebase) {
+        await session.dispose();
+        return;
+      }
+      await _applyRebasePreviewResult(comparison, result, request);
+    } catch (error) {
+      if (!mounted || request != _rebasePreviewSerial) return;
+      _rebuild(
+        () => _rebaseCheck = RebaseCheckResult(
+          status: RebaseCheckStatus.failed,
+          error: error.toString(),
+        ),
+      );
+    }
+  }
+
+  Future<void> _applyRebasePreviewResult(
+    BranchComparisonResult comparison,
+    RebasePreviewResult result,
+    int request,
+  ) async {
+    if (result.baseTip != comparison.baseTip ||
+        result.compareTip != comparison.compareTip) {
+      final session = _rebasePreviewSession;
+      _rebasePreviewSession = null;
+      await session?.dispose();
+      if (!mounted ||
+          request != _rebasePreviewSerial ||
+          _branchPreviewMode != BranchPreviewMode.rebase ||
+          _comparison != comparison) {
+        return;
+      }
+      const message = '브랜치가 변경되었습니다. 미리보기를 다시 선택해 주세요.';
+      _rebuild(() {
+        _rebasePreview = RebasePreviewResult(
+          status: RebasePreviewStatus.failed,
+          baseTip: result.baseTip,
+          compareTip: result.compareTip,
+          error: message,
+        );
+        _rebasePreviewError = message;
+        _rebaseCheck = const RebaseCheckResult(
+          status: RebaseCheckStatus.failed,
+          error: message,
+        );
+      });
+      return;
+    }
+    final graph = layoutRebasePreviewGraph(
+      comparison,
+      result,
+      mergeCommit: _rebaseApplyMerge,
+    );
+    final conflictIndex = graph.rows.indexWhere(
+      (row) => row.commit.sha == result.currentCommit?.sha,
+    );
+    final session = _rebasePreviewSession;
+    final operationInProgress = result.status == RebasePreviewStatus.conflict
+        ? await widget.repository.operationInProgress()
+        : false;
+    if (!mounted ||
+        request != _rebasePreviewSerial ||
+        _branchPreviewMode != BranchPreviewMode.rebase ||
+        _comparison != comparison ||
+        !identical(_rebasePreviewSession, session)) {
+      return;
+    }
+    _rebuild(() {
+      _rebasePreview = result;
+      if (result.status == RebasePreviewStatus.conflict) {
+        _rebaseHadConflict = true;
+      }
+      _rebasePreviewError = null;
+      _repositoryOperationInProgress = operationInProgress;
+      _rebaseResolvedFiles.clear();
+      _rebaseEditedFiles.clear();
+      _dropKeepBoth();
+      _rebaseCheck = switch (result.status) {
+        RebasePreviewStatus.clean => const RebaseCheckResult(
+          status: RebaseCheckStatus.clean,
+        ),
+        RebasePreviewStatus.conflict => RebaseCheckResult(
+          status: RebaseCheckStatus.conflicts,
+          stoppedCommit: result.currentCommit?.sha,
+          files: result.conflictFiles,
+        ),
+        RebasePreviewStatus.failed => RebaseCheckResult(
+          status: RebaseCheckStatus.failed,
+          error: result.error,
+        ),
+      };
+      _previewGraph = graph;
+      _comparisonRows = graph.rows;
+      _comparisonEntries = [
+        for (var index = 0; index < graph.rows.length; index++)
+          (rowIndex: index, label: null, row: graph.rows[index]),
+      ];
+      _selectedIndex.value =
+          result.status == RebasePreviewStatus.conflict && conflictIndex >= 0
+          ? conflictIndex
+          : 0;
+    });
+    _showPreviewTop();
+    if (_rebaseCheck case final check?) {
+      unawaited(
+        _loadRecommendation(comparison, _comparisonSerial, rebaseCheck: check),
+      );
+    }
+    if (result.status == RebasePreviewStatus.conflict && session != null) {
+      unawaited(
+        _loadKeepBothCandidates(
+          session.keepBothCandidate,
+          result.conflictFiles,
+          () => !identical(_rebasePreviewSession, session),
+        ),
+      );
+    }
+    if (result.status == RebasePreviewStatus.conflict &&
+        _previewController.previewPlacement == PreviewPlacement.closed) {
+      await _previewController.setPreview(widget.preferredPreviewPlacement);
+    }
+    _scheduleRatchetUpdate();
+    if (result.status == RebasePreviewStatus.clean) {
+      _showFirstComparisonRow();
+    } else if (result.status == RebasePreviewStatus.conflict) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final rowContext = _rebaseConflictRowContextKey.currentContext;
+        if (!mounted || rowContext == null) return;
+        unawaited(
+          Scrollable.ensureVisible(
+            rowContext,
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 220),
+            curve: Curves.easeOut,
+          ),
+        );
+      });
+    }
+  }
+
+  void _clearComparison() {
+    if (_branchApplyBusy || _compareRef == null) return;
+    _dropMergePreview();
+    _dropRebasePreview();
+    _comparisonSerial++;
+    _rebuild(() {
+      _compareRef = null;
+      _resetBranchApply();
+      _comparison = null;
+      _comparisonRows = [];
+      _comparisonEntries = [];
+      _previewGraph = null;
+      _rebaseCheck = null;
+      _dropRecommendation();
+      _dropCommitBadges();
+      _comparisonError = null;
+      if (_normalEntries.isNotEmpty) {
+        _selectedIndex.value = _selectedIndex.value.clamp(
+          0,
+          _normalEntries.length - 1,
+        );
+      }
+    });
+    _scheduleRatchetUpdate();
+    _focusNode.requestFocus();
+  }
+
+  Future<void> _prepareBranchPreviewApply() async {
+    final target = _branchPreviewTarget;
+    if (target == null || !_branchPreviewReady || _branchApplyBusy) return;
+    if (target.needsRecalculation) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('기존 로컬 ${target.localBranch} 기준으로 미리보기를 다시 계산했습니다.'),
+        ),
+      );
+      await _selectComparison(target.localBranch);
+      return;
+    }
+    await _confirmBranchPreviewApply();
+  }
+
+  Future<void> _confirmBranchPreviewApply() async {
+    final rebaseThenMerge = _rebaseThenMergeSelected;
+    final comparison = _comparison;
+    final target = _branchPreviewTarget;
+    if (comparison == null ||
+        target == null ||
+        !_branchPreviewCanApply ||
+        _branchApplyBusy) {
+      return;
+    }
+    final merge = _branchPreviewMode == BranchPreviewMode.merge;
+    // An apply that writes a merge commit asks for its message instead of a
+    // confirmation: writing the message is the confirmation. A plain rebase
+    // carries the original messages over, so there is nothing to write.
+    if (merge || rebaseThenMerge) {
+      final message = await showYogitAlert<String>(
+        context,
+        CommitMessageDialog(
+          lead: merge
+              ? '${comparison.baseRef} ← ${comparison.compareRef} · '
+              : '${comparison.compareRef} 재배치 → ',
+          emphasis: merge
+              ? '머지 커밋 1개 생성'
+              : '머지 커밋 1개로 ${comparison.baseRef} 이동',
+          message: renderCommitMessageTemplate(
+            merge
+                ? widget.mergeMessageTemplate
+                : widget.rebaseMergeMessageTemplate,
+            source: comparison.compareRef,
+            target: comparison.baseRef,
+            profile: _commitMessageProfile,
+          ),
+          templated:
+              (merge
+                      ? widget.mergeMessageTemplate
+                      : widget.rebaseMergeMessageTemplate)
+                  .trim()
+                  .isNotEmpty,
+        ),
+      );
+      if (message != null && mounted) {
+        await _runBranchPreviewApply(comparison, message: message);
+      }
+      return;
+    }
+    // 남은 길은 'Rebase만' 하나뿐이라 문구도 그 한 가지다.
+    final confirmed = await showYogitAlert<bool>(
+      context,
+      YogitAlert(
+        title: 'Rebase를 실제로 적용할까요?',
+        message:
+            '로컬 ${target.localBranch} 브랜치만 변경합니다. '
+            '원격 추적 브랜치와 원격 저장소는 그대로입니다.',
+        body: YogitAlertBlock([
+          '기준 ${comparison.baseRef}  ${comparison.baseTip}',
+          '대상 ${comparison.compareRef}  ${comparison.compareTip}',
+        ]),
+        detail: '완료 뒤 적용 전 SHA로 되돌릴 수 있습니다.',
+        confirmLabel: '적용',
+        confirmKey: const Key('branch-apply-confirm'),
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await _runBranchPreviewApply(comparison);
+    }
+  }
+
+  Future<void> _runBranchPreviewApply(
+    BranchComparisonResult comparison, {
+    String? message,
+  }) async {
+    final rebaseThenMerge = _rebaseThenMergeSelected;
+    final mode = _branchPreviewMode;
+    final request = ++_branchApplySerial;
+    _rebuild(() {
+      _branchApplyStatus = BranchApplyStatus.applying;
+      _branchApplyError = null;
+    });
+    try {
+      BranchApplyResult result;
+      if (mode == BranchPreviewMode.merge) {
+        result = await widget.repository.applyMergePreview(
+          comparison: comparison,
+          treeSha: (_mergePreview?.treeSha ?? comparison.merge.treeSha)!,
+          message: message,
+        );
+      } else {
+        final preview = _rebasePreview!;
+        final duration = MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 220);
+        // 훑고 지나가는 건 가상 행이라 그래프가 정한 키로 찾는다.
+        final rebaseMappings = _previewGraph?.mappings ?? const [];
+        for (var index = 0; index < preview.rewritten.length; index++) {
+          if (!mounted || request != _branchApplySerial) return;
+          final sha = index < rebaseMappings.length
+              ? rebaseMappings[index].rewrittenSha
+              : preview.rewritten[index].rewrittenSha;
+          final row = _comparisonRows.indexWhere(
+            (entry) => entry.commit.sha == sha,
+          );
+          _rebuild(() => _rebaseApplyingSha = sha);
+          if (row >= 0) _selectedIndex.value = row;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final rowContext = _rebaseApplyRowContextKey.currentContext;
+            if (!mounted || rowContext == null) return;
+            unawaited(
+              Scrollable.ensureVisible(
+                rowContext,
+                duration: duration,
+                curve: Curves.easeOut,
+              ),
+            );
+          });
+          if (duration > Duration.zero) await Future<void>.delayed(duration);
+        }
+        result = rebaseThenMerge
+            ? await widget.repository.applyRebaseThenMerge(
+                comparison: comparison,
+                virtualTip: preview.virtualTip!,
+                message: message,
+              )
+            : await widget.repository.applyRebasePreview(
+                comparison: comparison,
+                virtualTip: preview.virtualTip!,
+              );
+      }
+      if (!mounted || request != _branchApplySerial) return;
+      final mergeSession = _mergePreviewSession;
+      final rebaseSession = _rebasePreviewSession;
+      _rebuild(() {
+        _branchApplyStatus = BranchApplyStatus.applied;
+        _branchApplyResult = result;
+        _rebaseApplyingSha = null;
+        if (mode == BranchPreviewMode.merge) {
+          _mergePreviewSession = null;
+        } else {
+          _rebasePreviewSession = null;
+        }
+      });
+      // 카드가 짧아지면서 스크롤이 내용 밖에 남을 수 있으니 결과를 위에서 보여준다.
+      _showPreviewTop();
+      if (mode == BranchPreviewMode.merge && mergeSession != null) {
+        unawaited(mergeSession.dispose());
+      } else if (mode == BranchPreviewMode.rebase && rebaseSession != null) {
+        unawaited(rebaseSession.dispose());
+      }
+    } catch (error) {
+      if (!mounted || request != _branchApplySerial) return;
+      _rebuild(() {
+        _branchApplyStatus = BranchApplyStatus.failed;
+        _branchApplyError = error;
+        _rebaseApplyingSha = null;
+      });
+    }
+  }
+
+  Future<void> _confirmBranchPreviewRollback() async {
+    final result = _branchApplyResult;
+    if (result == null || _branchApplyStatus != BranchApplyStatus.applied) {
+      return;
+    }
+    final confirmed = await showYogitAlert<bool>(
+      context,
+      YogitAlert(
+        title:
+            '${_TimelineScreenState._applyModeLabel(result.mode)} 이전 시점으로 되돌릴까요?',
+        body: YogitAlertBlock(
+          _branchPreviewRollbackMessage(result).split('\n'),
+        ),
+        role: YogitAlertRole.destructive,
+        confirmLabel: '되돌리기',
+        confirmKey: const Key('branch-rollback-confirm'),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final request = ++_branchApplySerial;
+    _rebuild(() {
+      _branchApplyStatus = BranchApplyStatus.reverting;
+      _branchApplyError = null;
+    });
+    try {
+      await widget.repository.restoreBranchApply(result);
+      if (mounted && request == _branchApplySerial) {
+        _rebuild(() => _branchApplyStatus = BranchApplyStatus.reverted);
+      }
+    } catch (error) {
+      if (mounted && request == _branchApplySerial) {
+        _rebuild(() {
+          _branchApplyStatus = BranchApplyStatus.failed;
+          _branchApplyError = error;
+        });
+      }
+    }
+  }
+
+  /// The two ways a clean rebase preview can land, as one choice: replay the
+  /// commits, or replay them and put one merge commit over them. What is
+  /// selected is what both graphs draw and what the button applies.
+  List<Widget> _branchPreviewApplyOptions() {
+    final comparison = _comparison;
+    // 옮길 커밋이 하나도 없으면 재배치 결과가 곧 기준 브랜치라 얹을 머지 커밋이
+    // 없다. 고를 것이 하나뿐이면 라디오도 내보내지 않는다.
+    if (comparison == null || (_rebasePreview?.rewritten.isEmpty ?? true)) {
+      return const [];
+    }
+    Widget option({
+      required Key key,
+      required bool mergeCommit,
+      required String title,
+      required String description,
+      Key? descriptionKey,
+    }) {
+      final selected = _rebaseApplyMerge == mergeCommit;
+      return Padding(
+        padding: const EdgeInsets.only(top: 7),
+        child: InkWell(
+          key: key,
+          onTap: _branchApplyBusy
+              ? null
+              : () => _selectRebaseApplyMerge(mergeCommit),
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+            decoration: BoxDecoration(
+              color: selected
+                  ? previewPurple.withValues(alpha: 0.08)
+                  : Colors.transparent,
+              border: Border.all(
+                color: selected
+                    ? const Color(0xFF9D79D0)
+                    : const Color(0xFF4A4157),
+              ),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Container(
+                    width: 14,
+                    height: 14,
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: selected
+                            ? previewPurple
+                            : const Color(0xFF8A8494),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: selected
+                        ? const DecoratedBox(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: previewPurple,
+                            ),
+                          )
+                        : null,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          color: selected
+                              ? const Color(0xFFE8DCFF)
+                              : _palette.text,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        description,
+                        key: descriptionKey,
+                        style: TextStyle(color: _palette.muted, fontSize: 10),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return [
+      option(
+        key: const Key('branch-preview-option-rebase'),
+        mergeCommit: false,
+        title: 'Rebase만',
+        description:
+            '${comparison.compareRef}를 ${comparison.baseRef} 위로 재배치합니다. '
+            '${comparison.baseRef}은 움직이지 않습니다.',
+      ),
+      option(
+        key: const Key('branch-preview-option-rebase-merge'),
+        mergeCommit: true,
+        title: 'Rebase 후 Merge 커밋으로 병합',
+        descriptionKey: const Key('branch-preview-rebase-merge-caption'),
+        description:
+            '재배치한 커밋 위에 머지 커밋 하나를 만들어 ${comparison.baseRef}을 옮깁니다. '
+            '${comparison.baseRef}이 체크아웃돼 있지 않으면 포인터만 이동합니다.',
+      ),
+    ];
+  }
+
+  Future<void> _dropResolvedBranchPreview() async {
+    if (_branchApplyBusy) return;
+    final mergeSession = _mergePreviewSession;
+    final rebaseSession = _rebasePreviewSession;
+    _rebuild(() {
+      _mergePreviewSession = null;
+      _rebasePreviewSession = null;
+      _resetBranchApply();
+      _dropCommitBadges();
+      _dropKeepBoth();
+      _branchPreviewDropped = true;
+    });
+    await mergeSession?.dispose();
+    await rebaseSession?.dispose();
+  }
+
+  /// 고른 순서의 결합 내용을 쓰고 해결로 표시한다. 파일은 그 뒤로도 편집할 수 있고
+  /// 마커가 남으면 markResolved가 막는다(P1a).
+  Future<void> _applyKeepBoth(
+    String path,
+    KeepBothCandidate candidate, {
+    required bool mergeMode,
+    required bool baseFirst,
+  }) async {
+    final mergeSession = _mergePreviewSession;
+    final rebaseSession = _rebasePreviewSession;
+    if ((mergeMode ? mergeSession == null : rebaseSession == null) ||
+        (mergeMode ? _mergePreviewBusy : _rebasePreviewBusy) ||
+        _repositoryOperationInProgress) {
+      return;
+    }
+    _rebuild(() {
+      if (mergeMode) {
+        _mergePreviewBusy = true;
+        _mergePreviewError = null;
+      } else {
+        _rebasePreviewBusy = true;
+        _rebasePreviewError = null;
+      }
+    });
+    try {
+      final content = baseFirst ? candidate.baseFirst : candidate.branchFirst;
+      if (mergeMode) {
+        await mergeSession!.applyKeepBoth(path, content);
+      } else {
+        await rebaseSession!.applyKeepBoth(path, content);
+      }
+      if (!mounted) return;
+      _rebuild(() {
+        if (mergeMode) {
+          _mergeResolvedFiles.add(path);
+        } else {
+          _rebaseResolvedFiles.add(path);
+        }
+        _keepBothCandidates.remove(path);
+        _keepBothOpenPath = null;
+        _previewDiffs.removeWhere((key, _) => key.path == path);
+      });
+    } catch (error) {
+      if (mounted) {
+        _rebuild(() {
+          if (mergeMode) {
+            _mergePreviewError = error;
+          } else {
+            _rebasePreviewError = error;
+          }
+        });
+      }
+    } finally {
+      if (mounted) {
+        _rebuild(() {
+          if (mergeMode) {
+            _mergePreviewBusy = false;
+          } else {
+            _rebasePreviewBusy = false;
+          }
+        });
+      }
+    }
+  }
+
+  Future<void> _finishMergePreview() async {
+    final session = _mergePreviewSession;
+    if (session == null || !_canFinishMergePreview || _mergePreviewBusy) return;
+    _rebuild(() {
+      _mergePreviewBusy = true;
+      _mergePreviewError = null;
+    });
+    try {
+      final result = await session.finish();
+      if (!mounted || !identical(session, _mergePreviewSession)) return;
+      _rebuild(() {
+        _mergePreview = result;
+        _previewFiles.clear();
+        _previewFileLists.clear();
+        _previewDiffs.clear();
+      });
+      _showPreviewTop();
+    } catch (error) {
+      if (mounted) _rebuild(() => _mergePreviewError = error);
+    } finally {
+      if (mounted) _rebuild(() => _mergePreviewBusy = false);
+    }
+  }
+
+  Future<void> _resolveRebaseConflict(RebaseConflictChoice choice) async {
+    final session = _rebasePreviewSession;
+    final path = _selectedRebaseConflictPath;
+    if (session == null ||
+        path == null ||
+        _rebasePreviewBusy ||
+        _repositoryOperationInProgress) {
+      return;
+    }
+    _rebuild(() {
+      _rebasePreviewBusy = true;
+      _rebasePreviewError = null;
+    });
+    try {
+      await session.resolveFile(path, choice);
+      if (mounted && identical(session, _rebasePreviewSession)) {
+        _rebuild(() {
+          _rebaseResolvedFiles.add(path);
+          _keepBothCandidates.remove(path);
+          if (_keepBothOpenPath == path) _keepBothOpenPath = null;
+          _previewDiffs.removeWhere((key, _) => key.path == path);
+        });
+      }
+    } catch (error) {
+      if (mounted) _rebuild(() => _rebasePreviewError = error);
+    } finally {
+      if (mounted) _rebuild(() => _rebasePreviewBusy = false);
+    }
+  }
+
+  Future<void> _continueRebasePreview() async {
+    final session = _rebasePreviewSession;
+    final comparison = _comparison;
+    final request = _rebasePreviewSerial;
+    if (session == null ||
+        comparison == null ||
+        !_canContinueRebasePreview ||
+        _rebasePreviewBusy) {
+      return;
+    }
+    _rebuild(() {
+      _rebasePreviewBusy = true;
+      _rebasePreviewError = null;
+    });
+    try {
+      for (final path in _rebaseEditedFiles.difference(_rebaseResolvedFiles)) {
+        await session.markResolved(path);
+      }
+      final result = await session.continueAfterResolving();
+      if (!mounted ||
+          request != _rebasePreviewSerial ||
+          !identical(session, _rebasePreviewSession)) {
+        return;
+      }
+      await _applyRebasePreviewResult(comparison, result, request);
+    } catch (error) {
+      if (mounted &&
+          request == _rebasePreviewSerial &&
+          identical(session, _rebasePreviewSession)) {
+        _rebuild(() => _rebasePreviewError = error);
+      }
+    } finally {
+      if (mounted &&
+          request == _rebasePreviewSerial &&
+          identical(session, _rebasePreviewSession)) {
+        _rebuild(() => _rebasePreviewBusy = false);
+      }
+    }
+  }
+
+  Future<void> _openBranchPreviewConflictEditor({
+    required bool mergeMode,
+  }) async {
+    final mergeSession = _mergePreviewSession;
+    final rebaseSession = _rebasePreviewSession;
+    final path = mergeMode
+        ? _selectedMergeConflictPath
+        : _selectedRebaseConflictPath;
+    final worktree = mergeMode
+        ? mergeSession?.worktreePath
+        : rebaseSession?.worktreePath;
+    if ((mergeMode ? mergeSession == null : rebaseSession == null) ||
+        path == null ||
+        worktree == null ||
+        (mergeMode ? _mergePreviewBusy : _rebasePreviewBusy) ||
+        _repositoryOperationInProgress) {
+      return;
+    }
+    _rebuild(() {
+      if (mergeMode) {
+        _mergePreviewBusy = true;
+        _mergePreviewError = null;
+      } else {
+        _rebasePreviewBusy = true;
+        _rebasePreviewError = null;
+      }
+    });
+    try {
+      final overlay =
+          Overlay.of(context).context.findRenderObject()! as RenderBox;
+      final choice = await showMenu<String>(
+        context: context,
+        position: RelativeRect.fromLTRB(
+          overlay.size.width - 260,
+          overlay.size.height - 160,
+          16,
+          16,
+        ),
+        items: const [
+          PopupMenuItem(value: 'internal', child: Text('내장 에디터')),
+          PopupMenuItem(value: 'external', child: Text('외부 에디터')),
+        ],
+      );
+      if (!mounted || choice == null) return;
+      final externalEditor = ExternalEditorService(repositoryRoot: worktree);
+      if (choice == 'external') {
+        await externalEditor.open(relativePath: path);
+        if (mounted) _rebuild(() => _rebaseEditedFiles.add(path));
+        return;
+      }
+      final document =
+          await widget.documentLoaderForTesting?.call(path) ??
+          await WorkingTreeTextDocument.load(
+            repositoryRoot: worktree,
+            relativePath: path,
+          );
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => MonacoEditorScreen(
+            title: path,
+            initialText: document.text,
+            language: monacoLanguageForPath(path),
+            readOnly: false,
+            onSave: (text) async {
+              await document.save(text);
+              if (mergeMode) {
+                await mergeSession!.markResolved(path);
+              } else {
+                await rebaseSession!.markResolved(path);
+              }
+              if (mounted) {
+                _rebuild(() {
+                  if (mergeMode) {
+                    _mergeResolvedFiles.add(path);
+                  } else {
+                    _rebaseEditedFiles.add(path);
+                    _rebaseResolvedFiles.add(path);
+                  }
+                  _previewDiffs.removeWhere((key, _) => key.path == path);
+                });
+                Navigator.of(context).pop();
+              }
+            },
+            onOpenExternal: () async {
+              await externalEditor.open(relativePath: path);
+              if (mounted && !mergeMode) {
+                _rebuild(() => _rebaseEditedFiles.add(path));
+              }
+            },
+            editorForTesting: widget.editorForTesting,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        _rebuild(() {
+          if (mergeMode) {
+            _mergePreviewError = error;
+          } else {
+            _rebasePreviewError = error;
+          }
+        });
+      }
+    } finally {
+      if (mounted) {
+        _rebuild(() {
+          if (mergeMode) {
+            _mergePreviewBusy = false;
+          } else {
+            _rebasePreviewBusy = false;
+          }
+        });
+      }
+    }
+  }
+}

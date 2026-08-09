@@ -1325,10 +1325,7 @@ extension _TimelinePreviewPane on _TimelineScreenState {
                     : null;
                 final nearest = line == null
                     ? null
-                    : _TimelineScreenState._nearestPreviewDiffLine(
-                        document,
-                        line.line,
-                      );
+                    : _nearestPreviewDiffLine(document, line.line);
                 final lineTarget = nearest == null
                     ? null
                     : (oldLine: null, newLine: nearest);
@@ -1512,4 +1509,458 @@ extension _TimelinePreviewPane on _TimelineScreenState {
       ),
     ),
   );
+}
+
+extension _TimelinePreviewFlows on _TimelineScreenState {
+  Future<void> _restoreCherryPickThenRefresh() async {
+    await Future.wait([_loadRefs(), _reloadCherryPickState()]);
+    if (_cherryPickState == null) await _refreshRemotes();
+  }
+
+  Future<void> _reloadCherryPickState() async {
+    try {
+      final state = await widget.repository.loadCherryPickState();
+      if (!mounted) return;
+      _rebuild(() {
+        _cherryPickState = state;
+        _cherryPickError = null;
+        _selectedConflictPath =
+            state?.conflicts.contains(_selectedConflictPath) == true
+            ? _selectedConflictPath
+            : state == null || state.conflicts.isEmpty
+            ? null
+            : state.conflicts.first;
+      });
+      if (state != null &&
+          _previewController.previewPlacement == PreviewPlacement.closed) {
+        await _previewController.setPreview(widget.preferredPreviewPlacement);
+      }
+    } catch (error) {
+      if (mounted) _rebuild(() => _cherryPickError = error);
+    }
+  }
+
+  /// Enter and Space toggle the panel; Esc always closes.
+  void _togglePreview() {
+    final closing =
+        _previewController.previewPlacement != PreviewPlacement.closed;
+    if (closing && _previewDiffOpen) _closePreviewDiff();
+    if (closing) _closeFullDiff();
+    unawaited(
+      _previewController.setPreview(
+        closing ? PreviewPlacement.closed : widget.preferredPreviewPlacement,
+      ),
+    );
+  }
+
+  /// The preview's, under the same rule.
+  Color get _previewSelectionColor =>
+      _previewFocusNode.hasFocus ? _palette.selectedRow : _restingSelection;
+
+  Widget _animatedPreview({
+    required Axis axis,
+    required double extent,
+    required double width,
+    required double height,
+    bool visible = true,
+  }) => TweenAnimationBuilder<double>(
+    key: const Key('preview-panel'),
+    duration: const Duration(milliseconds: 180),
+    curve: Curves.easeOutCubic,
+    tween: Tween(begin: 0, end: extent),
+    builder: (context, value, child) {
+      final visibleExtent = math.min(value, extent);
+      return SizedBox(
+        width: axis == Axis.horizontal ? visibleExtent : width,
+        height: axis == Axis.vertical ? visibleExtent : height,
+        child: child,
+      );
+    },
+    child: visible
+        ? ClipRect(
+            child: OverflowBox(
+              alignment: Alignment.topLeft,
+              minWidth: width,
+              maxWidth: width,
+              minHeight: height,
+              maxHeight: height,
+              child: SizedBox(width: width, height: height, child: _preview()),
+            ),
+          )
+        : null,
+  );
+
+  Future<void> _confirmCherryPick(GitCommit commit) async {
+    final current = _refs.current;
+    if (current == null || !_canCherryPick(commit)) return;
+    final approved = await showYogitAlert<bool>(
+      context,
+      YogitAlert(
+        title: '이 커밋을 체리픽할까요?',
+        message: commit.subject,
+        body: YogitAlertBlock([commit.sha, '→ $current']),
+        confirmLabel: '체리픽',
+        confirmKey: const Key('cherry-pick-confirm'),
+      ),
+    );
+    if (approved == true) await _runCherryPick(commit.sha);
+  }
+
+  Future<void> _runCherryPick(String sha) async {
+    if (_cherryPickBusy) return;
+    _rebuild(() {
+      _cherryPickBusy = true;
+      _cherryPickError = null;
+    });
+    try {
+      await _handleCherryPickResult(await widget.repository.cherryPick(sha));
+    } catch (error) {
+      if (mounted) {
+        _rebuild(() => _cherryPickError = error);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+    } finally {
+      if (mounted) _rebuild(() => _cherryPickBusy = false);
+    }
+  }
+
+  Future<void> _handleCherryPickResult(CherryPickResult result) async {
+    if (!mounted) return;
+    if (result.outcome == CherryPickOutcome.conflicts) {
+      _rebuild(() {
+        _cherryPickState = result.state;
+        _selectedConflictPath = result.state?.conflicts.isEmpty == false
+            ? result.state!.conflicts.first
+            : null;
+      });
+      if (_previewController.previewPlacement == PreviewPlacement.closed) {
+        await _previewController.setPreview(widget.preferredPreviewPlacement);
+      }
+      return;
+    }
+    _rebuild(() {
+      _cherryPickState = null;
+      _selectedConflictPath = null;
+    });
+    if (result.outcome == CherryPickOutcome.empty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('적용할 변경이 없습니다')));
+    }
+    await _reloadTimelineAfterCherryPick(result.headSha);
+  }
+
+  Future<void> _continueCherryPick() async {
+    if (_cherryPickBusy || _cherryPickState?.canContinue != true) return;
+    _rebuild(() {
+      _cherryPickBusy = true;
+      _cherryPickError = null;
+    });
+    try {
+      await _handleCherryPickResult(
+        await widget.repository.continueCherryPick(),
+      );
+    } catch (error) {
+      if (mounted) {
+        _rebuild(() => _cherryPickError = error);
+        await _reloadCherryPickState();
+      }
+    } finally {
+      if (mounted) _rebuild(() => _cherryPickBusy = false);
+    }
+  }
+
+  Future<void> _confirmAbortCherryPick() async {
+    final approved = await showYogitAlert<bool>(
+      context,
+      const YogitAlert(
+        title: '체리픽을 중단할까요?',
+        message: '체리픽을 시작하기 전 상태로 되돌립니다.',
+        role: YogitAlertRole.destructive,
+        confirmLabel: '중단',
+        confirmKey: Key('abort-cherry-pick-confirm'),
+      ),
+    );
+    if (approved != true || !mounted) return;
+    _rebuild(() => _cherryPickBusy = true);
+    try {
+      await widget.repository.abortCherryPick();
+      if (!mounted) return;
+      _rebuild(() {
+        _cherryPickState = null;
+        _selectedConflictPath = null;
+        _cherryPickError = null;
+      });
+      await _reloadTimelineAfterCherryPick(null);
+    } catch (error) {
+      if (mounted) _rebuild(() => _cherryPickError = error);
+    } finally {
+      if (mounted) _rebuild(() => _cherryPickBusy = false);
+    }
+  }
+
+  Future<void> _reloadTimelineAfterCherryPick(String? headSha) async {
+    widget.repository.invalidateHistory();
+    _rebuild(() {
+      _normalCommits.clear();
+      _normalRows = [];
+      _normalEntries = [];
+      _committersBySha.clear();
+      _previewFiles.clear();
+      _previewFileLists.clear();
+      _previewDiffs.clear();
+      _previewPaths.clear();
+      _hasWorkingTree = false;
+      _end = false;
+      _loadError = null;
+      _selectedIndex.value = 0;
+    });
+    await _fetchNextPage();
+    await _loadRefs();
+    // Whatever the repository says after a reload is what the timeline shows,
+    // so an app-initiated change never comes back as a prompt.
+    await _syncLocalSignature();
+    if (!mounted || headSha == null) return;
+    final index = _entries.indexWhere(
+      (entry) => entry.rowIndex >= 0 && entry.row.commit.sha == headSha,
+    );
+    if (index >= 0) _selectedIndex.value = index;
+  }
+
+  Future<void> _openConflictEditor() async {
+    final path = _selectedConflictPath;
+    if (path == null || _cherryPickBusy) return;
+    _rebuild(() {
+      _cherryPickBusy = true;
+      _cherryPickError = null;
+    });
+    try {
+      final overlay =
+          Overlay.of(context).context.findRenderObject()! as RenderBox;
+      final choice = await showMenu<String>(
+        context: context,
+        position: RelativeRect.fromLTRB(
+          overlay.size.width - 260,
+          overlay.size.height - 160,
+          16,
+          16,
+        ),
+        items: [
+          const PopupMenuItem(value: 'internal', child: Text('내장 에디터')),
+          const PopupMenuItem(value: 'external', child: Text('외부 에디터')),
+        ],
+      );
+      if (!mounted || choice == null) return;
+      final externalEditor = ExternalEditorService(
+        repositoryRoot: widget.repository.root,
+      );
+      if (choice == 'external') {
+        await externalEditor.open(relativePath: path);
+        return;
+      }
+      final document =
+          await widget.documentLoaderForTesting?.call(path) ??
+          await WorkingTreeTextDocument.load(
+            repositoryRoot: widget.repository.root,
+            relativePath: path,
+          );
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => MonacoEditorScreen(
+            title: path,
+            initialText: document.text,
+            language: monacoLanguageForPath(path),
+            readOnly: false,
+            onSave: (text) async {
+              await document.save(text);
+              await widget.repository.stageResolvedFile(path);
+              await _reloadCherryPickState();
+              if (mounted) Navigator.of(context).pop();
+            },
+            onOpenExternal: () async {
+              try {
+                await externalEditor.open(relativePath: path);
+              } catch (error) {
+                if (mounted) _rebuild(() => _cherryPickError = error);
+              }
+            },
+            editorForTesting: widget.editorForTesting,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) _rebuild(() => _cherryPickError = error);
+    } finally {
+      if (mounted) _rebuild(() => _cherryPickBusy = false);
+    }
+  }
+
+  Future<List<GitFileChange>> _previewFilesFor(GitCommit commit) {
+    final key = _previewKey(commit);
+    return _previewFiles.putIfAbsent(key, () {
+      final comparison = _comparison;
+      final preview = _rebasePreview;
+      final request = comparison == null || !_usesBranchPreviewResult(commit)
+          ? widget.repository.loadFiles(commit)
+          : _branchPreviewMode == BranchPreviewMode.merge
+          ? Future.value(
+              _effectiveMergeStatus == MergeConflictStatus.clean
+                  ? (_mergePreview?.treeSha ?? comparison.merge.treeSha) == null
+                        ? comparison.files
+                        : _mergePreview?.resultFiles ??
+                              comparison.merge.resultFiles
+                  : [
+                      for (final path
+                          in _mergePreview?.conflictFiles ??
+                              comparison.merge.files)
+                        GitFileChange(
+                          path: path,
+                          status: 'U',
+                          additions: null,
+                          deletions: null,
+                        ),
+                    ],
+            )
+          : preview?.status == RebasePreviewStatus.clean &&
+                preview?.virtualTip != null
+          ? widget.repository.loadFilesBetween(
+              comparison.baseTip,
+              preview!.virtualTip!,
+            )
+          : Future.value([
+              for (final path in preview?.conflictFiles ?? const <String>[])
+                GitFileChange(
+                  path: path,
+                  status: 'U',
+                  additions: null,
+                  deletions: null,
+                ),
+            ]);
+      unawaited(
+        request
+            .then((files) => _previewFileLists[key] = files)
+            .catchError((_) => const <GitFileChange>[]),
+      );
+      return request;
+    });
+  }
+
+  Future<String> _previewMessageFor(GitCommit commit) =>
+      _commitMessageFor(commit.sha);
+
+  Widget _adjacentPreviewDiff(PreviewPlacement placement) => Stack(
+    children: [
+      Positioned.fill(
+        child: ValueListenableBuilder<int>(
+          valueListenable: _selectedIndex,
+          builder: (context, _, _) {
+            final commit = _selectedCommit;
+            if (commit == null) return const SizedBox.shrink();
+            return FutureBuilder<List<GitFileChange>>(
+              key: ValueKey(_previewKey(commit)),
+              future: _previewFilesFor(commit),
+              builder: (context, snapshot) {
+                final changes = snapshot.data;
+                if (changes == null || changes.isEmpty) {
+                  return const SizedBox.shrink();
+                }
+                final requestedPath = _previewPaths[_previewKey(commit)];
+                final file = changes.firstWhere(
+                  (file) => file.path == requestedPath,
+                  orElse: () => changes.first,
+                );
+                return Container(
+                  key: const Key('preview-diff'),
+                  decoration: BoxDecoration(
+                    color: _palette.background,
+                    border: Border.all(color: _palette.border),
+                  ),
+                  child: SelectionArea(
+                    child: KeyedSubtree(
+                      key: const Key('preview-diff-scroll'),
+                      child: _previewDiff(commit, file),
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        ),
+      ),
+      _previewDiffResizer(placement),
+    ],
+  );
+
+  void _closePreviewDiff() {
+    _rebuild(() => _previewDiffOpen = false);
+    _focusNode.requestFocus();
+  }
+
+  /// Merge-result line spans where both sides edited within ten lines of each
+  /// other. Empty outside the clean merge preview, and for files only one side
+  /// touched.
+  List<LineSpan> _previewProximity(GitCommit commit, GitFileChange file) {
+    final comparison = _comparison;
+    if (comparison == null ||
+        _branchPreviewMode != BranchPreviewMode.merge ||
+        _effectiveMergeStatus != MergeConflictStatus.clean ||
+        !_usesBranchPreviewResult(commit)) {
+      return const [];
+    }
+    return comparison.merge.proximity[file.path] ?? const [];
+  }
+
+  /// The nearest line the loaded result diff actually draws. A region's first
+  /// line is often a base-side edit the result diff never shows, and a number no
+  /// row carries would leave the scroll target attached nowhere.
+  int? _nearestPreviewDiffLine(DiffDocument document, int line) {
+    int? nearest;
+    for (final hunk in document.hunks) {
+      for (final diffLine in hunk.lines) {
+        final number = diffLine.newNumber;
+        if (number == null) continue;
+        if (nearest == null || (number - line).abs() < (nearest - line).abs()) {
+          nearest = number;
+        }
+      }
+    }
+    return nearest;
+  }
+
+  /// Scrolls the open result diff onto the line a pill asked for, once the diff
+  /// itself has rendered. The diff builds its rows lazily, so a target below the
+  /// first viewport only exists after paging down to it.
+  void _revealPreviewDiffTarget(({String path, int line}) line) {
+    final target = _previewDiffTargetKey.currentContext;
+    if (target == null) {
+      if (!_previewDiffScrollController.hasClients) return;
+      final position = _previewDiffScrollController.position;
+      final next = (position.pixels + position.viewportDimension).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      );
+      if ((next - position.pixels).abs() < 0.5) return;
+      position.jumpTo(next);
+      _previewDiffRevealScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _previewDiffRevealScheduled = false;
+        if (mounted) _revealPreviewDiffTarget(line);
+      });
+      return;
+    }
+    _previewDiffLineRevealed = line;
+    unawaited(
+      Scrollable.ensureVisible(
+        target,
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        alignment: 0.2,
+      ),
+    );
+  }
 }

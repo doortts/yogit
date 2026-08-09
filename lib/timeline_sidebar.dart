@@ -787,3 +787,258 @@ extension _TimelineSidebar on _TimelineScreenState {
     );
   }
 }
+
+extension _TimelineSidebarFlows on _TimelineScreenState {
+  /// The named rows currently on screen, in paint order: sections top-down,
+  /// minus collapsed sections, collapsed folders, and filtered-out names.
+  List<(_RefSection, String)> _visibleRefRows() {
+    final filtering = _filter.trim().isNotEmpty;
+    final rows = <(_RefSection, String)>[];
+    void walk(_RefSection section, List<RefTreeNode> nodes, String parentPath) {
+      for (final node in nodes) {
+        final path = parentPath.isEmpty
+            ? node.segment
+            : '$parentPath/${node.segment}';
+        if (node.fullName case final name?) rows.add((section, name));
+        final collapsed =
+            !filtering &&
+            _collapsedRefFolders.contains('${section.name}:$path');
+        if (node.children.isNotEmpty && !collapsed) {
+          walk(section, node.children, path);
+        }
+      }
+    }
+
+    for (final (section, names) in [
+      (_RefSection.local, _localBranches),
+      (_RefSection.remote, _refs.remote),
+      (_RefSection.tags, _refs.tags),
+    ]) {
+      if (!filtering && _collapsedRefSections.contains(section)) continue;
+      walk(section, buildRefTree(_visibleSectionNames(section, names)), '');
+    }
+    return rows;
+  }
+
+  /// Right-click on a local branch row: the delete menu at the pointer.
+  Future<void> _showLocalBranchMenu(Offset position, String branch) async {
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    _rebuild(() => _contextMenuRef = branch);
+    final action = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        position & Size.zero,
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        PopupMenuItem(
+          key: Key('sidebar-delete-branch-$branch'),
+          value: 'delete',
+          height: 34,
+          child: const Text('브랜치 삭제', style: TextStyle(fontSize: 13)),
+        ),
+      ],
+    );
+    if (mounted) {
+      _rebuild(() => _contextMenuRef = null);
+    } else {
+      _contextMenuRef = null;
+    }
+    if (action == 'delete' && mounted) await _confirmDeleteBranch(branch);
+  }
+
+  Iterable<Widget> _refSection(_RefSection section, List<String> names) sync* {
+    final filtering = _filter.trim().isNotEmpty;
+    final collapsed = !filtering && _collapsedRefSections.contains(section);
+    final headerColor = _palette.text.withValues(alpha: 0.82);
+    yield GestureDetector(
+      key: Key('sidebar-section-${section.name}'),
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _rebuild(() {
+        if (!_collapsedRefSections.remove(section)) {
+          _collapsedRefSections.add(section);
+        }
+      }),
+      child: Padding(
+        padding: const EdgeInsets.only(top: 10, bottom: 5),
+        child: Container(
+          key: Key('sidebar-section-band-${section.name}'),
+          height: 20,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          decoration: BoxDecoration(
+            color: _palette.raised.withValues(alpha: 0.7),
+            border: Border.symmetric(
+              horizontal: BorderSide(
+                color: _palette.border.withValues(alpha: 0.7),
+              ),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                collapsed ? Icons.chevron_right : Icons.expand_more,
+                size: 16,
+                color: headerColor,
+              ),
+              const SizedBox(width: 2),
+              Icon(
+                section.icon,
+                key: Key('sidebar-section-icon-${section.name}'),
+                size: 14,
+                color: headerColor,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  section.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: headerColor,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+              ),
+              SizedBox(
+                key: Key('sidebar-section-count-${section.name}'),
+                child: Text(
+                  '${names.length}',
+                  style: TextStyle(
+                    color: headerColor,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (collapsed) return;
+
+    final hiddenTagCount = section == _RefSection.tags
+        ? math.max(0, names.length - _TimelineScreenState._collapsedTagLimit)
+        : 0;
+    yield* _refTreeRows(
+      section,
+      buildRefTree(_visibleSectionNames(section, names)),
+    );
+    if (section == _RefSection.tags && !filtering && hiddenTagCount > 0) {
+      yield _tagOverflowRow(hiddenTagCount);
+    }
+  }
+
+  /// The names a section shows, after tag ordering/projection and the filter.
+  /// Shared with [_visibleRefRows] so keyboard navigation walks exactly the
+  /// rows on screen.
+  List<String> _visibleSectionNames(_RefSection section, List<String> names) {
+    final query = _filter.trim().toLowerCase();
+    final filtering = query.isNotEmpty;
+    final orderedNames = section == _RefSection.tags
+        ? sortRefsNewestFirst(names, _refs.tagCreatorTimes)
+        : names;
+    final projectedNames =
+        section == _RefSection.tags && !filtering && !_showAllTags
+        ? orderedNames.take(_TimelineScreenState._collapsedTagLimit).toList()
+        : orderedNames;
+    return filtering
+        ? orderedNames.where((name) => fuzzyMatch(name, query)).toList()
+        : projectedNames;
+  }
+
+  Widget _tagOverflowRow(int hiddenTagCount) => GestureDetector(
+    key: const Key('sidebar-tags-overflow'),
+    behavior: HitTestBehavior.opaque,
+    onTap: () => _rebuild(() => _showAllTags = !_showAllTags),
+    child: SizedBox(
+      height: 28,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Row(
+          children: [
+            Icon(
+              _showAllTags ? Icons.expand_less : Icons.expand_more,
+              size: 16,
+              color: _palette.muted,
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                _showAllTags ? '태그 접기' : '나머지 $hiddenTagCount개',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: _palette.muted, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  Iterable<Widget> _refTreeRows(
+    _RefSection section,
+    List<RefTreeNode> nodes, {
+    int depth = 0,
+    String parentPath = '',
+  }) sync* {
+    final filtering = _filter.trim().isNotEmpty;
+    for (final node in nodes) {
+      final path = parentPath.isEmpty
+          ? node.segment
+          : '$parentPath/${node.segment}';
+      yield _refTreeRow(section, node, path, depth);
+      final folderKey = '${section.name}:$path';
+      final collapsed = !filtering && _collapsedRefFolders.contains(folderKey);
+      if (node.children.isNotEmpty && !collapsed) {
+        yield* _refTreeRows(
+          section,
+          node.children,
+          depth: depth + 1,
+          parentPath: path,
+        );
+      }
+    }
+  }
+
+  Widget _refChip(
+    GitCommit commit,
+    GitRef ref,
+    Color color, {
+    int? paletteIndex,
+  }) {
+    final colors = paletteIndex == null
+        ? refPaletteColorsForName(
+            ref.name,
+            widget.refPalette,
+            refPaletteAssignments: widget.refPaletteAssignments,
+          )
+        : refPaletteColorsAt(paletteIndex, widget.refPalette);
+    final background = _comparison == null
+        ? colors.base.withValues(alpha: .18)
+        : color.withValues(alpha: .14);
+    final border = _comparison == null
+        ? colors.text.withValues(alpha: .30)
+        : color.withValues(alpha: .55);
+    final foreground = _comparison == null ? colors.text : color;
+    return Container(
+      key: Key('ref-chip-${commit.sha}-${ref.name}'),
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      decoration: BoxDecoration(
+        color: background,
+        border: Border.all(color: border),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Row(
+        children: [
+          _refGlyph(ref, foreground, false),
+          _refName(ref, foreground, false),
+        ],
+      ),
+    );
+  }
+}
