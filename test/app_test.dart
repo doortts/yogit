@@ -661,8 +661,8 @@ void main() {
                 .painter!
             as CommitGraphPainter;
 
-    // Two lanes auto-fit to 28 + 2 * 30, clamped up to the 96px minimum.
-    expect(beforeSize.width, 96);
+    // Two lanes on screen auto-fit to 28 + 30 + 13.
+    expect(beforeSize.width, CommitGraphPainter.contentWidth(1));
     expect(before.laneSpacing, 30);
     expect(afterSize.width, greaterThan(beforeSize.width));
     expect(after.laneSpacing, before.laneSpacing);
@@ -2017,13 +2017,13 @@ void main() {
     double nameRight() =>
         tester.getRect(find.byKey(const Key('name-header'))).right;
 
-    // 1400 - 150 sidebar - 288 preview - (156 + 96 + 78 + 116 + 150) fixed.
-    expect(titleWidth(), 366);
+    // 1400 - 150 sidebar - 288 preview - (156 + 57 + 78 + 116 + 150) fixed.
+    expect(titleWidth(), 405);
     expect(nameRight(), lessThanOrEqualTo(1400 - 288));
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(titleWidth(), 654);
+    expect(titleWidth(), 693);
     expect(nameRight(), lessThanOrEqualTo(1400));
 
     // Every column stays visible at the default window size with the preview
@@ -2032,7 +2032,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(titleWidth(), 246);
+    expect(titleWidth(), 285);
     expect(nameRight(), lessThanOrEqualTo(1280 - 288));
 
     // Dragging the divider narrower hands the 100px to Date and Author instead
@@ -2043,7 +2043,7 @@ void main() {
       const Offset(-100, 0),
     );
     await tester.pumpAndSettle();
-    expect(titleWidth(), 146);
+    expect(titleWidth(), 185);
     expect(saved?.time, 170);
     expect(saved?.name, 196);
 
@@ -2056,7 +2056,7 @@ void main() {
     // moved stayed with Date and Author.
     tester.view.physicalSize = const Size(1400, 760);
     await tester.pumpAndSettle();
-    expect(titleWidth(), 266);
+    expect(titleWidth(), 305);
   });
 
   testWidgets('the six columns fill the timeline viewport with no dead strip', (
@@ -2089,8 +2089,8 @@ void main() {
 
     // 1538 - 150 sidebar - 288 preview.
     expect(viewport().width, 1100);
-    expect(columnWidth('graph'), 96);
-    expect(columnWidth('commit'), 1100 - (156 + 96 + 78 + 116 + 150));
+    expect(columnWidth('graph'), CommitGraphPainter.minAutoFitWidth);
+    expect(columnWidth('commit'), 1100 - (156 + 57 + 78 + 116 + 150));
     expect(
       tester.getRect(find.byKey(const Key('name-header'))).right,
       viewport().right,
@@ -2137,13 +2137,13 @@ void main() {
       ),
     );
 
-    // One lane wants 28 + 30, so the 96px minimum wins.
+    // One lane wants 28 + 13, so the never-fold floor wins.
     await tester.pumpWidget(
       screen(FakeGitRepository((_, _) async => [commit('1', 'first commit')])),
     );
     await tester.pumpAndSettle();
     expect(const TimelineColumnWidths().graph, isNull);
-    expect(graphWidth(), 96);
+    expect(graphWidth(), CommitGraphPainter.minAutoFitWidth);
 
     // Three lanes want 28 + 2 * 30 + 12 of content, which clears the minimum.
     await tester.pumpWidget(
@@ -2243,14 +2243,14 @@ void main() {
     // 1250 - 150 sidebar, preview closed.
     expect(timelineColumns['commit']!.min, 100);
     expect(viewport().width, 1100);
-    expect(titleWidth(), 1100 - 596);
+    expect(titleWidth(), 1100 - 557);
     expect(nameRight(), viewport().right);
 
     // The title takes the whole 350px shrink; the other five hold their widths.
     tester.view.physicalSize = const Size(900, 800);
     await tester.pumpAndSettle();
     expect(viewport().width, 750);
-    expect(titleWidth(), 750 - 596);
+    expect(titleWidth(), 750 - 557);
     expect(nameRight(), viewport().right);
 
     // Past the 100px floor the row overflows instead, so the right clips. (The
@@ -12992,7 +12992,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(graphWidth(), 96);
+    expect(graphWidth(), CommitGraphPainter.minAutoFitWidth);
   });
 
   testWidgets('YogitApp migrates legacy graph width to the first repository', (
@@ -13949,7 +13949,7 @@ void main() {
         tester.getSize(find.byKey(const Key('graph-header'))).width;
 
     // Only lane 0 is on screen, so the column stays at its floor.
-    expect(graphWidth(), 96);
+    expect(graphWidth(), CommitGraphPainter.minAutoFitWidth);
 
     // Scrolling the octopus into view widens it once: 28 + 3 * 30 + 12.
     final scrollable = tester.state<ScrollableState>(
@@ -13975,7 +13975,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(graphWidth(), 96);
+    expect(graphWidth(), CommitGraphPainter.minAutoFitWidth);
   });
 
   testWidgets('async base branch relayout ratchets to newly visible lanes', (

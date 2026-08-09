@@ -294,6 +294,12 @@ class CommitGraphPainter extends CustomPainter {
   /// Stage 3: at or below this cell width the graph collapses to one lane.
   static const compactWidth = 56.0;
 
+  /// The narrowest width auto-fit ever asks for. A single-lane history needs
+  /// only [contentWidth] of 0 — 41 — but that sits inside stage 3, where the
+  /// rail turns committer-coloured and the lanes fold. Fitting stops one point
+  /// clear of it, so folding stays something the user asks for by dragging.
+  static const minAutoFitWidth = compactWidth + 1;
+
   /// Stage 2 floor.
   static const minLaneSpacing = 12.0;
 

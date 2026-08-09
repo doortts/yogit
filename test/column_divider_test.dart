@@ -314,5 +314,38 @@ void main() {
         );
       }
     });
+
+    testWidgets('several moves inside one frame count in full', (tester) async {
+      // A fast mouse delivers more than one move between frames. Each move has
+      // to build on the width the one before it left, or the divider crawls
+      // behind the cursor at a fraction of its speed.
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1500, 800);
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
+      await tester.pumpWidget(timeline());
+      await tester.pumpAndSettle();
+
+      for (final column in const ['refs', 'graph', 'hash', 'time']) {
+        final before = widthOf(tester, column);
+        final gesture = await tester.startGesture(
+          tester.getCenter(find.byKey(Key('$column-resizer'))),
+          kind: PointerDeviceKind.mouse,
+        );
+        for (var move = 0; move < 4; move++) {
+          await gesture.moveBy(const Offset(6, 0));
+        }
+        await gesture.up();
+        await tester.pumpAndSettle();
+
+        expect(
+          widthOf(tester, column),
+          closeTo(before + 24, 1),
+          reason: '$column: 네 번 움직인 만큼 다 따라와야 한다',
+        );
+      }
+    });
   });
 }

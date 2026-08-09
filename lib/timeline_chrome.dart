@@ -418,7 +418,7 @@ extension _TimelineChrome on _TimelineScreenState {
             ),
           ),
         ),
-        _resizer(column, width),
+        _resizer(column),
       ],
     ),
   );

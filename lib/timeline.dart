@@ -852,7 +852,10 @@ class _TimelineScreenState extends State<TimelineScreen>
       CommitGraphPainter.contentWidth(
         _graphLayoutDepth,
         laneSpacing: _graphLayoutSpacing,
-      ).clamp(96.0, timelineColumns['graph']!.max);
+      ).clamp(
+        CommitGraphPainter.minAutoFitWidth,
+        timelineColumns['graph']!.max,
+      );
 
   void _scheduleRatchetUpdate() {
     WidgetsBinding.instance.addPostFrameCallback((_) => _updateRatchet());
@@ -2255,7 +2258,18 @@ class _TimelineScreenState extends State<TimelineScreen>
     );
   }
 
-  Widget _resizer(String column, double width) => Positioned(
+  /// The column's width as it stands *now*, not as it stood when the divider
+  /// was built. A fast mouse delivers several moves between frames, and each
+  /// one has to build on what the one before it left.
+  double _liveWidth(String column) => switch (column) {
+    'graph' => _graphColumnWidth,
+    // The title column holds no width of its own; its divider moves by
+    // transfer, so [_resizeBy] never reads this.
+    'commit' => _commitAvailableWidth,
+    _ => _w(column),
+  };
+
+  Widget _resizer(String column) => Positioned(
     right: 0,
     top: 0,
     bottom: 0,
@@ -2280,7 +2294,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           _ => null,
         };
         if (delta == null) return KeyEventResult.ignored;
-        _resizeBy(column, width, delta);
+        _resizeBy(column, _liveWidth(column), delta);
         _saveColumnWidths();
         return KeyEventResult.handled;
       },
@@ -2292,7 +2306,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           onHorizontalDragStart: (_) => _startResize(column),
           onHorizontalDragUpdate: (details) {
             _dragResized = true;
-            _resizeBy(column, width, details.delta.dx);
+            _resizeBy(column, _liveWidth(column), details.delta.dx);
           },
           onHorizontalDragEnd: (_) => _finishResize(column),
           onHorizontalDragCancel: () => _finishResize(column),

@@ -90,7 +90,7 @@ void main() {
   double autoFit(int depth) => CommitGraphPainter.contentWidth(
     depth,
     laneSpacing: CommitGraphPainter.defaultLaneSpacing,
-  ).clamp(96.0, timelineColumns['graph']!.max);
+  ).clamp(CommitGraphPainter.minAutoFitWidth, timelineColumns['graph']!.max);
 
   Future<void> setGraphWidth(WidgetTester tester, double target) async {
     await tester.drag(
@@ -101,6 +101,37 @@ void main() {
     await tester.pumpAndSettle();
     expect(graphWidth(tester), closeTo(target, 0.5));
   }
+
+  testWidgets('a one-lane history opens at one lane’s worth of column', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 420);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [
+            for (var index = 0; index < 8; index++)
+              commit('$index', 'straight $index', parents: ['${index + 1}']),
+            commit('8', 'root'),
+          ],
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(visibleDepth(tester), 0);
+    expect(
+      graphWidth(tester),
+      CommitGraphPainter.minAutoFitWidth,
+      reason: '한 줄짜리 그래프가 빈 컬럼을 끌고 다니면 안 된다',
+    );
+  });
 
   testWidgets('the column never counts a row past the fold', (tester) async {
     final position = await pumpTimeline(tester);
