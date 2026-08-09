@@ -780,3 +780,22 @@ const timelineColumns = <String, ColumnSpec>{
   'time': (label: 'Date', min: 20, max: 170),
   'name': (label: 'Author', min: 20, max: 240),
 };
+
+/// What each branch line is called: the ref worn by the line's topmost row,
+/// because a line is born at its tip. A ref further down belongs to history the
+/// line passes through, not to the line, so it never renames it — and a tip
+/// wearing nothing leaves its line unnamed rather than borrowing a name.
+///
+/// A branch beats a tag on the same commit: the row sits *on* the branch.
+Map<int, String> branchLineNames(List<GraphRow> rows) {
+  final names = <int, String>{};
+  final seen = <int>{};
+  for (final row in rows) {
+    if (!seen.add(row.branch)) continue;
+    final refs = row.commit.refs;
+    if (refs.isEmpty) continue;
+    final pick = refs.firstWhere((ref) => !ref.isTag, orElse: () => refs.first);
+    names[row.branch] = pick.name;
+  }
+  return names;
+}

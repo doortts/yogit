@@ -191,6 +191,11 @@ extension _TimelineRows on _TimelineScreenState {
             : _deletedBranchNames[lineTip],
         deletedBranchLoading:
             lineTip != null && _resolvingDeletedBranchTips.contains(lineTip),
+        // A commit partway down a line says which branch it sits on. The tip
+        // itself already wears the chip, so it is not asked twice.
+        lineName: selected && refs.isEmpty
+            ? _branchLineNames[row.branch]
+            : null,
       );
       if (mergeConflict) {
         return KeyedSubtree(
@@ -673,6 +678,7 @@ extension _TimelineRows on _TimelineScreenState {
     bool showConnector = true,
     String? deletedBranchName,
     bool deletedBranchLoading = false,
+    String? lineName,
   }) => SizedBox(
     key: Key('refs-cell-$index'),
     width: _w('refs'),
@@ -691,9 +697,23 @@ extension _TimelineRows on _TimelineScreenState {
                     ),
                   ),
                 )
-              : deletedBranchName == null
+              : deletedBranchName != null
+              ? _deletedBranchLabel(commit, deletedBranchName, color)
+              : lineName == null
               ? null
-              : _deletedBranchLabel(commit, deletedBranchName, color)
+              : Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 5),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      lineName,
+                      key: Key('row-branch-name-$index'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: _palette.muted, fontSize: 11),
+                    ),
+                  ),
+                )
         : LayoutBuilder(
             builder: (context, constraints) {
               // Chips split the cell evenly, each keeping at least 40px, and

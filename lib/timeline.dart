@@ -309,6 +309,10 @@ class _TimelineScreenState extends State<TimelineScreen>
   final _committersBySha = <String, GitIdentity>{};
   var _normalRows = <GraphRow>[];
   var _branchPaletteIndexes = <int, int>{};
+
+  /// Branch line id → the name of the ref that tips it, so a commit partway
+  /// down a line can still say which branch it sits on.
+  var _branchLineNames = <int, String>{};
   var _normalEntries = <TimelineEntry>[];
   String? _compareRef;
   BranchComparisonResult? _comparison;
@@ -886,6 +890,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       widget.repository.root.hashCode,
       refPaletteAssignments: widget.refPaletteAssignments,
     );
+    _branchLineNames = branchLineNames(_normalRows);
     AvatarService.branchAssignments = {
       for (final entry in _branchPaletteIndexes.entries)
         entry.key: refPaletteColorsAt(entry.value, widget.refPalette).text,
