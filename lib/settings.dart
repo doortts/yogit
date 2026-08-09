@@ -264,6 +264,27 @@ bool _nestedStringMapEquals(
   return true;
 }
 
+Map<String, List<String>> _parseHiddenRefs(Object? value) => {
+  if (value is Map)
+    for (final repository in value.entries)
+      if (repository.key is String && repository.value is List)
+        repository.key as String: [
+          for (final ref in repository.value as List)
+            if (ref is String) ref,
+        ],
+};
+
+bool _hiddenRefsEqual(
+  Map<String, List<String>> left,
+  Map<String, List<String>> right,
+) {
+  if (left.length != right.length) return false;
+  for (final entry in left.entries) {
+    if (!listEquals(entry.value, right[entry.key])) return false;
+  }
+  return true;
+}
+
 /// A commit identity the status bar can switch a repository to: the name and
 /// email Git will sign commits with, under a label the user recognizes.
 class CommitProfile {
@@ -402,6 +423,7 @@ class AppSettings {
     this.previewDiffBottomHeight,
     this.baseBranches = const {},
     this.deletedBranchNames = const {},
+    this.hiddenRefs = const {},
     this.recentRepositories = const [],
     this.timelineFont = TimelineFontChoice.system,
     this.timelineFontSize,
@@ -485,6 +507,9 @@ class AppSettings {
   final List<int> refPaletteAssignments;
   final Map<String, String> baseBranches;
   final Map<String, Map<String, String>> deletedBranchNames;
+
+  /// Repository root → the refs the graph leaves out of its starting points.
+  final Map<String, List<String>> hiddenRefs;
 
   /// Repository roots, most recently opened first.
   final List<String> recentRepositories;
@@ -616,6 +641,7 @@ class AppSettings {
     double? previewDiffBottomHeight,
     Map<String, String>? baseBranches,
     Map<String, Map<String, String>>? deletedBranchNames,
+    Map<String, List<String>>? hiddenRefs,
     List<String>? recentRepositories,
     TimelineFontChoice? timelineFont,
     double? timelineFontSize,
@@ -646,6 +672,7 @@ class AppSettings {
         previewDiffBottomHeight ?? this.previewDiffBottomHeight,
     baseBranches: baseBranches ?? this.baseBranches,
     deletedBranchNames: deletedBranchNames ?? this.deletedBranchNames,
+    hiddenRefs: hiddenRefs ?? this.hiddenRefs,
     recentRepositories: recentRepositories ?? this.recentRepositories,
     timelineFont: timelineFont ?? this.timelineFont,
     // `??` cannot say "back to the family default", so the flag says it.
@@ -780,6 +807,7 @@ class AppSettings {
       ),
       baseBranches: baseBranches,
       deletedBranchNames: _parseNestedStringMap(value['deletedBranchNames']),
+      hiddenRefs: _parseHiddenRefs(value['hiddenRefs']),
       recentRepositories: _parseRecentRepositories(value['recentRepositories']),
       timelineFont: TimelineFontChoice.parse(value['timelineFont']),
       timelineFontSize: _parseTimelineFontSize(value['timelineFontSize']),
@@ -865,6 +893,7 @@ class AppSettings {
     'previewDiffBottomHeight': ?previewDiffBottomHeight,
     'baseBranches': baseBranches,
     'deletedBranchNames': deletedBranchNames,
+    'hiddenRefs': hiddenRefs,
     'recentRepositories': recentRepositories,
     'timelineFont': timelineFont.name,
     'timelineFontSize': ?timelineFontSize,
@@ -897,6 +926,7 @@ class AppSettings {
       previewDiffBottomHeight == other.previewDiffBottomHeight &&
       mapEquals(baseBranches, other.baseBranches) &&
       _nestedStringMapEquals(deletedBranchNames, other.deletedBranchNames) &&
+      _hiddenRefsEqual(hiddenRefs, other.hiddenRefs) &&
       listEquals(recentRepositories, other.recentRepositories) &&
       timelineFont == other.timelineFont &&
       timelineFontSize == other.timelineFontSize &&

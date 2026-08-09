@@ -409,6 +409,46 @@ extension _TimelineSidebar on _TimelineScreenState {
     ),
   );
 
+  /// Every ref under [node], so a folder's eye governs its whole subtree.
+  List<String> _refNamesUnder(RefTreeNode node) => [
+    ?node.fullName,
+    for (final child in node.children) ..._refNamesUnder(child),
+  ];
+
+  /// The eye that takes a ref — or a whole folder — off the graph. It stands in
+  /// for the row's own icon rather than sitting beside it, so nothing shifts
+  /// sideways on hover, and it stays put once closed because a hidden row has
+  /// to keep saying it is hidden.
+  ///
+  /// [partial] is a folder with only some of its refs hidden.
+  Widget _hideEye({
+    required Key key,
+    required bool hidden,
+    required bool partial,
+    required bool hovered,
+    required Widget icon,
+    required VoidCallback onPressed,
+  }) {
+    if (!hovered && !hidden && !partial) return icon;
+    return GestureDetector(
+      key: key,
+      behavior: HitTestBehavior.opaque,
+      onTap: onPressed,
+      child: Tooltip(
+        message: hidden ? '그래프에 다시 표시' : '그래프에서 숨기기',
+        child: Icon(
+          hidden || partial
+              ? Icons.visibility_off_outlined
+              : Icons.visibility_outlined,
+          size: 13,
+          color: partial && !hidden
+              ? _palette.muted.withValues(alpha: 0.5)
+              : _palette.muted,
+        ),
+      ),
+    );
+  }
+
   /// A sidebar row's name, with a tooltip only when the row is too narrow to
   /// hold it. A tooltip over a name already fully on screen is just in the way.
   Widget _refLabel(
@@ -522,6 +562,14 @@ extension _TimelineSidebar on _TimelineScreenState {
         ? remotePullState(_refs, name)
         : null;
     final inFolderTree = name == null || depth > 0;
+    // Tags name no branch line, and the checked-out branch is a starting point
+    // through HEAD whatever the eye says — neither offers one.
+    final governed = section == _RefSection.tags || current
+        ? const <String>[]
+        : _refNamesUnder(node);
+    final allHidden =
+        governed.isNotEmpty && governed.every(_hiddenRefs.contains);
+    final someHidden = governed.any(_hiddenRefs.contains);
 
     void toggleFolder() => _rebuild(() {
       if (!_collapsedRefFolders.remove(folderKey)) {
@@ -629,179 +677,224 @@ extension _TimelineSidebar on _TimelineScreenState {
           left: 4 + (inFolderTree ? 18 : 0) + depth * 16.0,
           right: 4,
         ),
-        child: Row(
-          children: [
-            if (hasChildren)
-              GestureDetector(
-                key: Key('sidebar-folder-${section.name}-$path'),
-                behavior: HitTestBehavior.opaque,
-                onTap: toggleFolder,
-                child: SizedBox(
-                  width: 18,
-                  height: double.infinity,
-                  child: Icon(
-                    folderCollapsed ? Icons.chevron_right : Icons.expand_more,
-                    size: 16,
-                    color: _palette.muted,
-                  ),
-                ),
-              )
-            else
-              const SizedBox(width: 18),
-            if (name == null) ...[
-              Icon(icon, size: 13, color: iconColor),
-              const SizedBox(width: 7),
-              Expanded(
-                child: GestureDetector(
+        // The whole row shares one hover: the eye lives in the slot left of the
+        // icon, outside the inner builder that dresses the name.
+        child: HoverBuilder(
+          builder: (rowHovered) => Row(
+            children: [
+              if (hasChildren)
+                GestureDetector(
+                  key: Key('sidebar-folder-${section.name}-$path'),
                   behavior: HitTestBehavior.opaque,
                   onTap: toggleFolder,
-                  child: buildContent(false),
-                ),
-              ),
-            ] else
-              Expanded(
-                child: HoverBuilder(
-                  // The row keeps its hover look while its context menu is
-                  // open or the keyboard cursor sits on it, so the highlight
-                  // doesn't die under the popup or between key presses.
-                  builder: (pointerHovered) {
-                    final pointerActive =
-                        pointerHovered || _contextMenuRef == name;
-                    final cursorHere = _sidebarCursor == (section, name);
-                    final hovered = pointerActive || cursorHere;
-                    // The cursor keeps its shape but drains to gray while the
-                    // keyboard lives in the timeline, so only one pane's
-                    // selection carries color at a time.
-                    final sidebarFocused = _sidebarFocusNode.hasFocus;
-                    final cursorFill = sidebarFocused
-                        ? _palette.selectedRow
-                        : _restingSelection;
-                    final cursorEdge = sidebarFocused
-                        ? iconColor
-                        : _TimelineScreenState._achromatic(iconColor);
-                    return GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      // Double-clicks are detected by hand: an onDoubleTap
-                      // recognizer would hold the gesture arena and delay every
-                      // single click on the row and its pull button by 300 ms.
-                      onTap: () {
-                        // A click moves the keyboard cursor here too, so the
-                        // arrows continue from the clicked row.
-                        _rebuild(() => _sidebarCursor = (section, name));
-                        _sidebarFocusNode.requestFocus();
-                        if (pullState == null) {
-                          _selectRef(
-                            name,
-                            remote: section == _RefSection.remote,
-                            focusTimeline: false,
-                          );
-                        } else {
-                          _tapRemoteRow(name);
-                        }
-                      },
-                      // HEAD is excluded: git refuses to delete the checked-out
-                      // branch, so the menu never offers it.
-                      onSecondaryTapDown:
-                          section == _RefSection.local && !current
-                          ? (details) => unawaited(
-                              _showLocalBranchMenu(
-                                details.globalPosition,
-                                name,
-                              ),
-                            )
-                          : null,
-                      child: Stack(
-                        key: Key('sidebar-ref-hover-$name'),
-                        clipBehavior: Clip.none,
-                        fit: StackFit.expand,
-                        children: [
-                          Positioned(
-                            left: -5,
-                            top: 0,
-                            right: 0,
-                            bottom: 0,
-                            child: DecoratedBox(
-                              key: Key('sidebar-ref-hover-background-$name'),
-                              decoration: BoxDecoration(
-                                // Selection paints like the timeline's
-                                // selected row, a plain hover like the
-                                // timeline's hover chip.
-                                color: cursorHere
-                                    ? cursorFill
-                                    : pointerActive
-                                    ? _palette.neutralChip.withValues(
-                                        alpha: 0.48,
-                                      )
-                                    : Colors.transparent,
-                                border: Border(
-                                  left: BorderSide(
-                                    color: cursorHere
-                                        ? cursorEdge
-                                        : Colors.transparent,
-                                    width: cursorHere ? 2 : 0,
+                  child: SizedBox(
+                    width: 18,
+                    height: double.infinity,
+                    child: Icon(
+                      folderCollapsed ? Icons.chevron_right : Icons.expand_more,
+                      size: 16,
+                      color: _palette.muted,
+                    ),
+                  ),
+                )
+              else if (governed.isNotEmpty && (rowHovered || allHidden))
+                SizedBox(
+                  width: 18,
+                  height: double.infinity,
+                  child: Center(
+                    child: _hideEye(
+                      key: Key('sidebar-hide-$name'),
+                      hidden: allHidden,
+                      partial: false,
+                      hovered: true,
+                      icon: const SizedBox.shrink(),
+                      onPressed: () => unawaited(
+                        _toggleHiddenRefs(governed, hide: !allHidden),
+                      ),
+                    ),
+                  ),
+                )
+              else
+                const SizedBox(width: 18),
+              if (name == null)
+                Expanded(
+                  child: HoverBuilder(
+                    builder: (hovered) => Row(
+                      children: [
+                        _hideEye(
+                          key: Key('sidebar-hide-folder-${section.name}-$path'),
+                          hidden: allHidden,
+                          partial: someHidden && !allHidden,
+                          hovered: hovered && governed.isNotEmpty,
+                          icon: Icon(icon, size: 13, color: iconColor),
+                          onPressed: () => unawaited(
+                            _toggleHiddenRefs(governed, hide: !allHidden),
+                          ),
+                        ),
+                        const SizedBox(width: 7),
+                        Expanded(
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: toggleFolder,
+                            child: Opacity(
+                              opacity: allHidden ? 0.5 : 1,
+                              child: buildContent(hovered),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                Expanded(
+                  child: HoverBuilder(
+                    // The row keeps its hover look while its context menu is
+                    // open or the keyboard cursor sits on it, so the highlight
+                    // doesn't die under the popup or between key presses.
+                    builder: (pointerHovered) {
+                      final pointerActive =
+                          pointerHovered || _contextMenuRef == name;
+                      final cursorHere = _sidebarCursor == (section, name);
+                      final hovered = pointerActive || cursorHere;
+                      // The cursor keeps its shape but drains to gray while the
+                      // keyboard lives in the timeline, so only one pane's
+                      // selection carries color at a time.
+                      final sidebarFocused = _sidebarFocusNode.hasFocus;
+                      final cursorFill = sidebarFocused
+                          ? _palette.selectedRow
+                          : _restingSelection;
+                      final cursorEdge = sidebarFocused
+                          ? iconColor
+                          : _TimelineScreenState._achromatic(iconColor);
+                      return GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        // Double-clicks are detected by hand: an onDoubleTap
+                        // recognizer would hold the gesture arena and delay every
+                        // single click on the row and its pull button by 300 ms.
+                        onTap: () {
+                          // A click moves the keyboard cursor here too, so the
+                          // arrows continue from the clicked row.
+                          _rebuild(() => _sidebarCursor = (section, name));
+                          _sidebarFocusNode.requestFocus();
+                          if (pullState == null) {
+                            _selectRef(
+                              name,
+                              remote: section == _RefSection.remote,
+                              focusTimeline: false,
+                            );
+                          } else {
+                            _tapRemoteRow(name);
+                          }
+                        },
+                        // HEAD is excluded: git refuses to delete the checked-out
+                        // branch, so the menu never offers it.
+                        onSecondaryTapDown:
+                            section == _RefSection.local && !current
+                            ? (details) => unawaited(
+                                _showLocalBranchMenu(
+                                  details.globalPosition,
+                                  name,
+                                ),
+                              )
+                            : null,
+                        child: Stack(
+                          key: Key('sidebar-ref-hover-$name'),
+                          clipBehavior: Clip.none,
+                          fit: StackFit.expand,
+                          children: [
+                            Positioned(
+                              left: -5,
+                              top: 0,
+                              right: 0,
+                              bottom: 0,
+                              child: DecoratedBox(
+                                key: Key('sidebar-ref-hover-background-$name'),
+                                decoration: BoxDecoration(
+                                  // Selection paints like the timeline's
+                                  // selected row, a plain hover like the
+                                  // timeline's hover chip.
+                                  color: cursorHere
+                                      ? cursorFill
+                                      : pointerActive
+                                      ? _palette.neutralChip.withValues(
+                                          alpha: 0.48,
+                                        )
+                                      : Colors.transparent,
+                                  border: Border(
+                                    left: BorderSide(
+                                      color: cursorHere
+                                          ? cursorEdge
+                                          : Colors.transparent,
+                                      width: cursorHere ? 2 : 0,
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                          Row(
-                            children: [
-                              Icon(icon, size: 13, color: iconColor),
-                              const SizedBox(width: 7),
-                              Expanded(
-                                child: KeyedSubtree(
-                                  key: Key('sidebar-ref-$name'),
-                                  child: buildContent(hovered),
+                            Row(
+                              children: [
+                                Icon(icon, size: 13, color: iconColor),
+                                const SizedBox(width: 7),
+                                Expanded(
+                                  child: Opacity(
+                                    opacity: allHidden ? 0.5 : 1,
+                                    child: KeyedSubtree(
+                                      key: Key('sidebar-ref-$name'),
+                                      child: buildContent(hovered),
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                          // Overlaid on the row's right edge so the ↓ button
-                          // never widens the row when it appears on hover.
-                          if (pullState != null)
-                            Positioned(
-                              right: 2,
-                              top: 0,
-                              bottom: 0,
-                              child: Center(
-                                child: _pullingRemote == name
-                                    ? SizedBox(
-                                        key: Key('sidebar-pull-busy-$name'),
-                                        width: 22,
-                                        height: 22,
-                                        child: Padding(
-                                          padding: const EdgeInsets.all(4),
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            color: _palette.interactive,
+                              ],
+                            ),
+                            // Overlaid on the row's right edge so the ↓ button
+                            // never widens the row when it appears on hover.
+                            if (pullState != null)
+                              Positioned(
+                                right: 2,
+                                top: 0,
+                                bottom: 0,
+                                child: Center(
+                                  child: _pullingRemote == name
+                                      ? SizedBox(
+                                          key: Key('sidebar-pull-busy-$name'),
+                                          width: 22,
+                                          height: 22,
+                                          child: Padding(
+                                            padding: const EdgeInsets.all(4),
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: _palette.interactive,
+                                            ),
+                                          ),
+                                        )
+                                      : RemotePullMenuButton(
+                                          remoteBranch: name,
+                                          state: pullState,
+                                          controller:
+                                              _pullMenuControllers[name] ??=
+                                                  MenuController(),
+                                          visible: hovered,
+                                          onPull: () => unawaited(
+                                            _runRemotePull(name, pullState),
+                                          ),
+                                          onCheckout: () => unawaited(
+                                            _runRemoteCheckout(name, pullState),
+                                          ),
+                                          onCompare: () => unawaited(
+                                            _selectComparison(name),
                                           ),
                                         ),
-                                      )
-                                    : RemotePullMenuButton(
-                                        remoteBranch: name,
-                                        state: pullState,
-                                        controller:
-                                            _pullMenuControllers[name] ??=
-                                                MenuController(),
-                                        visible: hovered,
-                                        onPull: () => unawaited(
-                                          _runRemotePull(name, pullState),
-                                        ),
-                                        onCheckout: () => unawaited(
-                                          _runRemoteCheckout(name, pullState),
-                                        ),
-                                        onCompare: () =>
-                                            unawaited(_selectComparison(name)),
-                                      ),
+                                ),
                               ),
-                            ),
-                        ],
-                      ),
-                    );
-                  },
+                          ],
+                        ),
+                      );
+                    },
+                  ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );

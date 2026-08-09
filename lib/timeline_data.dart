@@ -121,6 +121,11 @@ extension _TimelineDataFlows on _TimelineScreenState {
         _rebuildGraph();
       });
       _scheduleRatchetUpdate();
+      // Refs land beside the first page, so a ref hidden from a previous
+      // session had no tip to resolve when that page went out. Now it does.
+      if (!setEquals(_loadedHiddenTips, _hiddenTips)) {
+        unawaited(_reloadHistory());
+      }
       unawaited(_resolveSelectedDeletedBranchName());
       if (comparisonTipsChanged || retryComparison) {
         unawaited(
@@ -185,11 +190,49 @@ extension _TimelineDataFlows on _TimelineScreenState {
     });
   }
 
+  /// Closes or opens the eye on [names], then reads the log again — the
+  /// starting points changed, so every page has to come back.
+  Future<void> _toggleHiddenRefs(Iterable<String> names, {required bool hide}) {
+    _rebuild(() {
+      if (hide) {
+        _hiddenRefs.addAll(names);
+      } else {
+        _hiddenRefs.removeAll(names);
+      }
+    });
+    widget.onHiddenRefsChanged?.call({..._hiddenRefs});
+    return _reloadHistory();
+  }
+
+  /// Drops the loaded log so the next read starts over. Refs are untouched —
+  /// nothing about them changed, only which ones the walk begins at.
+  Future<void> _reloadHistory() async {
+    widget.repository.invalidateHistory();
+    _rebuild(() {
+      _normalCommits.clear();
+      _normalRows = [];
+      _normalEntries = [];
+      _committersBySha.clear();
+      _hasWorkingTree = false;
+      _end = false;
+      _loadError = null;
+    });
+    await _fetchNextPage();
+    if (!mounted) return;
+    _rebuild(
+      () => _selectedIndex.value = _selectedIndex.value.clamp(
+        0,
+        math.max(0, _entries.length - 1),
+      ),
+    );
+  }
+
   Future<void> _fetchNextPage() async {
     _rebuild(() {
       _loading = true;
       _loadError = null;
     });
+    _loadedHiddenTips = _hiddenTips;
     try {
       // The first page fetches the working tree and the log together.
       final (working, page) = _normalCommits.isEmpty
@@ -197,6 +240,7 @@ extension _TimelineDataFlows on _TimelineScreenState {
               widget.repository.loadWorkingTree(),
               widget.repository.loadHistory(
                 limit: _TimelineScreenState._pageSize,
+                hiddenTips: _hiddenTips,
               ),
             ).wait
           : (
@@ -204,6 +248,7 @@ extension _TimelineDataFlows on _TimelineScreenState {
               await widget.repository.loadHistory(
                 skip: _historyCount,
                 limit: _TimelineScreenState._pageSize,
+                hiddenTips: _hiddenTips,
               ),
             );
       if (!mounted) return;

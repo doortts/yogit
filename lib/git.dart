@@ -2054,8 +2054,18 @@ class GitRepository implements FullDiffRepository {
 
   void invalidateHistory() => _startingRevisions = null;
 
-  Future<List<GitCommit>> loadHistory({int limit = 500, int skip = 0}) async {
-    final revisions = await (_startingRevisions ??= _loadStartingRevisions());
+  /// [hiddenTips] are commits the log should not start from. What they alone
+  /// lead to disappears; anything another starting point also reaches stays,
+  /// so hiding a branch never takes shared history with it.
+  Future<List<GitCommit>> loadHistory({
+    int limit = 500,
+    int skip = 0,
+    Set<String> hiddenTips = const {},
+  }) async {
+    final all = await (_startingRevisions ??= _loadStartingRevisions());
+    final revisions = hiddenTips.isEmpty
+        ? all
+        : all.where((sha) => !hiddenTips.contains(sha)).toList();
     if (revisions.isEmpty) return const [];
     final args = [
       'log',

@@ -538,6 +538,17 @@ class _YogitAppState extends State<YogitApp> {
                   );
                 }
               : null,
+          hiddenRefs: {...?_settings.hiddenRefs[_repository.root]},
+          onHiddenRefsChanged: _settingsLoaded
+              ? (refs) => _changeSettings(
+                  _settings.copyWith(
+                    hiddenRefs: {
+                      ..._settings.hiddenRefs,
+                      _repository.root: refs.toList()..sort(),
+                    },
+                  ),
+                )
+              : null,
           showRemoteAvatars: _settingsLoaded && _settings.showAvatars,
           preferredPreviewPlacement: _settings.previewPlacement,
           preferredBranch: _settingsLoaded

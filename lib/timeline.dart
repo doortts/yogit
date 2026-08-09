@@ -137,6 +137,8 @@ class TimelineScreen extends StatefulWidget {
     this.deletedBranchNames = const {},
     this.deletedBranchNamesReady = true,
     this.onDeletedBranchNamesChanged,
+    this.hiddenRefs = const {},
+    this.onHiddenRefsChanged,
     this.showRemoteAvatars = true,
     this.preferredPreviewPlacement = PreviewPlacement.right,
     this.columnWidths = const TimelineColumnWidths(),
@@ -196,6 +198,11 @@ class TimelineScreen extends StatefulWidget {
   final Map<String, String> deletedBranchNames;
   final bool deletedBranchNamesReady;
   final ValueChanged<Map<String, String>>? onDeletedBranchNamesChanged;
+
+  /// Refs the graph leaves out of the log's starting points, so what only they
+  /// reach never draws. Saved per repository.
+  final Set<String> hiddenRefs;
+  final ValueChanged<Set<String>>? onHiddenRefsChanged;
   final bool showRemoteAvatars;
   final PreviewPlacement preferredPreviewPlacement;
   final TimelineColumnWidths columnWidths;
@@ -313,6 +320,23 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// Branch line id → the name of the ref that tips it, so a commit partway
   /// down a line can still say which branch it sits on.
   var _branchLineNames = <int, String>{};
+
+  /// Refs the reader has closed the eye on. Held here rather than read from the
+  /// widget so a press redraws at once instead of waiting for the round trip
+  /// through settings.
+  late final Set<String> _hiddenRefs = {...widget.hiddenRefs};
+
+  /// The commits [_hiddenRefs] takes out of the log's starting points. The
+  /// checked-out branch is never among them: HEAD is a starting point too, and
+  /// a graph that hides the ground you stand on is worse than a busy one.
+  /// What the loaded log was actually told to leave out, so a later ref load
+  /// can notice it now resolves a tip the first page could not.
+  var _loadedHiddenTips = <String>{};
+
+  Set<String> get _hiddenTips => {
+    for (final ref in _hiddenRefs)
+      if (ref != _refs.current) ?_refs.tips[ref],
+  };
   var _normalEntries = <TimelineEntry>[];
   String? _compareRef;
   BranchComparisonResult? _comparison;

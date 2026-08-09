@@ -18131,9 +18131,13 @@ class FakeGitRepository extends GitRepository {
     this.stageResolvedFileCallback,
     this.commitMessage,
     this.deletedBranchNameCallback,
+    this.onLoadHistory,
     String root = '.',
     CommandRunner runner = runProcess,
   }) : super(root, runner: runner);
+
+  /// What each history read was told to leave out of the log's starting points.
+  final void Function(Set<String> hiddenTips)? onLoadHistory;
 
   final RepoRefs refs;
   final GitDiffAlgorithmSetting gitDiffAlgorithmSetting;
@@ -18241,8 +18245,14 @@ class FakeGitRepository extends GitRepository {
   history;
 
   @override
-  Future<List<GitCommit>> loadHistory({int limit = 500, int skip = 0}) =>
-      loader(skip, limit);
+  Future<List<GitCommit>> loadHistory({
+    int limit = 500,
+    int skip = 0,
+    Set<String> hiddenTips = const {},
+  }) {
+    onLoadHistory?.call(hiddenTips);
+    return loader(skip, limit);
+  }
 
   @override
   Future<String?> loadOriginUrl() =>
