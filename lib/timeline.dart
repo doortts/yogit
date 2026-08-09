@@ -30,6 +30,7 @@ import 'page_scroll_shortcuts.dart';
 import 'preview_header.dart';
 import 'timeline_graph_painters.dart';
 import 'timeline_model.dart';
+import 'timeline_widgets.dart';
 import 'timeline_palette.dart';
 import 'ref_tree.dart';
 import 'search_icon.dart';
@@ -46,6 +47,7 @@ import 'window_frame.dart';
 /// door they are reached through.
 export 'timeline_graph_painters.dart';
 export 'timeline_model.dart';
+export 'timeline_widgets.dart';
 import 'yogit_alert.dart';
 
 /// The date group heading's box and label.
@@ -2429,7 +2431,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               if (size > 0) ...[
                 const Spacer(flex: 2),
                 IgnorePointer(
-                  child: _Wordmark(key: const Key('wordmark'), fontSize: size),
+                  child: Wordmark(key: const Key('wordmark'), fontSize: size),
                 ),
                 const Spacer(flex: 2),
               ],
@@ -3499,7 +3501,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         ),
         const SizedBox(width: 8),
       ],
-      _HoverBuilder(
+      HoverBuilder(
         enabled: widget.onOpenSettings != null,
         builder: (hovered) => Container(
           key: const Key('settings-hover-surface'),
@@ -3530,7 +3532,7 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   Widget _placementButton(String label, PreviewPlacement placement) {
     final pressed = _activePlacement == placement;
-    return _HoverBuilder(
+    return HoverBuilder(
       builder: (hovered) => GestureDetector(
         key: Key('placement-$placement'),
         behavior: HitTestBehavior.opaque,
@@ -3565,7 +3567,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     children: [
       Text('상세', style: TextStyle(color: _palette.muted, fontSize: 14)),
       const SizedBox(width: 6),
-      _KeyCap(
+      KeyCap(
         label: 'Enter',
         onTap: () {
           if (_commits.isEmpty) return;
@@ -3736,10 +3738,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           icon: CustomPaint(
             key: Key(opens ? 'sidebar-expand-icon' : 'sidebar-collapse-icon'),
             size: const Size(14.4, 14.4),
-            painter: _PaneToggleIconPainter(
-              opens: opens,
-              color: _palette.muted,
-            ),
+            painter: PaneToggleIconPainter(opens: opens, color: _palette.muted),
           ),
         ),
       ),
@@ -4193,7 +4192,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               ),
             ] else
               Expanded(
-                child: _HoverBuilder(
+                child: HoverBuilder(
                   // The row keeps its hover look while its context menu is
                   // open or the keyboard cursor sits on it, so the highlight
                   // doesn't die under the popup or between key presses.
@@ -4393,9 +4392,9 @@ class _TimelineScreenState extends State<TimelineScreen>
             builder: (context, error, _) => error == null
                 ? Row(
                     children: [
-                      _legend('commit', const _LegendDot()),
-                      _legend('merge', const _LegendDot(filled: true)),
-                      _legend('WIP', const _LegendDot(dashed: true)),
+                      _legend('commit', const LegendDot()),
+                      _legend('merge', const LegendDot(filled: true)),
+                      _legend('WIP', const LegendDot(dashed: true)),
                     ],
                   )
                 : Row(
@@ -4451,7 +4450,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                       ),
                     ),
                     const SizedBox(width: 6),
-                    _CopyButton(
+                    CopyButton(
                       // Shortened on screen, whole on the clipboard.
                       text: name,
                       color: _palette.muted,
@@ -5027,7 +5026,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (merge || rebaseThenMerge) {
       final message = await showYogitAlert<String>(
         context,
-        _CommitMessageDialog(
+        CommitMessageDialog(
           lead: merge
               ? '${comparison.baseRef} ← ${comparison.compareRef} · '
               : '${comparison.compareRef} 재배치 → ',
@@ -6533,7 +6532,7 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   /// Only the rows whose selected or hovered state flipped rebuild.
   Widget _row(int index, double commitWidth, double graphWidth) =>
-      _RowStateScope(
+      RowStateScope(
         index: index,
         selectedIndex: _selectedIndex,
         hoverIndex: _hoverIndex,
@@ -6544,7 +6543,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// The date heading: no node, no hairline, just the rails running through and
   /// a boxed label where the hash column starts.
   Widget _dateRow(int index, TimelineEntry entry, double graphWidth) =>
-      _RowStateScope(
+      RowStateScope(
         index: index,
         selectedIndex: _selectedIndex,
         hoverIndex: _hoverIndex,
@@ -7587,7 +7586,7 @@ class _TimelineScreenState extends State<TimelineScreen>
                             _refGlyph(ref, refColor, false),
                             _refName(ref, refColor, false, ellipsis: false),
                             const SizedBox(width: 6),
-                            _CopyButton(text: ref.name, color: refColor),
+                            CopyButton(text: ref.name, color: refColor),
                             const SizedBox(width: 4),
                           ],
                         ),
@@ -8076,7 +8075,7 @@ class _TimelineScreenState extends State<TimelineScreen>
             child: KeyedSubtree(
               key: const Key('preview-sha-copy'),
               // Seven characters read; the whole hash is what pastes.
-              child: _CopyButton(
+              child: CopyButton(
                 text: commit.sha,
                 color: hashRed,
                 slot: 'preview-sha',
@@ -10692,619 +10691,6 @@ class _TimelineScreenState extends State<TimelineScreen>
 
 /// The app's wordmark: one soft pastel per letter, legible on the dark bar, with
 /// a small cloud badge tucked over the final letter.
-class _Wordmark extends StatelessWidget {
-  const _Wordmark({required this.fontSize, super.key});
-
-  final double fontSize;
-
-  static const letters = <(String, Color)>[
-    ('Y', Color(0xFFFFB3BA)),
-    ('o', Color(0xFFFFDFBA)),
-    ('g', Color(0xFFFFFFB3)),
-    ('i', Color(0xFFBAFFC9)),
-    ('t', Color(0xFFBAE1FF)),
-  ];
-
-  TextStyle get _style => TextStyle(
-    fontFamily: 'DancingScript',
-    fontSize: fontSize,
-    fontWeight: FontWeight.w700,
-  );
-
-  /// Where the 'Y' ends, so the badge can float in the space the lowercase
-  /// letters leave above them.
-  double get _afterY => (TextPainter(
-    text: TextSpan(text: letters.first.$1, style: _style),
-    textDirection: TextDirection.ltr,
-  )..layout()).width;
-
-  @override
-  Widget build(BuildContext context) => Stack(
-    clipBehavior: Clip.none,
-    children: [
-      Text.rich(
-        TextSpan(
-          children: [
-            for (final (glyph, color) in letters)
-              TextSpan(
-                text: glyph,
-                style: TextStyle(color: color),
-              ),
-          ],
-        ),
-        style: _style,
-      ),
-      Positioned(
-        left: _afterY + fontSize * 0.03,
-        // Above the x-height, below the Y's cap: the lowercase tops stay clear.
-        top: fontSize * 0.06,
-        child: CustomPaint(
-          key: const Key('wordmark-cloud'),
-          size: Size(fontSize * 0.92, fontSize * 0.54),
-          painter: const _CloudBadgePainter(),
-        ),
-      ),
-    ],
-  );
-}
-
-/// The little blue cloud with wind streaks that rides the wordmark. Drawn at a
-/// nominal 24x14 and scaled by whatever size the wordmark asks for.
-class _CloudBadgePainter extends CustomPainter {
-  const _CloudBadgePainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final unit = size.width / 24;
-    Offset at(double x, double y) => Offset(x * unit, y * unit);
-
-    final cloud = Path()
-      ..addOval(Rect.fromCircle(center: at(5, 9), radius: 3.2 * unit))
-      ..addOval(Rect.fromCircle(center: at(9, 6.6), radius: 4.4 * unit))
-      ..addOval(Rect.fromCircle(center: at(13, 8.6), radius: 3.4 * unit))
-      ..addRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTWH(2 * unit, 8.4 * unit, 12.4 * unit, 3.6 * unit),
-          Radius.circular(1.8 * unit),
-        ),
-      );
-    canvas.drawPath(
-      cloud,
-      Paint()
-        ..isAntiAlias = true
-        ..shader = const LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFFCFE8FF), Color(0xFF8EC9FF)],
-        ).createShader(Rect.fromLTWH(0, 0, size.width, size.height)),
-    );
-
-    final wind = Paint()
-      ..color = const Color(0xFFBAE1FF)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.6 * unit
-      ..strokeCap = StrokeCap.round;
-    canvas.drawLine(at(16.6, 4.8), at(19.8, 4.8), wind);
-    canvas.drawLine(at(16.8, 10.6), at(19.2, 10.6), wind);
-    // The long middle streak curls up at the tail.
-    canvas.drawPath(
-      Path()
-        ..moveTo(17 * unit, 7.7 * unit)
-        ..lineTo(21.4 * unit, 7.7 * unit)
-        ..quadraticBezierTo(23.2 * unit, 7.7 * unit, 22.4 * unit, 5.9 * unit),
-      wind,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_CloudBadgePainter oldDelegate) => false;
-}
-
-class _HoverBuilder extends StatefulWidget {
-  const _HoverBuilder({required this.builder, this.enabled = true});
-
-  final Widget Function(bool hovered) builder;
-  final bool enabled;
-
-  @override
-  State<_HoverBuilder> createState() => _HoverBuilderState();
-}
-
-class _HoverBuilderState extends State<_HoverBuilder> {
-  var _hovered = false;
-
-  @override
-  Widget build(BuildContext context) => MouseRegion(
-    cursor: widget.enabled ? SystemMouseCursors.click : MouseCursor.defer,
-    onEnter: widget.enabled ? (_) => setState(() => _hovered = true) : null,
-    onExit: widget.enabled ? (_) => setState(() => _hovered = false) : null,
-    child: widget.builder(_hovered),
-  );
-}
-
-/// A keycap that also works as a button — the Enter chip runs the same toggle the
-/// Enter key does.
-class _KeyCap extends StatefulWidget {
-  const _KeyCap({required this.label, required this.onTap});
-
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  State<_KeyCap> createState() => _KeyCapState();
-}
-
-class _KeyCapState extends State<_KeyCap> {
-  var _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = context.timelineTheme;
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        key: Key('keycap-${widget.label}'),
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-          decoration: BoxDecoration(
-            color: _hovered ? palette.selectedRow : palette.raised,
-            border: Border.all(
-              color: _hovered ? palette.muted : palette.border,
-            ),
-            borderRadius: BorderRadius.circular(5),
-          ),
-          child: Text(
-            widget.label,
-            style: TextStyle(color: palette.text, fontSize: 13),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PaneToggleIconPainter extends CustomPainter {
-  const _PaneToggleIconPainter({required this.opens, required this.color});
-
-  final bool opens;
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5
-      ..strokeCap = StrokeCap.round;
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(0.75, 0.75, size.width - 1.5, size.height - 1.5),
-        const Radius.circular(3.5),
-      ),
-      paint,
-    );
-    final dividerX = size.width * (opens ? 0.36 : 0.25);
-    canvas.drawLine(
-      Offset(dividerX, 3.5),
-      Offset(dividerX, size.height - 3.5),
-      paint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _PaneToggleIconPainter oldDelegate) =>
-      oldDelegate.opens != opens || oldDelegate.color != color;
-}
-
-/// Copies a ref name and answers with a check for a moment, so the click has
-/// feedback without a snackbar.
-class _CopyButton extends StatefulWidget {
-  const _CopyButton({
-    required this.text,
-    required this.color,
-    this.slot = 'copy-ref',
-  });
-
-  final String text;
-  final Color color;
-
-  /// Names this button apart from the other copier for the same ref: the modal's
-  /// item and the status bar can both be on screen at once.
-  final String slot;
-
-  @override
-  State<_CopyButton> createState() => _CopyButtonState();
-}
-
-class _CopyButtonState extends State<_CopyButton> {
-  Timer? _reset;
-  var _copied = false;
-  var _hovered = false;
-
-  @override
-  void dispose() {
-    _reset?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _copy() async {
-    await Clipboard.setData(ClipboardData(text: widget.text));
-    if (!mounted) return;
-    setState(() => _copied = true);
-    _reset?.cancel();
-    _reset = Timer(const Duration(seconds: 1), () {
-      if (mounted) setState(() => _copied = false);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = context.timelineTheme;
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        key: Key('${widget.slot}-${widget.text}'),
-        behavior: HitTestBehavior.opaque,
-        onTap: () => unawaited(_copy()),
-        child: Icon(
-          _copied ? Icons.check : Icons.copy_outlined,
-          size: 16,
-          color: _copied
-              ? widget.color
-              : _hovered
-              ? palette.text
-              : palette.muted,
-        ),
-      ),
-    );
-  }
-}
-
-/// The message the merge commit an apply is about to write will carry. Prefilled
-/// from the settings template; confirming pops the text exactly as edited, and
-/// Escape or 취소 pops nothing at all — the apply itself is off.
-///
-/// Its own surface rather than [YogitAlert]'s: the mockup draws a wider card
-/// with an editor in it, radius 12, and the preview's purple on 적용.
-class _CommitMessageDialog extends StatefulWidget {
-  const _CommitMessageDialog({
-    required this.lead,
-    required this.emphasis,
-    required this.message,
-    required this.templated,
-  });
-
-  /// The context line, split where the mockup colors it: quiet up to [lead],
-  /// then [emphasis] in the preview's purple.
-  final String lead;
-  final String emphasis;
-  final String message;
-
-  /// Whether [message] came from the settings template or, with that emptied,
-  /// from git's own wording — the helper line names whichever filled the box.
-  final bool templated;
-
-  @override
-  State<_CommitMessageDialog> createState() => _CommitMessageDialogState();
-}
-
-class _CommitMessageDialogState extends State<_CommitMessageDialog> {
-  late final _message = TextEditingController(text: widget.message);
-
-  /// 무엇이 채웠는지 그대로 말한다 — 템플릿을 비웠으면 git 표준 메시지가 채운
-  /// 것이고, Reviewed-by 줄이 없으면 그 줄을 설명할 일도 없다.
-  String get _prefillHelp {
-    final source = widget.templated
-        ? '설정의 기본 메시지 템플릿으로 채워졌습니다'
-        : 'git 표준 메시지로 채워졌습니다';
-    return widget.message.contains('Reviewed-by:')
-        ? '$source · Reviewed-by는 이 저장소의 커밋 프로필 이름입니다'
-        : source;
-  }
-
-  @override
-  void dispose() {
-    _message.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = context.timelineTheme;
-    // An empty message would write a subject-less merge commit, so it is the one
-    // edit the dialog refuses; the helper line says so while it is refusing.
-    final blank = _message.text.trim().isEmpty;
-    // 시안의 CSS 그대로: 440 너비, 16/16/14 패딩, 줄 사이 10, 편집기는 88부터.
-    return Center(
-      child: Material(
-        color: palette.surface,
-        elevation: 24,
-        shadowColor: Colors.black.withValues(alpha: 0.5),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: const BorderSide(color: Color(0xFF48484A)),
-        ),
-        child: SizedBox(
-          width: 440,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  '실제 적용하기',
-                  style: TextStyle(
-                    color: palette.text,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text.rich(
-                  TextSpan(
-                    text: widget.lead,
-                    children: [
-                      TextSpan(
-                        text: widget.emphasis,
-                        style: const TextStyle(
-                          color: previewPurple,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                  style: TextStyle(color: palette.muted, fontSize: 11),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  '커밋 메시지',
-                  style: TextStyle(
-                    color: palette.muted,
-                    fontSize: 10.5,
-                    letterSpacing: 0.4,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                TextField(
-                  key: const Key('branch-apply-message'),
-                  controller: _message,
-                  autofocus: true,
-                  minLines: 4,
-                  maxLines: 10,
-                  cursorColor: previewPurple,
-                  style: TextStyle(
-                    color: palette.text,
-                    fontSize: 11.5,
-                    height: 1.55,
-                    fontFamily: 'monospace',
-                  ),
-                  decoration: InputDecoration(
-                    isDense: true,
-                    filled: true,
-                    fillColor: palette.background,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 11,
-                      vertical: 9,
-                    ),
-                    // 편집기는 포커스를 받아도 테두리가 변하지 않는다 — 커서가 말해 준다.
-                    border: _editorBorder(palette),
-                    enabledBorder: _editorBorder(palette),
-                    focusedBorder: _editorBorder(palette),
-                  ),
-                  onChanged: (_) => setState(() {}),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  blank
-                      ? '비워서 적용할 수는 없습니다 · Esc 또는 취소로 적용 자체를 중단합니다'
-                      : _prefillHelp,
-                  style: TextStyle(color: palette.muted, fontSize: 10),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      key: const Key('branch-apply-cancel'),
-                      onPressed: () => Navigator.pop(context),
-                      style: TextButton.styleFrom(
-                        foregroundColor: palette.text,
-                        backgroundColor: palette.raised,
-                        side: const BorderSide(color: Color(0xFF48484A)),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        textStyle: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        visualDensity: VisualDensity.standard,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 6,
-                        ),
-                      ),
-                      child: const Text('취소'),
-                    ),
-                    const SizedBox(width: 8),
-                    FilledButton(
-                      key: const Key('branch-apply-confirm'),
-                      onPressed: blank
-                          ? null
-                          : () => Navigator.pop(context, _message.text),
-                      style: FilledButton.styleFrom(
-                        foregroundColor: const Color(0xFFFFF4FF),
-                        backgroundColor: const Color(0xFF594576),
-                        disabledForegroundColor: const Color(
-                          0xFFFFF4FF,
-                        ).withValues(alpha: 0.4),
-                        disabledBackgroundColor: const Color(
-                          0xFF594576,
-                        ).withValues(alpha: 0.35),
-                        side: const BorderSide(color: Color(0xFF9D79D0)),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        textStyle: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        visualDensity: VisualDensity.standard,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 6,
-                        ),
-                      ),
-                      child: const Text('적용'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  OutlineInputBorder _editorBorder(TimelineThemePalette palette) =>
-      OutlineInputBorder(
-        borderRadius: BorderRadius.circular(7),
-        borderSide: BorderSide(color: palette.border),
-      );
-}
-
-/// Rebuilds one row only when *its* selected or hovered state flips. Every row
-/// listens, but a notification that does not change this row's pair is dropped
-/// before it can rebuild the subtree.
-class _RowStateScope extends StatefulWidget {
-  const _RowStateScope({
-    required this.index,
-    required this.selectedIndex,
-    required this.hoverIndex,
-    required this.builder,
-  });
-
-  final int index;
-  final ValueListenable<int> selectedIndex;
-  final ValueListenable<int> hoverIndex;
-  final Widget Function(bool selected, bool hovered) builder;
-
-  @override
-  State<_RowStateScope> createState() => _RowStateScopeState();
-}
-
-class _RowStateScopeState extends State<_RowStateScope> {
-  late bool _selected = widget.selectedIndex.value == widget.index;
-  late bool _hovered = widget.hoverIndex.value == widget.index;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.selectedIndex.addListener(_sync);
-    widget.hoverIndex.addListener(_sync);
-  }
-
-  @override
-  void didUpdateWidget(covariant _RowStateScope oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // The list recycles elements across indexes, so re-read without a rebuild.
-    if (oldWidget.index != widget.index) {
-      _selected = widget.selectedIndex.value == widget.index;
-      _hovered = widget.hoverIndex.value == widget.index;
-    }
-  }
-
-  @override
-  void dispose() {
-    widget.selectedIndex.removeListener(_sync);
-    widget.hoverIndex.removeListener(_sync);
-    super.dispose();
-  }
-
-  void _sync() {
-    final selected = widget.selectedIndex.value == widget.index;
-    final hovered = widget.hoverIndex.value == widget.index;
-    if (selected == _selected && hovered == _hovered) return;
-    setState(() {
-      _selected = selected;
-      _hovered = hovered;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) => widget.builder(_selected, _hovered);
-}
-
-/// What the selected rebase landing leaves behind. Without [mergeCommit] the
-/// replayed commits carry the base rail straight on, because rebasing onto the
-/// base branch is that line continuing; with it they ride a dashed arc onto the
-/// merge commit the base branch lands on. Drawn in a 560 wide design space and
-/// stretched to whatever the pane gives it.
-/// Status bar legend marker: outlined commit, filled merge, dashed WIP.
-class _LegendDot extends StatelessWidget {
-  const _LegendDot({this.filled = false, this.dashed = false});
-
-  final bool filled;
-  final bool dashed;
-
-  @override
-  Widget build(BuildContext context) => SizedBox.square(
-    dimension: 10,
-    child: CustomPaint(painter: _LegendDotPainter(filled, dashed)),
-  );
-}
-
-class _LegendDotPainter extends CustomPainter {
-  const _LegendDotPainter(this.filled, this.dashed);
-
-  final bool filled;
-  final bool dashed;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = size.center(Offset.zero);
-    if (filled) {
-      canvas.drawCircle(center, 4, Paint()..color = mainAccent);
-      return;
-    }
-    final stroke = Paint()
-      ..color = mainAccent
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2;
-    if (dashed) {
-      drawDashedRing(canvas, center, 3, stroke, 2.5);
-      return;
-    }
-    canvas.drawCircle(center, 3, stroke);
-  }
-
-  @override
-  bool shouldRepaint(covariant _LegendDotPainter oldDelegate) =>
-      oldDelegate.filled != filled || oldDelegate.dashed != dashed;
-}
-
-/// Per-state color for the 18px file chips in the preview.
-({Color background, Color letter}) fileStateChipColor(
-  String status, {
-  TimelineThemePalette palette = TimelineThemePalette.systemGraphite,
-}) => switch (status.isEmpty ? '' : status[0]) {
-  'A' => (background: mainAccent.withValues(alpha: 0.2), letter: mainAccent),
-  'D' => (background: deletedPink.withValues(alpha: 0.2), letter: deletedPink),
-  'R' || 'C' => (
-    background: renamedPurple.withValues(alpha: 0.2),
-    letter: renamedPurple,
-  ),
-  _ => (background: palette.neutralChip, letter: palette.text),
-};
-
 String _socialTime(int timestamp) => socialTimeLabel(
   DateTime.fromMillisecondsSinceEpoch(timestamp * 1000),
   DateTime.now(),
