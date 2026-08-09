@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:collection';
-import 'dart:convert';
-import 'dart:io' show ProcessException;
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import 'git.dart';
+import 'github_api.dart';
 
 bool _isGravatarHost(String host) {
   final normalized = host.toLowerCase();
@@ -89,11 +89,7 @@ class CommitAvatars {
 }
 
 class AvatarService {
-  AvatarService({
-    required this.remote,
-    this.ghExecutable = 'gh',
-    this.runner = runProcess,
-  });
+  AvatarService({required this.remote, required this.api});
 
   /// Neon: pink, cyan, green, yellow, orange, purple, blue, red.
   static const defaultColors = [
@@ -110,14 +106,26 @@ class AvatarService {
   /// The palette every rail, ring, chip and dot reads. Settings replace it.
   static List<Color> palette = defaultColors;
 
+  /// A branch line's weight. It lives here, beside the colour, because the
+  /// avatar ring is that same line drawn around a disc — and the graph painter
+  /// that draws the rails already reads its colours from this class, so the
+  /// number stays in one place instead of once per drawer.
+  /// `CommitGraphPainter.railWidth` forwards to it.
+  static const railWidth = 2.0;
+
   final RemoteRepository remote;
-  final String ghExecutable;
-  final CommandRunner runner;
+  final GitHubApi api;
   final _cache = <String, Future<CommitAvatars>>{};
+
+  /// What a finished lookup found, kept beside the future so a rebuild can
+  /// paint the photo in the same frame instead of flashing initials first.
+  final _resolved = <String, CommitAvatars>{};
   final _permits = _PermitPool(4, maxQueued: 32);
   final _saturated = Future.value(const CommitAvatars());
   Future<String?>? _account;
-  Future<String?>? _token;
+
+  /// The answer for [sha] if one has already arrived, without waiting a frame.
+  CommitAvatars? cachedFor(String sha) => _resolved[sha];
 
   Future<CommitAvatars> resolve(String sha) {
     final cached = _cache.remove(sha);
@@ -125,7 +133,12 @@ class AvatarService {
       _cache[sha] = cached;
       return cached;
     }
-    final pending = _permits.tryRun(() => _load(sha));
+    final pending = _permits.tryRun(
+      () => _load(sha).then((avatars) {
+        _resolved[sha] = avatars;
+        return avatars;
+      }),
+    );
     if (pending == null) return _saturated;
     _cache[sha] = pending;
     if (_cache.length > 256) _cache.remove(_cache.keys.first);
@@ -144,89 +157,65 @@ class AvatarService {
   Future<String?> accountLogin() => _account ??= _loadAccount();
 
   Future<String?> resolveMergedBranchName(String tipSha) async {
-    try {
-      final result = await runner(ghExecutable, [
-        'api',
-        '--hostname',
-        remote.host,
-        'repos/${remote.owner}/${remote.repository}/commits/$tipSha/pulls',
-      ]);
-      if (result.exitCode != 0) return null;
-      final json = jsonDecode(result.stdout.toString());
-      if (json is! List) return null;
-      final candidates = <({String ref, String sha, DateTime mergedAt})>[];
-      for (final entry in json) {
-        if (entry is! Map<String, dynamic>) continue;
-        final head = entry['head'];
-        final mergedAt = DateTime.tryParse('${entry['merged_at'] ?? ''}');
-        if (head is! Map<String, dynamic> || mergedAt == null) continue;
-        final sha = head['sha'];
-        final ref = head['ref'];
-        if (sha is! String || sha.isEmpty || ref is! String || ref.isEmpty) {
-          continue;
-        }
-        candidates.add((ref: ref, sha: sha, mergedAt: mergedAt));
+    final json = await _getJsonOrNull(
+      'repos/${remote.owner}/${remote.repository}/commits/$tipSha/pulls',
+    );
+    if (json is! List) return null;
+    final candidates = <({String ref, String sha, DateTime mergedAt})>[];
+    for (final entry in json) {
+      if (entry is! Map<String, dynamic>) continue;
+      final head = entry['head'];
+      final mergedAt = DateTime.tryParse('${entry['merged_at'] ?? ''}');
+      if (head is! Map<String, dynamic> || mergedAt == null) continue;
+      final sha = head['sha'];
+      final ref = head['ref'];
+      if (sha is! String || sha.isEmpty || ref is! String || ref.isEmpty) {
+        continue;
       }
-      candidates.sort((left, right) {
-        final leftExact = left.sha == tipSha;
-        final rightExact = right.sha == tipSha;
-        if (leftExact != rightExact) return leftExact ? -1 : 1;
-        return right.mergedAt.compareTo(left.mergedAt);
-      });
-      return candidates.firstOrNull?.ref;
-    } on ProcessException {
-      return null;
-    } on FormatException {
-      return null;
+      candidates.add((ref: ref, sha: sha, mergedAt: mergedAt));
     }
+    candidates.sort((left, right) {
+      final leftExact = left.sha == tipSha;
+      final rightExact = right.sha == tipSha;
+      if (leftExact != rightExact) return leftExact ? -1 : 1;
+      return right.mergedAt.compareTo(left.mergedAt);
+    });
+    return candidates.firstOrNull?.ref;
   }
 
   Future<String?> _loadAccount() async {
-    final result = await runner(ghExecutable, [
-      'api',
-      '--hostname',
-      remote.host,
-      'user',
-    ]);
-    if (result.exitCode != 0) return null;
-    try {
-      final json = jsonDecode(result.stdout.toString());
-      return json is Map<String, dynamic> && json['login'] is String
-          ? json['login'] as String
-          : null;
-    } on FormatException {
-      return null;
-    }
+    final json = await _getJsonOrNull('user');
+    return json is Map<String, dynamic> && json['login'] is String
+        ? json['login'] as String
+        : null;
   }
 
   Future<CommitAvatars> _load(String sha) async {
-    final result = await runner(ghExecutable, [
-      'api',
-      '--hostname',
-      remote.host,
+    final json = await _getJsonOrNull(
       'repos/${remote.owner}/${remote.repository}/commits/$sha',
-    ]);
-    if (result.exitCode != 0) return const CommitAvatars();
+    );
+    if (json is! Map<String, dynamic>) return const CommitAvatars();
+    final author = _parseAvatar(json['author']);
+    final committer = _parseAvatar(json['committer']);
+    if (remote.host == 'github.com' ||
+        api.token.isEmpty ||
+        !_needsRemoteHeader(author, committer)) {
+      return CommitAvatars(author: author, committer: committer);
+    }
+    final headers = {'Authorization': 'Bearer ${api.token}'};
+    return CommitAvatars(
+      author: _withSafeHeaders(author, headers),
+      committer: _withSafeHeaders(committer, headers),
+    );
+  }
+
+  /// A failed avatar lookup stays quiet — the row keeps its initials — so every
+  /// GitHub failure comes back as a missing answer instead of an error.
+  Future<Object?> _getJsonOrNull(String path) async {
     try {
-      final json = jsonDecode(result.stdout.toString());
-      if (json is! Map<String, dynamic>) return const CommitAvatars();
-      final author = _parseAvatar(json['author']);
-      final committer = _parseAvatar(json['committer']);
-      if (remote.host == 'github.com' ||
-          !_needsRemoteHeader(author, committer)) {
-        return CommitAvatars(author: author, committer: committer);
-      }
-      final token = await (_token ??= _loadToken());
-      if (token == null) {
-        return CommitAvatars(author: author, committer: committer);
-      }
-      final headers = {'Authorization': 'Bearer $token'};
-      return CommitAvatars(
-        author: _withSafeHeaders(author, headers),
-        committer: _withSafeHeaders(committer, headers),
-      );
-    } on FormatException {
-      return const CommitAvatars();
+      return await api.getJson(path);
+    } on GitHubApiException {
+      return null;
     }
   }
 
@@ -259,17 +248,6 @@ class AvatarService {
       return avatar;
     }
     return RemoteAvatar(login: avatar.login, url: avatar.url, headers: headers);
-  }
-
-  Future<String?> _loadToken() async {
-    final result = await runner(ghExecutable, [
-      'auth',
-      'token',
-      '--hostname',
-      remote.host,
-    ]);
-    final token = result.stdout.toString().trim();
-    return result.exitCode == 0 && token.isNotEmpty ? token : null;
   }
 
   static String initials(GitIdentity identity) {
@@ -309,13 +287,25 @@ class AvatarService {
     return branchColor(hash);
   }
 
-  /// Ink that stays readable on a filled [background] disc. The crossover sits
-  /// where white and near-black swap contrast, not at mid grey, so the brighter
-  /// palette colors get dark letters.
+  static const _lightInk = Color(0xFFFFFFFF);
+  static const _darkInk = Color(0xFF15171E);
+
+  /// Ink that stays readable on a filled [background] disc: whichever of the
+  /// two actually contrasts more. A luminance threshold would be the same
+  /// answer only against pure black, and the dark ink is not pure — near the
+  /// crossover, a mid-bright fill like the dimmed orange reads better in white
+  /// than the threshold would have guessed.
   static Color onColor(Color background) =>
-      background.computeLuminance() > 0.179
-      ? const Color(0xFF15171E)
-      : const Color(0xFFFFFFFF);
+      _contrast(_lightInk, background) >= _contrast(_darkInk, background)
+      ? _lightInk
+      : _darkInk;
+
+  /// WCAG relative contrast, the lighter of the pair over the darker.
+  static double _contrast(Color ink, Color background) {
+    final a = ink.computeLuminance() + 0.05;
+    final b = background.computeLuminance() + 0.05;
+    return a > b ? a / b : b / a;
+  }
 }
 
 class _PermitPool {
@@ -372,6 +362,8 @@ class IdentityAvatar extends StatelessWidget {
     this.remoteAvatar,
     this.size = 22,
     this.discColor,
+    this.fontFamily,
+    this.fontScale = 1,
     super.key,
   });
 
@@ -379,13 +371,50 @@ class IdentityAvatar extends StatelessWidget {
   final RemoteAvatar? remoteAvatar;
   final double size;
 
-  /// The disc color for an avatar sitting in a row: its branch line. Without one
-  /// — the settings preview — the disc falls back to the identity color.
+  /// The face and scale the initials take when no photo covers them. The
+  /// timeline hands over its own font so the disc matches the row it sits in;
+  /// everywhere else the disc keeps its 0.42-of-the-diameter default.
+  final String? fontFamily;
+  final double fontScale;
+
+  /// The branch line this avatar sits on, drawn as a ring around a disc of the
+  /// same color. Null off the graph — the settings preview, the blame gutter —
+  /// where there is no branch to name and the disc goes unringed.
   final Color? discColor;
+
+  /// How far the branch color is dimmed inside the ring. The initials sit on
+  /// this fill in the undimmed branch color, so the two share a hue and the
+  /// alpha barely moves their contrast — over the row background (`#1C1C1E`) and
+  /// the selected row (`#234D72`) the worst palette color reads 1.87 at 0.18 and
+  /// 1.70 at 0.40. What the alpha does decide is whether the disc reads as
+  /// filled, which is why it is the mockup's 0.22 and not lower.
+  /// How far under its line a disc sits. Small on purpose: darker than the
+  /// rail so the two read apart where the line meets the disc, and nowhere
+  /// near black, which would cost the disc its branch.
+  static const fillLightnessScale = 0.72;
+
+  /// The disc's interior for a commit on [branch]: the same hue and
+  /// saturation, a little darker, and opaque — a translucent fill would let
+  /// the lane's rail run through the face.
+  static Color fillFor(Color branch) {
+    final line = HSLColor.fromColor(branch);
+    return line.withLightness(line.lightness * fillLightnessScale).toColor();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final color = discColor ?? AvatarService.color(identity);
+    final branch = discColor;
+    // A row's disc is its branch line: a ring at the rail's own weight and the
+    // same colour a little darker inside it. Off the graph — the settings
+    // preview, the blame gutter — there is no branch to name, so the disc
+    // keeps the identity fill. Either way the ink is whichever of white or
+    // black reads better on what it sits on.
+    final ring = branch == null ? 0.0 : AvatarService.railWidth;
+    final fill = branch == null
+        ? AvatarService.color(identity)
+        : fillFor(branch);
+    final ink = AvatarService.onColor(fill);
+    final inner = size - ring * 2;
     final avatar = _safeAvatar(remoteAvatar);
     return Container(
       width: size,
@@ -393,20 +422,26 @@ class IdentityAvatar extends StatelessWidget {
       alignment: Alignment.center,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        // A filled identity-colored disc, no outline: a photo covers it,
-        // initials sit on it.
-        color: color,
+        color: fill,
+        border: branch == null ? null : Border.all(color: branch, width: ring),
       ),
       clipBehavior: Clip.antiAlias,
       child: avatar == null
-          ? _initials(color)
-          : Image.network(
-              avatar.url,
-              headers: avatar.headers.isEmpty ? null : avatar.headers,
-              width: size,
-              height: size,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => _initials(color),
+          ? _initials(ink, inner)
+          // The border insets the child, and clipping the photo to its own
+          // circle keeps its corners off the ring: the branch stays visible
+          // around a face that used to hide it completely.
+          : ClipOval(
+              child: Image.network(
+                avatar.url,
+                headers: avatar.headers.isEmpty ? null : avatar.headers,
+                width: inner,
+                height: inner,
+                fit: BoxFit.cover,
+                // A photo that never arrives leaves the initials, ring and all:
+                // a 404 avatar must not cost the row who wrote the commit.
+                errorBuilder: (_, _, _) => _initials(ink, inner),
+              ),
             ),
     );
   }
@@ -422,12 +457,15 @@ class IdentityAvatar extends StatelessWidget {
         : avatar;
   }
 
-  Widget _initials(Color background) => Text(
+  Widget _initials(Color ink, double inner) => Text(
     AvatarService.initials(identity),
     maxLines: 1,
     style: TextStyle(
-      color: AvatarService.onColor(background),
-      fontSize: size * 0.42,
+      color: ink,
+      fontFamily: fontFamily,
+      // Two glyphs still have to sit inside the circle, so the scale stops at
+      // half the room the ring leaves however large the timeline's font grows.
+      fontSize: math.min(inner / 2, size * 0.42 * fontScale),
       fontWeight: FontWeight.w700,
       height: 1,
     ),
@@ -443,6 +481,8 @@ class CommitAvatarStack extends StatelessWidget {
     this.stacked = true,
     this.committerOnly = false,
     this.discColor,
+    this.fontFamily,
+    this.fontScale = 1,
     super.key,
   });
 
@@ -459,6 +499,10 @@ class CommitAvatarStack extends StatelessWidget {
   /// Passed straight through to both discs: a row's avatars wear its branch.
   final Color? discColor;
 
+  /// The initials' face and size, passed through to both discs.
+  final String? fontFamily;
+  final double fontScale;
+
   bool get _hasSeparateCommitter =>
       !committerOnly &&
       stacked &&
@@ -471,6 +515,7 @@ class CommitAvatarStack extends StatelessWidget {
     if (service == null) return _stack(null);
     return FutureBuilder<CommitAvatars>(
       future: service.resolve(commit.sha),
+      initialData: service.cachedFor(commit.sha),
       builder: (context, snapshot) => _stack(snapshot.data),
     );
   }
@@ -483,6 +528,8 @@ class CommitAvatarStack extends StatelessWidget {
         remoteAvatar: avatars?.committer,
         size: size,
         discColor: discColor,
+        fontFamily: fontFamily,
+        fontScale: fontScale,
       );
     }
     final offset = _hasSeparateCommitter ? size * 0.45 : 0.0;
@@ -501,6 +548,8 @@ class CommitAvatarStack extends StatelessWidget {
                 remoteAvatar: avatars?.committer,
                 size: size,
                 discColor: discColor,
+                fontFamily: fontFamily,
+                fontScale: fontScale,
               ),
             ),
           Positioned(
@@ -511,6 +560,8 @@ class CommitAvatarStack extends StatelessWidget {
               remoteAvatar: avatars?.author,
               size: size,
               discColor: discColor,
+              fontFamily: fontFamily,
+              fontScale: fontScale,
             ),
           ),
         ],

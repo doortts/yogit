@@ -377,7 +377,9 @@ class FullDiffSessionController extends ChangeNotifier {
     required int initialIndex,
     FullDiffPreferences initialPreferences = const FullDiffPreferences(),
     FullDiffEncodingCache? encodingCache,
-  }) : _encodingCache = encodingCache ?? FullDiffEncodingCache.shared,
+    String? initialPath,
+  }) : _wantedPath = initialPath,
+       _encodingCache = encodingCache ?? FullDiffEncodingCache.shared,
        state = _initialState(commits, initialIndex, initialPreferences) {
     _patchCache = _LruFutureCache(
       capacity: _cacheCapacity,
@@ -402,6 +404,9 @@ class FullDiffSessionController extends ChangeNotifier {
   }
 
   final FullDiffRepository repository;
+
+  /// The file the session was opened on, consumed the first time files land.
+  String? _wantedPath;
   final FullDiffEncodingCache _encodingCache;
   late final _LruFutureCache<PatchCacheKey, DiffDocument> _patchCache;
   late final _LruFutureCache<FileCacheKey, FileDocument> _fileCache;
@@ -894,7 +899,15 @@ class FullDiffSessionController extends ChangeNotifier {
     }
 
     final immutableFiles = List<GitFileChange>.unmodifiable(files);
-    final selectedFile = immutableFiles.firstOrNull;
+    // Opening on a named file lands on it directly: selecting it after the
+    // first one loaded would show the wrong diff for a frame and read as a
+    // flicker.
+    final wanted = _wantedPath;
+    _wantedPath = null;
+    final selectedFile = wanted == null
+        ? immutableFiles.firstOrNull
+        : immutableFiles.where((file) => file.path == wanted).firstOrNull ??
+              immutableFiles.firstOrNull;
     _replace(
       state.copyWith(
         files: immutableFiles,

@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>포커스 없는 pane의 선택 표시 — 시안</title>
+<style>
+  :root {
+    --bg:#1C1C1E; --surface:#242426; --panel:#202022; --raised:#2C2C2E;
+    --border:#38383A; --text:#F2F2F7; --muted:#AEAEB2;
+    --sel:#234D72;            /* selectedRow */
+    --sel-gray:#3F3F3F;       /* 1안: 같은 명도, 채도 0 */
+    --hash:#EF6C63; --green:#3FB950; --blue:#0A84FF;
+    --mono:Menlo,"D2Coding",Monaco,monospace;
+  }
+  body { margin:0; padding:26px 24px 70px; background:#101012; color:var(--text);
+         font:13px/1.6 -apple-system,"Apple SD Gothic Neo",sans-serif; }
+  h1 { font-size:19px; font-weight:600; margin:0 0 4px; }
+  h2 { font-size:14px; font-weight:600; margin:28px 0 2px; }
+  h3 { font-size:12px; font-weight:600; margin:14px 0 4px; color:#B9B9C0; }
+  p.note { margin:0 0 10px; color:#98989F; font-size:12px; max-width:1080px; }
+  .cap { font-size:11.5px; color:#8E8E93; padding:6px 2px 0; max-width:1080px; }
+  code { font-family:var(--mono); font-size:11px; background:#2C2C2E; padding:1px 5px; border-radius:4px; }
+
+  .win { width:1080px; max-width:100%; background:var(--bg); border:1px solid #333336;
+         border-radius:10px; overflow:hidden; display:flex; margin-bottom:4px; }
+  .side { width:190px; flex:none; background:var(--panel); border-right:1px solid var(--border);
+          padding:8px 0; }
+  .side .sec { color:var(--muted); font-size:10px; letter-spacing:.8px; padding:6px 12px 3px; }
+  .side .row { padding:5px 12px; font-size:12px; display:flex; gap:7px; align-items:center; }
+  .tl { flex:1; min-width:0; }
+  .tl .head { display:flex; padding:5px 0 5px 10px; border-bottom:1px solid var(--border);
+              font-size:9.5px; letter-spacing:1.1px; color:#8E8E93; }
+  .tl .row { display:flex; align-items:center; height:22px; font-size:12px; }
+  .tl .sha { width:82px; flex:none; font-family:var(--mono); font-size:11px; color:var(--hash); padding-left:10px; }
+  .tl .msg { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tl .when { width:92px; flex:none; color:var(--muted); font-size:11px; }
+  .pv { width:250px; flex:none; background:var(--surface); border-left:1px solid var(--border); }
+  .pv .head { height:30px; display:flex; align-items:center; gap:6px; padding:0 10px;
+              border-bottom:1px solid var(--border); font-size:11px; }
+  .pv .lab { color:var(--muted); font-size:9.5px; }
+  .pv .h { font-family:var(--mono); font-size:11px; color:var(--hash); }
+  .pv .file { display:flex; gap:7px; align-items:center; padding:5px 10px; font-size:11.5px; }
+  .pv .file .st { width:12px; color:var(--green); font-weight:700; font-size:10px; }
+  .pv .file .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pv .file .pm { color:var(--muted); font-size:10px; }
+
+  /* 선택 상태 */
+  .on      { background:var(--sel); }                 /* 포커스 있음 */
+  .off1    { background:var(--sel-gray); }            /* 1안 무채색 */
+  .off2    { background:rgba(35,77,114,.38); }        /* 2안 같은 파랑, 옅게 */
+  .off3    { background:transparent; box-shadow:inset 0 0 0 1px #45566A; } /* 3안 윤곽선만 */
+  .on .nm, .on .msg { color:#fff; }
+  .off1 .msg, .off1 .nm, .off2 .msg, .off2 .nm { color:#D6D6DB; }
+  .rounded { border-radius:6px; margin:0 6px; padding-left:4px; padding-right:4px; }
+
+  .ring { outline:2px solid var(--blue); outline-offset:-2px; }
+  .tag { display:inline-block; font-size:10px; color:#8E8E93; margin:0 0 4px 2px; }
+  table { border-collapse:collapse; font-size:12px; margin-top:6px; }
+  td { padding:3px 16px 3px 0; vertical-align:top; }
+  .k { color:#8E8E93; white-space:nowrap; }
+</style>
+</head>
+<body>
+
+<h1>포커스 없는 pane의 선택 표시</h1>
+<p class="note">지금은 타임라인만 회색으로 물러난다(사이드바가 키보드를 쥔 동안). 미리보기의 선택 파일은
+언제나 파랑이라, 타임라인에 포커스가 있어도 미리보기 파일이 선택된 것처럼 보인다.
+<b>세 pane 모두</b> 같은 규칙을 쓰자 — 키보드를 쥔 pane만 파랑, 나머지는 물러난 표시.</p>
+
+<h2>1안 — 무채색 (지금 타임라인이 쓰는 방식)</h2>
+<p class="note">같은 명도, 채도 0. 선택은 남고 색만 빠진다. 이미 앱에 있는 규칙이라 새로 배울 것이 없다.</p>
+<span class="tag">키보드: 타임라인</span>
+<div class="win">
+  <div class="side">
+    <div class="sec">LOCAL</div>
+    <div class="row off1 rounded">⑂ main <span style="color:#8AD6A1;font-size:9px">HEAD</span></div>
+    <div class="row">⑂ feature/pr-monitoring</div>
+    <div class="sec">REMOTE</div>
+    <div class="row">⑂ origin/main</div>
+  </div>
+  <div class="tl">
+    <div class="head"><span style="width:82px">HASH</span><span style="flex:1">COMMIT MESSAGE</span><span style="width:92px">DATE</span></div>
+    <div class="row"><span class="sha">2280d58</span><span class="msg">docs(readme): 최근 작업 반영</span><span class="when">3 days ago</span></div>
+    <div class="row on"><span class="sha" style="color:#fff">8defd36</span><span class="msg">docs(design): 자동 업데이트 설계와 아이콘 시안 여섯</span><span class="when" style="color:#DCE6F0">4 days ago</span></div>
+    <div class="row"><span class="sha">2f332fe</span><span class="msg">style(app): 팝오버 Fable 알약도 파랑으로</span><span class="when">4 days ago</span></div>
+    <div class="row"><span class="sha">e99590a</span><span class="msg">fix(app): launch 반환 URL 미사용 경고 제거</span><span class="when">4 days ago</span></div>
+  </div>
+  <div class="pv">
+    <div class="head"><span class="lab">커밋</span><span class="h">8defd36</span><span class="lab">⧉ · 부모</span><span class="h" style="color:var(--muted)">2f332fe</span></div>
+    <div style="padding:8px 10px 4px; font-size:12px; font-weight:600">docs(design): 자동 업데이트 설계…</div>
+    <div style="padding:2px 10px 8px; color:var(--muted); font-size:11px">2 files changed</div>
+    <div class="file off1 rounded"><span class="st">M</span><span class="nm">docs/design/14-self-update.html</span><span class="pm">+148 −59</span></div>
+    <div class="file"><span class="st">A</span><span class="nm">docs/design/icon-artist-mockups.html</span><span class="pm">+321</span></div>
+  </div>
+</div>
+<span class="tag">키보드: 미리보기</span>
+<div class="win">
+  <div class="side">
+    <div class="sec">LOCAL</div>
+    <div class="row off1 rounded">⑂ main <span style="color:#8AD6A1;font-size:9px">HEAD</span></div>
+    <div class="row">⑂ feature/pr-monitoring</div>
+    <div class="sec">REMOTE</div>
+    <div class="row">⑂ origin/main</div>
+  </div>
+  <div class="tl">
+    <div class="head"><span style="width:82px">HASH</span><span style="flex:1">COMMIT MESSAGE</span><span style="width:92px">DATE</span></div>
+    <div class="row"><span class="sha">2280d58</span><span class="msg">docs(readme): 최근 작업 반영</span><span class="when">3 days ago</span></div>
+    <div class="row off1"><span class="sha">8defd36</span><span class="msg">docs(design): 자동 업데이트 설계와 아이콘 시안 여섯</span><span class="when">4 days ago</span></div>
+    <div class="row"><span class="sha">2f332fe</span><span class="msg">style(app): 팝오버 Fable 알약도 파랑으로</span><span class="when">4 days ago</span></div>
+    <div class="row"><span class="sha">e99590a</span><span class="msg">fix(app): launch 반환 URL 미사용 경고 제거</span><span class="when">4 days ago</span></div>
+  </div>
+  <div class="pv">
+    <div class="head"><span class="lab">커밋</span><span class="h">8defd36</span><span class="lab">⧉ · 부모</span><span class="h" style="color:var(--muted)">2f332fe</span></div>
+    <div style="padding:8px 10px 4px; font-size:12px; font-weight:600">docs(design): 자동 업데이트 설계…</div>
+    <div style="padding:2px 10px 8px; color:var(--muted); font-size:11px">2 files changed</div>
+    <div class="file on rounded"><span class="st">M</span><span class="nm">docs/design/14-self-update.html</span><span class="pm" style="color:#DCE6F0">+148 −59</span></div>
+    <div class="file"><span class="st">A</span><span class="nm">docs/design/icon-artist-mockups.html</span><span class="pm">+321</span></div>
+  </div>
+</div>
+<div class="cap">파랑은 화면에 언제나 하나뿐 — 지금 키보드가 어디 있는지 한눈에 읽힌다.</div>
+
+<h2>2안 — 같은 파랑을 옅게 (38%)</h2>
+<p class="note">색은 남기고 강도만 낮춘다. "여기도 선택돼 있다"는 걸 색으로 이어 말해 주지만,
+회색보다 대비가 약해 파랑 둘이 같이 보일 때 헷갈릴 수 있다.</p>
+<span class="tag">키보드: 타임라인</span>
+<div class="win">
+  <div class="side">
+    <div class="sec">LOCAL</div>
+    <div class="row off2 rounded">⑂ main <span style="color:#8AD6A1;font-size:9px">HEAD</span></div>
+    <div class="row">⑂ feature/pr-monitoring</div>
+  </div>
+  <div class="tl">
+    <div class="head"><span style="width:82px">HASH</span><span style="flex:1">COMMIT MESSAGE</span><span style="width:92px">DATE</span></div>
+    <div class="row"><span class="sha">2280d58</span><span class="msg">docs(readme): 최근 작업 반영</span><span class="when">3 days ago</span></div>
+    <div class="row on"><span class="sha" style="color:#fff">8defd36</span><span class="msg">docs(design): 자동 업데이트 설계와 아이콘 시안 여섯</span><span class="when" style="color:#DCE6F0">4 days ago</span></div>
+    <div class="row"><span class="sha">2f332fe</span><span class="msg">style(app): 팝오버 Fable 알약도 파랑으로</span><span class="when">4 days ago</span></div>
+  </div>
+  <div class="pv">
+    <div class="head"><span class="lab">커밋</span><span class="h">8defd36</span><span class="lab">⧉ · 부모</span><span class="h" style="color:var(--muted)">2f332fe</span></div>
+    <div style="padding:8px 10px 4px; font-size:12px; font-weight:600">docs(design): 자동 업데이트 설계…</div>
+    <div style="padding:2px 10px 8px; color:var(--muted); font-size:11px">2 files changed</div>
+    <div class="file off2 rounded"><span class="st">M</span><span class="nm">docs/design/14-self-update.html</span><span class="pm">+148 −59</span></div>
+    <div class="file"><span class="st">A</span><span class="nm">docs/design/icon-artist-mockups.html</span><span class="pm">+321</span></div>
+  </div>
+</div>
+
+<h2>3안 — 윤곽선만 남기기</h2>
+<p class="note">채움을 없애고 1px 테두리만. 가장 조용하지만 22px 행에서는 선이 가늘어 잘 안 보인다.</p>
+<span class="tag">키보드: 타임라인</span>
+<div class="win">
+  <div class="side">
+    <div class="sec">LOCAL</div>
+    <div class="row off3 rounded">⑂ main <span style="color:#8AD6A1;font-size:9px">HEAD</span></div>
+    <div class="row">⑂ feature/pr-monitoring</div>
+  </div>
+  <div class="tl">
+    <div class="head"><span style="width:82px">HASH</span><span style="flex:1">COMMIT MESSAGE</span><span style="width:92px">DATE</span></div>
+    <div class="row"><span class="sha">2280d58</span><span class="msg">docs(readme): 최근 작업 반영</span><span class="when">3 days ago</span></div>
+    <div class="row on"><span class="sha" style="color:#fff">8defd36</span><span class="msg">docs(design): 자동 업데이트 설계와 아이콘 시안 여섯</span><span class="when" style="color:#DCE6F0">4 days ago</span></div>
+    <div class="row"><span class="sha">2f332fe</span><span class="msg">style(app): 팝오버 Fable 알약도 파랑으로</span><span class="when">4 days ago</span></div>
+  </div>
+  <div class="pv">
+    <div class="head"><span class="lab">커밋</span><span class="h">8defd36</span><span class="lab">⧉ · 부모</span><span class="h" style="color:var(--muted)">2f332fe</span></div>
+    <div style="padding:8px 10px 4px; font-size:12px; font-weight:600">docs(design): 자동 업데이트 설계…</div>
+    <div style="padding:2px 10px 8px; color:var(--muted); font-size:11px">2 files changed</div>
+    <div class="file off3 rounded"><span class="st">M</span><span class="nm">docs/design/14-self-update.html</span><span class="pm">+148 −59</span></div>
+    <div class="file"><span class="st">A</span><span class="nm">docs/design/icon-artist-mockups.html</span><span class="pm">+321</span></div>
+  </div>
+</div>
+
+<h2>함께 들어가는 것 (시안 승인과 무관하게 적용)</h2>
+<table>
+  <tr><td class="k">pane 이동</td><td><code>←/→</code> 와 <code>h/l</code> 로 사이드바 ↔ 타임라인 ↔ 미리보기. 미리보기에서 <code>↑/↓·j/k</code> 는 파일 이동, <code>esc</code> 는 타임라인 복귀.</td></tr>
+  <tr><td class="k">커밋 메시지 스크롤바</td><td>10줄을 넘겨 스크롤할 것이 있을 때만 얇은 스크롤바가 보인다.</td></tr>
+  <tr><td class="k">사이드바</td><td>지금도 커서 행을 표시하지만 포커스 여부와 무관했다 — 같은 규칙으로 통일한다.</td></tr>
+</table>
+
+</body>
+</html>

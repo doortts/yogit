@@ -378,10 +378,8 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.view == FullDiffView.history) {
-      return const SizedBox.shrink();
-    }
-
+    // History used to fill the content area with a list; now it is a revision's
+    // diff like any other, so it maps the same way.
     return SizedBox(
       width: fullDiffMinimapWidth,
       child: LayoutBuilder(

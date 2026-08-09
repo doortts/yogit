@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>diff 뷰가 키보드를 쥐었다는 표시 — 시안 4</title>
+<style>
+  :root {
+    --dheader:#151B23; --ddiv:#3D444D; --canvas:#0D1117; --hunk:#111D2E;
+    --sel:#0D273F; --accent:#83C4FF; --chip:#3A3A3A; --dmuted:#9198A1;
+    --add:#12261E; --addg:#1C4328; --del:#25171C; --delg:#542426;
+    --surface:#242426; --border:#38383A; --text:#F2F2F7; --muted:#AEAEB2;
+    --mono:Menlo,"D2Coding",Monaco,monospace;
+  }
+  body { margin:0; padding:26px 24px 80px; background:#101012; color:var(--text);
+         font:13px/1.6 -apple-system,"Apple SD Gothic Neo",sans-serif; }
+  h1 { font-size:19px; font-weight:600; margin:0 0 4px; }
+  h2 { font-size:14px; font-weight:600; margin:30px 0 2px; }
+  p.note { margin:0 0 10px; color:#98989F; font-size:12px; max-width:980px; }
+  .cap { font-size:11.5px; color:#8E8E93; padding:6px 2px 0; max-width:980px; }
+  code { font-family:var(--mono); font-size:11px; background:#2C2C2E; padding:1px 5px; border-radius:4px; }
+  .pair { display:flex; gap:18px; flex-wrap:wrap; }
+  .tag { font-size:10.5px; color:#8E8E93; margin:0 0 4px 2px; display:block; }
+
+  .win { width:470px; background:var(--canvas); border:1px solid #2A2A2C;
+         overflow:hidden; display:flex; }
+  .diff { flex:1; min-width:0; display:flex; flex-direction:column; position:relative; }
+  .bar { display:flex; align-items:center; gap:5px; padding:4px 8px; background:var(--dheader);
+         border-bottom:1px solid var(--ddiv); font-size:11px; }
+  .ctl { height:22px; display:flex; align-items:center; padding:0 7px; border-radius:11px;
+         background:rgba(54,54,54,.96); color:#fff; font-size:11px; }
+  .ctl.on { background:#fff; color:#000; }
+  .count { color:var(--dmuted); font-family:var(--mono); font-size:11px; padding:0 4px; }
+  .spacer { flex:1; }
+  .body { flex:1; font-family:var(--mono); font-size:11px; line-height:19px; }
+  .ln { display:flex; white-space:pre; height:19px; position:relative; }
+  .ln .no { width:44px; flex:none; text-align:right; padding-right:8px; color:var(--dmuted); font-size:9.5px; }
+  .ln .src { flex:1; padding-left:6px; overflow:hidden; }
+  .ln.add { background:var(--add); } .ln.add .no { background:var(--addg); color:#B7DFC2; }
+  .ln.del { background:var(--del); } .ln.del .no { background:var(--delg); color:#F2B8B5; }
+  .ln.hunk { background:var(--hunk); color:var(--accent); font-size:10.5px; }
+  .ln.hunk .no { color:transparent; }
+  .kw { color:#FF7B72; } .cm { color:#8B949E; }
+  .side { width:106px; flex:none; background:var(--dheader); border-left:1px solid var(--ddiv);
+          font-size:10px; color:var(--dmuted); padding:6px 8px; }
+  .pv { width:104px; flex:none; background:var(--surface); border-left:1px solid var(--border);
+        font-size:10px; color:var(--muted); padding:6px 8px; }
+
+  /* 1안 — 가장자리 실선 */
+  .edge::before { content:''; position:absolute; left:0; top:0; bottom:0; width:2px;
+                  background:var(--accent); z-index:2; }
+  /* 2안 — 현재 변경 막대 */
+  .curbar { position:absolute; left:44px; top:0; bottom:0; width:3px; }
+  .curbar.on { background:var(--accent); }
+  .curbar.off { background:#3A4149; }
+  .ln.current.on { background:#16311f; }
+  /* 3안 — hunk 줄이 커서 */
+  .ln.hunk.cursor { background:#1D3B5C; color:#fff; }
+  .ln.hunk.cursor::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px;
+                            background:var(--accent); }
+  /* 4안 — 카운터 알약 */
+  .count.pill { background:var(--sel); color:var(--accent); border-radius:9999px; padding:2px 8px; }
+  .arrow.lit { color:var(--accent); }
+  table { border-collapse:collapse; font-size:12px; margin-top:6px; }
+  td { padding:3px 16px 3px 0; vertical-align:top; }
+  .k { color:#8E8E93; white-space:nowrap; }
+</style>
+</head>
+<body>
+
+<h1>diff 뷰가 키보드를 쥐었다는 표시</h1>
+<p class="note">지금 규칙: 키보드를 쥔 pane의 선택만 색을 갖는다. 그런데 diff에는 "선택된 행"이 없어서
+포커스가 와도 화면이 그대로다. 아래 넷 중 하나로 그 순간을 말한다. 각 안은 <b>왼쪽 = 포커스 있음 / 오른쪽 = 없음</b>.</p>
+
+<!-- 1안 -->
+<h2>1안 — 가장자리 실선</h2>
+<p class="note">pane 안쪽 모서리에 2px 액센트 선. 내용은 한 픽셀도 안 건드리고 "이 칸이 지금 듣고 있다"만 말한다.
+사이드바·미리보기에도 같은 규칙을 쓰면 화면 전체가 한 언어로 읽힌다.</p>
+<div class="pair">
+  <div><span class="tag">포커스 있음</span>
+    <div class="win"><div class="diff edge">
+      <div class="bar"><span class="ctl">Myers</span><span class="ctl">공백 무시</span><span class="spacer"></span>
+        <span class="count">↑ 1 / 2 ↓</span></div>
+      <div class="body">
+        <div class="ln hunk"><span class="no"></span><span class="src">@@ -50,3 +50,5 @@ UsageModel</span></div>
+        <div class="ln"><span class="no">50</span><span class="src">  <span class="kw">var</span> notifiedOnce</span></div>
+        <div class="ln add"><span class="no">53 +</span><span class="src"> <span class="cm">// 리셋으로 풀릴 때</span></span></div>
+        <div class="ln add"><span class="no">54 +</span><span class="src"> <span class="kw">var</span> recovery</span></div>
+        <div class="ln"><span class="no">55</span><span class="src">  appearanceWatch</span></div>
+      </div></div><div class="side">History</div><div class="pv">Commit</div></div>
+  </div>
+  <div><span class="tag">포커스 없음</span>
+    <div class="win"><div class="diff">
+      <div class="bar"><span class="ctl">Myers</span><span class="ctl">공백 무시</span><span class="spacer"></span>
+        <span class="count">↑ 1 / 2 ↓</span></div>
+      <div class="body">
+        <div class="ln hunk"><span class="no"></span><span class="src">@@ -50,3 +50,5 @@ UsageModel</span></div>
+        <div class="ln"><span class="no">50</span><span class="src">  <span class="kw">var</span> notifiedOnce</span></div>
+        <div class="ln add"><span class="no">53 +</span><span class="src"> <span class="cm">// 리셋으로 풀릴 때</span></span></div>
+        <div class="ln add"><span class="no">54 +</span><span class="src"> <span class="kw">var</span> recovery</span></div>
+        <div class="ln"><span class="no">55</span><span class="src">  appearanceWatch</span></div>
+      </div></div><div class="side">History</div><div class="pv">Commit</div></div>
+  </div>
+</div>
+
+<!-- 2안 -->
+<h2>2안 — 현재 변경 막대가 살아난다</h2>
+<p class="note">이미 있는 것을 쓴다: 현재 hunk 행 왼쪽의 3px 막대. 포커스가 있으면 액센트 파랑에 그 행이 옅게 물들고,
+없으면 막대가 회색으로 물러난다. 화살표가 움직일 대상이 어디인지도 같이 말해 준다.</p>
+<div class="pair">
+  <div><span class="tag">포커스 있음</span>
+    <div class="win"><div class="diff">
+      <div class="bar"><span class="ctl">Myers</span><span class="ctl">공백 무시</span><span class="spacer"></span>
+        <span class="count">↑ 1 / 2 ↓</span></div>
+      <div class="body">
+        <div class="ln hunk"><span class="no"></span><span class="src">@@ -50,3 +50,5 @@ UsageModel</span></div>
+        <div class="ln"><span class="no">50</span><span class="src">  <span class="kw">var</span> notifiedOnce</span></div>
+        <div class="ln add current on"><span class="no">53 +</span><span class="curbar on"></span><span class="src"> <span class="cm">// 리셋으로 풀릴 때</span></span></div>
+        <div class="ln add current on"><span class="no">54 +</span><span class="curbar on"></span><span class="src"> <span class="kw">var</span> recovery</span></div>
+        <div class="ln"><span class="no">55</span><span class="src">  appearanceWatch</span></div>
+      </div></div><div class="side">History</div><div class="pv">Commit</div></div>
+  </div>
+  <div><span class="tag">포커스 없음</span>
+    <div class="win"><div class="diff">
+      <div class="bar"><span class="ctl">Myers</span><span class="ctl">공백 무시</span><span class="spacer"></span>
+        <span class="count">↑ 1 / 2 ↓</span></div>
+      <div class="body">
+        <div class="ln hunk"><span class="no"></span><span class="src">@@ -50,3 +50,5 @@ UsageModel</span></div>
+        <div class="ln"><span class="no">50</span><span class="src">  <span class="kw">var</span> notifiedOnce</span></div>
+        <div class="ln add"><span class="no">53 +</span><span class="curbar off"></span><span class="src"> <span class="cm">// 리셋으로 풀릴 때</span></span></div>
+        <div class="ln add"><span class="no">54 +</span><span class="curbar off"></span><span class="src"> <span class="kw">var</span> recovery</span></div>
+        <div class="ln"><span class="no">55</span><span class="src">  appearanceWatch</span></div>
+      </div></div><div class="side">History</div><div class="pv">Commit</div></div>
+  </div>
+</div>
+
+<!-- 3안 -->
+<h2>3안 — hunk 줄이 커서가 된다</h2>
+<p class="note">화살표가 걷는 단위가 hunk이니, 현재 hunk의 <code>@@</code> 줄을 목록의 선택 행처럼 칠한다.
+사이드바·타임라인·미리보기의 "선택된 행"과 똑같은 문법이라 배울 것이 없다.</p>
+<div class="pair">
+  <div><span class="tag">포커스 있음</span>
+    <div class="win"><div class="diff">
+      <div class="bar"><span class="ctl">Myers</span><span class="ctl">공백 무시</span><span class="spacer"></span>
+        <span class="count">↑ 1 / 2 ↓</span></div>
+      <div class="body">
+        <div class="ln hunk cursor"><span class="no"></span><span class="src">@@ -50,3 +50,5 @@ UsageModel</span></div>
+        <div class="ln"><span class="no">50</span><span class="src">  <span class="kw">var</span> notifiedOnce</span></div>
+        <div class="ln add"><span class="no">53 +</span><span class="src"> <span class="cm">// 리셋으로 풀릴 때</span></span></div>
+        <div class="ln add"><span class="no">54 +</span><span class="src"> <span class="kw">var</span> recovery</span></div>
+        <div class="ln hunk"><span class="no"></span><span class="src">@@ -537,9 +540,11 @@ notify</span></div>
+      </div></div><div class="side">History</div><div class="pv">Commit</div></div>
+  </div>
+  <div><span class="tag">포커스 없음</span>
+    <div class="win"><div class="diff">
+      <div class="bar"><span class="ctl">Myers</span><span class="ctl">공백 무시</span><span class="spacer"></span>
+        <span class="count">↑ 1 / 2 ↓</span></div>
+      <div class="body">
+        <div class="ln hunk"><span class="no"></span><span class="src">@@ -50,3 +50,5 @@ UsageModel</span></div>
+        <div class="ln"><span class="no">50</span><span class="src">  <span class="kw">var</span> notifiedOnce</span></div>
+        <div class="ln add"><span class="no">53 +</span><span class="src"> <span class="cm">// 리셋으로 풀릴 때</span></span></div>
+        <div class="ln add"><span class="no">54 +</span><span class="src"> <span class="kw">var</span> recovery</span></div>
+        <div class="ln hunk"><span class="no"></span><span class="src">@@ -537,9 +540,11 @@ notify</span></div>
+      </div></div><div class="side">History</div><div class="pv">Commit</div></div>
+  </div>
+</div>
+
+<!-- 4안 -->
+<h2>4안 — 화살표 카운터에 불이 들어온다</h2>
+<p class="note">키보드가 움직일 바로 그 값 — 툴바의 <code>↑ 1 / 2 ↓</code> — 만 액센트 알약으로 켜진다.
+가장 작고 조용하지만, 눈이 본문에 있을 땐 놓치기 쉽다.</p>
+<div class="pair">
+  <div><span class="tag">포커스 있음</span>
+    <div class="win"><div class="diff">
+      <div class="bar"><span class="ctl">Myers</span><span class="ctl">공백 무시</span><span class="spacer"></span>
+        <span class="arrow lit">↑</span><span class="count pill">1 / 2</span><span class="arrow lit">↓</span></div>
+      <div class="body">
+        <div class="ln hunk"><span class="no"></span><span class="src">@@ -50,3 +50,5 @@ UsageModel</span></div>
+        <div class="ln"><span class="no">50</span><span class="src">  <span class="kw">var</span> notifiedOnce</span></div>
+        <div class="ln add"><span class="no">53 +</span><span class="src"> <span class="cm">// 리셋으로 풀릴 때</span></span></div>
+        <div class="ln add"><span class="no">54 +</span><span class="src"> <span class="kw">var</span> recovery</span></div>
+        <div class="ln"><span class="no">55</span><span class="src">  appearanceWatch</span></div>
+      </div></div><div class="side">History</div><div class="pv">Commit</div></div>
+  </div>
+  <div><span class="tag">포커스 없음</span>
+    <div class="win"><div class="diff">
+      <div class="bar"><span class="ctl">Myers</span><span class="ctl">공백 무시</span><span class="spacer"></span>
+        <span class="count">↑ 1 / 2 ↓</span></div>
+      <div class="body">
+        <div class="ln hunk"><span class="no"></span><span class="src">@@ -50,3 +50,5 @@ UsageModel</span></div>
+        <div class="ln"><span class="no">50</span><span class="src">  <span class="kw">var</span> notifiedOnce</span></div>
+        <div class="ln add"><span class="no">53 +</span><span class="src"> <span class="cm">// 리셋으로 풀릴 때</span></span></div>
+        <div class="ln add"><span class="no">54 +</span><span class="src"> <span class="kw">var</span> recovery</span></div>
+        <div class="ln"><span class="no">55</span><span class="src">  appearanceWatch</span></div>
+      </div></div><div class="side">History</div><div class="pv">Commit</div></div>
+  </div>
+</div>
+
+<h2>비교</h2>
+<table>
+  <tr><td class="k">1안 실선</td><td>가장 눈에 잘 띄고 pane 단위로 일관된다. 새 요소를 하나 들이는 값을 치른다.</td></tr>
+  <tr><td class="k">2안 현재 막대</td><td>이미 있는 요소를 쓰고, 화살표가 움직일 대상까지 같이 말한다. 변화가 3px이라 조용한 편.</td></tr>
+  <tr><td class="k">3안 hunk 커서</td><td>앱의 "선택된 행" 문법을 그대로 물려받는다. 화살표=hunk 이동과 가장 정확히 맞물린다.</td></tr>
+  <tr><td class="k">4안 카운터</td><td>가장 작다. 툴바를 안 보고 있으면 놓친다.</td></tr>
+  <tr><td class="k">섞어도 된다</td><td>1안(어느 칸인지) + 3안(그 칸의 어디인지)은 서로 다른 것을 말하니 함께 써도 시끄럽지 않다.</td></tr>
+</table>
+
+</body>
+</html>

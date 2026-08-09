@@ -192,7 +192,7 @@ void main() {
     );
   });
 
-  testWidgets('history hides the minimap', (tester) async {
+  testWidgets('a history revision maps like any other diff', (tester) async {
     final scrollController = ScrollController();
     addTearDown(scrollController.dispose);
 
@@ -214,7 +214,9 @@ void main() {
       ),
     );
 
-    expect(find.byKey(const Key('full-diff-minimap')), findsNothing);
+    // The History list moved out to its own pane, so this view is a revision's
+    // diff and keeps its map.
+    expect(find.byKey(const Key('full-diff-minimap')), findsOneWidget);
   });
 
   testWidgets(

@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Full Diff × 미리보기 통합 — 최종 시안 (1안)</title>
+<style>
+  :root {
+    /* 본창(timeline_theme 다크) */
+    --bg:#1C1C1E; --surface:#242426; --panel:#202022; --raised:#2C2C2E;
+    --border:#38383A; --text:#F2F2F7; --muted:#AEAEB2;
+    /* full_diff_theme — 앱 토큰 그대로 */
+    --dheader:#151B23; --dcontrol:rgba(54,54,54,.96); --ddiv:#3D444D; --canvas:#0D1117;
+    --hunk:#111D2E; --sel:#0D273F; --selchip:#273E52; --accent:#83C4FF; --chip:#3A3A3A;
+    --dmuted:#9198A1; --add:#12261E; --addg:#1C4328; --del:#25171C; --delg:#542426;
+    --mtrack:#2F2F2F; --mview:#353A3E; --madd:#3FB950; --mdel:#F85149;
+    --green:#3FB950; --red:#F85149;
+    --mono:Menlo,"D2Coding",Monaco,monospace;
+  }
+  body { margin:0; padding:26px 24px 60px; background:#101012; color:var(--text);
+         font:13px/1.6 -apple-system,"Apple SD Gothic Neo",sans-serif; }
+  h1 { font-size:19px; font-weight:600; margin:0 0 4px; }
+  h2 { font-size:15px; font-weight:600; margin:34px 0 2px; }
+  p.note { margin:0 0 10px; color:#98989F; font-size:12px; max-width:1240px; }
+  .cap { font-size:11.5px; color:#8E8E93; padding:7px 2px 0; max-width:1240px; }
+  code { font-family:var(--mono); font-size:11px; background:#2C2C2E; padding:1px 5px; border-radius:4px; }
+
+  .win { width:1240px; max-width:100%; background:var(--bg); border:1px solid #333336;
+         border-radius:12px; overflow:hidden; box-shadow:0 8px 30px rgba(0,0,0,.5); }
+  .tbar { display:flex; align-items:center; gap:10px; height:44px; padding:0 14px;
+          background:var(--panel); border-bottom:1px solid var(--border); font-size:12px; }
+  .dots { display:flex; gap:7px; margin-right:6px; }
+  .dot { width:11px; height:11px; border-radius:50%; }
+  .tlabel { color:var(--muted); font-size:10px; line-height:1.2; }
+  .tval { font-weight:600; font-size:12.5px; }
+  .tgroup { display:flex; flex-direction:column; }
+  .spacer { flex:1; }
+  .tbtn { padding:4px 11px; border-radius:7px; background:var(--raised); color:var(--text); font-size:12px; }
+  .tbtn.on { background:#1E4632; color:#7BE0A2; border:1px solid #2E6B4A; font-weight:600; }
+  .tseg { display:flex; border-radius:7px; overflow:hidden; }
+  .tseg span { padding:4px 11px; background:var(--raised); border-right:1px solid var(--border); font-size:12px; }
+  .tseg span:last-child { border-right:none; }
+  .tseg .picked { background:#3A3A3E; font-weight:600; }
+  .logo { font-weight:700; font-size:15px; }
+  .gear { color:var(--muted); font-size:15px; }
+
+  /* ── Full Diff 헤더 (GlobalFileBar / GlobalDiffToolbar, 컴팩트판) ──
+     제어 높이 24(원판 28) · 행 상하 패딩 4(원판 7) · 컨트롤 간격 5 ·
+     라운드 12.5 · 선택=흰 배경+검정 글자 · 배지=필(9999) Menlo 11 */
+  .hrow { display:flex; align-items:center; gap:5px; padding:4px 10px; background:var(--dheader);
+          border-bottom:1px solid var(--ddiv); font-size:13px; flex-wrap:wrap; }
+  .back { width:24px; height:24px; display:flex; align-items:center; justify-content:center;
+          color:var(--dmuted); font-size:15px; flex:none; }
+  .pathchip { height:24px; max-width:260px; display:flex; align-items:center; padding:0 8px;
+              background:var(--chip); border-radius:7.5px; font-family:var(--mono); font-size:12px;
+              color:#fff; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .pill { height:24px; display:flex; align-items:center; padding:0 9px; border-radius:9999px;
+          background:var(--sel); color:var(--accent); font-family:var(--mono); font-size:11px; flex:none; }
+  .ctl { height:24px; display:flex; align-items:center; gap:4px; padding:0 7px;
+         border-radius:12.5px; background:var(--dcontrol); color:#fff; font-size:13px;
+         border:1px solid rgba(0,0,0,.1); flex:none; }
+  .ctl.sel { background:#fff; color:#000; border-color:transparent; }
+  .ctl .ic { font-size:13px; opacity:.9; }
+  .segg { display:flex; flex:none; }
+  .segg .ctl { border-radius:0; }
+  .segg .ctl:first-child { border-radius:12.5px 0 0 12.5px; }
+  .segg .ctl:last-child { border-radius:0 12.5px 12.5px 0; }
+  .hlabel { color:#fff; font-size:13px; flex:none; }
+  .counter { color:var(--dmuted); font-family:var(--mono); font-size:13px; padding:0 4px; flex:none; }
+  .navarrow { color:var(--dmuted); font-size:14px; padding:0 3px; flex:none; }
+  .commitline { padding:4px 12px; background:var(--dheader); border-bottom:1px solid var(--ddiv);
+                color:var(--dmuted); font-family:var(--mono); font-size:10.5px;
+                overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  /* ── diff 본문: Menlo 12 · 행높이 21 · 거터 Menlo 10 · 줄번호 폭 74 ── */
+  .dbody { flex:1 1 0; min-width:0; overflow:hidden; font-family:var(--mono); font-size:12px;
+           line-height:21px; background:var(--canvas); }
+  .ln { display:flex; white-space:pre; height:21px; }
+  .ln .no { width:74px; flex:none; text-align:right; padding-right:10px; color:var(--dmuted);
+            font-size:10px; }
+  .ln .src { flex:1; padding-left:6px; overflow:hidden; }
+  .ln.add { background:var(--add); } .ln.add .no { background:var(--addg); color:#B7DFC2; }
+  .ln.del { background:var(--del); } .ln.del .no { background:var(--delg); color:#F2B8B5; }
+  .ln.hunk { background:var(--hunk); color:var(--accent); font-size:11px; }
+  .ln.hunk .no { color:transparent; }
+  .kw { color:#FF7B72; } .ty { color:#FFA657; } .cm { color:#8B949E; } .str { color:#FFBFA0; }
+  .minimap { width:18px; flex:none; background:var(--mtrack); position:relative; }
+  .minimap i { position:absolute; left:2px; right:2px; border-radius:1px; }
+
+  /* ── History pane (FullHistoryView 카드 재사용) ── */
+  .hist { flex:none; display:flex; flex-direction:column; background:var(--dheader);
+          border-left:1px solid var(--ddiv); min-width:0; }
+  .hhead { display:flex; align-items:center; justify-content:space-between; padding:8px 11px 6px;
+           font-weight:600; font-size:12px; border-bottom:1px solid var(--ddiv); }
+  .hhead .cnt { color:var(--dmuted); font-weight:400; font-family:var(--mono); font-size:10px; }
+  .hbody { flex:1; overflow:hidden; background:var(--canvas); }
+  .hrow2 { padding:7px 11px 8px; border-left:2px solid transparent; min-width:0;
+           border-bottom:1px solid rgba(61,68,77,.4); }
+  .hrow2 .top { display:flex; gap:7px; align-items:baseline; }
+  .hrow2 .hsha { font-family:var(--mono); font-size:10px; color:var(--accent); flex:none; }
+  .hrow2 .hdate { color:var(--dmuted); font-family:var(--mono); font-size:10px; margin-left:auto; flex:none; }
+  .hrow2 .msg { color:#fff; font-size:11px; line-height:1.5; overflow:hidden; text-overflow:ellipsis;
+                white-space:nowrap; }
+  .hrow2 .who { color:var(--dmuted); font-size:10px; }
+  .hrow2.on { background:var(--sel); border-left-color:var(--accent); }
+
+  /* ── 미리보기 pane (본창 그대로) ── */
+  .preview { flex:none; background:var(--surface); display:flex; flex-direction:column;
+             font-size:12px; border-left:1px solid var(--border); min-width:0; }
+  .phead { display:flex; align-items:center; justify-content:space-between; padding:9px 12px 7px; }
+  .phead b { font-size:13px; }
+  .pmeta { padding:0 12px 8px; color:var(--muted); font-size:10.5px; }
+  .author { display:flex; gap:9px; align-items:center; padding:4px 12px 10px; }
+  .ava { width:30px; height:30px; border-radius:50%; background:#3E5F8A; display:flex; align-items:center;
+         justify-content:center; font-size:12px; font-weight:700; flex:none; }
+  .aname { font-weight:600; font-size:12.5px; line-height:1.35; }
+  .amail { color:var(--muted); font-size:10.5px; line-height:1.35; }
+  .fsummary { display:flex; justify-content:space-between; padding:6px 12px; border-top:1px solid var(--border);
+              color:var(--muted); font-size:11px; }
+  .plus { color:var(--green); } .minus { color:var(--red); }
+  .file { display:flex; gap:7px; align-items:center; padding:5px 12px; font-size:11.5px; min-width:0; }
+  .file .name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; direction:rtl; text-align:left; }
+  .file .st { width:13px; text-align:center; font-weight:700; font-size:10.5px; flex:none; }
+  .stM { color:#E3B341; } .stA { color:var(--green); }
+  .file .pm { font-size:10px; color:var(--muted); flex:none; }
+  .file.on { background:#234D72; }
+  .file.on .name { color:#fff; }
+
+  table.spec { border-collapse:collapse; font-size:12px; margin-top:6px; }
+  table.spec td, table.spec th { padding:3px 16px 3px 0; vertical-align:top; text-align:left; }
+  table.spec th { color:#8E8E93; font-weight:600; font-size:11px; }
+  .k { color:#8E8E93; white-space:nowrap; }
+  .sw { display:inline-block; width:10px; height:10px; border-radius:2px; vertical-align:-1px;
+        margin-right:4px; border:1px solid rgba(255,255,255,.15); }
+</style>
+</head>
+<body>
+
+<h1>Full Diff × 미리보기 통합 — 최종 시안 (1안 확정)</h1>
+<p class="note">미리보기 pane에서 파일을 고르면 사이드바+타임라인 자리가 Full Diff로 바뀐다.
+헤더 2줄은 지금 Full Diff 화면의 옵션 요소 <b>전부</b>를 그대로 가져온다 — ← 복귀, 파일 경로 칩,
+<code>M · +15 −11 · 23 KB</code>·<code>UTF-8</code> 배지, 집중 모드, 편집기로 열기, Diff|Blame,
+diff 알고리즘, 공백 무시, 줄바꿈, ↑ 1 / 2 ↓, Unified|Side-by-side, Hunk, History.
+헤더는 원판보다 컴팩트하다: 컨트롤 높이 28→24, 행 상하 패딩 7→4, 컨트롤 간격 5.
+미니맵·diff 팔레트·문법 강조·폰트는 앱 토큰 그대로(아래 충실도 표). 파일 목록 pane만 없다 —
+그 역할은 미리보기 pane이 한다.</p>
+
+<!-- ═══════════════ 우측 배치 ═══════════════ -->
+<h2>미리보기 = 우측 (기본): diff · History · 미리보기</h2>
+<div class="win">
+  <div class="tbar">
+    <div class="dots"><span class="dot" style="background:#FF5F57"></span><span class="dot" style="background:#FEBC2E"></span><span class="dot" style="background:#28C840"></span></div>
+    <div class="tgroup"><span class="tlabel">저장소</span><span class="tval">clf ▾</span></div>
+    <div class="tgroup" style="margin-left:14px"><span class="tlabel">기준 브랜치</span><span class="tval">main ▾</span></div>
+    <span class="spacer"></span><span class="logo">Yogit</span><span class="spacer"></span>
+    <span class="tbtn">미리보기</span>
+    <div class="tseg"><span>좌측</span><span class="picked">우측</span><span>하단</span></div>
+    <span class="tbtn">모니터링</span><span class="tbtn on">Full Diff ⌘D</span><span class="gear">⚙</span>
+  </div>
+  <div style="display:flex; height:470px">
+    <!-- diff 칼럼 -->
+    <div style="flex:1; min-width:0; display:flex; flex-direction:column">
+      <div class="hrow">
+        <span class="back">←</span>
+        <span class="pathchip">Sources/ClfApp/UsageModel.swift</span>
+        <span class="pill">M · +15 −11 · 23 KB</span>
+        <span class="pill">UTF-8</span>
+        <span class="spacer"></span>
+        <span class="ctl"><span class="ic">⧉</span>집중 모드</span>
+        <span class="ctl"><span class="ic">↗</span>편집기로 열기</span>
+        <div class="segg"><span class="ctl sel">Diff</span><span class="ctl">Blame</span></div>
+      </div>
+      <div class="hrow">
+        <span class="hlabel">diff 알고리즘</span>
+        <span class="ctl">Myers <span style="opacity:.6">▾</span></span>
+        <span class="ctl"><span class="ic">␣</span>공백 무시</span>
+        <span class="ctl sel"><span class="ic">⏎</span>줄바꿈</span>
+        <span class="spacer"></span>
+        <span class="navarrow">↑</span><span class="counter">1 / 2</span><span class="navarrow">↓</span>
+        <span class="spacer"></span>
+        <div class="segg"><span class="ctl sel">Unified</span><span class="ctl">Side-by-side</span></div>
+        <span class="ctl sel"><span class="ic">≡</span>Hunk</span>
+        <span class="ctl sel"><span class="ic">↺</span>History</span>
+      </div>
+      <div class="commitline">6983f0f · 이전 상태 ← ff81987 · fix(app): 같은 알림이 읽을 때마다 다시 오던 것을 멈추고, 풀림 알림을 더한다</div>
+      <div style="display:flex; flex:1; min-height:0">
+        <div class="dbody">
+          <div class="ln hunk"><span class="no"></span><span class="src">@@ -50,3 +50,5 @@ final class UsageModel</span></div>
+          <div class="ln"><span class="no">50  50</span><span class="src">  <span class="kw">@Published private</span>(set) <span class="kw">var</span> notifyPermission = <span class="ty">Notifier.Permission</span>.unknown</span></div>
+          <div class="ln"><span class="no">51  51</span><span class="src">  <span class="cm">/// 앱을 켠 뒤 한 번이라도 알림을 판단했다. 첫 읽기는 표시만 하고 안 보낸다.</span></span></div>
+          <div class="ln"><span class="no">52  52</span><span class="src">  <span class="kw">private var</span> notifiedOnce = <span class="kw">false</span></span></div>
+          <div class="ln add"><span class="no">    53</span><span class="src">+ <span class="cm">/// 빨강에 들어섰던 계정. 리셋으로 풀릴 때 한 번 알리기 위해 기억한다.</span></span></div>
+          <div class="ln add"><span class="no">    54</span><span class="src">+ <span class="kw">private var</span> recovery = <span class="ty">RecoveryWatch</span>()</span></div>
+          <div class="ln"><span class="no">55  55</span><span class="src">  <span class="kw">private var</span> appearanceWatch: (<span class="kw">any</span> <span class="ty">NSObjectProtocol</span>)?</span></div>
+          <div class="ln"><span class="no">56  56</span><span class="src">  <span class="kw">private var</span> spaceWatch: (<span class="kw">any</span> <span class="ty">NSObjectProtocol</span>)?</span></div>
+          <div class="ln hunk"><span class="no"></span><span class="src">@@ -537,9 +540,11 @@ private func notify(at:)</span></div>
+          <div class="ln"><span class="no">540 540</span><span class="src">  <span class="kw">private func</span> notify(at now: <span class="ty">Date</span>) <span class="kw">async</span> {</span></div>
+          <div class="ln"><span class="no">541 541</span><span class="src">    <span class="kw">let</span> visible = prefs.apply(to: known)</span></div>
+          <div class="ln del"><span class="no">537    </span><span class="src">- <span class="kw">let</span> alerts = visible.flatMap { org <span class="kw">in</span></span></div>
+          <div class="ln add"><span class="no">    542</span><span class="src">+ <span class="kw">let</span> live = visible.flatMap { org <span class="kw">in</span></span></div>
+          <div class="ln"><span class="no">543 543</span><span class="src">      <span class="ty">UsageAlerts</span>.build(for: org,</span></div>
+          <div class="ln"><span class="no">544 544</span><span class="src">        others: visible.filter { $0.uuid != org.uuid },</span></div>
+          <div class="ln"><span class="no">545 545</span><span class="src">        now: now)</span></div>
+          <div class="ln del"><span class="no">546    </span><span class="src">- <span class="kw">guard</span> prefs.notify <span class="kw">else</span> {</span></div>
+          <div class="ln del"><span class="no">547    </span><span class="src">-   <span class="cm">// 꺼 둔 동안의 조건은 쌓아 두지 않는다</span></span></div>
+          <div class="ln del"><span class="no">548    </span><span class="src">-   notifier.markSeen(alerts)</span></div>
+        </div>
+        <div class="minimap">
+          <i style="top:6%;height:2.5%;background:var(--madd)"></i>
+          <i style="top:41%;height:1.5%;background:var(--mdel)"></i>
+          <i style="top:43%;height:2.5%;background:var(--madd)"></i>
+          <i style="top:52%;height:4%;background:var(--mdel)"></i>
+          <i style="top:2%;height:34%;background:var(--mview)"></i>
+          <i style="top:2%;height:34%;border:1px solid rgba(131,196,255,.76);border-radius:2px;background:transparent"></i>
+        </div>
+      </div>
+    </div>
+    <!-- History pane: FullDiffColumnWidths.history 기본 280, 드래그 180–420 -->
+    <div class="hist" style="width:250px">
+      <div class="hhead">History <span class="cnt">UsageModel.swift · 12</span></div>
+      <div class="hbody">
+        <div class="hrow2 on"><div class="top"><span class="hsha">ff81987</span><span class="hdate">08-06</span></div>
+          <div class="msg">fix(app): 같은 알림이 읽을 때마다 다시 오던 것을 멈추고…</div><div class="who">Suwon Chae</div></div>
+        <div class="hrow2"><div class="top"><span class="hsha">6983f0f</span><span class="hdate">08-01</span></div>
+          <div class="msg">feat(app): 사용량 경고를 메뉴바에 표시</div><div class="who">Suwon Chae</div></div>
+        <div class="hrow2"><div class="top"><span class="hsha">3c90d12</span><span class="hdate">07-28</span></div>
+          <div class="msg">refactor: UsageModel 상태 분리</div><div class="who">Suwon Chae</div></div>
+        <div class="hrow2"><div class="top"><span class="hsha">b44a0e7</span><span class="hdate">07-21</span></div>
+          <div class="msg">feat: 알림 권한 프롬프트</div><div class="who">Suwon Chae</div></div>
+        <div class="hrow2"><div class="top"><span class="hsha">91d03aa</span><span class="hdate">07-14</span></div>
+          <div class="msg">feat: 첫 사용량 모델</div><div class="who">Suwon Chae</div></div>
+        <div class="hrow2"><div class="top"><span class="hsha">2f6c881</span><span class="hdate">07-09</span></div>
+          <div class="msg">chore: Clf 앱 뼈대</div><div class="who">Suwon Chae</div></div>
+      </div>
+    </div>
+    <!-- 미리보기 pane -->
+    <div class="preview" style="width:262px">
+      <div class="phead"><b>Commit &amp; Diff</b></div>
+      <div class="pmeta">파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓</div>
+      <div class="author"><span class="ava">SC</span>
+        <div><div class="aname">Suwon Chae</div><div class="amail">sw.chae@navercorp.com · 08-06 01:54</div></div></div>
+      <div class="fsummary"><span>6 files changed</span><span><span class="plus">+323</span> <span class="minus">−31</span></span></div>
+      <div class="file on"><span class="st stM">M</span><span class="name">Sources/ClfApp/UsageModel.swift</span><span class="pm"><span class="plus">+15</span> <span class="minus">−11</span></span></div>
+      <div class="file"><span class="st stA">A</span><span class="name">Sources/ClfDesktop/RecoveryWatch.swift</span><span class="pm"><span class="plus">+49</span></span></div>
+      <div class="file"><span class="st stM">M</span><span class="name">Sources/ClfDesktop/UsageAlert.swift</span><span class="pm"><span class="plus">+47</span> <span class="minus">−10</span></span></div>
+      <div class="file"><span class="st stA">A</span><span class="name">Tests/ClfDesktopTests/RecoveryWatchTests.swift</span><span class="pm"><span class="plus">+107</span></span></div>
+      <div class="file"><span class="st stM">M</span><span class="name">Tests/ClfDesktopTests/UsageAlertTests.swift</span><span class="pm"><span class="plus">+37</span> <span class="minus">−7</span></span></div>
+      <div class="file"><span class="st stM">M</span><span class="name">docs/design/notify-mockup.html</span><span class="pm"><span class="plus">+68</span> <span class="minus">−3</span></span></div>
+    </div>
+  </div>
+</div>
+<div class="cap">History 토글(⌘3)을 끄면 History pane이 접히고 diff가 폭을 흡수한다. History pane 폭은
+드래그로 조절(180–420, 기본 280 — 기존 Full Diff 설정 그대로). <b>집중 모드</b>는 History·미리보기 pane을
+함께 숨겨 diff만 남긴다(⇧F, 다시 누르면 복귀). Blame을 고르면 diff 자리에서 blame으로 전환.
+머지 커밋이면 커밋 라인에 <code>Parent 1 · 6983f0f ▾</code> 선택 칩이 붙는다.</div>
+
+<!-- ═══════════════ 하단 배치 ═══════════════ -->
+<h2>미리보기 = 하단: 위 diff / 아래 미리보기 · History</h2>
+<p class="note">diff가 위 전체를 차지하고, 아래 줄에서 History pane이 미리보기 pane 오른쪽에 붙는다.
+아래 줄 높이는 지금 미리보기 하단 배치의 높이 조절을 그대로 쓴다.</p>
+<div class="win">
+  <div class="tbar">
+    <div class="dots"><span class="dot" style="background:#FF5F57"></span><span class="dot" style="background:#FEBC2E"></span><span class="dot" style="background:#28C840"></span></div>
+    <div class="tgroup"><span class="tlabel">저장소</span><span class="tval">clf ▾</span></div>
+    <div class="tgroup" style="margin-left:14px"><span class="tlabel">기준 브랜치</span><span class="tval">main ▾</span></div>
+    <span class="spacer"></span><span class="logo">Yogit</span><span class="spacer"></span>
+    <span class="tbtn">미리보기</span>
+    <div class="tseg"><span>좌측</span><span>우측</span><span class="picked">하단</span></div>
+    <span class="tbtn">모니터링</span><span class="tbtn on">Full Diff ⌘D</span><span class="gear">⚙</span>
+  </div>
+  <div style="display:flex; flex-direction:column; height:470px">
+    <!-- diff (위 전체) -->
+    <div style="flex:1; min-height:0; display:flex; flex-direction:column">
+      <div class="hrow">
+        <span class="back">←</span>
+        <span class="pathchip">Sources/ClfApp/UsageModel.swift</span>
+        <span class="pill">M · +15 −11 · 23 KB</span>
+        <span class="pill">UTF-8</span>
+        <span class="spacer"></span>
+        <span class="ctl"><span class="ic">⧉</span>집중 모드</span>
+        <span class="ctl"><span class="ic">↗</span>편집기로 열기</span>
+        <div class="segg"><span class="ctl sel">Diff</span><span class="ctl">Blame</span></div>
+        <span style="width:2px"></span>
+        <span class="hlabel" style="color:var(--dmuted)">·</span>
+        <span class="ctl">Myers <span style="opacity:.6">▾</span></span>
+        <span class="ctl"><span class="ic">␣</span>공백 무시</span>
+        <span class="ctl sel"><span class="ic">⏎</span>줄바꿈</span>
+        <span class="navarrow">↑</span><span class="counter">1 / 2</span><span class="navarrow">↓</span>
+        <div class="segg"><span class="ctl sel">Unified</span><span class="ctl">Side-by-side</span></div>
+        <span class="ctl sel"><span class="ic">≡</span>Hunk</span>
+        <span class="ctl sel"><span class="ic">↺</span>History</span>
+      </div>
+      <div class="commitline">6983f0f · 이전 상태 ← ff81987 · fix(app): 같은 알림이 읽을 때마다 다시 오던 것을 멈추고, 풀림 알림을 더한다</div>
+      <div style="display:flex; flex:1; min-height:0">
+        <div class="dbody">
+          <div class="ln hunk"><span class="no"></span><span class="src">@@ -50,3 +50,5 @@ final class UsageModel</span></div>
+          <div class="ln"><span class="no">50  50</span><span class="src">  <span class="kw">@Published private</span>(set) <span class="kw">var</span> notifyPermission = <span class="ty">Notifier.Permission</span>.unknown</span></div>
+          <div class="ln"><span class="no">51  51</span><span class="src">  <span class="cm">/// 앱을 켠 뒤 한 번이라도 알림을 판단했다. 첫 읽기는 표시만 하고 안 보낸다.</span></span></div>
+          <div class="ln"><span class="no">52  52</span><span class="src">  <span class="kw">private var</span> notifiedOnce = <span class="kw">false</span></span></div>
+          <div class="ln add"><span class="no">    53</span><span class="src">+ <span class="cm">/// 빨강에 들어섰던 계정. 리셋으로 풀릴 때 한 번 알리기 위해 기억한다.</span></span></div>
+          <div class="ln add"><span class="no">    54</span><span class="src">+ <span class="kw">private var</span> recovery = <span class="ty">RecoveryWatch</span>()</span></div>
+          <div class="ln"><span class="no">55  55</span><span class="src">  <span class="kw">private var</span> appearanceWatch: (<span class="kw">any</span> <span class="ty">NSObjectProtocol</span>)?</span></div>
+          <div class="ln del"><span class="no">537    </span><span class="src">- <span class="kw">let</span> alerts = visible.flatMap { org <span class="kw">in</span></span></div>
+          <div class="ln add"><span class="no">    542</span><span class="src">+ <span class="kw">let</span> live = visible.flatMap { org <span class="kw">in</span></span></div>
+          <div class="ln"><span class="no">543 543</span><span class="src">      <span class="ty">UsageAlerts</span>.build(for: org,</span></div>
+        </div>
+        <div class="minimap">
+          <i style="top:8%;height:3%;background:var(--madd)"></i>
+          <i style="top:52%;height:2%;background:var(--mdel)"></i>
+          <i style="top:55%;height:3%;background:var(--madd)"></i>
+          <i style="top:4%;height:44%;background:var(--mview)"></i>
+          <i style="top:4%;height:44%;border:1px solid rgba(131,196,255,.76);border-radius:2px;background:transparent"></i>
+        </div>
+      </div>
+    </div>
+    <!-- 아래 줄: 미리보기 | History -->
+    <div style="display:flex; height:190px; border-top:1px solid var(--border)">
+      <div class="preview" style="flex:1; border-left:none">
+        <div style="display:flex; min-height:0; flex:1">
+          <div style="width:250px; flex:none; border-right:1px solid var(--border); padding-top:2px">
+            <div class="phead"><b>Commit &amp; Diff</b></div>
+            <div class="author"><span class="ava">SC</span>
+              <div><div class="aname">Suwon Chae</div><div class="amail">sw.chae@navercorp.com · 08-06</div></div></div>
+            <div class="fsummary" style="border-top:none"><span>6 files changed</span><span><span class="plus">+323</span> <span class="minus">−31</span></span></div>
+          </div>
+          <div style="flex:1; min-width:0; padding-top:4px">
+            <div class="file on"><span class="st stM">M</span><span class="name">Sources/ClfApp/UsageModel.swift</span><span class="pm"><span class="plus">+15</span> <span class="minus">−11</span></span></div>
+            <div class="file"><span class="st stA">A</span><span class="name">Sources/ClfDesktop/RecoveryWatch.swift</span><span class="pm"><span class="plus">+49</span></span></div>
+            <div class="file"><span class="st stM">M</span><span class="name">Sources/ClfDesktop/UsageAlert.swift</span><span class="pm"><span class="plus">+47</span> <span class="minus">−10</span></span></div>
+            <div class="file"><span class="st stA">A</span><span class="name">Tests/ClfDesktopTests/RecoveryWatchTests.swift</span><span class="pm"><span class="plus">+107</span></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="hist" style="width:250px; border-left:1px solid var(--border)">
+        <div class="hhead">History <span class="cnt">UsageModel.swift · 12</span></div>
+        <div class="hbody">
+          <div class="hrow2 on"><div class="top"><span class="hsha">ff81987</span><span class="hdate">08-06</span></div>
+            <div class="msg">fix(app): 같은 알림이 읽을 때마다 다시 오던 것을…</div><div class="who">Suwon Chae</div></div>
+          <div class="hrow2"><div class="top"><span class="hsha">6983f0f</span><span class="hdate">08-01</span></div>
+            <div class="msg">feat(app): 사용량 경고를 메뉴바에 표시</div><div class="who">Suwon Chae</div></div>
+          <div class="hrow2"><div class="top"><span class="hsha">3c90d12</span><span class="hdate">07-28</span></div>
+            <div class="msg">refactor: UsageModel 상태 분리</div><div class="who">Suwon Chae</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="cap">좌측 배치는 우측의 거울: <b>미리보기 · History · diff</b> 순. 두 헤더 줄은 폭이 좁아지면
+지금 Full Diff처럼 Wrap으로 줄바꿈한다(하단 배치 시안은 한 줄로 합쳐 그렸다 — 실제로는 같은 2줄 구조).</div>
+
+<h2>충실도 표 — 앱과 시안이 공유하는 토큰 (구현 검수 기준)</h2>
+<table class="spec">
+  <tr><th>대상</th><th>값</th><th>출처</th></tr>
+  <tr><td class="k">diff 캔버스</td><td><span class="sw" style="background:#0D1117"></span>#0D1117</td><td>fullDiffCanvas</td></tr>
+  <tr><td class="k">헤더/History 배경</td><td><span class="sw" style="background:#151B23"></span>#151B23 · 구분선 <span class="sw" style="background:#3D444D"></span>#3D444D</td><td>fullDiffHeader / fullDiffDivider</td></tr>
+  <tr><td class="k">추가 행</td><td><span class="sw" style="background:#12261E"></span>#12261E · 거터 <span class="sw" style="background:#1C4328"></span>#1C4328</td><td>fullDiffAddedSource / Gutter</td></tr>
+  <tr><td class="k">삭제 행</td><td><span class="sw" style="background:#25171C"></span>#25171C · 거터 <span class="sw" style="background:#542426"></span>#542426</td><td>fullDiffDeletedSource / Gutter</td></tr>
+  <tr><td class="k">hunk 헤더 / 선택 / 액센트</td><td><span class="sw" style="background:#111D2E"></span>#111D2E · <span class="sw" style="background:#0D273F"></span>#0D273F · <span class="sw" style="background:#83C4FF"></span>#83C4FF</td><td>fullDiffHunkHeader / Selection / Accent</td></tr>
+  <tr><td class="k">미니맵</td><td>폭 18 · 트랙 #2F2F2F · 뷰포트 #353A3E · +#3FB950 −#F85149 · 링 #83C4FF(76%)</td><td>fullDiffMinimap*</td></tr>
+  <tr><td class="k">소스 폰트</td><td>Menlo(D2Coding 폴백) 12px · 행높이 21 · 거터 10px · 줄번호 폭 74</td><td>fullDiffSourceTextStyle / fullDiffLineNumberWidth</td></tr>
+  <tr><td class="k">문법 강조</td><td>HighlightJsSyntaxHighlighter 그대로 (키워드 #FF7B72 · 타입 #FFA657 · 주석 #8B949E · 문자열 #FFBFA0)</td><td>full_diff_syntax</td></tr>
+  <tr><td class="k">헤더 컨트롤</td><td>높이 24(원판 28) · 라운드 12.5 · 선택 = 흰 배경+검정 글자 · 글자 13px</td><td>fullDiffControlHeight 28→24, _HeaderButton</td></tr>
+  <tr><td class="k">헤더 행 여백</td><td>상하 패딩 4(원판 7) · 좌우 10 · 컨트롤 간격 5(원판 6–10)</td><td>_HeaderBar, Wrap spacing</td></tr>
+  <tr><td class="k">배지</td><td>필(radius 9999) · Menlo 11px · #83C4FF on #0D273F</td><td>_HeaderBadge</td></tr>
+  <tr><td class="k">경로 칩</td><td>#3A3A3A · 라운드 7.5 · Menlo 13px · 최대폭 260</td><td>file-path-chip</td></tr>
+  <tr><td class="k">History 카드</td><td>제목 11px · sha/날짜 Menlo 10px · 선택 = #0D273F + 좌측 2px #83C4FF</td><td>FullHistoryView / FullDiffCommitInfoCard</td></tr>
+  <tr><td class="k">History pane 폭</td><td>기본 280 · 드래그 180–420 · 설정 저장</td><td>FullDiffColumnWidths.history</td></tr>
+  <tr><td class="k">미리보기 pane</td><td>지금 그대로 — 이 작업에서 변경 없음</td><td>timeline.dart _preview()</td></tr>
+</table>
+
+</body>
+</html>

@@ -244,6 +244,15 @@ class DiffHunk {
         count == 1 ? '$start' : '$start,$count';
     return '−${range(oldStart, oldCount)}  +${range(newStart, newCount)}';
   }
+
+  /// The header git itself writes over a hunk, with whatever enclosing symbol
+  /// the diff named trailing it.
+  String unifiedHeader(String trailing) {
+    String range(int start, int count) => '$start,$count';
+    final head =
+        '@@ -${range(oldStart, oldCount)} +${range(newStart, newCount)} @@';
+    return trailing.isEmpty ? head : '$head $trailing';
+  }
 }
 
 @immutable

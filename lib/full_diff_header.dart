@@ -68,12 +68,12 @@ class GlobalFileBar extends StatelessWidget {
       child: Wrap(
         alignment: WrapAlignment.spaceBetween,
         runSpacing: 8,
-        spacing: 10,
+        spacing: 5,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           Wrap(
             key: const Key('file-info-controls'),
-            spacing: 8,
+            spacing: 5,
             runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
@@ -84,13 +84,21 @@ class GlobalFileBar extends StatelessWidget {
                   key: const Key('full-diff-back'),
                   tooltip: '타임라인으로 돌아가기 (Esc)',
                   onPressed: onBack,
-                  icon: const Icon(Icons.arrow_back, size: 18),
+                  icon: const Icon(Icons.arrow_back, size: 16),
                   color: fullDiffMuted,
                   constraints: const BoxConstraints.tightFor(
-                    width: 32,
-                    height: 32,
+                    width: fullDiffControlHeight,
+                    height: fullDiffControlHeight,
                   ),
                   padding: EdgeInsets.zero,
+                  // Material 3 reads its size from the style, not from
+                  // `constraints`, and its 48px tap target would push the row
+                  // past one control height.
+                  style: IconButton.styleFrom(
+                    minimumSize: const Size.square(fullDiffControlHeight),
+                    maximumSize: const Size.square(fullDiffControlHeight),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
                 ),
               ),
               if (path case final path?)
@@ -135,7 +143,7 @@ class GlobalFileBar extends StatelessWidget {
           ),
           Wrap(
             key: const Key('file-actions-controls'),
-            spacing: 6,
+            spacing: 5,
             runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
@@ -254,11 +262,16 @@ class GlobalDiffToolbar extends StatelessWidget {
     final canGoNext =
         navigationEnabled && activeIndex >= 0 && activeIndex < anchorCount - 1;
     final algorithmControls = Wrap(
-      spacing: compact ? 3 : (dense ? 0 : 6),
+      spacing: compact ? 3 : (dense ? 0 : 5),
       runSpacing: 6,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        const Text('diff 알고리즘', key: Key('diff-algorithm-label')),
+        const Text(
+          'diff 알고리즘',
+          key: Key('diff-algorithm-label'),
+          // 다른 헤더 라벨과 같은 13 — 안 주면 bodyMedium 14를 물려받는다.
+          style: TextStyle(color: Colors.white, fontSize: 13),
+        ),
         FullDiffShortcutHint(
           visible: showShortcutHints,
           label: shortcutLabel('⇧A'),
@@ -301,7 +314,7 @@ class GlobalDiffToolbar extends StatelessWidget {
       ],
     );
     final navigationControls = Wrap(
-      spacing: compact ? 3 : (dense ? 0 : 6),
+      spacing: compact ? 3 : (dense ? 0 : 5),
       runSpacing: 6,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
@@ -394,7 +407,7 @@ class GlobalDiffToolbar extends StatelessWidget {
       child: Wrap(
         alignment: WrapAlignment.spaceBetween,
         runSpacing: 8,
-        spacing: width <= 782 ? 0 : 10,
+        spacing: width <= 782 ? 0 : 5,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           if (compact)
@@ -404,7 +417,7 @@ class GlobalDiffToolbar extends StatelessWidget {
           navigationControls,
           if (showLeadingControls && view != FullDiffView.blame)
             Wrap(
-              spacing: 6,
+              spacing: 5,
               runSpacing: 6,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [layoutHint, hunkControl, historyControl],
@@ -498,7 +511,7 @@ class _HeaderBar extends StatelessWidget {
       border: Border(bottom: BorderSide(color: fullDiffDivider)),
     ),
     child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       child: child,
     ),
   );
@@ -639,7 +652,7 @@ class _HeaderButton extends StatelessWidget {
                   label,
                   style: TextStyle(
                     color: enabled ? foreground : disabledForeground,
-                    fontSize: 14,
+                    fontSize: 13,
                     height: 1,
                   ),
                 ),
@@ -720,7 +733,19 @@ class _NavigationButton extends StatelessWidget {
         width: compact ? 22 : fullDiffControlHeight,
         height: fullDiffControlHeight,
       ),
-      visualDensity: VisualDensity.compact,
+      // Material 3 sizes from the style, not from `constraints`, and its 48px
+      // tap target would stand the row up taller than one control.
+      style: IconButton.styleFrom(
+        minimumSize: Size(
+          compact ? 22 : fullDiffControlHeight,
+          fullDiffControlHeight,
+        ),
+        maximumSize: Size(
+          compact ? 22 : fullDiffControlHeight,
+          fullDiffControlHeight,
+        ),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
     ),
   );
 }

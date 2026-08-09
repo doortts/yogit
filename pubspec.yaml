@@ -70,10 +70,22 @@ flutter:
       fonts:
         - asset: assets/fonts/DancingScript.ttf
           weight: 700
+    # Commit-message font choices in settings. Geist OFL 1.1, Open Sans
+    # OFL 1.1 — both licenses bundled beside the fonts.
+    - family: Geist
+      fonts:
+        - asset: assets/fonts/Geist-Regular.ttf
+          weight: 400
+    - family: OpenSans
+      fonts:
+        - asset: assets/fonts/OpenSans-Regular.ttf
+          weight: 400
 
   assets:
     - assets/fonts/D2Coding-OFL.txt
     - assets/fonts/DancingScript-OFL.txt
+    - assets/fonts/Geist-OFL.txt
+    - assets/fonts/OpenSans-LICENSE.txt
 
   # To add assets to your application, add an assets section, like this:
   # assets:

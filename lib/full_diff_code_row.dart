@@ -12,6 +12,9 @@ import 'typography.dart';
 
 const fullDiffSourceRowHeight = 21.0;
 
+/// The +/− column beside the numbers in a one-number gutter.
+const _signColumnWidth = 16.0;
+
 const fullDiffSourceTextStyle = TextStyle(
   color: Colors.white,
   fontFamily: technicalFontFamily,
@@ -26,6 +29,15 @@ const _gutterStyle = TextStyle(
   fontFamilyFallback: technicalFontFallback,
   fontSize: 10,
   height: 21 / 10,
+);
+
+/// The sign standing where the code starts, on the row's own fill.
+const _signStyle = TextStyle(
+  color: fullDiffMuted,
+  fontFamily: technicalFontFamily,
+  fontFamilyFallback: technicalFontFallback,
+  fontSize: 12,
+  height: fullDiffSourceRowHeight / 12,
 );
 
 class FullDiffLazyBuildMetrics {
@@ -251,12 +263,14 @@ class FullDiffCodeRow extends StatelessWidget {
     this.current = false,
     this.wordRanges = const [],
     this.compactGutter = false,
+    this.gutterWidth = fullDiffLineNumberWidth,
     this.showGutter = true,
     this.leadingMetadata,
     this.horizontalScroll = true,
     this.richRenderingEnabled = true,
     this.compact = false,
     this.currentMarkerColor = fullDiffAccent,
+    this.currentTint,
     this.selectionOrder,
     super.key,
   });
@@ -268,12 +282,20 @@ class FullDiffCodeRow extends StatelessWidget {
   final bool current;
   final List<WordRange> wordRanges;
   final bool compactGutter;
+
+  /// How much room the numbers take. Unified spends it on two columns;
+  /// side-by-side carries one number per side and needs far less.
+  final double gutterWidth;
   final bool showGutter;
   final Widget? leadingMetadata;
   final bool horizontalScroll;
   final bool richRenderingEnabled;
   final bool compact;
   final Color currentMarkerColor;
+
+  /// Washed over the current change while the diff holds the keyboard, so the
+  /// row the arrows will move reads at a glance.
+  final Color? currentTint;
   final FullDiffSelectionOrder? selectionOrder;
 
   @override
@@ -326,7 +348,7 @@ class FullDiffCodeRow extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (showGutter) const SizedBox(width: fullDiffLineNumberWidth),
+              if (showGutter) SizedBox(width: gutterWidth),
               if (leadingMetadata case final Widget metadata)
                 SelectionContainer.disabled(child: metadata),
               Expanded(
@@ -340,15 +362,41 @@ class FullDiffCodeRow extends StatelessWidget {
                       ),
                       child: Padding(
                         padding: EdgeInsets.symmetric(
-                          horizontal: 10,
+                          horizontal: compactGutter ? 10 : 6,
                           vertical: compactSourceRow ? 0 : 3,
                         ),
-                        child: _SourceSelectionContainer(
-                          selectionOrder: selectionOrder,
-                          child: source,
-                        ),
+                        child: compactGutter
+                            ? _SourceSelectionContainer(
+                                selectionOrder: selectionOrder,
+                                child: source,
+                              )
+                            : Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // The sign reads with the code but copies
+                                  // with the gutter — that is, not at all.
+                                  SelectionContainer.disabled(
+                                    child: SizedBox(
+                                      width: 14,
+                                      child: Text(marker, style: _signStyle),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: _SourceSelectionContainer(
+                                      selectionOrder: selectionOrder,
+                                      child: source,
+                                    ),
+                                  ),
+                                ],
+                              ),
                       ),
                     ),
+                    if (current && currentTint != null)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: ColoredBox(color: currentTint!),
+                        ),
+                      ),
                     if (current)
                       Positioned(
                         key: const Key('code-row-current-marker'),
@@ -374,32 +422,43 @@ class FullDiffCodeRow extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (compactGutter)
+                    if (compactGutter) ...[
                       _GutterCell(
                         number: line.newNumber ?? line.oldNumber,
-                        width: fullDiffLineNumberWidth - 18,
+                        width: gutterWidth - _signColumnWidth,
                         color: gutterColor,
-                      )
-                    else ...[
+                        compact: compactSourceRow,
+                      ),
+                      Container(
+                        width: _signColumnWidth,
+                        constraints: BoxConstraints(
+                          minHeight: compactSourceRow
+                              ? fullDiffSourceRowHeight
+                              : 27,
+                        ),
+                        alignment: Alignment.topCenter,
+                        color: gutterColor,
+                        padding: EdgeInsets.symmetric(
+                          vertical: compactSourceRow ? 0 : 3,
+                        ),
+                        child: Text(marker, style: _gutterStyle),
+                      ),
+                    ] else ...[
+                      // Both numbers, the way git prints them; the sign moved
+                      // over to the source so the two columns get the width.
                       _GutterCell(
                         number: line.oldNumber,
-                        width: (fullDiffLineNumberWidth - 18) / 2,
+                        width: gutterWidth / 2,
                         color: gutterColor,
+                        compact: compactSourceRow,
                       ),
                       _GutterCell(
                         number: line.newNumber,
-                        width: (fullDiffLineNumberWidth - 18) / 2,
+                        width: gutterWidth / 2,
                         color: gutterColor,
+                        compact: compactSourceRow,
                       ),
                     ],
-                    Container(
-                      width: 18,
-                      constraints: const BoxConstraints(minHeight: 27),
-                      alignment: Alignment.topCenter,
-                      color: gutterColor,
-                      padding: const EdgeInsets.symmetric(vertical: 3),
-                      child: Text(marker, style: _gutterStyle),
-                    ),
                   ],
                 ),
               ),
@@ -529,19 +588,26 @@ class _GutterCell extends StatelessWidget {
     required this.number,
     required this.width,
     required this.color,
+    this.compact = false,
   });
 
   final int? number;
   final double width;
   final Color color;
 
+  /// Follows the source row's own density — a tall cell beside a 21px row
+  /// paints its fill past the line it belongs to.
+  final bool compact;
+
   @override
   Widget build(BuildContext context) => Container(
     width: width,
-    constraints: const BoxConstraints(minHeight: 27),
+    constraints: BoxConstraints(
+      minHeight: compact ? fullDiffSourceRowHeight : 27,
+    ),
     alignment: Alignment.topRight,
     color: color,
-    padding: const EdgeInsets.fromLTRB(0, 3, 2, 3),
+    padding: EdgeInsets.fromLTRB(0, compact ? 0 : 3, 2, compact ? 0 : 3),
     child: Text(number?.toString() ?? '', style: _gutterStyle),
   );
 }
@@ -598,12 +664,8 @@ TextSpan _sourceSpan(
   );
   var style = fullDiffSourceTextStyle;
   if (syntax != null) style = style.merge(syntax.style);
-  if (changed) {
-    style = style.copyWith(
-      backgroundColor: wordColor,
-      decoration: TextDecoration.underline,
-      decorationColor: fullDiffAccent,
-    );
-  }
+  // The tint alone marks the changed words. An underline under them too broke
+  // Hangul into per-syllable dashes and read as noise.
+  if (changed) style = style.copyWith(backgroundColor: wordColor);
   return TextSpan(text: source.substring(start, end), style: style);
 }

@@ -15,7 +15,6 @@ List<String> monitorLaunchArguments({
   required String bundlePath,
   required String root,
   required String gitExecutable,
-  required String? ghExecutable,
   required String branch,
 }) => [
   '-n',
@@ -25,22 +24,32 @@ List<String> monitorLaunchArguments({
   root,
   '--git',
   gitExecutable,
-  if (ghExecutable != null) ...['--gh', ghExecutable],
   '--monitor',
   branch,
 ];
 
-/// The monitor's window shell: maximizes itself once on entry and lets esc
-/// hand the window back to the system.
+/// The monitor's window shell. macOS draws no titlebar for yogit, so every
+/// state this window can reach — loading, a notice, the graph — needs its own
+/// controls: traffic lights, a drag region, and esc. Wrapping the whole route
+/// is what keeps a notice from becoming a window with no way out.
 class MonitorWindow extends StatefulWidget {
   const MonitorWindow({
     required this.controller,
     required this.child,
+    this.zoomOnEntry = true,
     super.key,
   });
 
   final WindowFrameController controller;
   final Widget child;
+
+  /// The graph wants the whole screen; a short notice does not.
+  final bool zoomOnEntry;
+
+  /// The strip the traffic lights and drag region occupy. Content that would
+  /// sit under them insets by this much.
+  static const titleBarHeight = 44.0;
+  static const controlsWidth = 66.0;
 
   @override
   State<MonitorWindow> createState() => _MonitorWindowState();
@@ -50,9 +59,11 @@ class _MonitorWindowState extends State<MonitorWindow> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => unawaited(widget.controller.toggleZoom()),
-    );
+    if (widget.zoomOnEntry) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => unawaited(widget.controller.toggleZoom()),
+      );
+    }
   }
 
   @override
@@ -61,7 +72,33 @@ class _MonitorWindowState extends State<MonitorWindow> {
       const SingleActivator(LogicalKeyboardKey.escape): () =>
           unawaited(widget.controller.closeWindow()),
     },
-    child: Focus(autofocus: true, child: widget.child),
+    child: Focus(
+      autofocus: true,
+      child: Stack(
+        children: [
+          Positioned.fill(child: widget.child),
+          // The drag region sits above the child but below the buttons, so a
+          // drag anywhere on the empty title strip moves the window.
+          Positioned(
+            left: MonitorWindow.controlsWidth,
+            right: 0,
+            top: 0,
+            height: MonitorWindow.titleBarHeight,
+            child: GestureDetector(
+              key: const Key('monitor-drag'),
+              behavior: HitTestBehavior.translucent,
+              onPanStart: (_) => unawaited(widget.controller.startDrag()),
+              onDoubleTap: () => unawaited(widget.controller.toggleZoom()),
+            ),
+          ),
+          Positioned(
+            left: 14,
+            top: (MonitorWindow.titleBarHeight - 12) / 2,
+            child: WindowButtons(controller: widget.controller),
+          ),
+        ],
+      ),
+    ),
   );
 }
 
@@ -203,7 +240,6 @@ class _MonitorScreenState extends State<MonitorScreen> {
   List<PrHistoryEvent> _events = const [];
   List<({String sha, String subject, String author, int time})> _commits =
       const [];
-  final _closeReasons = <int, String>{};
   String? _error;
   var _loaded = false;
   var _refreshing = false;
@@ -232,21 +268,12 @@ class _MonitorScreenState extends State<MonitorScreen> {
         widget.branch,
         limit: 8,
       );
-      final pullRequests = await widget.service.loadOpenPullRequests();
-      final events = await widget.service.loadHistory();
-      // Closing reasons only for the closed events on screen — a few calls.
-      for (final event in events.take(6)) {
-        if (event.kind == PrEventKind.closed &&
-            !_closeReasons.containsKey(event.number)) {
-          final reason = await widget.service.loadCloseReason(event.number);
-          if (reason != null) _closeReasons[event.number] = reason;
-        }
-      }
+      final snapshot = await widget.service.loadSnapshot();
       final loadedCommits = await commits;
       if (!mounted) return;
       setState(() {
-        _pullRequests = pullRequests;
-        _events = events;
+        _pullRequests = snapshot.pullRequests;
+        _events = snapshot.events;
         _commits = loadedCommits;
         _error = null;
         _loaded = true;
@@ -306,9 +333,13 @@ class _MonitorScreenState extends State<MonitorScreen> {
   );
 
   Widget _topBar() => Container(
-    height: 44,
+    height: MonitorWindow.titleBarHeight,
     color: _palette.surface,
-    padding: const EdgeInsets.symmetric(horizontal: 14),
+    // The window's traffic lights own the left edge of this strip.
+    padding: const EdgeInsets.only(
+      left: MonitorWindow.controlsWidth,
+      right: 14,
+    ),
     child: Row(
       children: [
         Text(
@@ -495,7 +526,8 @@ class _MonitorScreenState extends State<MonitorScreen> {
   Widget _card(MonitoredPullRequest entry) {
     final color = _stateColor(entry.state);
     final visibleReviewers = entry.reviewers.take(3).toList();
-    final overflow = entry.reviewers.length - visibleReviewers.length;
+    // The count GitHub reports, not the page we fetched.
+    final overflow = entry.reviewerTotal - visibleReviewers.length;
     return Container(
       key: Key('monitor-card-${entry.number}'),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
@@ -694,8 +726,8 @@ class _MonitorScreenState extends State<MonitorScreen> {
                         )
                       else
                         TextSpan(
-                          text: _closeReasons[event.number] != null
-                              ? '닫음 · "${_closeReasons[event.number]}"'
+                          text: event.reason != null
+                              ? '닫음 · "${event.reason}"'
                               : '닫음',
                         ),
                     ],

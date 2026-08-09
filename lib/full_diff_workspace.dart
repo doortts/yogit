@@ -4,7 +4,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:yogit/vim_navigation.dart';
 
 import 'avatars.dart';
 import 'external_editor.dart';
@@ -15,17 +14,15 @@ import 'full_diff_controller.dart';
 import 'full_diff_header.dart';
 import 'full_diff_minimap.dart';
 import 'full_diff_model.dart';
-import 'full_diff_resizable_pane.dart';
-import 'full_diff_selectable_row.dart';
 import 'full_diff_side_by_side_view.dart';
 import 'full_diff_syntax.dart';
 import 'full_diff_theme.dart';
 import 'full_diff_unified_view.dart';
 import 'full_diff_unavailable_panel.dart';
-import 'full_history_view.dart';
-import 'full_history_workspace.dart';
 import 'git.dart';
 import 'monaco_editor_screen.dart';
+import 'package:yogit/vim_navigation.dart';
+
 import 'page_scroll_shortcuts.dart';
 import 'settings.dart';
 import 'shortcut_modifier.dart';
@@ -77,14 +74,6 @@ class _StepFileIntent extends Intent {
   final int delta;
 }
 
-class _StepPrimaryFileIntent extends Intent {
-  const _StepPrimaryFileIntent(this.delta);
-
-  final int delta;
-}
-
-enum _FullDiffNavigationPane { files, history, blame }
-
 @visibleForTesting
 class FullDiffScrollController extends ScrollController {
   FullDiffScrollController({super.onAttach});
@@ -95,18 +84,17 @@ class FullDiffScrollController extends ScrollController {
   bool get clientsReady => debugClientsAvailable && hasClients;
 }
 
-/// Full-diff workspace for one controller-backed session.
+/// The full-diff machinery — both option rows, the commit line, the
+/// diff/blame content, the minimap and the keyboard — with no route, Scaffold,
+/// file list or history list of its own, so any pane can hold it.
 ///
-/// Rebuilding an owned session with new [repository] or [commits] replaces that
-/// session. Changing [controller] swaps the subscription, while an injected
-/// controller remains externally owned and authoritative for its session.
-class DiffScreen extends StatefulWidget {
-  const DiffScreen({
-    required this.repository,
-    required this.commits,
-    required this.initialIndex,
-    this.initialPreferences = const FullDiffPreferences(),
-    this.controller,
+/// The session belongs to whoever builds this: [controller] is never created or
+/// disposed here, only observed. Whoever embeds it draws the navigation —
+/// the file list and the History pane both live outside.
+class FullDiffWorkspace extends StatefulWidget {
+  const FullDiffWorkspace({
+    required this.controller,
+    required this.onBack,
     this.columnWidths = const FullDiffColumnWidths(),
     this.onColumnWidthsChanged,
     this.onPreferencesChanged,
@@ -116,14 +104,13 @@ class DiffScreen extends StatefulWidget {
     this.avatarService,
     this.commitMessageCache,
     this.showRemoteAvatars = true,
+    this.focusNode,
+    this.onMovePane,
     super.key,
   });
 
-  final FullDiffRepository repository;
-  final List<GitCommit> commits;
-  final int initialIndex;
-  final FullDiffPreferences initialPreferences;
-  final FullDiffSessionController? controller;
+  final FullDiffSessionController controller;
+  final VoidCallback onBack;
   final FullDiffColumnWidths columnWidths;
   final ValueChanged<FullDiffColumnWidths>? onColumnWidthsChanged;
   final ValueChanged<FullDiffPreferences>? onPreferencesChanged;
@@ -139,17 +126,19 @@ class DiffScreen extends StatefulWidget {
   final FullDiffCommitMessageCache? commitMessageCache;
   final bool showRemoteAvatars;
 
+  /// Lets the embedder hand the keyboard to the diff itself.
+  final FocusNode? focusNode;
+
+  /// ← and → out of the diff, as the embedder orders its panes.
+  final ValueChanged<int>? onMovePane;
+
   @override
-  State<DiffScreen> createState() => _DiffScreenState();
+  State<FullDiffWorkspace> createState() => _FullDiffWorkspaceState();
 }
 
-class _DiffScreenState extends State<DiffScreen> {
+class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
   late final FullDiffScrollController _contentScroll;
-  final _historyScroll = ScrollController();
-  final _fileListFocus = FocusNode(debugLabel: 'full diff files');
-  final _historyListFocus = FocusNode(debugLabel: 'full diff history');
   final _blameListFocus = FocusNode(debugLabel: 'full diff blame');
-  late final Listenable _detailNavigationFocus;
   final _algorithmChooserKey = GlobalKey<FullDiffAlgorithmChooserState>();
   final _contentViewportKey = GlobalKey();
   final _fullFileScrollTargetKey = GlobalKey(
@@ -161,23 +150,15 @@ class _DiffScreenState extends State<DiffScreen> {
 
   late FullDiffSessionController _controller;
   late ExternalEditorService _editorService;
-  late bool _ownsController;
   late FullDiffSessionState _observedState;
   late FullDiffPreferences _lastReportedPreferences;
-  late double _filesWidth;
-  late double _historyWidth;
   late double _sideBySideRatio;
-  _FullDiffNavigationPane _lastDiffHistoryNavigationPane =
-      _FullDiffNavigationPane.files;
-  _FullDiffNavigationPane _lastBlameNavigationPane =
-      _FullDiffNavigationPane.files;
   double? _lastResponsiveWidth;
 
   bool _effectScheduled = false;
   bool _scrollSyncScheduled = false;
   bool _programmaticAnchorScroll = false;
   bool _pendingScrollToTop = false;
-  bool _pendingHistoryScrollToTop = false;
   bool _pendingFullFileScrollToTop = false;
   String? _pendingAnchorId;
   DiffSourceTarget? _pendingFullFileScrollTarget;
@@ -186,16 +167,26 @@ class _DiffScreenState extends State<DiffScreen> {
   String? _editorError;
   bool _openingEditor = false;
   bool _commandHeld = false;
+  bool _hasKeyboard = false;
   int _editorRequestSerial = 0;
+
+  /// The current change wears the accent while the diff has the keyboard and
+  /// falls back to the divider's grey when it does not — the same "only the
+  /// focused pane carries colour" rule the lists follow.
+  Color get _currentMarkerColor =>
+      _hasKeyboard ? fullDiffAccent : fullDiffDivider;
+
+  Color? get _currentTint =>
+      _hasKeyboard ? fullDiffAccent.withValues(alpha: 0.10) : null;
 
   FullDiffCommitMessageCache get _commitMessageCache =>
       widget.commitMessageCache ?? FullDiffCommitMessageCache.shared;
 
   Future<String> _loadCommitMessage(String sha) =>
       _commitMessageCache.getOrLoad(
-        repositoryRoot: widget.repository.root,
+        repositoryRoot: _controller.repository.root,
         sha: sha,
-        loader: () => widget.repository.loadCommitMessage(sha),
+        loader: () => _controller.repository.loadCommitMessage(sha),
       );
 
   @override
@@ -204,38 +195,19 @@ class _DiffScreenState extends State<DiffScreen> {
     _contentScroll = FullDiffScrollController(
       onAttach: (_) => _handleContentScrollAttached(),
     );
-    _detailNavigationFocus = Listenable.merge([
-      _historyListFocus,
-      _blameListFocus,
-    ]);
-    _filesWidth = widget.columnWidths.files;
-    _historyWidth = widget.columnWidths.history;
     _sideBySideRatio = widget.columnWidths.sideBySideRatio;
     _editorService =
         widget.editorService ??
-        ExternalEditorService(repositoryRoot: widget.repository.root);
-    _attachController(_newController());
+        ExternalEditorService(
+          repositoryRoot: widget.controller.repository.root,
+        );
+    _attachController(widget.controller);
     HardwareKeyboard.instance.addHandler(_handleHardwareKeyEvent);
     _contentScroll.addListener(_handleContentScrolled);
-    _fileListFocus.addListener(_handleFileListFocusChanged);
-    _historyListFocus.addListener(_handleHistoryListFocusChanged);
-    _blameListFocus.addListener(_handleBlameListFocusChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _restoreNavigationFocus();
     });
     _queueAttachedAnchorScroll();
-    if (_ownsController) unawaited(_controller.initialize());
-  }
-
-  FullDiffSessionController _newController() {
-    _ownsController = widget.controller == null;
-    return widget.controller ??
-        FullDiffSessionController(
-          repository: widget.repository,
-          commits: widget.commits,
-          initialIndex: widget.initialIndex,
-          initialPreferences: widget.initialPreferences,
-        );
   }
 
   void _attachController(FullDiffSessionController controller) {
@@ -247,49 +219,40 @@ class _DiffScreenState extends State<DiffScreen> {
   }
 
   @override
-  void didUpdateWidget(covariant DiffScreen oldWidget) {
+  void didUpdateWidget(covariant FullDiffWorkspace oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.columnWidths != oldWidget.columnWidths) {
-      _filesWidth = widget.columnWidths.files;
-      _historyWidth = widget.columnWidths.history;
       _sideBySideRatio = widget.columnWidths.sideBySideRatio;
     }
-    final editorContextChanged =
-        widget.editorService != oldWidget.editorService ||
-        widget.repository.root != oldWidget.repository.root;
-    if (editorContextChanged) {
-      _editorService =
-          widget.editorService ??
-          ExternalEditorService(repositoryRoot: widget.repository.root);
-    }
-
     final controllerChanged = !identical(
       widget.controller,
       oldWidget.controller,
     );
-    final ownedInputsChanged =
-        widget.controller == null &&
-        oldWidget.controller == null &&
-        (!identical(widget.repository, oldWidget.repository) ||
-            !identical(widget.commits, oldWidget.commits) ||
-            widget.initialIndex != oldWidget.initialIndex);
-    if (editorContextChanged || controllerChanged || ownedInputsChanged) {
+    final editorContextChanged =
+        widget.editorService != oldWidget.editorService ||
+        widget.controller.repository.root !=
+            oldWidget.controller.repository.root;
+    if (editorContextChanged) {
+      _editorService =
+          widget.editorService ??
+          ExternalEditorService(
+            repositoryRoot: widget.controller.repository.root,
+          );
+    }
+    if (editorContextChanged || controllerChanged) {
       _invalidateEditorRequest();
     }
-    if (!controllerChanged && !ownedInputsChanged) return;
+    if (!controllerChanged) return;
 
-    _controller.removeListener(_handleControllerChanged);
-    if (_ownsController) _controller.dispose();
-    _attachController(_newController());
+    oldWidget.controller.removeListener(_handleControllerChanged);
+    _attachController(widget.controller);
     _pendingScrollToTop = true;
-    _pendingHistoryScrollToTop = true;
     _pendingAnchorId = null;
     _clearPendingFullFileScroll();
     _queueAttachedAnchorScroll();
     if (_pendingAnchorId == null && _pendingFullFileScrollTarget == null) {
       _scheduleScrollEffect();
     }
-    if (_ownsController) unawaited(_controller.initialize());
   }
 
   @override
@@ -300,14 +263,7 @@ class _DiffScreenState extends State<DiffScreen> {
     _contentScroll
       ..removeListener(_handleContentScrolled)
       ..dispose();
-    _historyScroll.dispose();
-    _fileListFocus.removeListener(_handleFileListFocusChanged);
-    _historyListFocus.removeListener(_handleHistoryListFocusChanged);
-    _blameListFocus.removeListener(_handleBlameListFocusChanged);
-    _fileListFocus.dispose();
-    _historyListFocus.dispose();
     _blameListFocus.dispose();
-    if (_ownsController) _controller.dispose();
     super.dispose();
   }
 
@@ -320,6 +276,33 @@ class _DiffScreenState extends State<DiffScreen> {
     return false;
   }
 
+  /// The diff's own keys, plus the steps out of it: ← and → hand the keyboard
+  /// to whichever pane the embedder put on that side. Consuming them both also
+  /// keeps a stray arrow from reaching the list behind the diff.
+  KeyEventResult _handleWorkspaceKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent &&
+        widget.onMovePane != null &&
+        !HardwareKeyboard.instance.isMetaPressed &&
+        !HardwareKeyboard.instance.isAltPressed) {
+      final key = normalizeNavigationKey(
+        event.logicalKey,
+        hasModifier:
+            HardwareKeyboard.instance.isShiftPressed ||
+            HardwareKeyboard.instance.isControlPressed,
+      );
+      final step = switch (key) {
+        LogicalKeyboardKey.arrowLeft => -1,
+        LogicalKeyboardKey.arrowRight => 1,
+        _ => 0,
+      };
+      if (step != 0) {
+        widget.onMovePane!(step);
+        return KeyEventResult.handled;
+      }
+    }
+    return _handlePageScrollKeyEvent(node, event);
+  }
+
   KeyEventResult _handlePageScrollKeyEvent(FocusNode _, KeyEvent event) {
     final intent = pageScrollIntentFor(
       event,
@@ -327,6 +310,14 @@ class _DiffScreenState extends State<DiffScreen> {
       shiftPressed: HardwareKeyboard.instance.isShiftPressed,
     );
     if (intent == null) return KeyEventResult.ignored;
+    // At the content's edge the keys travel on, so an embedder can page its own
+    // list once the diff has nothing left to give.
+    if (!_contentScroll.clientsReady) return KeyEventResult.ignored;
+    final position = _contentScroll.position;
+    final room = intent.direction > 0
+        ? position.extentAfter
+        : position.extentBefore;
+    if (room <= 0) return KeyEventResult.ignored;
     applyPageScroll(
       _contentScroll,
       direction: intent.direction,
@@ -382,15 +373,12 @@ class _DiffScreenState extends State<DiffScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted ||
             !_controller.state.blame.loading ||
-            _lastBlameNavigationPane != _FullDiffNavigationPane.blame ||
             !_blameListFocus.hasFocus) {
           return;
         }
         _blameListFocus.unfocus();
         scheduleMicrotask(() {
-          if (mounted &&
-              _controller.state.blame.loading &&
-              _lastBlameNavigationPane == _FullDiffNavigationPane.blame) {
+          if (mounted && _controller.state.blame.loading) {
             _blameListFocus.requestFocus();
           }
         });
@@ -398,9 +386,6 @@ class _DiffScreenState extends State<DiffScreen> {
     }
     if (blameFileBecameReady) {
       _restoreNavigationFocus();
-    }
-    if (previous.historyContext != next.historyContext) {
-      _pendingHistoryScrollToTop = true;
     }
     if (movedContext) {
       _invalidateEditorRequest();
@@ -438,7 +423,6 @@ class _DiffScreenState extends State<DiffScreen> {
       _pendingAnchorDirection = nextIndex.compareTo(previousIndex);
     }
     if (_pendingScrollToTop ||
-        _pendingHistoryScrollToTop ||
         _pendingFullFileScrollTarget != null ||
         _pendingAnchorId != null) {
       _scheduleScrollEffect();
@@ -519,10 +503,6 @@ class _DiffScreenState extends State<DiffScreen> {
       if (_pendingScrollToTop && _contentScroll.clientsReady) {
         _contentScroll.jumpTo(_contentScroll.position.minScrollExtent);
         _pendingScrollToTop = false;
-      }
-      if (_pendingHistoryScrollToTop && _historyScroll.hasClients) {
-        _historyScroll.jumpTo(_historyScroll.position.minScrollExtent);
-        _pendingHistoryScrollToTop = false;
       }
 
       if (sourceTarget != null) {
@@ -765,74 +745,14 @@ class _DiffScreenState extends State<DiffScreen> {
       state.file.data?.kind == FileContentKind.utf8 &&
       (_blameListFocus.context?.mounted ?? false);
 
-  void _handleFileListFocusChanged() {
-    if (!_fileListFocus.hasFocus) return;
-    switch (_controller.state.view) {
-      case FullDiffView.diff:
-        _lastDiffHistoryNavigationPane = _FullDiffNavigationPane.files;
-      case FullDiffView.history:
-        if (_historyListFocus.context?.mounted ?? false) {
-          _lastDiffHistoryNavigationPane = _FullDiffNavigationPane.files;
-        }
-      case FullDiffView.blame:
-        if (_blameDetailConnected(_controller.state)) {
-          _lastBlameNavigationPane = _FullDiffNavigationPane.files;
-        }
-    }
-  }
-
-  void _handleHistoryListFocusChanged() {
-    if (_historyListFocus.hasFocus &&
-        (_fileListFocus.context?.mounted ?? false)) {
-      _lastDiffHistoryNavigationPane = _FullDiffNavigationPane.history;
-    }
-  }
-
-  void _handleBlameListFocusChanged() {
-    if (_blameListFocus.hasFocus &&
-        (_fileListFocus.context?.mounted ?? false)) {
-      _lastBlameNavigationPane = _FullDiffNavigationPane.blame;
-    }
-  }
-
-  FocusNode? _navigationTarget({
-    required _FullDiffNavigationPane remembered,
-    required _FullDiffNavigationPane detailPane,
-    required FocusNode detailFocus,
-    required bool detailConnected,
-    required bool filesConnected,
-  }) {
-    if (remembered == detailPane && detailConnected) return detailFocus;
-    if (filesConnected) return _fileListFocus;
-    return detailConnected ? detailFocus : null;
-  }
-
+  /// The blame list is the only list the workspace still owns, so it is the
+  /// only place the keyboard is handed back to.
   void _restoreNavigationFocus() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _controller.state.focusMode) return;
-      final historyConnected =
-          _controller.state.view == FullDiffView.history &&
-          (_historyListFocus.context?.mounted ?? false);
-      final blameConnected = _blameDetailConnected(_controller.state);
-      final filesConnected = _fileListFocus.context?.mounted ?? false;
-      final target = switch (_controller.state.view) {
-        FullDiffView.history => _navigationTarget(
-          remembered: _lastDiffHistoryNavigationPane,
-          detailPane: _FullDiffNavigationPane.history,
-          detailFocus: _historyListFocus,
-          detailConnected: historyConnected,
-          filesConnected: filesConnected,
-        ),
-        FullDiffView.blame => _navigationTarget(
-          remembered: _lastBlameNavigationPane,
-          detailPane: _FullDiffNavigationPane.blame,
-          detailFocus: _blameListFocus,
-          detailConnected: blameConnected,
-          filesConnected: filesConnected,
-        ),
-        FullDiffView.diff => filesConnected ? _fileListFocus : null,
-      };
-      target?.requestFocus();
+      if (_blameDetailConnected(_controller.state)) {
+        _blameListFocus.requestFocus();
+      }
     });
   }
 
@@ -848,9 +768,6 @@ class _DiffScreenState extends State<DiffScreen> {
 
   void _selectPrimaryView(FullDiffView view) {
     _controller.setPrimaryView(view);
-    if (_controller.state.view == FullDiffView.diff) {
-      _lastDiffHistoryNavigationPane = _FullDiffNavigationPane.files;
-    }
     _restoreNavigationFocus();
   }
 
@@ -861,59 +778,8 @@ class _DiffScreenState extends State<DiffScreen> {
 
   void _selectHistory(bool selected) {
     _controller.setHistorySelected(selected);
-    if (!selected) {
-      _lastDiffHistoryNavigationPane = _FullDiffNavigationPane.files;
-    }
     _restoreNavigationFocus();
   }
-
-  KeyEventResult _handleFileListKey(FocusNode _, KeyEvent event) {
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
-      return KeyEventResult.ignored;
-    }
-    final keyboard = HardwareKeyboard.instance;
-    final key = normalizeNavigationKey(
-      event.logicalKey,
-      hasModifier:
-          keyboard.isMetaPressed ||
-          keyboard.isAltPressed ||
-          keyboard.isShiftPressed ||
-          keyboard.isControlPressed,
-    );
-    if (keyboard.isMetaPressed || keyboard.isAltPressed) {
-      return KeyEventResult.ignored;
-    }
-    if (key == LogicalKeyboardKey.arrowUp) {
-      _stepFile(-1);
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.arrowDown) {
-      _stepFile(1);
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.arrowRight &&
-        _controller.state.view == FullDiffView.history) {
-      final entries = _controller.state.history.data;
-      if (_controller.state.selectedHistoryEntry == null &&
-          entries != null &&
-          entries.isNotEmpty) {
-        unawaited(_controller.selectHistoryEntry(entries.first));
-      }
-      _historyListFocus.requestFocus();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.arrowRight &&
-        _controller.state.view == FullDiffView.blame) {
-      _lastBlameNavigationPane = _FullDiffNavigationPane.blame;
-      if (_blameListFocus.context?.mounted ?? false) {
-        _blameListFocus.requestFocus();
-      }
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
-  }
-
-  void _returnToTimeline() => Navigator.of(context).maybePop();
 
   bool _canOpenEditor(FullDiffSessionState state) {
     final file = state.selectedFile;
@@ -991,7 +857,7 @@ class _DiffScreenState extends State<DiffScreen> {
         document =
             await widget.documentLoaderForTesting?.call(file.path) ??
             await WorkingTreeTextDocument.load(
-              repositoryRoot: widget.repository.root,
+              repositoryRoot: _controller.repository.root,
               relativePath: file.path,
             );
         text = document.text;
@@ -1063,291 +929,265 @@ class _DiffScreenState extends State<DiffScreen> {
     animation: _controller,
     builder: (context, _) {
       final state = _controller.state;
-      return Scaffold(
-        backgroundColor: fullDiffCanvas,
-        body: Shortcuts(
-          shortcuts: <ShortcutActivator, Intent>{
-            const SingleActivator(LogicalKeyboardKey.escape):
-                _ReturnToTimelineIntent(),
-            const SingleActivator(
-              LogicalKeyboardKey.keyF,
-              meta: true,
-              shift: true,
-              includeRepeats: false,
-            ): _ToggleFocusModeIntent(),
-            const SingleActivator(
-              LogicalKeyboardKey.digit1,
-              meta: true,
-              includeRepeats: false,
-            ): const _SelectViewIntent(
-              FullDiffView.diff,
+      return Shortcuts(
+        shortcuts: <ShortcutActivator, Intent>{
+          const SingleActivator(LogicalKeyboardKey.escape):
+              _ReturnToTimelineIntent(),
+          const SingleActivator(
+            LogicalKeyboardKey.keyF,
+            meta: true,
+            shift: true,
+            includeRepeats: false,
+          ): _ToggleFocusModeIntent(),
+          const SingleActivator(
+            LogicalKeyboardKey.digit1,
+            meta: true,
+            includeRepeats: false,
+          ): const _SelectViewIntent(
+            FullDiffView.diff,
+          ),
+          const SingleActivator(
+            LogicalKeyboardKey.digit2,
+            meta: true,
+            includeRepeats: false,
+          ): const _SelectViewIntent(
+            FullDiffView.blame,
+          ),
+          const SingleActivator(
+            LogicalKeyboardKey.digit3,
+            meta: true,
+            includeRepeats: false,
+          ): const _SelectViewIntent(
+            FullDiffView.history,
+          ),
+          const SingleActivator(
+            LogicalKeyboardKey.keyU,
+            meta: true,
+            includeRepeats: false,
+          ): _ToggleLayoutIntent(),
+          const SingleActivator(
+            LogicalKeyboardKey.keyH,
+            meta: true,
+            shift: true,
+            includeRepeats: false,
+          ): _ToggleScopeIntent(),
+          const SingleActivator(
+            LogicalKeyboardKey.space,
+            meta: true,
+            shift: true,
+            includeRepeats: false,
+          ): _ToggleWhitespaceIntent(),
+          const SingleActivator(
+            LogicalKeyboardKey.keyL,
+            meta: true,
+            shift: true,
+            includeRepeats: false,
+          ): _ToggleWrapIntent(),
+          const SingleActivator(
+            LogicalKeyboardKey.keyA,
+            meta: true,
+            shift: true,
+            includeRepeats: false,
+          ): _OpenAlgorithmChooserIntent(),
+          const SingleActivator(LogicalKeyboardKey.arrowUp, alt: true):
+              _StepHunkIntent(-1),
+          const SingleActivator(LogicalKeyboardKey.arrowDown, alt: true):
+              _StepHunkIntent(1),
+          const SingleActivator(LogicalKeyboardKey.arrowUp, meta: true):
+              _StepFileIntent(-1),
+          const SingleActivator(LogicalKeyboardKey.arrowDown, meta: true):
+              _StepFileIntent(1),
+          // Plain arrows walk the change the reader is looking at. Files are
+          // the preview pane's list now, and ⌘↑/↓ still reaches them.
+          const SingleActivator(LogicalKeyboardKey.arrowUp): _StepHunkIntent(
+            -1,
+          ),
+          const SingleActivator(LogicalKeyboardKey.arrowDown): _StepHunkIntent(
+            1,
+          ),
+          const SingleActivator(LogicalKeyboardKey.keyK): _StepHunkIntent(-1),
+          const SingleActivator(LogicalKeyboardKey.keyJ): _StepHunkIntent(1),
+        },
+        child: Actions(
+          actions: <Type, Action<Intent>>{
+            _ReturnToTimelineIntent: CallbackAction<_ReturnToTimelineIntent>(
+              onInvoke: (_) {
+                if (Tooltip.dismissAllToolTips()) return null;
+                widget.onBack();
+                return null;
+              },
             ),
-            const SingleActivator(
-              LogicalKeyboardKey.digit2,
-              meta: true,
-              includeRepeats: false,
-            ): const _SelectViewIntent(
-              FullDiffView.blame,
+            _ToggleFocusModeIntent: CallbackAction<_ToggleFocusModeIntent>(
+              onInvoke: (_) {
+                _controller.setFocusMode(!_controller.state.focusMode);
+                return null;
+              },
             ),
-            const SingleActivator(
-              LogicalKeyboardKey.digit3,
-              meta: true,
-              includeRepeats: false,
-            ): const _SelectViewIntent(
-              FullDiffView.history,
+            _SelectViewIntent: CallbackAction<_SelectViewIntent>(
+              onInvoke: (intent) {
+                if (intent.view == FullDiffView.history) {
+                  _selectHistory(!_controller.state.historySelected);
+                } else {
+                  _selectPrimaryView(intent.view);
+                }
+                return null;
+              },
             ),
-            const SingleActivator(
-              LogicalKeyboardKey.keyU,
-              meta: true,
-              includeRepeats: false,
-            ): _ToggleLayoutIntent(),
-            const SingleActivator(
-              LogicalKeyboardKey.keyH,
-              meta: true,
-              shift: true,
-              includeRepeats: false,
-            ): _ToggleScopeIntent(),
-            const SingleActivator(
-              LogicalKeyboardKey.space,
-              meta: true,
-              shift: true,
-              includeRepeats: false,
-            ): _ToggleWhitespaceIntent(),
-            const SingleActivator(
-              LogicalKeyboardKey.keyL,
-              meta: true,
-              shift: true,
-              includeRepeats: false,
-            ): _ToggleWrapIntent(),
-            const SingleActivator(
-              LogicalKeyboardKey.keyA,
-              meta: true,
-              shift: true,
-              includeRepeats: false,
-            ): _OpenAlgorithmChooserIntent(),
-            const SingleActivator(LogicalKeyboardKey.arrowUp, alt: true):
-                _StepHunkIntent(-1),
-            const SingleActivator(LogicalKeyboardKey.arrowDown, alt: true):
-                _StepHunkIntent(1),
-            const SingleActivator(LogicalKeyboardKey.arrowUp, meta: true):
-                _StepFileIntent(-1),
-            const SingleActivator(LogicalKeyboardKey.arrowDown, meta: true):
-                _StepFileIntent(1),
-            if (state.view != FullDiffView.history)
-              const SingleActivator(LogicalKeyboardKey.arrowUp):
-                  _StepPrimaryFileIntent(-1),
-            if (state.view != FullDiffView.history)
-              const SingleActivator(LogicalKeyboardKey.arrowDown):
-                  _StepPrimaryFileIntent(1),
-            if (state.view != FullDiffView.history)
-              const SingleActivator(LogicalKeyboardKey.keyK):
-                  _StepPrimaryFileIntent(-1),
-            if (state.view != FullDiffView.history)
-              const SingleActivator(LogicalKeyboardKey.keyJ):
-                  _StepPrimaryFileIntent(1),
+            _ToggleLayoutIntent: CallbackAction<_ToggleLayoutIntent>(
+              onInvoke: (_) {
+                _selectLayout(
+                  _controller.state.layout == DiffLayout.unified
+                      ? DiffLayout.sideBySide
+                      : DiffLayout.unified,
+                );
+                return null;
+              },
+            ),
+            _ToggleScopeIntent: CallbackAction<_ToggleScopeIntent>(
+              onInvoke: (_) {
+                if (_controller.state.patch.loading) return null;
+                unawaited(
+                  _controller
+                      .setScope(
+                        _controller.state.requestedScope == DiffScope.hunks
+                            ? DiffScope.fullFile
+                            : DiffScope.hunks,
+                      )
+                      .catchError((_) {}),
+                );
+                _restoreNavigationFocus();
+                return null;
+              },
+            ),
+            _ToggleWhitespaceIntent: CallbackAction<_ToggleWhitespaceIntent>(
+              onInvoke: (_) {
+                if (_controller.state.patch.loading) return null;
+                unawaited(
+                  _controller
+                      .setIgnoreWhitespace(
+                        !_controller.state.requestedIgnoreWhitespace,
+                      )
+                      .catchError((_) {}),
+                );
+                return null;
+              },
+            ),
+            _ToggleWrapIntent: CallbackAction<_ToggleWrapIntent>(
+              onInvoke: (_) {
+                _controller.setWrapLines(!_controller.state.wrapLines);
+                return null;
+              },
+            ),
+            _OpenAlgorithmChooserIntent:
+                CallbackAction<_OpenAlgorithmChooserIntent>(
+                  onInvoke: (_) {
+                    _algorithmChooserKey.currentState?.show();
+                    return null;
+                  },
+                ),
+            _StepHunkIntent: CallbackAction<_StepHunkIntent>(
+              onInvoke: (intent) {
+                _controller.stepAnchor(intent.delta);
+                return null;
+              },
+            ),
+            _StepFileIntent: CallbackAction<_StepFileIntent>(
+              onInvoke: (intent) {
+                _stepFile(intent.delta);
+                return null;
+              },
+            ),
           },
-          child: Actions(
-            actions: <Type, Action<Intent>>{
-              _ReturnToTimelineIntent: CallbackAction<_ReturnToTimelineIntent>(
-                onInvoke: (_) {
-                  if (Tooltip.dismissAllToolTips()) return null;
-                  _returnToTimeline();
-                  return null;
-                },
-              ),
-              _ToggleFocusModeIntent: CallbackAction<_ToggleFocusModeIntent>(
-                onInvoke: (_) {
-                  _controller.setFocusMode(!_controller.state.focusMode);
-                  return null;
-                },
-              ),
-              _SelectViewIntent: CallbackAction<_SelectViewIntent>(
-                onInvoke: (intent) {
-                  if (intent.view == FullDiffView.history) {
-                    _selectHistory(!_controller.state.historySelected);
-                  } else {
-                    _selectPrimaryView(intent.view);
-                  }
-                  return null;
-                },
-              ),
-              _ToggleLayoutIntent: CallbackAction<_ToggleLayoutIntent>(
-                onInvoke: (_) {
-                  _selectLayout(
-                    _controller.state.layout == DiffLayout.unified
-                        ? DiffLayout.sideBySide
-                        : DiffLayout.unified,
-                  );
-                  return null;
-                },
-              ),
-              _ToggleScopeIntent: CallbackAction<_ToggleScopeIntent>(
-                onInvoke: (_) {
-                  if (_controller.state.patch.loading) return null;
-                  unawaited(
-                    _controller
-                        .setScope(
-                          _controller.state.requestedScope == DiffScope.hunks
-                              ? DiffScope.fullFile
-                              : DiffScope.hunks,
-                        )
-                        .catchError((_) {}),
-                  );
-                  _restoreNavigationFocus();
-                  return null;
-                },
-              ),
-              _ToggleWhitespaceIntent: CallbackAction<_ToggleWhitespaceIntent>(
-                onInvoke: (_) {
-                  if (_controller.state.patch.loading) return null;
-                  unawaited(
-                    _controller
-                        .setIgnoreWhitespace(
-                          !_controller.state.requestedIgnoreWhitespace,
-                        )
-                        .catchError((_) {}),
-                  );
-                  return null;
-                },
-              ),
-              _ToggleWrapIntent: CallbackAction<_ToggleWrapIntent>(
-                onInvoke: (_) {
-                  _controller.setWrapLines(!_controller.state.wrapLines);
-                  return null;
-                },
-              ),
-              _OpenAlgorithmChooserIntent:
-                  CallbackAction<_OpenAlgorithmChooserIntent>(
-                    onInvoke: (_) {
-                      _algorithmChooserKey.currentState?.show();
-                      return null;
-                    },
-                  ),
-              _StepHunkIntent: CallbackAction<_StepHunkIntent>(
-                onInvoke: (intent) {
-                  _controller.stepAnchor(intent.delta);
-                  return null;
-                },
-              ),
-              _StepFileIntent: CallbackAction<_StepFileIntent>(
-                onInvoke: (intent) {
-                  _stepFile(intent.delta);
-                  return null;
-                },
-              ),
-              _StepPrimaryFileIntent: CallbackAction<_StepPrimaryFileIntent>(
-                onInvoke: (intent) {
-                  if (_controller.state.view != FullDiffView.history) {
-                    _stepFile(intent.delta);
-                  }
-                  return null;
-                },
-              ),
+          child: Focus(
+            key: const Key('diff-focus'),
+            autofocus: widget.focusNode == null,
+            focusNode: widget.focusNode,
+            onKeyEvent: _handleWorkspaceKeyEvent,
+            onFocusChange: (hasFocus) {
+              if (!mounted || _hasKeyboard == hasFocus) return;
+              setState(() => _hasKeyboard = hasFocus);
             },
-            child: Focus(
-              autofocus: true,
-              onKeyEvent: _handlePageScrollKeyEvent,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(fullDiffOuterRadius),
-                child: ColoredBox(
-                  color: fullDiffHeader,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      GlobalFileBar(
-                        file: state.selectedFile,
-                        path: state.selectedFile?.path,
-                        view: state.view,
-                        encodingLabel: state.encodingLabel,
-                        canOpenEditor: _canOpenEditor(state),
-                        focusMode: state.focusMode,
-                        showShortcutHints: _commandHeld,
-                        editorError: _editorError,
-                        onBack: _returnToTimeline,
-                        onOpenEditor: _openEditor,
-                        onViewSelected: _selectPrimaryView,
-                        onFocusModeChanged: _controller.setFocusMode,
-                      ),
-                      GlobalDiffToolbar(
-                        algorithmChooserKey: _algorithmChooserKey,
-                        algorithmEnabled:
-                            state.requestedAlgorithm == state.appliedAlgorithm,
-                        view: state.view,
-                        layout: state.layout,
-                        hunkEnabled: state.requestedScope == DiffScope.hunks,
-                        historySelected: state.historySelected,
-                        activeIndex: state.activeAnchor?.hunkIndex ?? 0,
-                        anchorCount: state.patch.data?.hunks.length ?? 0,
-                        algorithm: state.appliedAlgorithm,
-                        gitDiffAlgorithmSetting: state.gitDiffAlgorithmSetting,
-                        ignoreWhitespace: state.requestedIgnoreWhitespace,
-                        wrapLines: state.wrapLines,
-                        loadingPatch: state.patch.loading,
-                        showShortcutHints: _commandHeld,
-                        onLayoutSelected: _selectLayout,
-                        onHunkChanged: (enabled) {
-                          unawaited(
-                            _controller
-                                .setScope(
-                                  enabled
-                                      ? DiffScope.hunks
-                                      : DiffScope.fullFile,
-                                )
-                                .catchError((_) {}),
+            // Square corners: the workspace fills a pane between two others
+            // now, and a rounded edge there cuts a notch out of the window.
+            child: ClipRect(
+              child: ColoredBox(
+                color: fullDiffHeader,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    GlobalFileBar(
+                      file: state.selectedFile,
+                      path: state.selectedFile?.path,
+                      view: state.view,
+                      encodingLabel: state.encodingLabel,
+                      canOpenEditor: _canOpenEditor(state),
+                      focusMode: state.focusMode,
+                      showShortcutHints: _commandHeld,
+                      editorError: _editorError,
+                      onBack: widget.onBack,
+                      onOpenEditor: _openEditor,
+                      onViewSelected: _selectPrimaryView,
+                      onFocusModeChanged: _controller.setFocusMode,
+                    ),
+                    GlobalDiffToolbar(
+                      algorithmChooserKey: _algorithmChooserKey,
+                      algorithmEnabled:
+                          state.requestedAlgorithm == state.appliedAlgorithm,
+                      view: state.view,
+                      layout: state.layout,
+                      hunkEnabled: state.requestedScope == DiffScope.hunks,
+                      historySelected: state.historySelected,
+                      activeIndex: state.activeAnchor?.hunkIndex ?? 0,
+                      anchorCount: state.patch.data?.hunks.length ?? 0,
+                      algorithm: state.appliedAlgorithm,
+                      gitDiffAlgorithmSetting: state.gitDiffAlgorithmSetting,
+                      ignoreWhitespace: state.requestedIgnoreWhitespace,
+                      wrapLines: state.wrapLines,
+                      loadingPatch: state.patch.loading,
+                      showShortcutHints: _commandHeld,
+                      onLayoutSelected: _selectLayout,
+                      onHunkChanged: (enabled) {
+                        unawaited(
+                          _controller
+                              .setScope(
+                                enabled ? DiffScope.hunks : DiffScope.fullFile,
+                              )
+                              .catchError((_) {}),
+                        );
+                        _restoreNavigationFocus();
+                      },
+                      onHistoryChanged: _selectHistory,
+                      onPrevious: () => _controller.stepAnchor(-1),
+                      onNext: () => _controller.stepAnchor(1),
+                      onAlgorithmSelected: (algorithm) {
+                        unawaited(
+                          _controller
+                              .selectAlgorithm(algorithm)
+                              .catchError((_) {}),
+                        );
+                      },
+                      onIgnoreWhitespaceChanged: (value) {
+                        unawaited(
+                          _controller
+                              .setIgnoreWhitespace(value)
+                              .catchError((_) {}),
+                        );
+                      },
+                      onWrapLinesChanged: _controller.setWrapLines,
+                    ),
+                    _commitLine(state),
+                    Expanded(
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          _observeResponsiveWidth(constraints.maxWidth);
+                          return _content(
+                            state,
+                            MediaQuery.sizeOf(context).width,
                           );
-                          _restoreNavigationFocus();
                         },
-                        onHistoryChanged: _selectHistory,
-                        onPrevious: () => _controller.stepAnchor(-1),
-                        onNext: () => _controller.stepAnchor(1),
-                        onAlgorithmSelected: (algorithm) {
-                          unawaited(
-                            _controller
-                                .selectAlgorithm(algorithm)
-                                .catchError((_) {}),
-                          );
-                        },
-                        onIgnoreWhitespaceChanged: (value) {
-                          unawaited(
-                            _controller
-                                .setIgnoreWhitespace(value)
-                                .catchError((_) {}),
-                          );
-                        },
-                        onWrapLinesChanged: _controller.setWrapLines,
                       ),
-                      Expanded(
-                        child: LayoutBuilder(
-                          builder: (context, constraints) {
-                            _observeResponsiveWidth(constraints.maxWidth);
-                            final viewportWidth = MediaQuery.sizeOf(
-                              context,
-                            ).width;
-                            final showFiles =
-                                !state.focusMode &&
-                                viewportWidth > 480 &&
-                                (state.view != FullDiffView.history ||
-                                    constraints.maxWidth >=
-                                        FullDiffColumnWidths.minFiles +
-                                            FullDiffColumnWidths.minHistory +
-                                            320);
-                            return _ResponsiveDiffBody(
-                              showFiles: showFiles,
-                              filesWidth: _filesWidth,
-                              minimumContentWidth:
-                                  state.view == FullDiffView.history
-                                  ? FullDiffColumnWidths.minHistory + 320
-                                  : 320,
-                              commitFiles: _commitFiles(state),
-                              content: _content(state, viewportWidth),
-                              onFilesResized: _resizeFiles,
-                              onResizeEnd: _saveColumnWidths,
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -1357,241 +1197,72 @@ class _DiffScreenState extends State<DiffScreen> {
     },
   );
 
-  Widget _commitFiles(FullDiffSessionState state) {
+  /// Names the commit whose diff is showing — after a History pick, that is
+  /// the picked commit, not the one the timeline sits on.
+  Widget _commitLine(FullDiffSessionState state) {
     final commit = state.selectedCommit;
-    return ColoredBox(
-      color: fullDiffCanvas,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+    final parent =
+        state.parent ?? (commit.parents.isEmpty ? null : commit.parents.first);
+    final compare = commit.isWorkingTree
+        ? 'WIP · 작업 트리'
+        : '${commit.shortSha} · ${commit.subject}';
+    return Container(
+      key: const Key('full-diff-commit-line'),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: const BoxDecoration(
+        color: fullDiffHeader,
+        border: Border(bottom: BorderSide(color: fullDiffDivider)),
+      ),
+      child: Row(
         children: [
-          if (commit.parents.length > 1)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-              child: DropdownButton<String>(
-                key: const Key('merge-parent-chooser'),
-                isExpanded: true,
-                value: state.parent,
-                items: [
-                  for (var index = 0; index < commit.parents.length; index++)
-                    DropdownMenuItem(
-                      value: commit.parents[index],
-                      child: Text.rich(
-                        TextSpan(
-                          children: [
-                            TextSpan(text: 'Parent ${index + 1} · '),
-                            TextSpan(
-                              text: _shortSha(commit.parents[index]),
-                              style: technicalTextStyle,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
-                onChanged: (parent) {
-                  if (parent != null && parent != state.parent) {
-                    unawaited(_controller.selectParent(parent));
-                  }
-                },
-              ),
-            ),
-          _sectionHeader(
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final summary =
-                    '${state.files.length} files · '
-                    '+${state.files.fold<int>(0, (sum, file) => sum + (file.additions ?? 0))} '
-                    '−${state.files.fold<int>(0, (sum, file) => sum + (file.deletions ?? 0))}';
-                final narrow = constraints.maxWidth <= 140;
-                return Row(
-                  children: [
-                    if (narrow)
-                      const SizedBox(
-                        width: 28,
-                        child: Text('변경 파일', maxLines: 2),
-                      )
-                    else
-                      const Expanded(
-                        child: Text(
-                          '변경 파일',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    const SizedBox(width: 4),
-                    Flexible(
-                      child: Text(
-                        summary,
-                        maxLines: 2,
-                        textAlign: TextAlign.end,
-                        overflow: TextOverflow.ellipsis,
-                        style: technicalTextStyle.copyWith(
-                          color: fullDiffMuted,
-                          fontSize: 9,
-                          fontWeight: FontWeight.normal,
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
           Expanded(
-            child: Focus(
-              key: const Key('changed-files-focus'),
-              focusNode: _fileListFocus,
-              onKeyEvent: _handleFileListKey,
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: SelectionArea(
-                      child: ListView.builder(
-                        key: const Key('changed-files-list'),
-                        itemCount: state.files.length,
-                        itemBuilder: (context, index) {
-                          final file = state.files[index];
-                          final selected =
-                              file.path == state.selectedFile?.path;
-                          return Semantics(
-                            selected: selected,
-                            button: true,
-                            child: InkWell(
-                              onTap: () {
-                                _fileListFocus.requestFocus();
-                                if (!selected) {
-                                  unawaited(_controller.selectFile(file));
-                                }
-                              },
-                              child: ListenableBuilder(
-                                listenable: _detailNavigationFocus,
-                                builder: (context, _) => FullDiffSelectableRowSurface(
-                                  key: selected
-                                      ? Key('selected-file-${file.path}')
-                                      : null,
-                                  selected: selected,
-                                  focused:
-                                      selected &&
-                                      switch (state.view) {
-                                        FullDiffView.history =>
-                                          !_historyListFocus.hasFocus,
-                                        FullDiffView.blame =>
-                                          !_blameListFocus.hasFocus,
-                                        FullDiffView.diff => true,
-                                      },
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 9,
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        SizedBox(
-                                          width: 24,
-                                          child: Text(
-                                            _statusLetter(file.status),
-                                            style: const TextStyle(fontSize: 9),
-                                          ),
-                                        ),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.stretch,
-                                            children: [
-                                              Text(
-                                                file.path,
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(
-                                                  fontFamily:
-                                                      technicalFontFamily,
-                                                  fontFamilyFallback:
-                                                      technicalFontFallback,
-                                                  fontSize: 13,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 3),
-                                              Text(
-                                                '+${file.additions ?? '—'} '
-                                                '−${file.deletions ?? '—'} · '
-                                                '${formatByteSize(file.sizeBytes)}',
-                                                style: technicalTextStyle
-                                                    .copyWith(
-                                                      color: fullDiffMuted,
-                                                      fontSize: 12,
-                                                    ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  if (state.filesResource.loading)
-                    const Center(
-                      child: SizedBox.square(
-                        key: Key('diff-pending-files'),
-                        dimension: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    ),
-                  if (!state.filesResource.loading &&
-                      state.filesResource.error != null)
-                    Center(
-                      key: const Key('files-error'),
-                      child: Semantics(
-                        liveRegion: true,
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                state.filesResource.error.toString(),
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: fullDiffDeletedMark,
-                                  fontSize: 13,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              TextButton(
-                                key: const Key('files-retry'),
-                                onPressed: () =>
-                                    unawaited(_controller.retryFiles()),
-                                child: const Text('다시 시도'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  if (!state.filesResource.loading &&
-                      state.filesResource.error == null &&
-                      state.filesResource.data?.isEmpty == true)
-                    const Center(
-                      key: Key('files-empty'),
-                      child: Text(
-                        '변경된 파일이 없습니다',
-                        style: TextStyle(color: fullDiffMuted, fontSize: 13),
-                      ),
-                    ),
-                ],
+            child: Text(
+              '${parent == null ? '—' : _shortSha(parent)} · '
+              '${parent == null ? '빈 트리' : '이전 상태'} ← $compare',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: technicalTextStyle.copyWith(
+                color: fullDiffMuted,
+                fontSize: 10.5,
               ),
             ),
           ),
+          if (commit.parents.length > 1) _parentChooser(state, commit),
         ],
       ),
     );
   }
+
+  Widget _parentChooser(FullDiffSessionState state, GitCommit commit) =>
+      DropdownButton<String>(
+        key: const Key('merge-parent-chooser'),
+        value: state.parent,
+        isDense: true,
+        underline: const SizedBox.shrink(),
+        style: const TextStyle(color: fullDiffMuted, fontSize: 10.5),
+        items: [
+          for (var index = 0; index < commit.parents.length; index++)
+            DropdownMenuItem(
+              value: commit.parents[index],
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(text: 'Parent ${index + 1} · '),
+                    TextSpan(
+                      text: _shortSha(commit.parents[index]),
+                      style: technicalTextStyle,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+        onChanged: (parent) {
+          if (parent != null && parent != state.parent) {
+            unawaited(_controller.selectParent(parent));
+          }
+        },
+      );
 
   Widget _content(FullDiffSessionState state, double viewportWidth) =>
       ColoredBox(
@@ -1599,31 +1270,39 @@ class _DiffScreenState extends State<DiffScreen> {
         child: Row(
           children: [
             Expanded(
-              child: KeyedSubtree(
-                key: _contentViewportKey,
-                child: PrimaryScrollController(
-                  controller: _contentScroll,
-                  child: KeyedSubtree(
-                    key: const Key('content-scrollable'),
-                    child: _contentFor(state, viewportWidth),
+              // No scrollbar: the minimap beside it already says where the
+              // reader is, and two rulers on one edge is one too many.
+              child: ScrollConfiguration(
+                behavior: ScrollConfiguration.of(
+                  context,
+                ).copyWith(scrollbars: false),
+                child: KeyedSubtree(
+                  key: _contentViewportKey,
+                  child: PrimaryScrollController(
+                    controller: _contentScroll,
+                    child: KeyedSubtree(
+                      key: const Key('content-scrollable'),
+                      child: _contentFor(state, viewportWidth),
+                    ),
                   ),
                 ),
               ),
             ),
-            if (state.view != FullDiffView.history)
-              SizedBox(
-                width: fullDiffMinimapWidth,
-                child: FullDiffMinimap(
-                  document: state.patch.data ?? DiffDocument.empty,
-                  activeAnchor: state.activeAnchor,
-                  sourceLineCount: _minimapSourceLineCount(state),
-                  sourceSide: _minimapSourceSide(state),
-                  view: state.view,
-                  scrollController: _contentScroll,
-                  onAnchorSelected: _controller.selectAnchor,
-                  onScrollFractionChanged: _scrollContentToFraction,
-                ),
+            // Every view here is a diff of one file now that History reads
+            // from its own pane, so the map always has something to map.
+            SizedBox(
+              width: fullDiffMinimapWidth,
+              child: FullDiffMinimap(
+                document: state.patch.data ?? DiffDocument.empty,
+                activeAnchor: state.activeAnchor,
+                sourceLineCount: _minimapSourceLineCount(state),
+                sourceSide: _minimapSourceSide(state),
+                view: state.view,
+                scrollController: _contentScroll,
+                onAnchorSelected: _controller.selectAnchor,
+                onScrollFractionChanged: _scrollContentToFraction,
               ),
+            ),
           ],
         ),
       );
@@ -1649,7 +1328,7 @@ class _DiffScreenState extends State<DiffScreen> {
       switch (state.view) {
         FullDiffView.diff => _diffContent(state, viewportWidth),
         FullDiffView.blame => _blameContent(state),
-        FullDiffView.history => _historyContent(state),
+        FullDiffView.history => _historyDetailContent(state, viewportWidth),
       };
 
   Widget _diffContent(FullDiffSessionState state, double viewportWidth) {
@@ -1710,9 +1389,14 @@ class _DiffScreenState extends State<DiffScreen> {
     }
     final presentation = switch (state.layout) {
       DiffLayout.unified => UnifiedPresentationView(
+        currentMarkerColor: _currentMarkerColor,
+        currentTint: _currentTint,
         document: patch,
         activeAnchor: state.activeAnchor,
         path: selectedFile.path,
+        // 21px rows, per the approved mockup: the diff sits beside two panes
+        // now, so every row it can show is one the reader keeps.
+        compactRows: true,
         wrapLines: state.wrapLines,
         highlighter: _highlighter,
         anchorKeys: _anchorKeys,
@@ -1724,10 +1408,13 @@ class _DiffScreenState extends State<DiffScreen> {
         scrollTargetKey: _fullFileScrollTargetKey,
       ),
       DiffLayout.sideBySide => SideBySidePresentationView(
+        currentMarkerColor: _currentMarkerColor,
+        currentTint: _currentTint,
         document: patch,
         activeAnchor: state.activeAnchor,
         oldPath: selectedFile.oldPath ?? selectedFile.path,
         newPath: selectedFile.path,
+        compactRows: true,
         wrapLines: state.wrapLines,
         showOldSide: viewportWidth > 480,
         highlighter: _highlighter,
@@ -1833,7 +1520,6 @@ class _DiffScreenState extends State<DiffScreen> {
         avatarService: widget.avatarService,
         showRemoteAvatars: widget.showRemoteAvatars,
         focusNode: _blameListFocus,
-        onMoveToFiles: _fileListFocus.requestFocus,
         loadCommitMessage: _loadCommitMessage,
       );
     }
@@ -1851,37 +1537,7 @@ class _DiffScreenState extends State<DiffScreen> {
       avatarService: widget.avatarService,
       showRemoteAvatars: widget.showRemoteAvatars,
       focusNode: _blameListFocus,
-      onMoveToFiles: _fileListFocus.requestFocus,
       loadCommitMessage: _loadCommitMessage,
-    );
-  }
-
-  Widget _historyContent(FullDiffSessionState state) {
-    final history = state.history.data;
-    if (history == null) {
-      return _resourceStatus(state.history, 'History를 읽는 중입니다');
-    }
-    return FullHistoryWorkspace(
-      historyWidth: _historyWidth,
-      onHistoryResized: _resizeHistory,
-      onHistoryResizeEnd: _saveColumnWidths,
-      showHistory: !state.focusMode,
-      history: FullHistoryView(
-        entries: history,
-        selected: state.selectedHistoryEntry,
-        onSelected: (entry) {
-          _historyListFocus.requestFocus();
-          unawaited(_controller.selectHistoryEntry(entry));
-        },
-        controller: _historyScroll,
-        focusNode: _historyListFocus,
-        onMoveToFiles: _fileListFocus.requestFocus,
-        loadCommitMessage: _loadCommitMessage,
-      ),
-      detail: LayoutBuilder(
-        builder: (context, constraints) =>
-            _historyDetailContent(state, constraints.maxWidth),
-      ),
     );
   }
 
@@ -1943,24 +1599,6 @@ class _DiffScreenState extends State<DiffScreen> {
     );
   }
 
-  void _resizeFiles(double width) {
-    setState(() {
-      _filesWidth = width.clamp(
-        FullDiffColumnWidths.minFiles,
-        FullDiffColumnWidths.maxFiles,
-      );
-    });
-  }
-
-  void _resizeHistory(double width) {
-    setState(() {
-      _historyWidth = width.clamp(
-        FullDiffColumnWidths.minHistory,
-        FullDiffColumnWidths.maxHistory,
-      );
-    });
-  }
-
   void _resizeSideBySide(double ratio) {
     setState(() {
       _sideBySideRatio = ratio.clamp(
@@ -1972,87 +1610,10 @@ class _DiffScreenState extends State<DiffScreen> {
 
   void _saveColumnWidths() => widget.onColumnWidthsChanged?.call(
     FullDiffColumnWidths(
-      history: _historyWidth,
-      files: _filesWidth,
+      history: widget.columnWidths.history,
       sideBySideRatio: _sideBySideRatio,
     ),
   );
-
-  Widget _sectionHeader(Widget child) => Container(
-    height: 42,
-    padding: const EdgeInsets.symmetric(horizontal: 10),
-    alignment: Alignment.centerLeft,
-    decoration: const BoxDecoration(
-      color: fullDiffHeader,
-      border: Border(bottom: BorderSide(color: fullDiffDivider)),
-    ),
-    child: DefaultTextStyle.merge(
-      style: const TextStyle(
-        color: Colors.white,
-        fontSize: 11,
-        fontWeight: FontWeight.w600,
-      ),
-      child: child,
-    ),
-  );
 }
-
-class _ResponsiveDiffBody extends StatelessWidget {
-  const _ResponsiveDiffBody({
-    required this.showFiles,
-    required this.filesWidth,
-    required this.minimumContentWidth,
-    required this.commitFiles,
-    required this.content,
-    required this.onFilesResized,
-    required this.onResizeEnd,
-  });
-
-  final bool showFiles;
-  final double filesWidth;
-  final double minimumContentWidth;
-  final Widget commitFiles;
-  final Widget content;
-  final ValueChanged<double> onFilesResized;
-  final VoidCallback onResizeEnd;
-
-  @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      const minFiles = FullDiffColumnWidths.minFiles;
-      final maxFiles = math
-          .max(minFiles, constraints.maxWidth - minimumContentWidth)
-          .clamp(minFiles, FullDiffColumnWidths.maxFiles)
-          .toDouble();
-      final effectiveFiles = filesWidth.clamp(minFiles, maxFiles);
-      return Row(
-        children: [
-          if (showFiles)
-            KeyedSubtree(
-              key: const Key('details-files-column'),
-              child: FullDiffResizablePane(
-                width: effectiveFiles,
-                minWidth: minFiles,
-                maxWidth: maxFiles,
-                label: 'Files pane width',
-                resizerKey: const Key('details-files-column-resizer'),
-                dividerKey: const Key('files-detail-divider'),
-                onChanged: onFilesResized,
-                onChangeEnd: onResizeEnd,
-                child: KeyedSubtree(
-                  key: const Key('commit-files-pane'),
-                  child: commitFiles,
-                ),
-              ),
-            ),
-          Expanded(key: const Key('diff-column'), child: content),
-        ],
-      );
-    },
-  );
-}
-
-String _statusLetter(String status) =>
-    status.characters.isEmpty ? '' : status.characters.first;
 
 String _shortSha(String sha) => sha.length <= 7 ? sha : sha.substring(0, 7);

@@ -34,10 +34,12 @@ const fullDiffMinimapAdded = Color(0xFF3FB950);
 const fullDiffMinimapDeleted = Color(0xFFF85149);
 const fullDiffDeletedMark = Color(0xFFF68B59);
 
-const fullDiffOuterPadding = 12.0;
-const fullDiffOuterRadius = 20.0;
-const fullDiffControlHeight = 28.0;
+const fullDiffControlHeight = 24.0;
 const fullDiffControlRadius = 12.5;
 const fullDiffChipRadius = 7.5;
 const fullDiffMinimapWidth = 18.0;
 const fullDiffLineNumberWidth = 74.0;
+
+/// Side-by-side carries one number per side, so it needs far less room than
+/// unified's two columns.
+const fullDiffSideLineNumberWidth = 46.0;

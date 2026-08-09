@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -13,10 +14,14 @@ import 'package:yogit/full_diff_minimap.dart';
 import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/full_diff_side_by_side_view.dart';
 import 'package:yogit/full_diff_theme.dart';
+import 'package:yogit/full_history_view.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/settings.dart';
+import 'package:yogit/timeline.dart';
+import 'package:yogit/window_frame.dart';
 
 import '../tool/full_diff_visual_diff.dart';
+import 'app_test.dart' show FakeGitRepository, commit;
 import 'support/full_diff_fixtures.dart';
 import 'support/full_diff_qa_harness.dart';
 
@@ -312,19 +317,6 @@ const qaCases = <QaCase>[
     algorithm: DiffAlgorithm.gitSetting,
     detailOnly: false,
   ),
-  (
-    name: '29-history-resizers',
-    size: Size(1280, 842),
-    view: FullDiffView.history,
-    layout: DiffLayout.sideBySide,
-    scope: DiffScope.hunks,
-    focus: false,
-    whitespace: false,
-    wrap: false,
-    hunk: 0,
-    algorithm: DiffAlgorithm.gitSetting,
-    detailOnly: false,
-  ),
 ];
 
 const followupCases = [
@@ -547,41 +539,6 @@ Future<void> prepareFunctionalCapture(
         greaterThan(0),
       );
       expect(tester.getTopLeft(coveredRow).dy, coveredRowTop);
-    case '29-history-resizers':
-      final filesPane = find.byKey(const Key('details-files-column'));
-      final historyPane = find.byKey(const Key('history-list-pane'));
-      final filesBefore = tester.getSize(filesPane).width;
-      final historyBefore = tester.getSize(historyPane).width;
-      await tester.drag(
-        find.byKey(const Key('details-files-column-resizer')),
-        const Offset(20, 0),
-      );
-      await tester.pump();
-      await tester.drag(
-        find.byKey(const Key('history-list-column-resizer')),
-        const Offset(24, 0),
-      );
-      await tester.pump();
-      expect(tester.getSize(filesPane).width, filesBefore + 20);
-      expect(tester.getSize(historyPane).width, historyBefore + 24);
-      expect(savedWidths()?.files, filesBefore + 20);
-      expect(savedWidths()?.history, historyBefore + 24);
-      final selectedSha = controller.state.selectedHistoryEntry!.commit.sha;
-      final nextRow = find.byKey(
-        Key('history-row-${qaHistoryRecords[1].commit.sha}'),
-      );
-      final nextRowTop = tester.getTopLeft(nextRow).dy;
-      final historyFocus = tester
-          .widget<Focus>(find.byKey(const Key('history-list-focus')))
-          .focusNode!;
-      historyFocus.requestFocus();
-      await tester.pump();
-      expect(historyFocus.hasPrimaryFocus, isTrue);
-      expect(
-        find.byKey(Key('history-commit-details-$selectedSha')),
-        findsOneWidget,
-      );
-      expect(tester.getTopLeft(nextRow).dy, nextRowTop);
     default:
       break;
   }
@@ -685,7 +642,6 @@ void main() {
       ),
     );
     expect(find.text('주변 커밋'), findsNothing);
-    expect(find.text('변경 파일'), findsOneWidget);
     final openEditorInk = find
         .ancestor(
           of: find.byKey(const Key('open-editor')),
@@ -788,48 +744,6 @@ void main() {
     expect(
       tester.getRect(find.byKey(const Key('full-diff-product-shell'))).left,
       16,
-    );
-  });
-
-  testWidgets('650px keeps the changed files title to exactly two lines', (
-    tester,
-  ) async {
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    final controller = await qaControllerFor();
-    addTearDown(controller.dispose);
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(650, 549);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: fullDiffQaTheme(),
-        home: FullDiffQaComparisonCanvas(
-          controller: controller,
-          surfaceSize: const Size(650, 549),
-        ),
-      ),
-    );
-    await tester.pump();
-
-    final title = find.text('변경 파일');
-    expect(tester.getSize(title).width, greaterThanOrEqualTo(24));
-    expect(tester.getSize(title).height, lessThanOrEqualTo(33));
-
-    final selectedFile = find.byKey(const Key('selected-file-src/drlua.pas'));
-    final path = find.descendant(
-      of: selectedFile,
-      matching: find.text('src/drlua.pas'),
-    );
-    final stats = find.descendant(
-      of: selectedFile,
-      matching: find.text('+12 −4 · 3.1 KB'),
-    );
-    expect(tester.getSize(path).width, greaterThan(70));
-    expect(
-      tester.getTopLeft(stats).dy,
-      greaterThan(tester.getBottomLeft(path).dy),
     );
   });
 
@@ -957,8 +871,7 @@ void main() {
     final focus = tester.getRect(find.text('탐색 패널'));
     final editor = tester.getRect(find.text('편집기로 열기'));
     expect(focus.right, lessThan(editor.left));
-    expect(find.byKey(const Key('commit-files-pane')), findsNothing);
-    expect(find.byKey(const Key('diff-column')), findsOneWidget);
+    expect(find.byKey(const Key('content-scrollable')), findsOneWidget);
   });
 
   for (final layout in DiffLayout.values) {
@@ -1069,8 +982,12 @@ void main() {
       tester.getRect(find.byKey(const Key('full-diff-product-shell'))),
       const Rect.fromLTWH(0, 0, 1070, 760),
     );
-    final filePane = tester.getRect(find.byKey(const Key('commit-files-pane')));
-    expect(filePane, const Rect.fromLTRB(0, 116, 278, 760));
+    // Both option rows now measure one 24px control plus 4px padding, so the
+    // commit line starts at 32 + 32.
+    expect(
+      tester.getRect(find.byKey(const Key('full-diff-commit-line'))).top,
+      64,
+    );
   });
 
   testWidgets('final polish Blame rows use the approved 21px height', (
@@ -1228,9 +1145,15 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: fullDiffQaTheme(),
-        home: FullDiffQaComparisonCanvas(
-          controller: controller,
-          surfaceSize: const Size(1070, 842),
+        home: Scaffold(
+          body: SizedBox(
+            width: 280,
+            child: FullHistoryView(
+              entries: controller.state.history.data!,
+              selected: controller.state.history.data!.first,
+              onSelected: (_) {},
+            ),
+          ),
         ),
       ),
     );
@@ -1415,9 +1338,6 @@ void main() {
         await tester.tap(find.text('Diff'));
         await tester.pumpAndSettle();
         expect(controller.state.view, FullDiffView.history);
-        final historyRowFocus = focusQaHistoryRow(tester, 'c78b2ff');
-        await tester.pump();
-        expect(historyRowFocus.hasPrimaryFocus, isTrue);
         final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
         await mouse.addPointer();
         addTearDown(mouse.removePointer);
@@ -1425,10 +1345,6 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
         await tester.pump(const Duration(milliseconds: 100));
         expect(find.text('파일의 변경 이력을 보여줍니다'), findsOneWidget);
-        expect(
-          controller.state.selectedHistoryEntry?.commit.shortSha,
-          '65f4c80',
-        );
         expect(find.byType(HatchedDiffCell), findsWidgets);
       },
       target: find.byType(Overlay),
@@ -1467,6 +1383,8 @@ void main() {
     );
   });
 
+  _timelineCaptures();
+
   testWidgets('capture 14-algorithm-tooltip', (tester) async {
     addTearDown(() {
       tester.view.resetDevicePixelRatio();
@@ -1496,5 +1414,276 @@ void main() {
       },
       target: find.byType(Overlay),
     );
+  });
+}
+
+// ---------------------------------------------------------------- timeline
+// The workspace captures above frame the diff alone. These four frame what the
+// user actually sees: the mockup's composition, with the preview pane and the
+// History pane in their placements.
+
+const _timelineFiles = <GitFileChange>[
+  GitFileChange(
+    path: 'src/drlua.pas',
+    status: 'M',
+    additions: 12,
+    deletions: 4,
+    sizeBytes: 3174,
+  ),
+  GitFileChange(
+    path: 'src/window_sdl.pas',
+    status: 'M',
+    additions: 9,
+    deletions: 3,
+    sizeBytes: 847,
+  ),
+  GitFileChange(
+    path: 'src/usage_model.pas',
+    status: 'M',
+    additions: 6,
+    deletions: 2,
+    sizeBytes: 2210,
+  ),
+  GitFileChange(
+    path: 'macos/retina.pas',
+    status: 'A',
+    additions: 13,
+    deletions: 0,
+    sizeBytes: 6963,
+  ),
+  GitFileChange(
+    path: 'macos/notifier.pas',
+    status: 'A',
+    additions: 21,
+    deletions: 0,
+    sizeBytes: 4180,
+  ),
+  GitFileChange(
+    path: 'macos/legacy_scale.pas',
+    status: 'D',
+    additions: 0,
+    deletions: 5,
+  ),
+];
+
+const _timelinePatch = <DiffLine>[
+  DiffLine(kind: DiffLineKind.hunk, text: '@@ -50,3 +50,5 @@ UsageModel'),
+  DiffLine(
+    kind: DiffLineKind.context,
+    text: '  Published private(set) var notifyPermission = unknown;',
+    oldNumber: 50,
+    newNumber: 50,
+  ),
+  DiffLine(
+    kind: DiffLineKind.context,
+    text: '  // 앱을 켠 뒤 한 번이라도 알림을 판단했다.',
+    oldNumber: 51,
+    newNumber: 51,
+  ),
+  DiffLine(
+    kind: DiffLineKind.context,
+    text: '  private var notifiedOnce := False;',
+    oldNumber: 52,
+    newNumber: 52,
+  ),
+  DiffLine(
+    kind: DiffLineKind.add,
+    text: '  // 빨강에 들어섰던 계정. 리셋으로 풀릴 때 한 번 알린다.',
+    newNumber: 53,
+  ),
+  DiffLine(
+    kind: DiffLineKind.add,
+    text: '  private var recovery := RecoveryWatch.Create;',
+    newNumber: 54,
+  ),
+  DiffLine(
+    kind: DiffLineKind.context,
+    text: '  private var appearanceWatch: NSObjectProtocol;',
+    oldNumber: 53,
+    newNumber: 55,
+  ),
+  DiffLine(kind: DiffLineKind.hunk, text: '@@ -537,9 +540,11 @@ notify(at:)'),
+  DiffLine(
+    kind: DiffLineKind.context,
+    text: '  procedure Notify(const now: TDateTime);',
+    oldNumber: 537,
+    newNumber: 540,
+  ),
+  DiffLine(
+    kind: DiffLineKind.context,
+    text: '    visible := prefs.Apply(known);',
+    oldNumber: 538,
+    newNumber: 541,
+  ),
+  DiffLine(
+    kind: DiffLineKind.delete,
+    text: '    alerts := visible.FlatMap(BuildAlerts);',
+    oldNumber: 539,
+  ),
+  DiffLine(
+    kind: DiffLineKind.add,
+    text: '    live := visible.FlatMap(BuildAlerts);',
+    newNumber: 542,
+  ),
+  DiffLine(
+    kind: DiffLineKind.add,
+    text: '    live := live.Filter(prefs.NotifyEnabled);',
+    newNumber: 543,
+  ),
+  DiffLine(
+    kind: DiffLineKind.context,
+    text: '    Deliver(live, now);',
+    oldNumber: 540,
+    newNumber: 544,
+  ),
+  DiffLine(
+    kind: DiffLineKind.context,
+    text: '  end;',
+    oldNumber: 541,
+    newNumber: 545,
+  ),
+];
+
+FakeGitRepository _timelineRepository() {
+  final commits = [
+    commit('ff81987', '같은 알림이 읽을 때마다 다시 오던 것을 멈춘다', parents: const ['6983f0f']),
+    commit('6983f0f', '사용량 경고를 메뉴바에 표시', parents: const ['3c90d12']),
+    commit('3c90d12', 'UsageModel 상태 분리', parents: const ['b44a0e7']),
+    commit('b44a0e7', '알림 권한 프롬프트', parents: const ['91d03aa']),
+    commit('91d03aa', '첫 사용량 모델'),
+  ];
+  return FakeGitRepository(
+    (skip, _) async => skip == 0 ? commits : const [],
+    files: (_, _) async => _timelineFiles,
+    diff: (_, _, _, _, _) async => _timelinePatch,
+    content: (_, _, _) async => Uint8List.fromList(
+      utf8.encode(
+        [for (var line = 1; line <= 80; line++) 'line \$line'].join('\n'),
+      ),
+    ),
+    history: (_, file) async => [
+      for (final entry in commits)
+        GitFileHistoryRecord(
+          commit: entry,
+          path: file.path,
+          oldPath: null,
+          status: 'M',
+        ),
+    ],
+  );
+}
+
+/// The timeline holds refresh timers, and the golden comparison runs real
+/// async work while the fake clock is parked. Unmounting cancels the periodic
+/// ones; the pump afterwards drains whatever one-shot timer was left waiting.
+Future<void> _releaseTimeline(WidgetTester tester) async {
+  await tester.pumpWidget(const SizedBox.shrink());
+  await tester.pump(const Duration(seconds: 5));
+}
+
+/// Drives the timeline into diff mode on the first file, the way a user does.
+Future<void> _enterDiffMode(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const Key('preview-state-src/drlua.pas')));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _tapKey(WidgetTester tester, String key) async {
+  await tester.tap(find.byKey(Key(key)));
+  await tester.pumpAndSettle();
+}
+
+void _timelineCaptures() {
+  const size = Size(1240, 800);
+
+  Widget timeline({double previewHeight = 260}) => TimelineScreen(
+    repository: _timelineRepository(),
+    controller: WindowFrameController(
+      channel: const MethodChannel('test/yogit-window'),
+    ),
+    previewHeight: previewHeight,
+    fullDiffColumnWidths: const FullDiffColumnWidths(history: 264),
+  );
+
+  testWidgets('capture 30-unified-right', (tester) async {
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await capture(
+      tester,
+      name: '30-unified-right',
+      size: size,
+      child: timeline(),
+      prepare: () => _enterDiffMode(tester),
+      target: find.byType(TimelineScreen),
+    );
+    await _releaseTimeline(tester);
+  });
+
+  testWidgets('capture 31-unified-right-history', (tester) async {
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await capture(
+      tester,
+      name: '31-unified-right-history',
+      size: size,
+      child: timeline(),
+      prepare: () async {
+        await _enterDiffMode(tester);
+        await _tapKey(tester, 'history-toggle');
+        expect(find.byKey(const Key('history-pane')), findsOneWidget);
+      },
+      target: find.byType(TimelineScreen),
+    );
+    await _releaseTimeline(tester);
+  });
+
+  testWidgets('capture 32-unified-bottom-history', (tester) async {
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await capture(
+      tester,
+      name: '32-unified-bottom-history',
+      size: size,
+      child: timeline(previewHeight: 190),
+      prepare: () async {
+        await _enterDiffMode(tester);
+        await _tapKey(tester, 'history-toggle');
+        await tester.tap(find.text('하단'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('preview-layout-bottom')), findsOneWidget);
+      },
+      target: find.byType(TimelineScreen),
+    );
+    await _releaseTimeline(tester);
+  });
+
+  testWidgets('capture 33-unified-focus', (tester) async {
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await capture(
+      tester,
+      name: '33-unified-focus',
+      size: size,
+      child: timeline(),
+      prepare: () async {
+        await _enterDiffMode(tester);
+        await _tapKey(tester, 'history-toggle');
+        await _tapKey(tester, 'focus-mode');
+        expect(find.byKey(const Key('history-pane')), findsNothing);
+        expect(find.byKey(const Key('preview-panel')), findsNothing);
+      },
+      target: find.byType(TimelineScreen),
+    );
+    await _releaseTimeline(tester);
   });
 }

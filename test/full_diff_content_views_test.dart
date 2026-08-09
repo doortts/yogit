@@ -1,6 +1,4 @@
-import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -10,6 +8,7 @@ import 'package:yogit/avatars.dart';
 import 'package:yogit/full_diff_anchor_probe.dart';
 import 'package:yogit/full_blame_view.dart';
 import 'package:yogit/full_diff_code_row.dart';
+import 'package:yogit/full_diff_hunk_header.dart';
 import 'package:yogit/full_diff_commit_info_card.dart';
 import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/full_diff_selectable_row.dart';
@@ -19,8 +18,24 @@ import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/full_diff_unified_view.dart';
 import 'package:yogit/full_history_view.dart';
 import 'package:yogit/git.dart';
+import 'package:yogit/github_api.dart';
 
 import 'support/full_diff_fixtures.dart';
+
+/// An [AvatarService] whose REST calls answer from [send] instead of the
+/// network.
+AvatarService avatarServiceOn(HttpSend send) => AvatarService(
+  remote: const RemoteRepository(
+    host: 'github.com',
+    owner: 'team',
+    repository: 'yogit',
+  ),
+  api: GitHubApi(
+    apiBaseUrl: 'https://api.github.com',
+    token: 'token-1',
+    send: send,
+  ),
+);
 
 void main() {
   Future<BlameDocument> pumpInteractiveBlameView(
@@ -206,17 +221,18 @@ void main() {
         ),
       );
 
-      final header = find.text('replace value · lines 1–3 · change 1 of 1');
+      final header = find.byType(FullDiffHunkHeader);
       final leadingContext = find.byKey(const Key('unified-line-0-0'));
       final changedRow = find.byKey(const Key('unified-line-0-2'));
-      expect(header, findsOneWidget);
+      expect(find.text('@@ -1,3 +1,3 @@ replace value'), findsOneWidget);
+      // The header sits flush between them — it is one source row tall now.
       expect(
         tester.getBottomLeft(leadingContext).dy,
-        lessThan(tester.getTopLeft(header).dy),
+        lessThanOrEqualTo(tester.getTopLeft(header).dy),
       );
       expect(
         tester.getBottomLeft(header).dy,
-        lessThan(tester.getTopLeft(changedRow).dy),
+        lessThanOrEqualTo(tester.getTopLeft(changedRow).dy),
       );
       final renderedLine = tester.widget<FullDiffCodeRow>(changedRow);
       expect(renderedLine.line.kind, DiffLineKind.add);
@@ -398,94 +414,8 @@ void main() {
     expect(find.byKey(const Key('history-list')), findsNothing);
   });
 
-  testWidgets(
-    'history shows focused selected commit details without moving rows',
-    (tester) async {
-      final historyFocus = FocusNode();
-      final filesFocus = FocusNode();
-      final messages = <String, Completer<String>>{};
-      addTearDown(historyFocus.dispose);
-      addTearDown(filesFocus.dispose);
-      var selected = historyEntries.first;
-      await tester.pumpWidget(
-        qaApp(
-          StatefulBuilder(
-            builder: (context, setState) => Column(
-              children: [
-                Focus(focusNode: filesFocus, child: const SizedBox(height: 1)),
-                Expanded(
-                  child: FullHistoryView(
-                    entries: historyEntries,
-                    selected: selected,
-                    focusNode: historyFocus,
-                    onSelected: (entry) => setState(() => selected = entry),
-                    loadCommitMessage: (sha) =>
-                        messages.putIfAbsent(sha, Completer<String>.new).future,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-
-      final secondRow = find.byKey(
-        Key('history-row-${historyEntries[1].commit.sha}'),
-      );
-      final secondRowTopBeforeFocus = tester.getTopLeft(secondRow).dy;
-      expect(
-        find.byKey(Key('history-commit-details-${commitA.sha}')),
-        findsNothing,
-      );
-
-      historyFocus.requestFocus();
-      await tester.pump();
-
-      final firstCard = find.byKey(
-        Key('history-commit-details-${commitA.sha}'),
-      );
-      final firstRow = find.byKey(Key('history-row-${commitA.sha}'));
-      expect(firstCard, findsOneWidget);
-      expect(
-        tester.getTopLeft(firstCard).dy,
-        closeTo(tester.getBottomLeft(firstRow).dy + 4, 0.5),
-      );
-      expect(tester.getTopLeft(secondRow).dy, secondRowTopBeforeFocus);
-
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await tester.pump();
-
-      final secondCard = find.byKey(
-        Key('history-commit-details-${historyEntries[1].commit.sha}'),
-      );
-      expect(selected, same(historyEntries[1]));
-      expect(secondCard, findsOneWidget);
-      expect(
-        find.descendant(
-          of: secondCard,
-          matching: find.text(historyEntries[1].commit.subject),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(
-          of: find.byKey(Key('history-commit-details-${selected.commit.sha}')),
-          matching: find.byKey(const Key('full-diff-commit-message-scroll')),
-        ),
-        findsNothing,
-      );
-      expect(
-        tester.getTopLeft(secondCard).dy,
-        closeTo(tester.getBottomLeft(secondRow).dy + 4, 0.5),
-      );
-
-      filesFocus.requestFocus();
-      await tester.pumpAndSettle();
-
-      expect(secondCard, findsNothing);
-      expect(selected, same(historyEntries[1]));
-    },
-  );
+  // 선택 행 아래 뜨던 커밋 메시지 팝오버는 은퇴했다 — 커밋 메시지는 diff의
+  // 커밋 라인이 말하고, History 행은 제목만 보여준다.
 
   testWidgets('history arrows immediately commit the controlled selection', (
     tester,
@@ -1127,25 +1057,22 @@ void main() {
   testWidgets('enabled blame avatars display a resolved remote author', (
     tester,
   ) async {
-    final requests = <List<String>>[];
-    final service = AvatarService(
-      remote: const RemoteRepository(
-        host: 'github.com',
-        owner: 'team',
-        repository: 'yogit',
-      ),
-      runner: (executable, arguments, {workingDirectory, environment}) async {
-        requests.add(List.unmodifiable(arguments));
-        return ProcessResult(
-          1,
-          0,
-          '{"author":{"login":"ada",'
-              '"avatar_url":"https://avatars.example/ada.png"},'
-              '"committer":null}',
-          '',
-        );
-      },
-    );
+    final requests = <Uri>[];
+    final service = avatarServiceOn((
+      uri, {
+      required method,
+      required headers,
+      body,
+    }) async {
+      requests.add(uri);
+      return (
+        status: 200,
+        body:
+            '{"author":{"login":"ada",'
+            '"avatar_url":"https://avatars.example/ada.png"},'
+            '"committer":null}',
+      );
+    });
 
     await tester.pumpWidget(
       qaApp(
@@ -1190,17 +1117,15 @@ void main() {
     tester,
   ) async {
     var requests = 0;
-    final service = AvatarService(
-      remote: const RemoteRepository(
-        host: 'github.com',
-        owner: 'team',
-        repository: 'yogit',
-      ),
-      runner: (executable, arguments, {workingDirectory, environment}) async {
-        requests++;
-        throw StateError('avatar lookup failed');
-      },
-    );
+    final service = avatarServiceOn((
+      uri, {
+      required method,
+      required headers,
+      body,
+    }) async {
+      requests++;
+      throw StateError('avatar lookup failed');
+    });
 
     await tester.pumpWidget(
       qaApp(

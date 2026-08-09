@@ -15,6 +15,7 @@ class FullDiffResizablePane extends StatelessWidget {
     required this.onChanged,
     required this.onChangeEnd,
     required this.child,
+    this.handleOnLeft = false,
     super.key,
   });
 
@@ -28,6 +29,12 @@ class FullDiffResizablePane extends StatelessWidget {
   final VoidCallback onChangeEnd;
   final Widget child;
 
+  /// Which edge carries the divider and its drag handle. It belongs on the
+  /// side the pane grows into — the neighbour that yields the space — and away
+  /// from any handle that neighbour owns, since two 8px strips on one seam
+  /// leave only the topmost one reachable.
+  final bool handleOnLeft;
+
   @override
   Widget build(BuildContext context) {
     final effectiveWidth = width.clamp(minWidth, maxWidth).toDouble();
@@ -39,14 +46,16 @@ class FullDiffResizablePane extends StatelessWidget {
           Positioned.fill(child: child),
           Positioned(
             key: dividerKey,
-            right: 0,
+            left: handleOnLeft ? 0 : null,
+            right: handleOnLeft ? null : 0,
             top: 0,
             bottom: 0,
             width: 1,
             child: const ColoredBox(color: fullDiffDivider),
           ),
           Positioned(
-            right: 0,
+            left: handleOnLeft ? 0 : null,
+            right: handleOnLeft ? null : 0,
             top: 0,
             bottom: 0,
             width: 8,
@@ -56,6 +65,7 @@ class FullDiffResizablePane extends StatelessWidget {
               maxWidth: maxWidth,
               label: label,
               resizerKey: resizerKey,
+              towardsStart: handleOnLeft,
               onChanged: onChanged,
               onChangeEnd: onChangeEnd,
             ),
@@ -73,6 +83,7 @@ class _FullDiffResizeHandle extends StatefulWidget {
     required this.maxWidth,
     required this.label,
     required this.resizerKey,
+    required this.towardsStart,
     required this.onChanged,
     required this.onChangeEnd,
   });
@@ -82,6 +93,9 @@ class _FullDiffResizeHandle extends StatefulWidget {
   final double maxWidth;
   final String label;
   final Key resizerKey;
+
+  /// A handle on the leading edge widens the pane as the cursor moves left.
+  final bool towardsStart;
   final ValueChanged<double> onChanged;
   final VoidCallback onChangeEnd;
 
@@ -113,12 +127,13 @@ class _FullDiffResizeHandleState extends State<_FullDiffResizeHandle> {
             keyboard.isShiftPressed ||
             keyboard.isControlPressed,
       );
-      final delta = switch (key) {
+      final step = switch (key) {
         LogicalKeyboardKey.arrowLeft => -8.0,
         LogicalKeyboardKey.arrowRight => 8.0,
         _ => null,
       };
-      if (delta == null) return KeyEventResult.ignored;
+      if (step == null) return KeyEventResult.ignored;
+      final delta = widget.towardsStart ? -step : step;
       widget.onChanged(_clamp(widget.width + delta));
       widget.onChangeEnd();
       return KeyEventResult.handled;
@@ -133,9 +148,10 @@ class _FullDiffResizeHandleState extends State<_FullDiffResizeHandle> {
           behavior: HitTestBehavior.opaque,
           onHorizontalDragStart: (_) => _dragWidth = widget.width,
           onHorizontalDragUpdate: (details) {
-            final nextWidth = _clamp(
-              (_dragWidth ?? widget.width) + details.delta.dx,
-            );
+            final travel = widget.towardsStart
+                ? -details.delta.dx
+                : details.delta.dx;
+            final nextWidth = _clamp((_dragWidth ?? widget.width) + travel);
             _dragWidth = nextWidth;
             widget.onChanged(nextWidth);
           },

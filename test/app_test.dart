@@ -9,20 +9,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/avatars.dart';
-import 'package:yogit/diff_screen.dart';
 import 'package:yogit/full_blame_view.dart';
+import 'package:yogit/external_editor.dart';
+import 'package:yogit/full_diff_commit_message_cache.dart';
 import 'package:yogit/full_diff_controller.dart';
 import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/full_diff_side_by_side_view.dart';
 import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/full_diff_unified_view.dart';
+import 'package:yogit/full_diff_workspace.dart';
+import 'package:yogit/commit_time.dart';
 import 'package:yogit/git.dart';
+import 'package:yogit/github_api.dart';
 import 'package:yogit/main.dart';
 import 'package:yogit/monitor_screen.dart';
 import 'package:yogit/monaco_editor_screen.dart';
 import 'package:yogit/settings.dart';
 import 'package:yogit/shortcut_modifier.dart';
 import 'package:yogit/timeline.dart';
+import 'package:yogit/timeline_palette.dart';
 import 'package:yogit/timeline_theme.dart';
 import 'package:yogit/typography.dart';
 import 'package:yogit/window_frame.dart';
@@ -112,6 +117,9 @@ void main() {
             .color,
         TimelineThemePalette.carbon.surface,
       );
+      // 미리보기는 들어가 봐야 파일을 고른다.
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
       final fileRow =
           tester
                   .widget<InkWell>(
@@ -123,7 +131,7 @@ void main() {
                   .child!
               as DecoratedBox;
       final fileRowDecoration = fileRow.decoration as BoxDecoration;
-      expect(fileRowDecoration.color, TimelineThemePalette.carbon.neutralChip);
+      expect(fileRowDecoration.color, TimelineThemePalette.carbon.selectedRow);
       expect(fileRowDecoration.border, isNull);
       expect(fileRowDecoration.borderRadius, BorderRadius.circular(6));
       expect(
@@ -335,7 +343,8 @@ void main() {
     final list = tester.widget<ListView>(
       find.byKey(const Key('timeline-list')),
     );
-    expect(TimelineScreen.rowHeight, 30);
+    // 22 = the 13px default text plus half the padding the 30px row carried.
+    expect(TimelineScreen.rowHeight, 22);
     expect(list.itemExtent, TimelineScreen.rowHeight);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
@@ -352,7 +361,7 @@ void main() {
     expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
 
     // The preview starts hidden and only a key opens it.
-    expect(find.text('Commit & Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pump();
     expect(find.text('second commit'), findsOneWidget);
@@ -381,15 +390,15 @@ void main() {
 
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsOneWidget);
+    expect(find.byKey(const Key('preview-surface')), findsOneWidget);
 
     // Enter toggles: a second press closes what the first opened.
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsOneWidget);
+    expect(find.byKey(const Key('preview-surface')), findsOneWidget);
 
     await tester.tap(find.text('하단'));
     await tester.pumpAndSettle();
@@ -397,22 +406,22 @@ void main() {
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
 
     // A click selects; it no longer opens the panel.
     await tester.tap(find.text('third commit'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-3')), findsOneWidget);
-    expect(find.text('Commit & Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
 
     // Space no longer opens the panel; Enter is the only toggle.
     await tester.sendKeyEvent(LogicalKeyboardKey.space);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsOneWidget);
+    expect(find.byKey(const Key('preview-surface')), findsOneWidget);
     expect(
       find.descendant(
         of: find.byKey(const Key('preview-panel')),
@@ -422,7 +431,7 @@ void main() {
     );
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
   });
 
   testWidgets('selection moves rebuild only the rows that changed', (
@@ -495,13 +504,17 @@ void main() {
       index++;
     }
 
-    // Nothing moved until the selected row's bottom passed the viewport bottom,
-    // and then only far enough to hold the row flush against that edge.
+    // Nothing moved until the selection came within two rows of the bottom,
+    // and then only far enough to keep those two rows of road ahead of it.
+    const margin = 2;
     expect(
       index * TimelineScreen.rowHeight,
-      greaterThan(viewport - TimelineScreen.rowHeight),
+      greaterThan(viewport - (1 + margin) * TimelineScreen.rowHeight),
     );
-    expect(position.pixels, (index + 1) * TimelineScreen.rowHeight - viewport);
+    expect(
+      position.pixels,
+      (index + 1 + margin) * TimelineScreen.rowHeight - viewport,
+    );
     final anchored = position.pixels;
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
@@ -516,16 +529,24 @@ void main() {
       index--;
       expect(
         position.pixels,
-        lessThanOrEqualTo(index * TimelineScreen.rowHeight),
+        // The list stops at its own top, so the margin can only ask for less.
+        lessThanOrEqualTo(
+          ((index - margin) * TimelineScreen.rowHeight).clamp(
+            0,
+            double.infinity,
+          ),
+        ),
       );
       expect(
         position.pixels,
-        greaterThanOrEqualTo((index + 1) * TimelineScreen.rowHeight - viewport),
+        greaterThanOrEqualTo(
+          (index + 1 + margin) * TimelineScreen.rowHeight - viewport,
+        ),
       );
     }
-    // The walk ends with the first commit flush at the top; the date heading
-    // above it stays off screen until the user scrolls there.
-    expect(position.pixels, TimelineScreen.rowHeight);
+    // Walking back to the first commit now runs the list to its very top: the
+    // two rows of road it keeps ahead include the date heading.
+    expect(position.pixels, 0);
     expect(find.byKey(const Key('selected-row-0')), findsOneWidget);
   });
 
@@ -577,7 +598,7 @@ void main() {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
     await tester.sendKeyRepeatEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsOneWidget);
+    expect(find.byKey(const Key('preview-surface')), findsOneWidget);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
   });
 
@@ -640,8 +661,8 @@ void main() {
                 .painter!
             as CommitGraphPainter;
 
-    // Two lanes auto-fit to 28 + 2 * 30, clamped up to the 96px minimum.
-    expect(beforeSize.width, 96);
+    // Two lanes on screen auto-fit to 28 + 30 + 13.
+    expect(beforeSize.width, CommitGraphPainter.contentWidth(1));
     expect(before.laneSpacing, 30);
     expect(afterSize.width, greaterThan(beforeSize.width));
     expect(after.laneSpacing, before.laneSpacing);
@@ -703,7 +724,7 @@ void main() {
   });
 
   testWidgets(
-    'a file click opens an adjacent diff without resizing the preview',
+    'a file click opens the embedded diff without resizing the preview',
     (tester) async {
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = const Size(1200, 700);
@@ -736,7 +757,7 @@ void main() {
 
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('preview-diff')), findsNothing);
+      expect(find.byType(FullDiffWorkspace), findsNothing);
       final previewWidth = tester
           .getSize(find.byKey(const Key('preview-panel')))
           .width;
@@ -744,13 +765,14 @@ void main() {
       await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('preview-diff')), findsOneWidget);
+      final diff = find.byType(FullDiffWorkspace);
+      expect(diff, findsOneWidget);
       expect(
         tester.getSize(find.byKey(const Key('preview-panel'))).width,
         previewWidth,
       );
       expect(
-        tester.getRect(find.byKey(const Key('preview-diff'))).right,
+        tester.getRect(diff).right,
         tester.getRect(find.byKey(const Key('preview-panel'))).left,
       );
 
@@ -758,177 +780,19 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         tester.getRect(find.byKey(const Key('preview-panel'))).right,
-        tester.getRect(find.byKey(const Key('preview-diff'))).left,
+        tester.getRect(diff).left,
       );
 
       await tester.tap(find.text('하단'));
       await tester.pumpAndSettle();
       expect(
-        tester.getRect(find.byKey(const Key('preview-diff'))).bottom,
+        tester.getRect(diff).bottom,
         tester.getRect(find.byKey(const Key('preview-panel'))).top,
       );
     },
   );
 
-  testWidgets('preview diff resizer shows blue line only on hover', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1200, 700);
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    await tester.pumpWidget(
-      app(
-        FakeGitRepository(
-          (_, _) async => [commit('1', 'first commit')],
-          files: (_, _) async => const [
-            GitFileChange(
-              path: 'lib/a.dart',
-              status: 'M',
-              additions: 1,
-              deletions: 1,
-            ),
-          ],
-          diff: (_, _, _, _, _) async => const [
-            DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
-            DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
-          ],
-        ),
-        controller,
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
-    await tester.pumpAndSettle();
-
-    Color lineColor() => tester
-        .widget<ColoredBox>(find.byKey(const Key('preview-diff-hover-line')))
-        .color;
-    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await mouse.addPointer(location: const Offset(1190, 690));
-    expect(lineColor(), Colors.transparent);
-    expect(
-      tester.getRect(find.byKey(const Key('preview-diff-hover-line'))).left,
-      tester.getRect(find.byKey(const Key('preview-diff'))).left,
-    );
-
-    await mouse.moveTo(
-      tester.getCenter(find.byKey(const Key('preview-diff-resizer'))),
-    );
-    await tester.pump();
-    expect(lineColor(), const Color(0xFF5AB0FF));
-
-    await mouse.moveTo(const Offset(1190, 690));
-    await tester.pump();
-    expect(lineColor(), Colors.transparent);
-  });
-
-  testWidgets(
-    'adjacent diff size defaults, persists, and reaches both endpoints',
-    (tester) async {
-      tester.view.devicePixelRatio = 1;
-      tester.view.physicalSize = const Size(1200, 700);
-      addTearDown(() {
-        tester.view.resetDevicePixelRatio();
-        tester.view.resetPhysicalSize();
-      });
-      final store = MemorySettingsStore();
-      final repository = FakeGitRepository(
-        (_, _) async => [commit('1', 'first commit')],
-        files: (_, _) async => const [
-          GitFileChange(
-            path: 'lib/a.dart',
-            status: 'M',
-            additions: 1,
-            deletions: 1,
-          ),
-        ],
-        diff: (_, _, _, _, _) async => const [
-          DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
-          DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
-        ],
-      );
-
-      Future<void> mountAndOpen() async {
-        await tester.pumpWidget(
-          YogitApp(
-            repository: repository,
-            settingsStore: store,
-            discoverAvatars: false,
-            windowFrameController: controller,
-          ),
-        );
-        await tester.pumpAndSettle();
-        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-        await tester.pumpAndSettle();
-        await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
-        await tester.pumpAndSettle();
-      }
-
-      await mountAndOpen();
-      final previewWidth = tester
-          .getSize(find.byKey(const Key('preview-panel')))
-          .width;
-      expect(
-        tester.getSize(find.byKey(const Key('timeline-viewport'))).width,
-        closeTo(100, 0.1),
-      );
-
-      final initialDiffWidth = tester
-          .getSize(find.byKey(const Key('preview-diff')))
-          .width;
-      await tester.drag(
-        find.byKey(const Key('preview-diff-resizer')),
-        Offset(initialDiffWidth - 400, 0),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        tester.getSize(find.byKey(const Key('preview-diff'))).width,
-        closeTo(400, 0.1),
-      );
-      expect(
-        store.current.toJson()['previewDiffRightWidth'],
-        closeTo(400, 0.1),
-      );
-      expect(
-        tester.getSize(find.byKey(const Key('preview-panel'))).width,
-        previewWidth,
-      );
-
-      await tester.pumpWidget(const SizedBox.shrink());
-      await controller.setPreview(PreviewPlacement.closed);
-      await mountAndOpen();
-      expect(
-        tester.getSize(find.byKey(const Key('preview-diff'))).width,
-        closeTo(400, 0.1),
-      );
-
-      await tester.drag(
-        find.byKey(const Key('preview-diff-resizer')),
-        const Offset(-5000, 0),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        tester.getSize(find.byKey(const Key('timeline-viewport'))).width,
-        closeTo(0, 0.1),
-      );
-      await tester.drag(
-        find.byKey(const Key('preview-diff-resizer')),
-        const Offset(5000, 0),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        tester.getSize(find.byKey(const Key('preview-diff'))).width,
-        closeTo(0, 0.1),
-      );
-    },
-  );
-
-  testWidgets('escape closes the adjacent diff before the preview', (
+  testWidgets('escape closes the embedded diff before the preview', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -960,26 +824,24 @@ void main() {
     await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('timeline-viewport')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('preview-diff')), findsOneWidget);
+    expect(find.byType(FullDiffWorkspace), findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('preview-diff')), findsNothing);
+    expect(find.byType(FullDiffWorkspace), findsNothing);
     expect(find.byKey(const Key('preview-panel')), findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('preview-diff-close')));
+    await tester.tap(find.byKey(const Key('full-diff-back')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('preview-diff')), findsNothing);
+    expect(find.byType(FullDiffWorkspace), findsNothing);
     expect(find.byKey(const Key('preview-panel')), findsOneWidget);
   });
 
@@ -1026,22 +888,13 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     expect(find.text('lib/first.dart'), findsOneWidget);
-    expect(find.byKey(const Key('preview-diff')), findsNothing);
+    expect(find.byType(FullDiffWorkspace), findsNothing);
     expect(diffLoads, 0);
 
     await tester.tap(find.byKey(const Key('preview-state-lib/first.dart')));
     await tester.pumpAndSettle();
-    expect(find.text('lib/first.dart'), findsNWidgets(2));
     expect(find.text('README.md'), findsOneWidget);
     expect(find.text('lib/first.dart changed'), findsOneWidget);
-    expect(
-      find.byKey(const Key('branch-preview-diff-toolbar')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const Key('branch-preview-layout-switch')),
-      findsOneWidget,
-    );
     expect(find.byType(UnifiedPresentationView), findsOneWidget);
     expect(find.text('+1 -1'), findsOneWidget);
     expect(
@@ -1053,23 +906,20 @@ void main() {
       isNull,
     );
     expect(
-      tester.getRect(find.byKey(const Key('preview-diff'))).right,
+      tester.getRect(find.byType(FullDiffWorkspace)).right,
       tester.getRect(find.byKey(const Key('preview-panel'))).left,
     );
-
-    await tester.tap(
-      find.byKey(const Key('branch-preview-layout-side-by-side')),
-    );
-    await tester.pump();
-    expect(find.byType(SideBySidePresentationView), findsOneWidget);
+    // The workspace loads the commit's files for its own session; picking the
+    // same file again asks git for nothing new.
+    final settled = (files: fileLoads, diffs: diffLoads);
+    await tester.tap(find.byKey(const Key('preview-state-lib/first.dart')));
+    await tester.pumpAndSettle();
+    expect(fileLoads, settled.files);
+    expect(diffLoads, settled.diffs);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('preview-diff')), findsNothing);
-    await tester.tap(find.byKey(const Key('preview-state-lib/first.dart')));
-    await tester.pumpAndSettle();
-    expect(fileLoads, 1);
-    expect(diffLoads, 1);
+    expect(find.byType(FullDiffWorkspace), findsNothing);
   });
 
   testWidgets('preview is a structural sibling and preserves timeline state', (
@@ -1180,13 +1030,24 @@ void main() {
         refConnector: true,
       );
       const centerY = TimelineScreen.rowHeight / 2;
-      const tip = Offset(13, centerY);
+      // The disc's own edge, less the gap every ref arrow keeps.
+      const tip = Offset(
+        CommitGraphPainter.laneInset -
+            CommitGraphPainter.avatarRadius -
+            CommitGraphPainter.refArrowGap,
+        centerY,
+      );
 
       expect(painter.refMarkerRadius, CommitGraphPainter.avatarRadius);
       expect(painter.refArrowTipX, tip.dx);
       expect(
         painter.refArrowheadPath(centerY).getBounds(),
-        Rect.fromLTRB(6, centerY - 5, 13, centerY + 5),
+        Rect.fromLTRB(
+          tip.dx - CommitGraphPainter.refArrowLength,
+          centerY - 5,
+          tip.dx,
+          centerY + 5,
+        ),
       );
       expect(
         (Canvas canvas) => painter.paint(canvas, size),
@@ -1232,7 +1093,7 @@ void main() {
     expect(workingTree.refArrowTipX, 16.0);
     expect(compact.laneX(compact.row.lane), CommitGraphPainter.laneInset);
     expect(compact.refMarkerRadius, CommitGraphPainter.avatarRadius);
-    expect(compact.refArrowTipX, 13.0);
+    expect(compact.refArrowTipX, 14.0);
   });
 
   test('preview rail inherits the previous row dash above its node', () {
@@ -1320,43 +1181,40 @@ void main() {
     );
   });
 
-  test(
-    'a virtual commit node draws its ring as dashes fitted to the circle',
-    () {
-      const fill = Color(0xFF8D6BB8);
-      const ring = Color(0xFFB78BEF);
-      const painter = DashedRingNodePainter(
-        fill: fill,
-        ring: ring,
-        ringWidth: 3,
-      );
-      const size = Size.square(CommitGraphPainter.avatarRadius * 2);
-      // The ring is stroked just inside the disc (r = 11 - 1.5), and its dash
-      // count is FITTED to that perimeter — whole dash+gap periods only, so the
-      // pattern closes without a seam instead of clipping the last dash.
-      final period = DashedRingNodePainter.dash + DashedRingNodePainter.gap;
-      final perimeter =
-          (Path()..addOval(
-                Rect.fromCircle(center: size.center(Offset.zero), radius: 9.5),
-              ))
-              .computeMetrics()
-              .single
-              .length;
-      final fitted = (perimeter / period).round();
-      PaintPattern dashes(int count) {
-        final pattern = paints..circle(color: fill);
-        for (var i = 0; i < count; i++) {
-          pattern.path(color: ring, strokeWidth: 3);
-        }
-        return pattern;
+  test('a virtual commit node draws its ring as dashes fitted to the circle', () {
+    const fill = Color(0xFF8D6BB8);
+    const ring = Color(0xFFB78BEF);
+    const painter = DashedRingNodePainter(fill: fill, ring: ring, ringWidth: 3);
+    const size = Size.square(CommitGraphPainter.avatarRadius * 2);
+    // The ring is stroked just inside the disc (r = the disc's own radius less
+    // half the ring's width), and its dash count is FITTED to that perimeter —
+    // whole dash+gap periods only, so the pattern closes without a seam
+    // instead of clipping the last dash.
+    final period = DashedRingNodePainter.dash + DashedRingNodePainter.gap;
+    final perimeter =
+        (Path()..addOval(
+              Rect.fromCircle(
+                center: size.center(Offset.zero),
+                radius: CommitGraphPainter.avatarRadius - 1.5,
+              ),
+            ))
+            .computeMetrics()
+            .single
+            .length;
+    final fitted = (perimeter / period).round();
+    PaintPattern dashes(int count) {
+      final pattern = paints..circle(color: fill);
+      for (var i = 0; i < count; i++) {
+        pattern.path(color: ring, strokeWidth: 3);
       }
+      return pattern;
+    }
 
-      void paint(Canvas canvas) => painter.paint(canvas, size);
-      expect(fitted, greaterThan(1));
-      expect(paint, dashes(fitted));
-      expect(paint, isNot(dashes(fitted + 1)));
-    },
-  );
+    void paint(Canvas canvas) => painter.paint(canvas, size);
+    expect(fitted, greaterThan(1));
+    expect(paint, dashes(fitted));
+    expect(paint, isNot(dashes(fitted + 1)));
+  });
 
   test(
     'compact preview keeps the virtual segment dashed above its real parent',
@@ -2054,6 +1912,29 @@ void main() {
     );
   });
 
+  testWidgets('the author column carries only the name — the graph node '
+      'already wears the avatar', (tester) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository((_, _) async => [commit('1', 'first commit')]),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final stacks = find.byType(CommitAvatarStack);
+    expect(stacks, findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('graph-cell-0')),
+        matching: stacks,
+      ),
+      findsOneWidget,
+      reason: '유일한 아바타는 그래프 노드의 것',
+    );
+    expect(find.text('Ada Author'), findsWidgets);
+  });
+
   testWidgets('merge rows swap the avatar stack for a filled lane dot', (
     tester,
   ) async {
@@ -2091,9 +1972,9 @@ void main() {
         matching: find.byType(CommitAvatarStack),
       ),
     );
-    expect(stack.size, 22);
+    expect(stack.size, CommitGraphPainter.avatarDiameter);
     expect(stack.discColor, AvatarService.branchColor(painterAt(1).row.branch));
-    // Every stack in a row — graph cell and name cell — wears its branch line.
+    // Every remaining stack (the graph cell) wears its branch line.
     expect(
       tester
           .widgetList<CommitAvatarStack>(find.byType(CommitAvatarStack))
@@ -2106,9 +1987,8 @@ void main() {
     );
   });
 
-  testWidgets('the commit title column flexes until it is dragged', (
-    tester,
-  ) async {
+  testWidgets('the commit title column flexes, and its divider hands width to '
+      'Date and Author', (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1400, 800);
     addTearDown(() {
@@ -2131,20 +2011,19 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
-    // Default is unset, so the title column takes whatever is left over.
-    expect(const TimelineColumnWidths().commit, isNull);
+    // Nothing pins the title column, so it takes whatever is left over.
     double titleWidth() =>
         tester.getSize(find.byKey(const Key('commit-header'))).width;
     double nameRight() =>
         tester.getRect(find.byKey(const Key('name-header'))).right;
 
-    // 1400 - 150 sidebar - 288 preview - (156 + 96 + 78 + 116 + 150) fixed.
-    expect(titleWidth(), 366);
+    // 1400 - 150 sidebar - 288 preview - (156 + 57 + 78 + 116 + 150) fixed.
+    expect(titleWidth(), 405);
     expect(nameRight(), lessThanOrEqualTo(1400 - 288));
 
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(titleWidth(), 654);
+    expect(titleWidth(), 693);
     expect(nameRight(), lessThanOrEqualTo(1400));
 
     // Every column stays visible at the default window size with the preview
@@ -2153,28 +2032,31 @@ void main() {
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(titleWidth(), 246);
+    expect(titleWidth(), 285);
     expect(nameRight(), lessThanOrEqualTo(1280 - 288));
 
-    // Dragging narrower pins the width: it is saved and stops following the
-    // viewport. The drag starts from the width on screen (246).
+    // Dragging the divider narrower hands the 100px to Date and Author instead
+    // of storing a width nothing draws: Date fills to its 170 maximum and
+    // Author takes the remaining 46.
     await tester.drag(
       find.byKey(const Key('commit-resizer')),
       const Offset(-100, 0),
     );
     await tester.pumpAndSettle();
-    final pinned = titleWidth();
-    expect(pinned, lessThan(246));
-    expect(saved?.commit, pinned);
+    expect(titleWidth(), 185);
+    expect(saved?.time, 170);
+    expect(saved?.name, 196);
 
-    // A narrow window compresses even a pinned title to the 100px minimum, and
-    // widening restores it up to the pinned width — never past it.
+    // A narrow window still compresses the title to the 100px minimum before
+    // any other column clips, and widening refills the leftover.
     tester.view.physicalSize = const Size(800, 760);
     await tester.pumpAndSettle();
     expect(titleWidth(), 100);
+    // The opening 1400px case again, now 100px narrower: the width the drag
+    // moved stayed with Date and Author.
     tester.view.physicalSize = const Size(1400, 760);
     await tester.pumpAndSettle();
-    expect(titleWidth(), pinned);
+    expect(titleWidth(), 305);
   });
 
   testWidgets('the six columns fill the timeline viewport with no dead strip', (
@@ -2207,8 +2089,8 @@ void main() {
 
     // 1538 - 150 sidebar - 288 preview.
     expect(viewport().width, 1100);
-    expect(columnWidth('graph'), 96);
-    expect(columnWidth('commit'), 1100 - (156 + 96 + 78 + 116 + 150));
+    expect(columnWidth('graph'), CommitGraphPainter.minAutoFitWidth);
+    expect(columnWidth('commit'), 1100 - (156 + 57 + 78 + 116 + 150));
     expect(
       tester.getRect(find.byKey(const Key('name-header'))).right,
       viewport().right,
@@ -2229,8 +2111,9 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(columnWidth('graph'), 102);
-    expect(columnWidth('commit'), 1100 - (156 + 102 + 78 + 116 + 150));
+    final deep = CommitGraphPainter.contentWidth(2);
+    expect(columnWidth('graph'), deep);
+    expect(columnWidth('commit'), 1100 - (156 + deep + 78 + 116 + 150));
     expect(
       tester.getRect(find.byKey(const Key('name-header'))).right,
       viewport().right,
@@ -2254,15 +2137,15 @@ void main() {
       ),
     );
 
-    // One lane wants 28 + 30, so the 96px minimum wins.
+    // One lane wants 28 + 13, so the never-fold floor wins.
     await tester.pumpWidget(
       screen(FakeGitRepository((_, _) async => [commit('1', 'first commit')])),
     );
     await tester.pumpAndSettle();
     expect(const TimelineColumnWidths().graph, isNull);
-    expect(graphWidth(), 96);
+    expect(graphWidth(), CommitGraphPainter.minAutoFitWidth);
 
-    // Three lanes want 28 + 2 * 30 + 14 of content, which clears the minimum.
+    // Three lanes want 28 + 2 * 30 + 12 of content, which clears the minimum.
     await tester.pumpWidget(
       screen(
         FakeGitRepository(
@@ -2276,7 +2159,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(graphWidth(), 102);
+    expect(graphWidth(), CommitGraphPainter.contentWidth(2));
 
     // Dragging pins it, and the pinned width is what gets saved.
     await tester.drag(
@@ -2285,7 +2168,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     final pinned = graphWidth();
-    expect(pinned, greaterThan(102));
+    expect(pinned, greaterThan(CommitGraphPainter.contentWidth(2)));
     expect(saved?.graph, pinned);
     final painter =
         tester
@@ -2360,14 +2243,14 @@ void main() {
     // 1250 - 150 sidebar, preview closed.
     expect(timelineColumns['commit']!.min, 100);
     expect(viewport().width, 1100);
-    expect(titleWidth(), 1100 - 596);
+    expect(titleWidth(), 1100 - 557);
     expect(nameRight(), viewport().right);
 
     // The title takes the whole 350px shrink; the other five hold their widths.
     tester.view.physicalSize = const Size(900, 800);
     await tester.pumpAndSettle();
     expect(viewport().width, 750);
-    expect(titleWidth(), 750 - 596);
+    expect(titleWidth(), 750 - 557);
     expect(nameRight(), viewport().right);
 
     // Past the 100px floor the row overflows instead, so the right clips. (The
@@ -2385,16 +2268,18 @@ void main() {
   test('graph lane spacing compresses in stages', () {
     // Lanes hold their coordinates while the cell still shows the last node,
     // which is all the width the content needs.
-    expect(CommitGraphPainter.contentWidth(2), 102);
-    expect(CommitGraphPainter.contentWidth(0), 42);
+    // The numbers follow the disc: nodeExtent is half of it plus the rail's
+    // clearance, so a 20pt avatar puts every stage one point further out.
+    expect(CommitGraphPainter.contentWidth(2), 101);
+    expect(CommitGraphPainter.contentWidth(0), 41);
     expect(CommitGraphPainter.spacingFor(260, 2), 30);
     expect(CommitGraphPainter.spacingFor(118, 2), 30);
-    expect(CommitGraphPainter.spacingFor(102, 2), 30);
+    expect(CommitGraphPainter.spacingFor(101, 2), 30);
     expect(CommitGraphPainter.spacingFor(58, 0), 30);
     // Below that the lanes squeeze so the last node stays just inside.
-    expect(CommitGraphPainter.spacingFor(101, 2), 29.5);
-    expect(CommitGraphPainter.spacingFor(100, 2), 29);
-    expect(CommitGraphPainter.spacingFor(70, 2), 14);
+    expect(CommitGraphPainter.spacingFor(100, 2), 29.5);
+    expect(CommitGraphPainter.spacingFor(99, 2), 29);
+    expect(CommitGraphPainter.spacingFor(68, 2), 13.5);
     expect(CommitGraphPainter.spacingFor(40, 2), 12);
     expect(CommitGraphPainter.compactWidth, 56);
     expect(timelineColumns['graph']!.min, 40);
@@ -2432,27 +2317,27 @@ void main() {
         )
         .size;
 
-    // Stage 1: 118px is wider than the 102px content, so nothing moves.
+    // Stage 1: 118px is wider than the 100px content, so nothing moves.
     await tester.pumpWidget(screen(118));
     await tester.pumpAndSettle();
     expect(painterAt(0).compact, isFalse);
     expect(painterAt(0).laneSpacing, 30);
     expect(painterAt(1).laneX(1) - painterAt(1).laneX(0), 30);
-    expect(avatarSize(1), 22);
+    expect(avatarSize(1), CommitGraphPainter.avatarDiameter);
 
     // Stage 2: the lanes squeeze together and the node avatar shrinks with them.
-    await tester.pumpWidget(screen(70));
+    await tester.pumpWidget(screen(68));
     await tester.pumpAndSettle();
     expect(painterAt(0).compact, isFalse);
-    expect(painterAt(0).laneSpacing, 14);
+    expect(painterAt(0).laneSpacing, 13.5);
     expect(painterAt(1).laneX(0), CommitGraphPainter.laneInset);
-    expect(painterAt(1).laneX(1) - painterAt(1).laneX(0), 14);
+    expect(painterAt(1).laneX(1) - painterAt(1).laneX(0), 13.5);
     expect(
-      painterAt(0).transitionPath(0, 2, 18, const Size(70, 36)).getBounds(),
-      const Rect.fromLTRB(28, 18, 56, 54),
+      painterAt(0).transitionPath(0, 2, 18, const Size(68, 36)).getBounds(),
+      const Rect.fromLTRB(28, 18, 55, 54),
     );
     // Nodes keep their full size at every width; the overhang just clips.
-    expect(avatarSize(1), 22);
+    expect(avatarSize(1), CommitGraphPainter.avatarDiameter);
 
     // Stage 3: every lane collapses onto the inset and the curves are dropped.
     await tester.pumpWidget(screen(56));
@@ -2469,7 +2354,7 @@ void main() {
       top: 0.0,
       bottom: 18.0,
     ));
-    expect(avatarSize(1), 22);
+    expect(avatarSize(1), CommitGraphPainter.avatarDiameter);
   });
 
   testWidgets('column resizers move by 8px on arrow keys and clamp', (
@@ -2509,12 +2394,18 @@ void main() {
     expect(saved?.time, 124);
     expect(tester.getSize(find.byKey(const Key('time-header'))).width, 124);
 
+    // The arrow keys drive the same divider a drag does, so what Date gives up
+    // goes to Author and the pair's total holds. Author stops at its own
+    // maximum, and Date stops with it: the line cannot move left once the
+    // column on its right has nowhere to put the width.
+    final pairBefore = saved!.time + saved!.name;
     for (var press = 0; press < 13; press++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
       await tester.pump();
     }
-    expect(saved?.time, 20);
-    expect(saved?.name, 150);
+    expect(saved!.name, timelineColumns['name']!.max);
+    expect(saved!.time + saved!.name, pairBefore);
+    expect(saved!.time, greaterThan(timelineColumns['time']!.min));
   });
 
   testWidgets('Date and Author columns hide and restore their last widths', (
@@ -2573,7 +2464,9 @@ void main() {
         .focusNode!
         .requestFocus();
     await tester.pump();
-    for (var press = 0; press < 7; press++) {
+    // Author is at 130 by now: the Date divider handed it the 60px Date gave up
+    // on its way down to the minimum, so it takes 14 presses to walk it back.
+    for (var press = 0; press < 14; press++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
       await tester.pump();
     }
@@ -2715,10 +2608,12 @@ void main() {
     expect(tester.getSize(find.byKey(const Key('time-header'))).width, 80);
 
     await hideWithOneDrag('name');
-    expect(saved?.name, 70);
+    // Collapsing Date first handed Author the 60px it gave up, so 130 is the
+    // width this drag started from — and the width the restore hands back.
+    expect(saved?.name, 130);
     await tester.tap(find.byKey(const Key('show-name-column')));
     await tester.pumpAndSettle();
-    expect(tester.getSize(find.byKey(const Key('name-header'))).width, 70);
+    expect(tester.getSize(find.byKey(const Key('name-header'))).width, 130);
   });
 
   testWidgets(
@@ -3043,7 +2938,9 @@ void main() {
       final folderChevron = tester.getRect(
         find.byKey(const Key('sidebar-folder-local-feature')),
       );
-      expect(folderChevron.left, sectionIcon.left);
+      // The tree sits one gutter in from the section icon: every row reserves
+      // that column for its hide-from-graph eye.
+      expect(folderChevron.left - sectionIcon.left, 18);
 
       final topLevelBranchName = tester.getRect(
         find.descendant(
@@ -3187,75 +3084,6 @@ void main() {
   });
 
   testWidgets(
-    'selected local branch shows only its nonzero upstream behind count',
-    (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: TimelineScreen(
-            repository: FakeGitRepository(
-              (_, _) async => [commit('1', 'first commit')],
-              refs: const RepoRefs(
-                local: ['main', 'release', 'local-only'],
-                current: 'main',
-                upstreams: {
-                  'main': 'origin/main',
-                  'release': 'company/release',
-                },
-                upstreamRemotes: {'main': 'origin', 'release': 'company'},
-                aheadBehind: {
-                  'main': BranchAheadBehind(ahead: 2, behind: 4),
-                  'release': BranchAheadBehind(ahead: 0, behind: 3),
-                },
-              ),
-            ),
-            preferredBranch: 'release',
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const Key('base-branch-selector')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('base-branch-menu-release')));
-      await tester.pumpAndSettle();
-
-      expect(find.byKey(const Key('sidebar-ahead-main')), findsNothing);
-      expect(find.byKey(const Key('sidebar-behind-main')), findsNothing);
-      final badge = find.byKey(const Key('sidebar-behind-release'));
-      expect(badge, findsOneWidget);
-      expect(
-        find.descendant(of: badge, matching: find.text('3')),
-        findsOneWidget,
-      );
-      expect(
-        tester
-            .widget<Tooltip>(
-              find.ancestor(of: badge, matching: find.byType(Tooltip)),
-            )
-            .message,
-        '원격보다 3개 커밋 뒤처져 있습니다',
-      );
-      expect(find.byKey(const Key('sidebar-ahead-local-only')), findsNothing);
-      expect(find.byKey(const Key('sidebar-behind-local-only')), findsNothing);
-      expect(
-        tester
-            .widget<Text>(find.descendant(of: badge, matching: find.text('3')))
-            .style
-            ?.color,
-        const Color(0xFFFF453A),
-      );
-      final label = find.descendant(
-        of: find.byKey(const Key('sidebar-ref-release')),
-        matching: find.text('release'),
-      );
-      expect(
-        tester.getRect(badge).left - tester.getRect(label).right,
-        lessThanOrEqualTo(4),
-      );
-    },
-  );
-
-  testWidgets(
     'remote branches show divergence from same-named local branches',
     (tester) async {
       await tester.pumpWidget(
@@ -3306,44 +3134,6 @@ void main() {
       },
     );
 
-    Future<TestGesture> hoverRow(WidgetTester tester, String name) async {
-      final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      addTearDown(pointer.removePointer);
-      await pointer.addPointer(location: Offset.zero);
-      await pointer.moveTo(
-        tester.getCenter(find.byKey(Key('sidebar-ref-$name'))),
-      );
-      await tester.pump();
-      return pointer;
-    }
-
-    testWidgets('the pull affordance appears on hover and lists actions', (
-      tester,
-    ) async {
-      await tester.pumpWidget(
-        app(
-          FakeGitRepository((_, _) async => [commit('1', 'c')], refs: pullRefs),
-          controller,
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.byKey(const Key('sidebar-pull-origin/lane')), findsNothing);
-      await hoverRow(tester, 'origin/lane');
-      expect(find.byKey(const Key('sidebar-pull-origin/lane')), findsOneWidget);
-
-      await tester.tap(find.byKey(const Key('sidebar-pull-origin/lane')));
-      await tester.pumpAndSettle();
-
-      expect(find.byKey(const Key('remote-pull-header')), findsOneWidget);
-      expect(find.text('로컬 lane보다 3개 앞'), findsOneWidget);
-      expect(find.text('Pull — 3개 커밋'), findsOneWidget);
-      expect(find.text('체크아웃 전환 없이 로컬만 전진'), findsOneWidget);
-      expect(find.text('체크아웃'), findsOneWidget);
-      expect(find.text('lane으로 전환 후 pull'), findsOneWidget);
-      expect(find.text('브랜치 diff로 비교'), findsOneWidget);
-    });
-
     testWidgets('pull fast-forwards without checkout and reports it', (
       tester,
     ) async {
@@ -3372,40 +3162,17 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await hoverRow(tester, 'origin/lane');
-      await tester.tap(find.byKey(const Key('sidebar-pull-origin/lane')));
+      await tester.tap(find.byKey(const Key('sidebar-ref-origin/lane')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('remote-pull-pull')));
+      await tester.tap(find.byKey(const Key('sidebar-action-pull')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('remote-pull-confirm')));
       await tester.pumpAndSettle();
 
       expect(calls, [
         ['-c', 'credential.interactive=never', 'fetch', 'origin', 'lane:lane'],
       ]);
       expect(find.text('lane ← origin/lane · 3개 커밋'), findsOneWidget);
-    });
-
-    testWidgets('a diverged remote leads with compare and disables pull', (
-      tester,
-    ) async {
-      await tester.pumpWidget(
-        app(
-          FakeGitRepository((_, _) async => [commit('1', 'c')], refs: pullRefs),
-          controller,
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await hoverRow(tester, 'origin/split');
-      await tester.tap(find.byKey(const Key('sidebar-pull-origin/split')));
-      await tester.pumpAndSettle();
-
-      expect(find.text('브랜치 diff로 비교'), findsOneWidget);
-      expect(find.text('merge / rebase는 미리보기에서 결정'), findsOneWidget);
-      expect(find.text('fast-forward 불가'), findsOneWidget);
-      final pull = tester.widget<MenuItemButton>(
-        find.byKey(const Key('remote-pull-pull')),
-      );
-      expect(pull.onPressed, isNull);
     });
 
     testWidgets(
@@ -3441,13 +3208,9 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await hoverRow(tester, 'origin/new-lane');
-        await tester.tap(find.byKey(const Key('sidebar-pull-origin/new-lane')));
+        await tester.tap(find.byKey(const Key('sidebar-ref-origin/new-lane')));
         await tester.pumpAndSettle();
-        expect(find.text('추적 브랜치 new-lane 생성'), findsOneWidget);
-        expect(find.byKey(const Key('remote-pull-pull')), findsNothing);
-
-        await tester.tap(find.byKey(const Key('remote-pull-checkout')));
+        await tester.tap(find.byKey(const Key('sidebar-action-checkout')));
         await tester.pumpAndSettle();
 
         expect(calls, [
@@ -3514,45 +3277,6 @@ void main() {
       ]);
     });
 
-    testWidgets('double-clicking any other state only opens the menu', (
-      tester,
-    ) async {
-      final calls = <List<String>>[];
-      await tester.pumpWidget(
-        app(
-          FakeGitRepository(
-            (_, _) async => [commit('1', 'c')],
-            refs: pullRefs,
-            runner:
-                (executable, arguments, {workingDirectory, environment}) async {
-                  // The status bar chip and the local-change watcher both
-                  // read on load; this test is about the pull commands.
-                  if (!const {
-                    'config',
-                    'for-each-ref',
-                    'rev-parse',
-                  }.contains(arguments.first)) {
-                    calls.add(arguments);
-                  }
-                  return ProcessResult(1, 0, '', '');
-                },
-          ),
-          controller,
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      final row = find.byKey(const Key('sidebar-ref-origin/split'));
-      await tester.tap(row);
-      await tester.pump(kDoubleTapMinTime);
-      await tester.tap(row);
-      await tester.pumpAndSettle();
-
-      expect(find.byKey(const Key('remote-pull-header')), findsOneWidget);
-      expect(find.text('fast-forward 불가'), findsOneWidget);
-      expect(calls, isEmpty);
-    });
-
     testWidgets('the row shows a spinner while the pull runs', (tester) async {
       final gate = Completer<void>();
       await tester.pumpWidget(
@@ -3571,10 +3295,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await hoverRow(tester, 'origin/lane');
-      await tester.tap(find.byKey(const Key('sidebar-pull-origin/lane')));
+      await tester.tap(find.byKey(const Key('sidebar-ref-origin/lane')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('remote-pull-pull')));
+      await tester.tap(find.byKey(const Key('sidebar-action-pull')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('remote-pull-confirm')));
       await tester.pump();
       await tester.pump();
 
@@ -3611,10 +3336,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await hoverRow(tester, 'origin/lane');
-      await tester.tap(find.byKey(const Key('sidebar-pull-origin/lane')));
+      await tester.tap(find.byKey(const Key('sidebar-ref-origin/lane')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('remote-pull-pull')));
+      await tester.tap(find.byKey(const Key('sidebar-action-pull')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('remote-pull-confirm')));
       await tester.pumpAndSettle();
 
       expect(
@@ -3774,7 +3500,7 @@ void main() {
     expect(remotes, ['origin', 'origin']);
   });
 
-  testWidgets('changing the base branch refreshes its upstream remote', (
+  testWidgets('every branch\'s upstream remote refreshes, base or not', (
     tester,
   ) async {
     final remotes = <String>[];
@@ -3797,13 +3523,20 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(remotes, ['origin']);
+    // Every local branch wears its own divergence badge, so every remote one
+    // of them tracks is fetched — not just the base branch's.
+    expect(remotes, ['company', 'origin']);
 
     await tester.tap(find.byKey(const Key('base-branch-selector')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('base-branch-menu-release')));
     await tester.pumpAndSettle();
-    expect(remotes, ['origin', 'company']);
+    expect(remotes, [
+      'company',
+      'origin',
+      'company',
+      'origin',
+    ], reason: '기준 브랜치를 바꾸면 다시 한 바퀴 돌지만, 도는 대상은 그대로다');
   });
 
   testWidgets('remote refresh failure keeps the selected branch count', (
@@ -3836,11 +3569,11 @@ void main() {
 
     expect(find.text('원격 갱신 실패'), findsOneWidget);
     expect(
-      find.descendant(
-        of: find.byKey(const Key('sidebar-behind-main')),
-        matching: find.text('1'),
-      ),
-      findsOneWidget,
+      tester
+          .widget<Text>(find.byKey(const Key('sidebar-local-divergence-main')))
+          .textSpan!
+          .toPlainText(),
+      '−1',
     );
     await tester.tap(find.byKey(const Key('retry-origin-fetch')));
     await tester.pumpAndSettle();
@@ -3848,11 +3581,11 @@ void main() {
     expect(fetches, 2);
     expect(find.text('원격 갱신 실패'), findsNothing);
     expect(
-      find.descendant(
-        of: find.byKey(const Key('sidebar-behind-main')),
-        matching: find.text('2'),
-      ),
-      findsOneWidget,
+      tester
+          .widget<Text>(find.byKey(const Key('sidebar-local-divergence-main')))
+          .textSpan!
+          .toPlainText(),
+      '−2',
     );
   });
 
@@ -4620,7 +4353,14 @@ void main() {
     ]);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
-    expect(find.text('선택한 커밋의 diff'), findsOneWidget);
+    // 비교 중에도 실제 커밋을 고르면 헤더는 그 커밋의 해시를 말한다.
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('preview-header')),
+        matching: find.text('main-tip'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('main-tip.dart'), findsWidgets);
     expect(commitCalls, [(sha: 'main-tip', path: 'main-tip.dart')]);
     expect(rangeCalls, hasLength(1));
@@ -4971,10 +4711,7 @@ void main() {
       find.descendant(of: sideTitles, matching: find.text('비교 브랜치')),
       findsOneWidget,
     );
-    expect(
-      find.text('lib/shared.dart · lines 1 · change 1 of 1'),
-      findsNothing,
-    );
+    expect(find.textContaining('@@ -1,1 +1,1 @@'), findsNothing);
     final conflictActions = find.byKey(
       const Key('branch-preview-conflict-actions'),
     );
@@ -8195,6 +7932,13 @@ void main() {
     final tagCreatorTimes = {
       for (var index = 1; index <= 12; index++) 'release/v$index': index * 100,
     };
+    // Tag rows carry their creation time now, so ten of them need the room.
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 1000);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
     await tester.pumpWidget(
       app(
         FakeGitRepository(
@@ -8429,7 +8173,6 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('Working tree changes'), findsOneWidget);
     expect(find.text('Not committed'), findsOneWidget);
     expect(find.text('No commit object or committer'), findsOneWidget);
     expect(find.text('2 files changed'), findsOneWidget);
@@ -8488,7 +8231,7 @@ void main() {
 
     await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
     await tester.pumpAndSettle();
-    final diff = find.byKey(const Key('preview-diff'));
+    final diff = find.byType(FullDiffWorkspace);
     expect(find.byType(UnifiedPresentationView), findsOneWidget);
     expect(find.byKey(const Key('unified-line-0-0')), findsOneWidget);
     expect(find.byKey(const Key('unified-line-0-1')), findsOneWidget);
@@ -9170,9 +8913,14 @@ void main() {
     final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
     int alphaAt(int x, int y) => bytes!.getUint8((y * 100 + x) * 4 + 3);
 
-    expect(alphaAt(42, 15), greaterThan(0));
-    expect(alphaAt(43, 16), 0);
-    expect(alphaAt(42, 21), greaterThan(0));
+    // The head opens rightward from the node's own edge — the lane inset plus
+    // the disc's radius — so the probes follow the avatar, not a fixed column.
+    final tip =
+        (CommitGraphPainter.laneInset + CommitGraphPainter.avatarDiameter / 2)
+            .round();
+    expect(alphaAt(tip + 3, 15), greaterThan(0));
+    expect(alphaAt(tip + 4, 16), 0);
+    expect(alphaAt(tip + 3, 21), greaterThan(0));
   });
 
   test(
@@ -9363,6 +9111,47 @@ void main() {
       isNot(contains(PreviewGraphNodeKind.virtualRebase)),
     );
     expect(graph.mappings, isEmpty);
+  });
+
+  test('a rebase that keeps the sha still draws original and copy apart', () {
+    final comparison = branchComparison();
+    final feature = comparison.commits
+        .singleWhere((entry) => entry.side == BranchCommitSide.compareOnly)
+        .commit;
+    // 기준 브랜치가 조상이면 재배치가 커밋을 그대로 두고, range-diff는 원본 sha를
+    // 그대로 짝지어 돌려준다.
+    final graph = layoutRebasePreviewGraph(
+      comparison,
+      RebasePreviewResult(
+        status: RebasePreviewStatus.clean,
+        baseTip: comparison.baseTip,
+        compareTip: comparison.compareTip,
+        rewritten: [(original: feature, rewrittenSha: feature.sha)],
+        completed: 1,
+        total: 1,
+        virtualTip: feature.sha,
+      ),
+      mergeCommit: true,
+    );
+    final copy = graph.rows[1];
+    // 가상 행과 원본 행이 서로 다른 키를 갖는다: 겹치면 원본까지 가상으로 그려진다.
+    expect(copy.commit.sha, isNot(feature.sha));
+    expect(graph.kinds[copy.commit.sha], PreviewGraphNodeKind.virtualRebase);
+    expect(graph.kinds[feature.sha], isNull);
+    // sha가 그대로니 해시 칸도 'new SHA'가 아니라 원본 해시를 보여준다.
+    expect(copy.commit.shortSha, feature.shortSha);
+    // 이동 화살표는 원본 행에서 나와 가상 행으로 들어간다.
+    final mapping = graph.mappings.single;
+    expect(mapping.originalSha, feature.sha);
+    expect(mapping.rewrittenSha, copy.commit.sha);
+    expect(mapping.rewrittenRow, 1);
+    expect(mapping.originalRow, isNot(mapping.rewrittenRow));
+    expect(graph.rows[mapping.originalRow].commit.sha, feature.sha);
+    // 가상 머지의 두 번째 부모도 가상 행을 가리킨다.
+    expect(graph.rows.first.commit.parents, [
+      comparison.baseTip,
+      copy.commit.sha,
+    ]);
   });
 
   test('the rebase preview graph adds the merge commit only when selected', () {
@@ -9751,35 +9540,43 @@ void main() {
     final fill =
         tester.widget<Container>(find.byType(Container)).decoration!
             as BoxDecoration;
-    // Opaque identity color, no transparent center, and no outline at all.
+    // No branch to wear: the settings preview keeps the opaque identity disc,
+    // no transparent center and no ring.
     expect(fill.color, AvatarService.color(ada));
     expect(fill.color!.a, 1.0);
     expect(fill.border, isNull);
     expect(tester.widget<IdentityAvatar>(find.byType(IdentityAvatar)).size, 22);
-
-    // In a row the disc wears the branch line instead, ink following suit.
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Center(
-          child: IdentityAvatar(
-            identity: ada,
-            discColor: AvatarService.branchColor(2),
-          ),
-        ),
-      ),
-    );
-    final branchFill =
-        tester.widget<Container>(find.byType(Container)).decoration!
-            as BoxDecoration;
-    expect(branchFill.color, AvatarService.branchColor(2));
-    expect(
-      tester.widget<Text>(find.text('AL')).style?.color,
-      AvatarService.onColor(AvatarService.branchColor(2)),
-    );
     expect(
       tester.widget<Text>(find.text('AL')).style?.color,
       AvatarService.onColor(AvatarService.color(ada)),
     );
+
+    // In a row the disc becomes the branch's own colour throughout: a ring at
+    // the rail's weight, the same colour dimmed inside it, and ink to match.
+    final branch = AvatarService.branchColor(2);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Center(
+          child: IdentityAvatar(identity: ada, discColor: branch),
+        ),
+      ),
+    );
+    final ringed =
+        tester.widget<Container>(find.byType(Container)).decoration!
+            as BoxDecoration;
+    expect(ringed.border, isNotNull);
+    final border = ringed.border! as Border;
+    expect(border.top.color, branch);
+    expect(border.top.width, CommitGraphPainter.railWidth);
+    // The same colour a little darker, opaque so the lane's rail stops at the
+    // disc, with ink picked for readability against it.
+    expect(ringed.color, IdentityAvatar.fillFor(branch));
+    expect(ringed.color!.a, 1.0);
+    expect(
+      tester.widget<Text>(find.text('AL')).style?.color,
+      AvatarService.onColor(IdentityAvatar.fillFor(branch)),
+    );
+
     expect(AvatarService.onColor(const Color(0xFFD29922)), isNot(Colors.white));
     expect(AvatarService.onColor(const Color(0xFF1D2029)), Colors.white);
   });
@@ -10271,32 +10068,24 @@ void main() {
   );
 
   test('full diff column widths round-trip and clamp damaged settings', () {
-    const widths = FullDiffColumnWidths(history: 240, files: 330);
+    const widths = FullDiffColumnWidths(history: 240);
     final decoded = AppSettings.fromJson(
       const AppSettings(fullDiffColumnWidths: widths).toJson(),
     );
 
     expect(decoded.fullDiffColumnWidths, widths);
+    // A settings file from the era of the file column still loads; the key it
+    // no longer knows is simply dropped.
     expect(
       AppSettings.fromJson({
         'fullDiffColumnWidths': {'history': 1, 'files': 9999},
       }).fullDiffColumnWidths,
-      const FullDiffColumnWidths(history: 180, files: 520),
-    );
-    expect(
-      FullDiffColumnWidths.fromJson(
-        const FullDiffColumnWidths(history: 180, files: 158).toJson(),
-      ),
-      const FullDiffColumnWidths(history: 180, files: 158),
+      const FullDiffColumnWidths(history: 180),
     );
   });
 
   test('side-by-side ratio round-trips and clamps damaged settings', () {
-    const widths = FullDiffColumnWidths(
-      history: 240,
-      files: 330,
-      sideBySideRatio: 0.65,
-    );
+    const widths = FullDiffColumnWidths(history: 240, sideBySideRatio: 0.65);
     expect(FullDiffColumnWidths.fromJson(widths.toJson()), widths);
 
     expect(
@@ -10317,12 +10106,7 @@ void main() {
     });
 
     expect(widths.history, 244);
-    expect(widths.files, 318);
-    expect(widths.toJson(), {
-      'history': 244.0,
-      'files': 318.0,
-      'sideBySideRatio': 0.5,
-    });
+    expect(widths.toJson(), {'history': 244.0, 'sideBySideRatio': 0.5});
   });
 
   test('legacy full diff initial view is ignored', () {
@@ -10468,6 +10252,8 @@ void main() {
         ),
       ),
     );
+    // The GitHub 서버 section reads the Keychain on entry, so let it finish.
+    await tester.pumpAndSettle();
     expect(find.text('Hunk'), findsNothing);
     expect(find.text('Full file focused on first change'), findsNothing);
     expect(saved, isEmpty);
@@ -10486,7 +10272,14 @@ void main() {
       YogitApp(
         repository: FakeGitRepository(
           (_, _) async => [commit('1', 'commit')],
-          files: (_, _) async => const [],
+          files: (_, _) async => const [
+            GitFileChange(
+              path: 'lib/a.dart',
+              status: 'M',
+              additions: 1,
+              deletions: 1,
+            ),
+          ],
         ),
         settingsStore: store,
         discoverAvatars: false,
@@ -10495,10 +10288,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
     expect(
-      tester.widget<DiffScreen>(find.byType(DiffScreen)).initialPreferences,
+      tester
+          .widget<FullDiffWorkspace>(find.byType(FullDiffWorkspace))
+          .controller
+          .state
+          .preferences,
       preferences,
     );
   });
@@ -10512,7 +10309,14 @@ void main() {
       YogitApp(
         repository: FakeGitRepository(
           (_, _) async => [commit('1', 'commit')],
-          files: (_, _) async => const [],
+          files: (_, _) async => const [
+            GitFileChange(
+              path: 'lib/a.dart',
+              status: 'M',
+              additions: 1,
+              deletions: 1,
+            ),
+          ],
         ),
         settingsStore: store,
         discoverAvatars: false,
@@ -10530,13 +10334,21 @@ void main() {
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
-    final diffContext = tester.element(find.byType(DiffScreen));
-    expect(Theme.of(diffContext).extension<TimelineThemePalette>(), isNull);
+    // The workspace keeps the full-diff palette whatever the timeline wears.
     expect(
-      tester.widget<Scaffold>(find.byType(Scaffold).last).backgroundColor,
-      fullDiffCanvas,
+      tester
+          .widget<ColoredBox>(
+            find
+                .descendant(
+                  of: find.byType(FullDiffWorkspace),
+                  matching: find.byType(ColoredBox),
+                )
+                .first,
+          )
+          .color,
+      fullDiffHeader,
     );
   });
 
@@ -10580,7 +10392,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
     }
 
@@ -10593,7 +10405,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('full-diff-back')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
 
     expect(
@@ -10651,7 +10463,14 @@ void main() {
       YogitApp(
         repository: FakeGitRepository(
           (_, _) async => [commit('1', 'commit')],
-          files: (_, _) async => const [],
+          files: (_, _) async => const [
+            GitFileChange(
+              path: 'lib/a.dart',
+              status: 'M',
+              additions: 1,
+              deletions: 1,
+            ),
+          ],
         ),
         settingsStore: store,
         discoverAvatars: false,
@@ -10659,7 +10478,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Side-by-side'));
     await tester.pump();
@@ -10723,19 +10542,15 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
-      tester
-          .widget<Focus>(find.byKey(const Key('changed-files-focus')))
-          .focusNode!
-          .requestFocus();
-      await tester.pump();
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.tap(find.byKey(const Key('preview-state-lib/second.dart')));
       await tester.pumpAndSettle();
-      expect(
-        find.byKey(const Key('selected-file-lib/second.dart')),
-        findsOneWidget,
+      Finder openFile() => find.descendant(
+        of: find.byKey(const Key('file-path-chip')),
+        matching: find.text('lib/second.dart'),
       );
+      expect(openFile(), findsOneWidget);
 
       final scrollable = tester.state<ScrollableState>(
         find
@@ -10752,10 +10567,7 @@ void main() {
       await tester.tap(find.text('Side-by-side'));
       await tester.pumpAndSettle();
 
-      expect(
-        find.byKey(const Key('selected-file-lib/second.dart')),
-        findsOneWidget,
-      );
+      expect(openFile(), findsOneWidget);
       expect(scrollable.position.pixels, 100);
       expect(tester.takeException(), isNull);
     },
@@ -10773,23 +10585,20 @@ void main() {
       final store = DelayedMemorySettingsStore();
       await tester.pumpWidget(
         YogitApp(
-          repository: FakeGitRepository(
-            (_, _) async => [commit('1', 'commit')],
-            files: (_, _) async => const [],
-          ),
+          repository: _widthFixtureRepository(),
           settingsStore: store,
           discoverAvatars: false,
           windowFrameController: controller,
         ),
       );
       await tester.pump();
-      await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Side-by-side'));
       await tester.pump();
       await tester.drag(
-        find.byKey(const Key('details-files-column-resizer')),
+        find.byKey(const Key('side-by-side-resizer')),
         const Offset(20, 0),
       );
       await tester.pump();
@@ -10805,23 +10614,23 @@ void main() {
         store.current.fullDiffPreferences,
         const FullDiffPreferences(layout: DiffLayout.sideBySide),
       );
-      expect(store.current.fullDiffColumnWidths.files, 310);
+      expect(
+        store.current.fullDiffColumnWidths.sideBySideRatio,
+        greaterThan(const FullDiffColumnWidths().sideBySideRatio),
+      );
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
       await tester.pumpWidget(
         YogitApp(
-          repository: FakeGitRepository(
-            (_, _) async => [commit('1', 'commit')],
-            files: (_, _) async => const [],
-          ),
+          repository: _widthFixtureRepository(),
           settingsStore: store,
           discoverAvatars: false,
           windowFrameController: controller,
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
 
       expect(
@@ -10832,12 +10641,15 @@ void main() {
         ui.Tristate.isTrue,
       );
       expect(
-        tester.getSize(find.byKey(const Key('details-files-column'))).width,
-        310,
+        tester
+            .widget<FullDiffWorkspace>(find.byType(FullDiffWorkspace))
+            .columnWidths
+            .sideBySideRatio,
+        store.current.fullDiffColumnWidths.sideBySideRatio,
       );
 
       final staleCallback = tester
-          .widget<DiffScreen>(find.byType(DiffScreen))
+          .widget<FullDiffWorkspace>(find.byType(FullDiffWorkspace))
           .onPreferencesChanged!;
       final savedBeforeDispose = store.saveCount;
       await tester.pumpWidget(const SizedBox.shrink());
@@ -10857,10 +10669,7 @@ void main() {
         tester.view.resetPhysicalSize();
       });
       final store = DelayedMemorySettingsStore();
-      final repository = FakeGitRepository(
-        (_, _) async => [commit('1', 'commit')],
-        files: (_, _) async => const [],
-      );
+      final repository = _widthFixtureRepository();
       await tester.pumpWidget(
         YogitApp(
           repository: repository,
@@ -10870,12 +10679,13 @@ void main() {
         ),
       );
       await tester.pump();
-      await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Side-by-side'));
+      await tester.pump();
       await tester.drag(
-        find.byKey(const Key('details-files-column-resizer')),
+        find.byKey(const Key('side-by-side-resizer')),
         const Offset(20, 0),
       );
       await tester.pump();
@@ -10892,9 +10702,12 @@ void main() {
         store.current.fullDiffPreferences,
         const FullDiffPreferences(layout: DiffLayout.sideBySide),
       );
-      expect(store.current.fullDiffColumnWidths.files, 310);
+      expect(
+        store.current.fullDiffColumnWidths.sideBySideRatio,
+        greaterThan(const FullDiffColumnWidths().sideBySideRatio),
+      );
 
-      await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
       expect(
         tester
@@ -10904,8 +10717,11 @@ void main() {
         ui.Tristate.isTrue,
       );
       expect(
-        tester.getSize(find.byKey(const Key('details-files-column'))).width,
-        310,
+        tester
+            .widget<FullDiffWorkspace>(find.byType(FullDiffWorkspace))
+            .columnWidths
+            .sideBySideRatio,
+        store.current.fullDiffColumnWidths.sideBySideRatio,
       );
     },
   );
@@ -11154,17 +10970,15 @@ void main() {
       tester.view.resetPhysicalSize();
     });
     final requested = <int>[];
-    final service = AvatarService(
-      remote: const RemoteRepository(
-        host: 'github.com',
-        owner: 'team',
-        repository: 'yogit',
-      ),
-      runner: (executable, arguments, {workingDirectory, environment}) async {
-        requested.add(int.parse(arguments.last.split('/').last));
-        return ProcessResult(1, 1, '', 'offline');
-      },
-    );
+    final service = avatarServiceOn((
+      uri, {
+      required method,
+      required headers,
+      body,
+    }) async {
+      requested.add(int.parse(uri.pathSegments.last));
+      return (status: 500, body: 'offline');
+    });
 
     await tester.pumpWidget(
       MaterialApp(
@@ -11183,7 +10997,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(requested, isNotEmpty);
-    expect(requested, everyElement(lessThan(12)));
+    // The bound is an extent, not a row count: the 180px viewport plus the
+    // list's cache, never all 100 commits, however tall a row is.
+    expect(
+      requested,
+      everyElement(lessThan((360 / TimelineScreen.rowHeight).ceil())),
+    );
   });
 
   testWidgets('timeline passes avatar settings into full diff blame', (
@@ -11196,17 +11015,15 @@ void main() {
       tester.view.resetPhysicalSize();
     });
     var requests = 0;
-    final service = AvatarService(
-      remote: const RemoteRepository(
-        host: 'github.com',
-        owner: 'team',
-        repository: 'yogit',
-      ),
-      runner: (executable, arguments, {workingDirectory, environment}) async {
-        requests++;
-        return ProcessResult(1, 1, '', 'offline');
-      },
-    );
+    final service = avatarServiceOn((
+      uri, {
+      required method,
+      required headers,
+      body,
+    }) async {
+      requests++;
+      return (status: 500, body: 'offline');
+    });
     final repository = FakeGitRepository(
       (_, _) async => [
         commit('40aff6d1', 'aligned blame', parents: const ['parent']),
@@ -11257,12 +11074,14 @@ void main() {
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('preview-full-diff')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
 
-    final diffScreen = tester.widget<DiffScreen>(find.byType(DiffScreen));
-    expect(diffScreen.avatarService, same(service));
-    expect(diffScreen.showRemoteAvatars, isFalse);
+    final workspace = tester.widget<FullDiffWorkspace>(
+      find.byType(FullDiffWorkspace),
+    );
+    expect(workspace.avatarService, same(service));
+    expect(workspace.showRemoteAvatars, isFalse);
 
     await tester.tap(find.text('Blame').last);
     await tester.pumpAndSettle();
@@ -11389,7 +11208,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('opens the full diff and preserves timeline state on escape', (
+  testWidgets('the full diff screen walks parents, files, and algorithms', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -11446,25 +11265,22 @@ void main() {
         ]);
       },
     );
-    await tester.pumpWidget(app(repository, controller));
-    await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byKey(const Key('preview-full-diff')));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OwnedFullDiffWorkspace(
+          repository: repository,
+          commits: await repository.loader(0, 3),
+          initialIndex: 0,
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('nearby-column')), findsNothing);
     expect(find.byKey(const Key('nearby-commits-list')), findsNothing);
     expect(find.byKey(const Key('nearby-column-resizer')), findsNothing);
-    expect(
-      tester.getSize(find.byKey(const Key('details-files-column'))).width,
-      290,
-    );
-    expect(find.byKey(const Key('nearby-commits-list')), findsNothing);
-    expect(find.byKey(const Key('changed-files-list')), findsOneWidget);
     expect(find.byKey(const Key('unified-list')), findsOneWidget);
-    expect(find.textContaining('change 1 of 1'), findsOneWidget);
+    expect(find.textContaining('@@ -'), findsOneWidget);
     expect(find.text('1 / 1'), findsWidgets);
     expect(find.text('Unified'), findsOneWidget);
     expect(find.text('Side-by-side'), findsOneWidget);
@@ -11478,10 +11294,12 @@ void main() {
       findsOneWidget,
     );
     expect(
-      tester.getTopLeft(find.byKey(const Key('changed-files-list'))).dx,
-      lessThan(tester.getTopLeft(find.byKey(const Key('unified-list'))).dx),
+      find.descendant(
+        of: find.byKey(const Key('full-diff-commit-line')),
+        matching: find.byKey(const Key('merge-parent-chooser')),
+      ),
+      findsOneWidget,
     );
-    expect(find.byKey(const Key('merge-parent-chooser')), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('merge-parent-chooser')));
     await tester.pumpAndSettle();
@@ -11489,9 +11307,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(calls.last.parent, 'feature');
 
-    await tester.tap(find.text('lib/b.dart'));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('selected-file-lib/b.dart')), findsOneWidget);
+    Finder openFile(String path) => find.descendant(
+      of: find.byKey(const Key('file-path-chip')),
+      matching: find.text(path),
+    );
+    expect(openFile('lib/b.dart'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('diff-algorithm')));
     await tester.pumpAndSettle();
@@ -11510,7 +11334,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.byKey(const Key('selected-file-lib/b.dart')), findsOneWidget);
+    expect(openFile('lib/b.dart'), findsOneWidget);
 
     histogram.complete([
       const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
@@ -11530,240 +11354,6 @@ void main() {
       ),
       findsOneWidget,
     );
-
-    await tester.tap(find.byKey(const Key('full-diff-back')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('selected-row-merge')), findsOneWidget);
-    expect(find.text('Commit & Diff'), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('preview-full-diff')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('code-row-source-text')).first);
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsOneWidget);
-  });
-
-  testWidgets('full diff starts with saved column widths', (tester) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1200, 800);
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    final repository = FakeGitRepository(
-      (_, _) async => [commit('1', 'commit')],
-      files: (_, _) async => const [],
-    );
-    await tester.pumpWidget(
-      MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: [commit('1', 'commit')],
-          initialIndex: 0,
-          columnWidths: const FullDiffColumnWidths(history: 240, files: 330),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const Key('nearby-column')), findsNothing);
-    expect(
-      tester.getSize(find.byKey(const Key('details-files-column'))).width,
-      330,
-    );
-  });
-
-  testWidgets('full diff restores and saves exact minimum column widths', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1200, 800);
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    final repository = FakeGitRepository(
-      (_, _) async => [commit('1', 'commit')],
-      files: (_, _) async => const [],
-    );
-    final restored = AppSettings.fromJson({
-      'fullDiffColumnWidths': {'commits': 126, 'files': 158},
-    }).fullDiffColumnWidths;
-    FullDiffColumnWidths? saved;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: [commit('1', 'commit')],
-          initialIndex: 0,
-          columnWidths: restored,
-          onColumnWidthsChanged: (value) => saved = value,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const Key('nearby-column')), findsNothing);
-    expect(
-      tester.getSize(find.byKey(const Key('details-files-column'))).width,
-      158,
-    );
-
-    await tester.drag(
-      find.byKey(const Key('details-files-column-resizer')),
-      const Offset(-80, 0),
-    );
-    await tester.pumpAndSettle();
-
-    expect(saved, const FullDiffColumnWidths(history: 180, files: 158));
-  });
-
-  testWidgets('focus mode hides navigation and restores saved widths', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1200, 800);
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    final repository = FakeGitRepository(
-      (_, _) async => [commit('1', 'commit')],
-      files: (_, _) async => const [],
-    );
-    FullDiffColumnWidths? saved;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: [commit('1', 'commit')],
-          initialIndex: 0,
-          columnWidths: const FullDiffColumnWidths(history: 240, files: 330),
-          onColumnWidthsChanged: (value) => saved = value,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const Key('nearby-column')), findsNothing);
-    await tester.tap(find.byKey(const Key('focus-mode')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-column')), findsNothing);
-    expect(find.byKey(const Key('details-files-column')), findsNothing);
-    expect(tester.getSize(find.byKey(const Key('diff-column'))).width, 1200);
-    expect(saved, isNull);
-
-    await tester.tap(find.byKey(const Key('focus-mode')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-column')), findsNothing);
-    expect(
-      tester.getSize(find.byKey(const Key('details-files-column'))).width,
-      330,
-    );
-    expect(saved, isNull);
-  });
-
-  testWidgets(
-    'full diff resizes files and preserves the stored History width',
-    (tester) async {
-      tester.view.devicePixelRatio = 1;
-      tester.view.physicalSize = const Size(1200, 800);
-      addTearDown(() {
-        tester.view.resetDevicePixelRatio();
-        tester.view.resetPhysicalSize();
-      });
-      final repository = FakeGitRepository(
-        (_, _) async => [commit('1', 'commit')],
-        files: (_, _) async => const [],
-      );
-      FullDiffColumnWidths? saved;
-      await tester.pumpWidget(
-        MaterialApp(
-          home: DiffScreen(
-            repository: repository,
-            commits: [commit('1', 'commit')],
-            initialIndex: 0,
-            onColumnWidthsChanged: (value) => saved = value,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.drag(
-        find.byKey(const Key('details-files-column-resizer')),
-        const Offset(40, 0),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        tester.getSize(find.byKey(const Key('details-files-column'))).width,
-        330,
-      );
-      expect(saved, const FullDiffColumnWidths(history: 280, files: 330));
-    },
-  );
-
-  testWidgets('narrow full diff uses exact pane thresholds without saving', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1200, 800);
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    final repository = FakeGitRepository(
-      (_, _) async => [commit('1', 'commit')],
-      files: (_, _) async => const [],
-    );
-    FullDiffColumnWidths? saved;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: [commit('1', 'commit')],
-          initialIndex: 0,
-          columnWidths: const FullDiffColumnWidths(history: 240, files: 330),
-          onColumnWidthsChanged: (value) => saved = value,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    tester.view.physicalSize = const Size(1070, 800);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-commits-pane')), findsNothing);
-    expect(find.byKey(const Key('nearby-commits-list')), findsNothing);
-    expect(find.byKey(const Key('nearby-column-resizer')), findsNothing);
-    expect(find.byKey(const Key('commit-files-pane')), findsOneWidget);
-    expect(saved, isNull);
-
-    tester.view.physicalSize = const Size(650, 800);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-commits-pane')), findsNothing);
-    expect(find.byKey(const Key('commit-files-pane')), findsOneWidget);
-    expect(saved, isNull);
-
-    tester.view.physicalSize = const Size(481, 800);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-commits-pane')), findsNothing);
-    expect(find.byKey(const Key('commit-files-pane')), findsOneWidget);
-    expect(saved, isNull);
-
-    tester.view.physicalSize = const Size(480, 800);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-commits-pane')), findsNothing);
-    expect(find.byKey(const Key('commit-files-pane')), findsNothing);
-    expect(saved, isNull);
-
-    tester.view.physicalSize = const Size(1200, 800);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-column')), findsNothing);
-    expect(
-      tester.getSize(find.byKey(const Key('details-files-column'))).width,
-      330,
-    );
-    expect(saved, isNull);
   });
 
   testWidgets('full diff widths load from and save to app settings', (
@@ -11777,37 +11367,40 @@ void main() {
     });
     final store = MemorySettingsStore()
       ..current = const AppSettings(
-        fullDiffColumnWidths: FullDiffColumnWidths(history: 240, files: 330),
+        fullDiffColumnWidths: FullDiffColumnWidths(history: 240),
       );
     await tester.pumpWidget(
       YogitApp(
-        repository: FakeGitRepository(
-          (_, _) async => [commit('1', 'commit')],
-          files: (_, _) async => const [],
-        ),
+        repository: _widthFixtureRepository(),
         settingsStore: store,
         discoverAvatars: false,
         windowFrameController: controller,
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('nearby-column')), findsNothing);
+    // The stored widths reach the live workspace.
     expect(
-      tester.getSize(find.byKey(const Key('details-files-column'))).width,
-      330,
+      tester
+          .widget<FullDiffWorkspace>(find.byType(FullDiffWorkspace))
+          .columnWidths,
+      const FullDiffColumnWidths(history: 240),
     );
 
+    await tester.tap(find.text('Side-by-side'));
+    await tester.pumpAndSettle();
     await tester.drag(
-      find.byKey(const Key('details-files-column-resizer')),
+      find.byKey(const Key('side-by-side-resizer')),
       const Offset(30, 0),
     );
     await tester.pumpAndSettle();
+    expect(store.current.fullDiffColumnWidths.history, 240);
     expect(
-      store.current.fullDiffColumnWidths,
-      const FullDiffColumnWidths(history: 240, files: 360),
+      store.current.fullDiffColumnWidths.sideBySideRatio,
+      greaterThan(const FullDiffColumnWidths().sideBySideRatio),
     );
   });
 
@@ -11840,7 +11433,7 @@ void main() {
     );
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: repository,
           commits: [
             commit('1', 'commit', parents: const ['0']),
@@ -11870,33 +11463,6 @@ void main() {
     expect(find.textContaining('minimal failed'), findsOneWidget);
   });
 
-  testWidgets('initial file loading has a distinct pending state', (
-    tester,
-  ) async {
-    final files = Completer<List<GitFileChange>>();
-    final repository = FakeGitRepository(
-      (_, _) async => [commit('1', 'commit')],
-      files: (_, _) => files.future,
-    );
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: [commit('1', 'commit')],
-          initialIndex: 0,
-        ),
-      ),
-    );
-    await tester.pump();
-
-    expect(find.byKey(const Key('diff-pending-files')), findsOneWidget);
-    expect(find.text('현재 옵션으로 표시할 변경이 없습니다'), findsNothing);
-
-    files.complete(const []);
-    await tester.pumpAndSettle();
-  });
-
   testWidgets('initial diff loading has a distinct pending state', (
     tester,
   ) async {
@@ -11916,7 +11482,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: repository,
           commits: [commit('1', 'commit')],
           initialIndex: 0,
@@ -11951,7 +11517,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: repository,
           commits: [commit('1', 'commit')],
           initialIndex: 0,
@@ -11986,7 +11552,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: repository,
           commits: [commit('1', 'commit')],
           initialIndex: 0,
@@ -12020,7 +11586,7 @@ void main() {
     );
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: repository,
           commits: [commit('1', 'commit')],
           initialIndex: 0,
@@ -12070,12 +11636,19 @@ void main() {
       (_, _) async => [
         commit('merge', 'merge', parents: const [firstParent, secondParent]),
       ],
-      files: (_, _) async => const [],
+      files: (_, _) async => const [
+        GitFileChange(
+          path: 'lib/a.dart',
+          status: 'M',
+          additions: 1,
+          deletions: 1,
+        ),
+      ],
     );
 
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: repository,
           commits: [
             commit(
@@ -12134,12 +11707,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: commits,
-          initialIndex: 0,
-          controller: session,
-        ),
+        home: FullDiffWorkspace(controller: session, onBack: () {}),
       ),
     );
     await tester.pumpAndSettle();
@@ -12151,138 +11719,6 @@ void main() {
 
     expect(session.state.wrapLines, isFalse);
     expect(fileLoads, 1);
-  });
-
-  testWidgets('full diff replaces its owned session when inputs change', (
-    tester,
-  ) async {
-    final oldCommits = [
-      commit('old', 'old commit', parents: const ['base']),
-    ];
-    final newCommits = [
-      commit('new', 'new commit', parents: const ['base']),
-    ];
-    final oldRepository = FakeGitRepository(
-      (_, _) async => oldCommits,
-      files: (_, _) async => const [
-        GitFileChange(path: 'old.txt', status: 'M', additions: 1, deletions: 0),
-      ],
-      diff: (_, _, _, _, _) async => const [
-        DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,0 +1 @@'),
-        DiffLine(kind: DiffLineKind.add, text: 'old body', newNumber: 1),
-      ],
-    );
-    final newRepository = FakeGitRepository(
-      (_, _) async => newCommits,
-      files: (_, _) async => const [
-        GitFileChange(path: 'new.txt', status: 'M', additions: 1, deletions: 0),
-      ],
-      diff: (_, _, _, _, _) async => const [
-        DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,0 +1 @@'),
-        DiffLine(kind: DiffLineKind.add, text: 'new body', newNumber: 1),
-      ],
-    );
-
-    Widget screen(
-      FullDiffRepository repository,
-      List<GitCommit> screenCommits,
-      FullDiffPreferences preferences,
-    ) => MaterialApp(
-      home: DiffScreen(
-        repository: repository,
-        commits: screenCommits,
-        initialIndex: 0,
-        initialPreferences: preferences,
-      ),
-    );
-
-    await tester.pumpWidget(
-      screen(oldRepository, oldCommits, const FullDiffPreferences()),
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('old body'), findsOneWidget);
-
-    await tester.pumpWidget(
-      screen(
-        newRepository,
-        newCommits,
-        const FullDiffPreferences(layout: DiffLayout.sideBySide),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('new body'), findsOneWidget);
-    expect(find.text('old body'), findsNothing);
-    expect(
-      tester
-          .getSemantics(find.bySemanticsLabel('Side-by-side'))
-          .flagsCollection
-          .isSelected,
-      ui.Tristate.isTrue,
-    );
-  });
-
-  testWidgets('initial preferences do not reset a live owned session', (
-    tester,
-  ) async {
-    final commits = [
-      commit('one', 'commit', parents: const ['base']),
-    ];
-    final repository = FakeGitRepository(
-      (_, _) async => commits,
-      files: (_, _) async => const [
-        GitFileChange(
-          path: 'first.txt',
-          status: 'M',
-          additions: 1,
-          deletions: 0,
-        ),
-        GitFileChange(
-          path: 'second.txt',
-          status: 'M',
-          additions: 1,
-          deletions: 0,
-        ),
-      ],
-      diff: (_, _, path, _, _) async => [
-        const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,0 +1 @@'),
-        DiffLine(kind: DiffLineKind.add, text: path, newNumber: 1),
-      ],
-    );
-
-    Widget screen(FullDiffPreferences preferences) => MaterialApp(
-      home: DiffScreen(
-        repository: repository,
-        commits: commits,
-        initialIndex: 0,
-        initialPreferences: preferences,
-      ),
-    );
-
-    await tester.pumpWidget(screen(const FullDiffPreferences()));
-    await tester.pumpAndSettle();
-    tester
-        .widget<Focus>(find.byKey(const Key('changed-files-focus')))
-        .focusNode!
-        .requestFocus();
-    await tester.pump();
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('selected-file-second.txt')), findsOneWidget);
-
-    await tester.pumpWidget(
-      screen(const FullDiffPreferences(layout: DiffLayout.sideBySide)),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const Key('selected-file-second.txt')), findsOneWidget);
-    expect(
-      tester
-          .getSemantics(find.bySemanticsLabel('Unified'))
-          .flagsCollection
-          .isSelected,
-      ui.Tristate.isTrue,
-    );
   });
 
   testWidgets('file and parent changes reset the hunk list to the top', (
@@ -12310,7 +11746,7 @@ void main() {
     );
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: repository,
           commits: [
             commit('merge', 'merge', parents: const ['main', 'feature']),
@@ -12347,8 +11783,11 @@ void main() {
     }
 
     await scrollDown();
-    await tester.tap(find.text('two.txt'));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
+    expect(find.text('two.txt line 1'), findsOneWidget);
     expect(contentPosition().pixels, 0);
 
     await scrollDown();
@@ -12603,7 +12042,6 @@ void main() {
           originUrlCallback: () async => 'https://github.com/team/second.git',
         ),
         settingsStore: MemorySettingsStore(),
-        ghExecutable: 'gh',
         windowFrameController: controller,
       ),
     );
@@ -12740,12 +12178,9 @@ void main() {
       '/tmp/project',
       '--git',
       '/usr/bin/git',
-      '--gh',
-      '/usr/bin/true',
     ]);
     expect(launch.repositoryPath, '/tmp/project');
     expect(launch.gitExecutable, '/usr/bin/git');
-    expect(launch.ghExecutable, '/usr/bin/true');
     expect(launch.monitorBranch, isNull);
     expect(
       launchOptionsFromArgs([
@@ -12886,8 +12321,10 @@ void main() {
     await tester.tap(find.byKey(const Key('base-branch-menu-release')));
     await tester.pumpAndSettle();
 
-    expect(refLoads, 2);
-    expect(fetched, ['company']);
+    // release's upstream is fetched from the first pass now — its badge needs
+    // it whether or not release is the base — and again on the base change.
+    expect(refLoads, 3);
+    expect(fetched, ['company', 'company']);
     expect(
       find.descendant(
         of: find.byKey(const Key('base-branch-selector')),
@@ -13072,7 +12509,6 @@ void main() {
     expect(source, contains(r'git_bin=$(command -v git)'));
     expect(source, contains('flutter build macos'));
     expect(source, contains(r'set -- --repo "$root" --git "$git_bin"'));
-    expect(source, contains(r'set -- "$@" --gh "$gh_bin"'));
     expect(source, contains('/usr/bin/open'));
     expect(source, contains(r'-n "$app" --args "$@"'));
     expect(File('README.md').readAsStringSync(), contains('Flutter 3.41.8'));
@@ -13098,98 +12534,94 @@ void main() {
     expect(RemoteRepository.tryParse('/tmp/local.git'), isNull);
   });
 
-  test('avatar lookup uses gh once per SHA and never requests Gravatar', () async {
-    final requests = <List<String>>[];
-    final service = AvatarService(
-      remote: const RemoteRepository(
-        host: 'github.com',
-        owner: 'team',
-        repository: 'yogit',
-      ),
-      ghExecutable: '/usr/bin/gh',
-      runner: (executable, arguments, {workingDirectory, environment}) async {
-        requests.add(arguments);
-        return ProcessResult(
-          1,
-          0,
-          '{"author":{"login":"ada","avatar_url":"https://avatars.example/ada"},'
+  test(
+    'avatar lookup asks GitHub once per SHA and never requests Gravatar',
+    () async {
+      final requests = <Uri>[];
+      final service = avatarServiceOn((
+        uri, {
+        required method,
+        required headers,
+        body,
+      }) async {
+        requests.add(uri);
+        return (
+          status: 200,
+          body:
+              '{"author":{"login":"ada","avatar_url":"https://avatars.example/ada"},'
               '"committer":{"login":"cam","avatar_url":"https://avatars.example/cam"}}',
-          '',
         );
-      },
-    );
+      });
 
-    final first = service.resolve('abc1234');
-    final second = service.resolve('abc1234');
-    final avatars = await first;
+      final first = service.resolve('abc1234');
+      final second = service.resolve('abc1234');
+      final avatars = await first;
 
-    expect(identical(first, second), isTrue);
-    expect(avatars.author?.login, 'ada');
-    expect(avatars.committer?.login, 'cam');
-    expect(requests, hasLength(1));
-    expect(requests.single, [
-      'api',
-      '--hostname',
-      'github.com',
-      'repos/team/yogit/commits/abc1234',
-    ]);
-    expect(
-      requests
-          .expand((request) => request)
-          .any((argument) => argument.toLowerCase().contains('gravatar')),
-      isFalse,
-    );
-  });
+      expect(identical(first, second), isTrue);
+      expect(avatars.author?.login, 'ada');
+      expect(avatars.committer?.login, 'cam');
+      expect(requests, hasLength(1));
+      expect(
+        requests.single,
+        Uri.parse('https://api.github.com/repos/team/yogit/commits/abc1234'),
+      );
+      expect(
+        requests.any(
+          (request) => request.toString().toLowerCase().contains('gravatar'),
+        ),
+        isFalse,
+      );
+    },
+  );
 
   test(
     'deleted branch PR lookup prefers an exact head sha over a newer merge',
     () async {
-      final requests = <List<String>>[];
-      final service = AvatarService(
-        remote: const RemoteRepository(
-          host: 'github.com',
-          owner: 'team',
-          repository: 'yogit',
-        ),
-        ghExecutable: '/usr/bin/gh',
-        runner: (executable, arguments, {workingDirectory, environment}) async {
-          requests.add(arguments);
-          return ProcessResult(1, 0, '''
+      final requests = <Uri>[];
+      final service = avatarServiceOn((
+        uri, {
+        required method,
+        required headers,
+        body,
+      }) async {
+        requests.add(uri);
+        return (
+          status: 200,
+          body: '''
 [
   {"number":2,"state":"closed","merged_at":"2026-07-28T12:00:00Z","head":{"sha":"other","ref":"newer"}},
   {"number":1,"state":"closed","merged_at":"2026-07-27T12:00:00Z","head":{"sha":"tip","ref":"exact"}}
 ]
-''', '');
-        },
-      );
+''',
+        );
+      });
 
       expect(await service.resolveMergedBranchName('tip'), 'exact');
-      expect(requests.single, [
-        'api',
-        '--hostname',
-        'github.com',
-        'repos/team/yogit/commits/tip/pulls',
-      ]);
+      expect(
+        requests.single,
+        Uri.parse('https://api.github.com/repos/team/yogit/commits/tip/pulls'),
+      );
     },
   );
 
   test(
     'deleted branch PR lookup uses the newest merge when no head matches',
     () async {
-      final service = AvatarService(
+      final service = avatarServiceOn(
+        (uri, {required method, required headers, body}) async => (
+          status: 200,
+          body: '''
+[
+  {"number":1,"state":"closed","merged_at":"2026-07-27T12:00:00Z","head":{"sha":"first","ref":"older"}},
+  {"number":2,"state":"closed","merged_at":"2026-07-28T12:00:00Z","head":{"sha":"second","ref":"newer"}}
+]
+''',
+        ),
         remote: const RemoteRepository(
           host: 'git.example.com',
           owner: 'team',
           repository: 'yogit',
         ),
-        runner:
-            (executable, arguments, {workingDirectory, environment}) async =>
-                ProcessResult(1, 0, '''
-[
-  {"number":1,"state":"closed","merged_at":"2026-07-27T12:00:00Z","head":{"sha":"first","ref":"older"}},
-  {"number":2,"state":"closed","merged_at":"2026-07-28T12:00:00Z","head":{"sha":"second","ref":"newer"}}
-]
-''', ''),
       );
 
       expect(await service.resolveMergedBranchName('tip'), 'newer');
@@ -13197,48 +12629,35 @@ void main() {
   );
 
   test('deleted branch PR lookup ignores unusable responses', () async {
-    for (final response in [
-      ProcessResult(1, 1, '', 'offline'),
-      ProcessResult(1, 0, 'not json', ''),
-      ProcessResult(
-        1,
-        0,
-        '[{"merged_at":null,"head":{"sha":"tip","ref":"open"}}]',
-        '',
+    for (final response in <HttpResponse>[
+      (status: 500, body: 'offline'),
+      (status: 200, body: 'not json'),
+      (
+        status: 200,
+        body: '[{"merged_at":null,"head":{"sha":"tip","ref":"open"}}]',
       ),
-      ProcessResult(
-        1,
-        0,
-        '[{"merged_at":"not-a-date","head":{"sha":"tip","ref":"bad"}}]',
-        '',
+      (
+        status: 200,
+        body: '[{"merged_at":"not-a-date","head":{"sha":"tip","ref":"bad"}}]',
       ),
     ]) {
-      final service = AvatarService(
-        remote: const RemoteRepository(
-          host: 'github.com',
-          owner: 'team',
-          repository: 'yogit',
-        ),
-        runner:
-            (executable, arguments, {workingDirectory, environment}) async =>
-                response,
+      final service = avatarServiceOn(
+        (uri, {required method, required headers, body}) async => response,
       );
 
       expect(await service.resolveMergedBranchName('tip'), isNull);
     }
   });
 
-  test('deleted branch PR lookup handles a missing gh executable', () async {
-    final service = AvatarService(
-      remote: const RemoteRepository(
-        host: 'github.com',
-        owner: 'team',
-        repository: 'yogit',
-      ),
-      runner: (executable, arguments, {workingDirectory, environment}) async {
-        throw ProcessException(executable, arguments, 'missing');
-      },
-    );
+  test('deleted branch PR lookup handles an unreachable server', () async {
+    final service = avatarServiceOn((
+      uri, {
+      required method,
+      required headers,
+      body,
+    }) async {
+      throw const GitHubApiException('연결할 수 없습니다');
+    });
 
     expect(await service.resolveMergedBranchName('tip'), isNull);
   });
@@ -13248,25 +12667,18 @@ void main() {
       'github.com': 'https://gravatar.com/avatar/ada',
       'git.example.com': 'https://cdn.gravatar.com/avatar/ada',
     }.entries) {
-      final service = AvatarService(
+      final service = avatarServiceOn(
+        (uri, {required method, required headers, body}) async => (
+          status: 200,
+          body:
+              '{"author":{"login":"ada","avatar_url":"${entry.value}"},'
+              '"committer":{"login":"cam","avatar_url":"https://notgravatar.com/cam"}}',
+        ),
         remote: RemoteRepository(
           host: entry.key,
           owner: 'team',
           repository: 'yogit',
         ),
-        runner:
-            (
-              executable,
-              arguments, {
-              workingDirectory,
-              environment,
-            }) async => ProcessResult(
-              1,
-              0,
-              '{"author":{"login":"ada","avatar_url":"${entry.value}"},'
-                  '"committer":{"login":"cam","avatar_url":"https://notgravatar.com/cam"}}',
-              '',
-            ),
       );
 
       final avatars = await service.resolve(entry.key);
@@ -13277,24 +12689,19 @@ void main() {
   });
 
   test('GHE token headers stay on the selected remote host', () async {
-    final service = AvatarService(
+    final service = avatarServiceOn(
+      (uri, {required method, required headers, body}) async => (
+        status: 200,
+        body:
+            '{"author":{"login":"ada","avatar_url":"https://cdn.example/ada"},'
+            '"committer":{"login":"cam","avatar_url":"https://git.example.com/cam"}}',
+      ),
       remote: const RemoteRepository(
         host: 'git.example.com',
         owner: 'team',
         repository: 'yogit',
       ),
-      runner: (executable, arguments, {workingDirectory, environment}) async {
-        if (arguments.take(2).join(' ') == 'auth token') {
-          return ProcessResult(1, 0, 'secret-token\n', '');
-        }
-        return ProcessResult(
-          1,
-          0,
-          '{"author":{"login":"ada","avatar_url":"https://cdn.example/ada"},'
-              '"committer":{"login":"cam","avatar_url":"https://git.example.com/cam"}}',
-          '',
-        );
-      },
+      token: 'secret-token',
     );
 
     final avatars = await service.resolve('abc1234');
@@ -13303,35 +12710,33 @@ void main() {
     expect(avatars.committer?.headers['Authorization'], 'Bearer secret-token');
   });
 
-  test('avatar lookup runs at most four gh requests concurrently', () async {
-    final gates = List.generate(5, (_) => Completer<ProcessResult>());
+  test('avatar lookup runs at most four requests concurrently', () async {
+    final gates = List.generate(5, (_) => Completer<HttpResponse>());
     var active = 0;
     var peak = 0;
     var started = 0;
-    final service = AvatarService(
-      remote: const RemoteRepository(
-        host: 'github.com',
-        owner: 'team',
-        repository: 'yogit',
-      ),
-      runner: (executable, arguments, {workingDirectory, environment}) {
-        final gate = gates[started++];
-        active++;
-        peak = active > peak ? active : peak;
-        return gate.future.whenComplete(() => active--);
-      },
-    );
+    final service = avatarServiceOn((
+      uri, {
+      required method,
+      required headers,
+      body,
+    }) {
+      final gate = gates[started++];
+      active++;
+      peak = active > peak ? active : peak;
+      return gate.future.whenComplete(() => active--);
+    });
 
     final futures = List.generate(5, (index) => service.resolve('$index'));
     await Future<void>.delayed(Duration.zero);
     expect(started, 4);
     expect(peak, 4);
 
-    gates.first.complete(ProcessResult(1, 1, '', 'offline'));
+    gates.first.complete((status: 500, body: 'offline'));
     await Future<void>.delayed(Duration.zero);
     expect(started, 5);
     for (final gate in gates.skip(1)) {
-      gate.complete(ProcessResult(1, 1, '', 'offline'));
+      gate.complete((status: 500, body: 'offline'));
     }
     await Future.wait(futures);
   });
@@ -13339,15 +12744,10 @@ void main() {
   test(
     'avatar queue and SHA cache stay bounded under heavy scrolling',
     () async {
-      final gates = List.generate(36, (_) => Completer<ProcessResult>());
+      final gates = List.generate(36, (_) => Completer<HttpResponse>());
       var started = 0;
-      final service = AvatarService(
-        remote: const RemoteRepository(
-          host: 'github.com',
-          owner: 'team',
-          repository: 'yogit',
-        ),
-        runner: (executable, arguments, {workingDirectory, environment}) =>
+      final service = avatarServiceOn(
+        (uri, {required method, required headers, body}) =>
             gates[started++].future,
       );
 
@@ -13364,7 +12764,7 @@ void main() {
       );
 
       for (var index = 0; index < gates.length; index++) {
-        gates[index].complete(ProcessResult(1, 1, '', 'offline'));
+        gates[index].complete((status: 500, body: 'offline'));
         await Future<void>.delayed(Duration.zero);
       }
       await Future.wait(futures);
@@ -13373,17 +12773,15 @@ void main() {
       expect(service.debugQueuedRequestCount, 0);
 
       var sequentialStarts = 0;
-      final lru = AvatarService(
-        remote: const RemoteRepository(
-          host: 'github.com',
-          owner: 'team',
-          repository: 'yogit',
-        ),
-        runner: (executable, arguments, {workingDirectory, environment}) async {
-          sequentialStarts++;
-          return ProcessResult(1, 1, '', 'offline');
-        },
-      );
+      final lru = avatarServiceOn((
+        uri, {
+        required method,
+        required headers,
+        body,
+      }) async {
+        sequentialStarts++;
+        return (status: 500, body: 'offline');
+      });
       for (var index = 0; index < 300; index++) {
         await lru.resolve('$index');
       }
@@ -13441,7 +12839,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(graphWidth(), 96);
+    expect(graphWidth(), CommitGraphPainter.minAutoFitWidth);
   });
 
   testWidgets('YogitApp migrates legacy graph width to the first repository', (
@@ -13494,7 +12892,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    for (var index = 0; index < 12; index++) {
+    // As many rows down as the whole 500px window could hold, so the list is
+    // certainly scrolled — the viewport is shorter than the window.
+    final target = (500 / TimelineScreen.rowHeight).ceil();
+    for (var index = 0; index < target; index++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     }
     await tester.pumpAndSettle();
@@ -13503,7 +12904,7 @@ void main() {
     final preview = find.byKey(const Key('preview-surface'));
     final previewSubject = find.descendant(
       of: preview,
-      matching: find.text('message 12'),
+      matching: find.text('message $target'),
     );
     expect(preview, findsOneWidget);
     expect(previewSubject, findsOneWidget);
@@ -13528,7 +12929,7 @@ void main() {
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('selected-row-12')), findsOneWidget);
+    expect(find.byKey(Key('selected-row-$target')), findsOneWidget);
     expect(preview, findsOneWidget);
     expect(previewSubject, findsOneWidget);
     expect(
@@ -13553,15 +12954,7 @@ void main() {
     tester,
   ) async {
     final store = MemorySettingsStore();
-    final service = AvatarService(
-      remote: const RemoteRepository(
-        host: 'github.com',
-        owner: 'team',
-        repository: 'yogit',
-      ),
-      runner: (executable, arguments, {workingDirectory, environment}) async =>
-          ProcessResult(1, 1, '', 'offline'),
-    );
+    final service = avatarServiceOn(offline);
     final repository = FakeGitRepository(
       (_, _) async => [
         commit('1', 'first commit'),
@@ -13586,6 +12979,9 @@ void main() {
     await tester.tap(find.byKey(const Key('open-settings')));
     await tester.pumpAndSettle();
     expect(find.text('Git integrations'), findsWidgets);
+    // The GitHub 서버 section sits above the toggle, so it has to be scrolled to.
+    await tester.ensureVisible(find.byKey(const Key('show-avatars-toggle')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('show-avatars-toggle')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Done'));
@@ -13608,17 +13004,15 @@ void main() {
     final loaded = Completer<AppSettings>();
     final store = DelayedSettingsStore(loaded.future);
     var requests = 0;
-    final service = AvatarService(
-      remote: const RemoteRepository(
-        host: 'github.com',
-        owner: 'team',
-        repository: 'yogit',
-      ),
-      runner: (executable, arguments, {workingDirectory, environment}) async {
-        requests++;
-        return ProcessResult(1, 1, '', 'offline');
-      },
-    );
+    final service = avatarServiceOn((
+      uri, {
+      required method,
+      required headers,
+      body,
+    }) async {
+      requests++;
+      return (status: 500, body: 'offline');
+    });
 
     await tester.pumpWidget(
       YogitApp(
@@ -13923,6 +13317,10 @@ void main() {
     expect(boxRect.top - rowRect.top, greaterThan(centred));
     expect(boxRect.top, greaterThanOrEqualTo(rowRect.top));
     expect(boxRect.bottom, lessThanOrEqualTo(rowRect.bottom));
+    // ignore: avoid_print
+    print(
+      'DATEBOX row=$rowRect box=$boxRect text=${tester.getSize(find.text('Today'))}',
+    );
     expect(boxRect.height, greaterThanOrEqualTo(20));
 
     // Underlines are gone from commit rows too.
@@ -14372,12 +13770,13 @@ void main() {
       tester.view.resetPhysicalSize();
     });
     // A straight run on lane 0, then an octopus far below the fold opening
-    // lanes 1..3.
+    // lanes 1..3. 60 rows outrun the 600px window and its list cache at any
+    // row height, so the octopus really does start off screen.
     final repository = FakeGitRepository(
       (_, _) async => [
-        for (var index = 0; index < 20; index++)
+        for (var index = 0; index < 60; index++)
           commit('$index', 'commit $index', parents: ['${index + 1}']),
-        commit('20', 'octopus', parents: const ['a', 'b', 'c', 'd']),
+        commit('60', 'octopus', parents: const ['a', 'b', 'c', 'd']),
         commit('a', 'a'),
         commit('b', 'b'),
         commit('c', 'c'),
@@ -14397,9 +13796,9 @@ void main() {
         tester.getSize(find.byKey(const Key('graph-header'))).width;
 
     // Only lane 0 is on screen, so the column stays at its floor.
-    expect(graphWidth(), 96);
+    expect(graphWidth(), CommitGraphPainter.minAutoFitWidth);
 
-    // Scrolling the octopus into view widens it once: 28 + 3 * 30 + 14.
+    // Scrolling the octopus into view widens it once: 28 + 3 * 30 + 12.
     final scrollable = tester.state<ScrollableState>(
       find.descendant(
         of: find.byKey(const Key('timeline-list')),
@@ -14408,12 +13807,12 @@ void main() {
     );
     scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
     await tester.pumpAndSettle();
-    expect(graphWidth(), 132);
+    expect(graphWidth(), CommitGraphPainter.contentWidth(3));
 
     // Scrolling back never shrinks it inside a session.
     scrollable.position.jumpTo(0);
     await tester.pumpAndSettle();
-    expect(graphWidth(), 132);
+    expect(graphWidth(), CommitGraphPainter.contentWidth(3));
 
     // A different repository starts over.
     await tester.pumpWidget(
@@ -14423,7 +13822,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(graphWidth(), 96);
+    expect(graphWidth(), CommitGraphPainter.minAutoFitWidth);
   });
 
   testWidgets('async base branch relayout ratchets to newly visible lanes', (
@@ -14462,7 +13861,7 @@ void main() {
         tester.getSize(find.byKey(const Key('graph-header'))).width;
 
     // The unpreferred merge exposes lanes 0..3.
-    expect(graphWidth(), 132);
+    expect(graphWidth(), CommitGraphPainter.contentWidth(3));
 
     // This unloaded tip reserves lane 0, shifting the visible merge to lanes
     // 1..4 after the asynchronous refs result arrives.
@@ -14481,7 +13880,7 @@ void main() {
                 .painter
             as CommitGraphPainter;
     expect(painter.row.nextLanes, contains(4));
-    expect(graphWidth(), 162);
+    expect(graphWidth(), CommitGraphPainter.contentWidth(4));
   });
 
   // ------------------------------------------------------------------ §18.1
@@ -14797,12 +14196,11 @@ void main() {
       tester.getRect(find.text('상세')).left,
       lessThan(tester.getRect(find.byKey(const Key('keycap-Enter'))).left),
     );
-    // Right cluster order: keycaps, caption, placement box, Full Diff, gear.
+    // Right cluster order: keycaps, caption, placement box, gear.
     final lefts = [
       tester.getRect(find.byKey(const Key('shortcut-hint'))).left,
       tester.getRect(find.text('미리보기')).left,
       box.left,
-      tester.getRect(find.byKey(const Key('toolbar-full-diff'))).left,
       tester.getRect(find.byIcon(Icons.settings_outlined)).left,
     ];
     expect(lefts, orderedEquals(([...lefts]..sort())));
@@ -14816,13 +14214,13 @@ void main() {
     // The Enter chip is the same toggle the key runs, by mouse.
     await tester.tap(find.byKey(const Key('keycap-Enter')));
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsOneWidget);
+    expect(find.byKey(const Key('preview-surface')), findsOneWidget);
     await tester.tap(find.byKey(const Key('keycap-Enter')));
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(find.text('Commit & Diff'), findsOneWidget);
+    expect(find.byKey(const Key('preview-surface')), findsOneWidget);
 
     // The placement buttons grew but still respond.
     await tester.tap(find.text('하단'));
@@ -15132,23 +14530,6 @@ void main() {
               as BoxDecoration)
           .color,
       TimelineThemePalette.systemGraphite.selectedRow,
-    );
-
-    final diffButton = find.byKey(const Key('toolbar-full-diff'));
-    await pointer.moveTo(tester.getCenter(diffButton));
-    await tester.pump();
-    expect(
-      (tester
-                  .widget<Container>(
-                    find.descendant(
-                      of: diffButton,
-                      matching: find.byType(Container),
-                    ),
-                  )
-                  .decoration!
-              as BoxDecoration)
-          .color,
-      const Color(0xFF3FB950),
     );
 
     await pointer.moveTo(
@@ -15502,7 +14883,7 @@ void main() {
     );
   });
   // ------------------------------------------------------------------ A1
-  testWidgets('the hash rule is an inset 2px strip', (tester) async {
+  testWidgets('the hash rule is an inset 1px hairline', (tester) async {
     await tester.pumpWidget(
       app(
         FakeGitRepository(
@@ -15518,19 +14899,19 @@ void main() {
       final rule = find.byKey(Key('hash-rule-$index'));
       expect(rule, findsOneWidget, reason: 'row $index');
       final rect = tester.getRect(rule);
-      expect(rect.width, 2);
+      expect(rect.width, 1);
       expect(rect.height, TimelineScreen.rowHeight - 2);
-      // A 22px node still centres cleanly in the shorter row.
+      // The node still centres cleanly in the shorter row.
       final cell = tester.getRect(find.byKey(Key('graph-cell-$index')));
       final node = find.descendant(
         of: find.byKey(Key('graph-cell-$index')),
         matching: find.byType(CommitAvatarStack),
       );
       if (node.evaluate().isNotEmpty) {
-        expect(tester.getRect(node).height, 22);
+        expect(tester.getRect(node).height, CommitGraphPainter.avatarDiameter);
         expect(
           tester.getRect(node).top - cell.top,
-          (TimelineScreen.rowHeight - 22) / 2,
+          (TimelineScreen.rowHeight - CommitGraphPainter.avatarDiameter) / 2,
         );
       }
       // 1px shy of the row at both ends.
@@ -15676,9 +15057,10 @@ void main() {
           DefaultTextStyle.of(tester.element(finder.first)).style.fontSize!;
     }
 
-    expect(sizeOf('Commit & Diff'), 12);
+    // 헤더 제목은 커밋·부모 해시로 바뀌었다 — 산문 크기는 아래 두 줄이 지킨다.
     expect(sizeOf('first commit'), 14);
-    expect(sizeOf('commit 1'), 12);
+    // 전체 해시 줄은 물러났다 — 해시는 헤더의 것이다.
+    expect(sizeOf('1'), 12);
     expect(sizeOf('Ada Author'), 14);
     expect(sizeOf('Cam Committer'), 14);
     expect(sizeOf('Committer · cam@example.com'), 12);
@@ -15691,7 +15073,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     final firstBody = find.descendant(
-      of: find.byKey(const Key('preview-diff')),
+      of: find.byType(FullDiffWorkspace),
       matching: find.text('lib/a.dart body'),
     );
     final firstBodyText = tester.widget<Text>(firstBody);
@@ -15708,7 +15090,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       find.descendant(
-        of: find.byKey(const Key('preview-diff')),
+        of: find.byType(FullDiffWorkspace),
         matching: find.text('lib/b.dart body'),
       ),
       findsOneWidget,
@@ -16051,18 +15433,15 @@ void main() {
               return null;
             },
           ),
-          avatarService: AvatarService(
-            remote: const RemoteRepository(
-              host: 'github.com',
-              owner: 'team',
-              repository: 'yogit',
-            ),
-            runner:
-                (executable, arguments, {workingDirectory, environment}) async {
-                  remoteLookups++;
-                  return ProcessResult(1, 1, '', 'offline');
-                },
-          ),
+          avatarService: avatarServiceOn((
+            uri, {
+            required method,
+            required headers,
+            body,
+          }) async {
+            remoteLookups++;
+            return (status: 500, body: 'offline');
+          }),
           showRemoteAvatars: false,
         ),
       ),
@@ -16159,16 +15538,15 @@ void main() {
   testWidgets('deleted branch lookup ignores a stale avatar service result', (
     tester,
   ) async {
-    final oldResult = Completer<ProcessResult>();
+    final oldResult = Completer<HttpResponse>();
     late StateSetter update;
-    var service = AvatarService(
+    var service = avatarServiceOn(
+      (uri, {required method, required headers, body}) => oldResult.future,
       remote: const RemoteRepository(
         host: 'github.com',
         owner: 'team',
         repository: 'old',
       ),
-      runner: (executable, arguments, {workingDirectory, environment}) =>
-          oldResult.future,
     );
     final commits = [
       commit('merge', 'merge', parents: const ['main-parent', 'side-tip']),
@@ -16205,41 +15583,33 @@ void main() {
     await tester.tap(find.text('side commit'));
     await tester.pump();
     update(() {
-      service = AvatarService(
+      service = avatarServiceOn(
+        (uri, {required method, required headers, body}) async => (
+          status: 200,
+          body: jsonEncode([
+            {
+              'merged_at': '2026-07-29T00:00:00Z',
+              'head': {'sha': 'side-tip', 'ref': 'feature/new'},
+            },
+          ]),
+        ),
         remote: const RemoteRepository(
           host: 'github.com',
           owner: 'team',
           repository: 'new',
         ),
-        runner:
-            (executable, arguments, {workingDirectory, environment}) async =>
-                ProcessResult(
-                  1,
-                  0,
-                  jsonEncode([
-                    {
-                      'merged_at': '2026-07-29T00:00:00Z',
-                      'head': {'sha': 'side-tip', 'ref': 'feature/new'},
-                    },
-                  ]),
-                  '',
-                ),
       );
     });
     await tester.pump();
-    oldResult.complete(
-      ProcessResult(
-        1,
-        0,
-        jsonEncode([
-          {
-            'merged_at': '2026-07-28T00:00:00Z',
-            'head': {'sha': 'side-tip', 'ref': 'feature/old'},
-          },
-        ]),
-        '',
-      ),
-    );
+    oldResult.complete((
+      status: 200,
+      body: jsonEncode([
+        {
+          'merged_at': '2026-07-28T00:00:00Z',
+          'head': {'sha': 'side-tip', 'ref': 'feature/old'},
+        },
+      ]),
+    ));
     await tester.pumpAndSettle();
 
     expect(find.text('feature/old'), findsNothing);
@@ -16324,18 +15694,15 @@ void main() {
               return null;
             },
           ),
-          avatarService: AvatarService(
-            remote: const RemoteRepository(
-              host: 'github.com',
-              owner: 'team',
-              repository: 'yogit',
-            ),
-            runner:
-                (executable, arguments, {workingDirectory, environment}) async {
-                  remoteLookups++;
-                  return ProcessResult(1, 1, '', 'offline');
-                },
-          ),
+          avatarService: avatarServiceOn((
+            uri, {
+            required method,
+            required headers,
+            body,
+          }) async {
+            remoteLookups++;
+            return (status: 500, body: 'offline');
+          }),
           showRemoteAvatars: false,
         ),
       ),
@@ -16468,7 +15835,7 @@ void main() {
     final filesScrollable = find.byKey(const Key('preview-files-scroll'));
     await tester.tap(find.byKey(const Key('preview-state-lib/file0.dart')));
     await tester.pumpAndSettle();
-    final diffScrollable = find.byKey(const Key('preview-diff-scroll'));
+    final diffScrollable = find.byKey(const Key('content-scrollable'));
     expect(filesScrollable, findsOneWidget);
     expect(diffScrollable, findsOneWidget);
 
@@ -16521,7 +15888,7 @@ void main() {
     await tester.pumpAndSettle();
 
     final previewPosition = tester
-        .widget<NestedScrollView>(
+        .widget<SingleChildScrollView>(
           find.byKey(const Key('preview-content-scroll')),
         )
         .controller!
@@ -16572,79 +15939,106 @@ void main() {
     await page(LogicalKeyboardKey.arrowDown);
     expect(previewPosition.pixels, previewEnd);
     expect(diffPosition.pixels, diffEnd);
-    expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
 
     await page(LogicalKeyboardKey.arrowUp);
     expect(diffPosition.pixels, lessThan(diffEnd));
     expect(previewPosition.pixels, previewEnd);
+
+    // Paging never moved the commit selection underneath the diff.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
   });
 
   // ------------------------------------------------------------------ C3/H2
-  testWidgets('the preview header carries the compact green Full Diff', (
+  testWidgets('the history pane loads, saves, and yields its width', (
     tester,
   ) async {
-    final opened = <String>[];
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    final store = MemorySettingsStore()
+      ..current = const AppSettings(
+        fullDiffColumnWidths: FullDiffColumnWidths(history: 240),
+      );
     await tester.pumpWidget(
-      MaterialApp(
-        home: TimelineScreen(
-          repository: FakeGitRepository(
-            (_, _) async => [commit('1', 'first commit')],
-          ),
-          controller: controller,
-          onOpenFullDiff: (commit) => opened.add(commit.sha),
-        ),
+      YogitApp(
+        repository: _widthFixtureRepository(),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('history-toggle')));
     await tester.pumpAndSettle();
 
-    // The full-width blue CTA is gone.
-    expect(find.byKey(const Key('open-full-diff')), findsNothing);
-    expect(find.text('Open full diff'), findsNothing);
+    final pane = find.byKey(const Key('history-pane'));
+    expect(tester.getSize(pane).width, 240);
 
-    // A compact green twin of the toolbar's button sits at the header's right.
-    final button = find.byKey(const Key('preview-full-diff'));
-    final header = tester.getRect(find.text('Commit & Diff'));
-    final rect = tester.getRect(button);
-    expect(rect.height, 28);
-    expect(rect.left, greaterThan(header.right));
-    expect(
-      find.descendant(of: button, matching: find.text('Full Diff')),
-      findsOneWidget,
+    // The handle sits on the diff seam, so dragging towards the diff — left,
+    // in this placement — is what widens History.
+    await tester.drag(
+      find.byKey(const Key('history-pane-resizer')),
+      const Offset(-30, 0),
     );
-    expect(
-      find.descendant(of: button, matching: find.text('⌘D')),
-      findsOneWidget,
-    );
-    expect(find.byKey(const Key('preview-hash')), findsNothing);
-    expect(
-      (tester
-                  .widget<Container>(
-                    find.descendant(
-                      of: button,
-                      matching: find.byType(Container),
-                    ),
-                  )
-                  .decoration!
-              as BoxDecoration)
-          .color,
-      const Color(0xFF2EA043),
-    );
-    expect(
-      tester
-          .widget<Text>(
-            find.descendant(of: button, matching: find.text('Full Diff')),
-          )
-          .style
-          ?.fontSize,
-      11,
-    );
-
-    await tester.tap(button);
     await tester.pumpAndSettle();
-    expect(opened, ['1']);
+    expect(tester.getSize(pane).width, 270);
+    expect(store.current.fullDiffColumnWidths.history, 270);
+
+    // The pane follows the file the diff is showing.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('history-pane-header')),
+        matching: find.textContaining('b.dart'),
+      ),
+      findsOneWidget,
+    );
+
+    // Too narrow for both, and the diff keeps the room.
+    tester.view.physicalSize = const Size(700, 800);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('history-pane')), findsNothing);
+    expect(find.byType(FullDiffWorkspace), findsOneWidget);
   });
+
+  testWidgets('a closed preview opens with the diff on the way in', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(app(_widthFixtureRepository(), controller));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
+
+    // → with the panel away opens it first: it is the diff's file list.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(find.byType(FullDiffWorkspace), findsOneWidget);
+    expect(find.byKey(const Key('preview-surface')), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(find.byType(FullDiffWorkspace), findsOneWidget);
+  });
+
+  // Full Diff 버튼은 헤더에서도 툴바에서도 은퇴했다 — diff는 미리보기에서 연다
+  // (test/preview_header_contract_test.dart, test/pane_focus_contract_test.dart).
 
   // ------------------------------------------------------------------ C5/C6
   testWidgets('the commit stamp gives way to the profile instead of hiding', (
@@ -16754,6 +16148,38 @@ void main() {
     expect(find.text('commit'), findsOneWidget);
   });
   // ------------------------------------------------------------------ D1
+  testWidgets('the commit column always fills the leftover viewport width', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1600, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+
+    Widget timeline(TimelineColumnWidths widths) => MaterialApp(
+      home: TimelineScreen(
+        repository: FakeGitRepository((_, _) async => [commit('1', 'c')]),
+        controller: controller,
+        columnWidths: widths,
+      ),
+    );
+
+    // A stored commit width — narrow or absurd — never leaves dead space:
+    // the viewport decides, the title column swallows the leftover.
+    final content = find.byKey(const Key('timeline-horizontal-content'));
+    for (final stored in const [200.0, 3000.0]) {
+      await tester.pumpWidget(timeline(TimelineColumnWidths(commit: stored)));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSize(content).width,
+        tester.getSize(find.byType(TimelineScreen)).width - 150,
+        reason: '사이드바를 뺀 타임라인 영역에 빈 공간이 남으면 안 된다 (commit: $stored)',
+      );
+    }
+  });
+
   testWidgets('the toolbar monitor button hands over the base branch', (
     tester,
   ) async {
@@ -16784,7 +16210,6 @@ void main() {
         bundlePath: '/Applications/yogit.app',
         root: '/repos/yonalist',
         gitExecutable: '/usr/bin/git',
-        ghExecutable: '/opt/homebrew/bin/gh',
         branch: 'dev',
       ),
       [
@@ -16795,137 +16220,15 @@ void main() {
         '/repos/yonalist',
         '--git',
         '/usr/bin/git',
-        '--gh',
-        '/opt/homebrew/bin/gh',
         '--monitor',
         'dev',
       ],
     );
-    expect(
-      monitorLaunchArguments(
-        bundlePath: '/Applications/yogit.app',
-        root: '/repos/yonalist',
-        gitExecutable: '/usr/bin/git',
-        ghExecutable: null,
-        branch: 'dev',
-      ),
-      isNot(contains('--gh')),
-    );
   });
 
-  testWidgets('the toolbar full-diff button and Cmd+D open the same screen', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1200, 800);
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    final opened = <String>[];
-    await tester.pumpWidget(
-      MaterialApp(
-        home: TimelineScreen(
-          repository: FakeGitRepository(
-            (_, _) async => [
-              commit('a', 'today commit'),
-              commit(
-                'b',
-                'older commit',
-                timestamp:
-                    DateTime.now()
-                        .subtract(const Duration(days: 3))
-                        .millisecondsSinceEpoch ~/
-                    1000,
-              ),
-            ],
-          ),
-          controller: controller,
-          onOpenFullDiff: (commit) => opened.add(commit.sha),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
+  // 툴바의 Full Diff 버튼과 ⌘D는 은퇴했다 — diff는 미리보기에서 연다
+  // (test/pane_focus_contract_test.dart).
 
-    final button = find.byKey(const Key('toolbar-full-diff'));
-    expect(button, findsOneWidget);
-    // The name with its shortcut underneath, on green.
-    expect(
-      find.descendant(of: button, matching: find.text('Full Diff')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: button, matching: find.text('⌘D')),
-      findsOneWidget,
-    );
-    expect(
-      tester
-          .getRect(find.descendant(of: button, matching: find.text('⌘D')))
-          .top,
-      greaterThan(
-        tester
-            .getRect(
-              find.descendant(of: button, matching: find.text('Full Diff')),
-            )
-            .top,
-      ),
-    );
-    Color background() =>
-        (tester
-                    .widget<Container>(
-                      find.descendant(
-                        of: button,
-                        matching: find.byType(Container),
-                      ),
-                    )
-                    .decoration!
-                as BoxDecoration)
-            .color!;
-    expect(background(), const Color(0xFF2EA043));
-    // Right of the preview control and left of the gear.
-    expect(
-      tester.getRect(button).left,
-      greaterThan(tester.getRect(find.text('하단')).left),
-    );
-    expect(
-      tester.getRect(button).right,
-      lessThan(tester.getRect(find.byIcon(Icons.settings_outlined)).left),
-    );
-
-    await tester.tap(button);
-    await tester.pumpAndSettle();
-    expect(opened, ['a']);
-
-    // Cmd+D does the same for the selected commit.
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
-    expect(opened, ['a', 'a']);
-
-    // The first date heading has no commit: the button dims and the shortcut
-    // does nothing.
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('selected-row-a')), findsNothing);
-    expect(background(), TimelineThemePalette.systemGraphite.raised);
-    expect(
-      tester
-          .widget<GestureDetector>(
-            find.descendant(of: button, matching: find.byType(GestureDetector)),
-          )
-          .onTap,
-      isNull,
-    );
-    await tester.tap(button);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
-    expect(opened, ['a', 'a']);
-  });
-
-  // ------------------------------------------------------------------ D2
   testWidgets('technical data uses mono while prose uses the system font', (
     tester,
   ) async {
@@ -17089,8 +16392,10 @@ void main() {
       tester.getRect(status).left,
       tester.getRect(find.byKey(const Key('refs-header'))).left,
     );
+    // Too long for the chip column, so it gives way from the front and its tail
+    // survives — the readout is cut like the chip is.
     expect(
-      find.descendant(of: status, matching: find.text(long)),
+      find.descendant(of: status, matching: find.textContaining('name-indeed')),
       findsOneWidget,
     );
     // Truncated before the DATE stamp it shares the bar with.
@@ -17109,7 +16414,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-root')), findsOneWidget);
     expect(
-      find.descendant(of: status, matching: find.text(long)),
+      find.descendant(of: status, matching: find.textContaining('name-indeed')),
       findsOneWidget,
     );
 
@@ -17301,7 +16606,7 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('selected-row-500')), findsOneWidget);
-      expect(find.text('Commit & Diff'), findsOneWidget);
+      expect(find.byKey(const Key('preview-surface')), findsOneWidget);
       final before = scrollable.position.pixels;
 
       await tester.tap(find.byKey(const Key('base-branch-selector')));
@@ -17311,7 +16616,7 @@ void main() {
 
       expect(historyCalls, [0, 500]);
       expect(find.byKey(const Key('selected-row-500')), findsOneWidget);
-      expect(find.text('Commit & Diff'), findsOneWidget);
+      expect(find.byKey(const Key('preview-surface')), findsOneWidget);
       expect(scrollable.position.pixels, before);
       expect(find.text('feature'), findsWidgets);
     },
@@ -17361,12 +16666,7 @@ void main() {
     await session.initialize();
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: commits,
-          initialIndex: 0,
-          controller: session,
-        ),
+        home: FullDiffWorkspace(controller: session, onBack: () {}),
       ),
     );
     await tester.pumpAndSettle();
@@ -17455,12 +16755,7 @@ void main() {
     await session.initialize();
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: commits,
-          initialIndex: 0,
-          controller: session,
-        ),
+        home: FullDiffWorkspace(controller: session, onBack: () {}),
       ),
     );
     await tester.pumpAndSettle();
@@ -17543,12 +16838,7 @@ void main() {
     session.setLayout(DiffLayout.unified);
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: commits,
-          initialIndex: 0,
-          controller: session,
-        ),
+        home: FullDiffWorkspace(controller: session, onBack: () {}),
       ),
     );
     await tester.pumpAndSettle();
@@ -17623,104 +16913,6 @@ void main() {
     expect(scroll.offset, lessThanOrEqualTo(maximum));
   });
 
-  testWidgets('history page scrolling targets the detail diff, not its list', (
-    tester,
-  ) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1200, 700);
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    final commits = [
-      commit('current', 'current commit', parents: const ['previous']),
-    ];
-    final historyCommits = [
-      commits.single,
-      for (var index = 1; index <= 30; index++)
-        commit(
-          'history-$index',
-          'history commit $index',
-          parents: ['history-${index + 1}'],
-        ),
-    ];
-    final repository = FakeGitRepository(
-      (_, _) async => commits,
-      files: (_, _) async => const [
-        GitFileChange(
-          path: 'lib/a.dart',
-          status: 'M',
-          additions: 1,
-          deletions: 1,
-        ),
-      ],
-      diff: (_, _, path, _, _) async => [
-        const DiffLine(kind: DiffLineKind.hunk, text: '@@ -1,80 +1,80 @@'),
-        for (var index = 1; index <= 80; index++)
-          DiffLine(
-            kind: DiffLineKind.context,
-            text: '$path line $index',
-            oldNumber: index,
-            newNumber: index,
-          ),
-      ],
-      history: (_, file) async => [
-        for (final historyCommit in historyCommits)
-          GitFileHistoryRecord(
-            commit: historyCommit,
-            path: file.path,
-            oldPath: null,
-            status: 'M',
-          ),
-      ],
-    );
-    final session = FullDiffSessionController(
-      repository: repository,
-      commits: commits,
-      initialIndex: 0,
-    );
-    addTearDown(session.dispose);
-    await session.initialize();
-    session
-      ..setView(FullDiffView.history)
-      ..setLayout(DiffLayout.unified);
-    await tester.pumpWidget(
-      MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: commits,
-          initialIndex: 0,
-          controller: session,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    final historyScroll = tester
-        .widget<ListView>(find.byKey(const Key('history-list')))
-        .controller!;
-    final detailScroll = tester
-        .widget<ListView>(
-          find
-              .descendant(
-                of: find.byKey(const Key('history-detail-pane')),
-                matching: find.byType(ListView),
-              )
-              .first,
-        )
-        .controller!;
-
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-    await tester.pumpAndSettle();
-
-    expect(detailScroll.offset, detailScroll.position.viewportDimension * 0.5);
-    expect(historyScroll.offset, 0);
-  });
-
   testWidgets('full diff popup handles arrows before screen shortcuts', (
     tester,
   ) async {
@@ -17769,12 +16961,7 @@ void main() {
     await session.initialize();
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
-          repository: repository,
-          commits: commits,
-          initialIndex: 0,
-          controller: session,
-        ),
+        home: FullDiffWorkspace(controller: session, onBack: () {}),
       ),
     );
     await tester.pumpAndSettle();
@@ -17799,7 +16986,9 @@ void main() {
     expect(find.byKey(const Key('algorithm-details-minimal')), findsOneWidget);
   });
 
-  testWidgets('the diff screen walks files from the keyboard', (tester) async {
+  testWidgets('the diff workspace walks files from the keyboard', (
+    tester,
+  ) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1400, 900);
     addTearDown(() {
@@ -17827,7 +17016,7 @@ void main() {
     );
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: repository,
           commits: [
             commit('newer', 'newer commit', parents: const ['older']),
@@ -17838,39 +17027,32 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    tester
-        .widget<Focus>(find.byKey(const Key('changed-files-focus')))
-        .focusNode!
-        .requestFocus();
-    await tester.pump();
-
     // It opens on the first file of the first commit.
     expect(find.text('body of newer/one.dart'), findsOneWidget);
-    expect(
-      find.byKey(const Key('selected-file-newer/one.dart')),
-      findsOneWidget,
-    );
 
-    // Down walks the file list, loading each diff as it goes.
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pumpAndSettle();
+    // ⌘Down walks the file list, loading each diff as it goes. Plain arrows
+    // belong to the hunks now — the file list is the preview pane's.
+    Future<void> stepFile(
+      LogicalKeyboardKey arrow, {
+      bool repeat = false,
+    }) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyDownEvent(arrow);
+      if (repeat) await tester.sendKeyRepeatEvent(arrow);
+      await tester.sendKeyUpEvent(arrow);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+    }
+
+    await stepFile(LogicalKeyboardKey.arrowDown);
     expect(find.text('body of newer/two.dart'), findsOneWidget);
-    expect(
-      find.byKey(const Key('selected-file-newer/two.dart')),
-      findsOneWidget,
-    );
     // Autorepeat keeps walking.
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
-    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowDown);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pumpAndSettle();
+    await stepFile(LogicalKeyboardKey.arrowDown, repeat: true);
     expect(find.text('body of newer/three.dart'), findsOneWidget);
     // And it stops at the end rather than wrapping.
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pumpAndSettle();
+    await stepFile(LogicalKeyboardKey.arrowDown);
     expect(find.text('body of newer/three.dart'), findsOneWidget);
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-    await tester.pumpAndSettle();
+    await stepFile(LogicalKeyboardKey.arrowUp);
     expect(find.text('body of newer/two.dart'), findsOneWidget);
 
     // Cmd+Down walks the same file list from any focused child.
@@ -17916,7 +17098,7 @@ void main() {
     });
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: FakeGitRepository(
             (_, _) async => [commit('1', 'commit')],
             files: (_, _) async => [
@@ -17951,7 +17133,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.byKey(const Key('unified-list')), findsOneWidget);
-    expect(find.textContaining('change 1 of 1'), findsOneWidget);
+    expect(find.textContaining('@@ -'), findsOneWidget);
     expect(find.text('diff --git a/x b/x'), findsNothing);
     expect(tester.takeException(), isNull);
   });
@@ -17981,7 +17163,7 @@ void main() {
     );
     await tester.pumpWidget(
       MaterialApp(
-        home: DiffScreen(
+        home: OwnedFullDiffWorkspace(
           repository: FakeGitRepository(
             (_, _) async => [commit('1', 'commit')],
             files: (_, _) async => [
@@ -18088,7 +17270,6 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
     expect(find.text('alpha lib/two.dart'), findsOneWidget);
-    expect(find.byKey(const Key('selected-file-lib/two.dart')), findsOneWidget);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
@@ -18119,10 +17300,18 @@ void main() {
               ),
             ),
           ],
+          // 화면보다 긴 목록이라야 ⇧⌘↓ 로 넘길 것이 있다.
           files: (_, _) async => [
             for (final name in ['one', 'two'])
               GitFileChange(
                 path: 'lib/$name.dart',
+                status: 'M',
+                additions: 1,
+                deletions: 0,
+              ),
+            for (var index = 0; index < 30; index++)
+              GitFileChange(
+                path: 'lib/filler$index.dart',
                 status: 'M',
                 additions: 1,
                 deletions: 0,
@@ -18221,7 +17410,7 @@ void main() {
     expect(find.text('Committer · Cam Committer'), findsNothing);
 
     final scrollable = tester
-        .widget<NestedScrollView>(
+        .widget<SingleChildScrollView>(
           find.byKey(const Key('preview-content-scroll')),
         )
         .controller!
@@ -18351,22 +17540,22 @@ void main() {
     expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
     await metaArrow(LogicalKeyboardKey.arrowDown);
     expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
-    expect(find.text('Commit & Diff'), findsNothing);
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('preview-diff')), findsNothing);
+    expect(find.byType(FullDiffWorkspace), findsNothing);
 
     // Down walks the files, up walks back, and both ends clamp.
     await metaArrow(LogicalKeyboardKey.arrowDown);
-    final diff = find.byKey(const Key('preview-diff'));
+    final diff = find.byType(FullDiffWorkspace);
     expect(
       find.descendant(of: diff, matching: find.text('body of lib/two.dart')),
       findsOneWidget,
     );
     expect(
       tester
-          .widget<NestedScrollView>(
+          .widget<SingleChildScrollView>(
             find.byKey(const Key('preview-content-scroll')),
           )
           .controller
@@ -18392,6 +17581,8 @@ void main() {
       findsOneWidget,
     );
     // The commit selection never moved while walking files.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
 
     // Bare arrows still move the commit selection, with its own first file.
@@ -18440,7 +17631,7 @@ void main() {
 
     final filesViewport = find.byKey(const Key('preview-content-scroll'));
     final filesPosition = tester
-        .widget<NestedScrollView>(filesViewport)
+        .widget<SingleChildScrollView>(filesViewport)
         .controller!
         .position;
 
@@ -18557,7 +17748,18 @@ void main() {
         });
     await tester.pumpWidget(
       app(
-        FakeGitRepository((_, _) async => [commit('1', 'first commit')]),
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          // The diff opens on a file now, so the commit needs one.
+          files: (_, _) async => const [
+            GitFileChange(
+              path: 'lib/a.dart',
+              status: 'M',
+              additions: 1,
+              deletions: 1,
+            ),
+          ],
+        ),
         controller,
       ),
     );
@@ -18599,10 +17801,9 @@ void main() {
     await tester.tap(find.text('하단'));
     await tester.pumpAndSettle();
     expect(controller.previewPlacement, PreviewPlacement.bottom);
-    await tester.tap(find.byKey(const Key('toolbar-full-diff')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('nearby-commits-list')), findsNothing);
-    expect(find.byKey(const Key('changed-files-list')), findsOneWidget);
+    expect(find.byType(FullDiffWorkspace), findsOneWidget);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(
@@ -18775,6 +17976,33 @@ Widget app(
   ),
 );
 
+/// An [AvatarService] whose REST calls answer from [send] instead of the
+/// network.
+AvatarService avatarServiceOn(
+  HttpSend send, {
+  RemoteRepository remote = const RemoteRepository(
+    host: 'github.com',
+    owner: 'team',
+    repository: 'yogit',
+  ),
+  String token = 'token-1',
+}) => AvatarService(
+  remote: remote,
+  api: GitHubApi(
+    apiBaseUrl: githubApiBaseUrl(remote.host),
+    token: token,
+    send: send,
+  ),
+);
+
+/// The transport every "the lookup failed" fixture uses.
+Future<HttpResponse> offline(
+  Uri uri, {
+  required String method,
+  required Map<String, String> headers,
+  String? body,
+}) async => (status: 500, body: 'offline');
+
 class FakeGitRepository extends GitRepository {
   FakeGitRepository(
     this.loader, {
@@ -18810,9 +18038,13 @@ class FakeGitRepository extends GitRepository {
     this.stageResolvedFileCallback,
     this.commitMessage,
     this.deletedBranchNameCallback,
+    this.onLoadHistory,
     String root = '.',
     CommandRunner runner = runProcess,
   }) : super(root, runner: runner);
+
+  /// What each history read was told to leave out of the log's starting points.
+  final void Function(Set<String> hiddenTips)? onLoadHistory;
 
   final RepoRefs refs;
   final GitDiffAlgorithmSetting gitDiffAlgorithmSetting;
@@ -18920,8 +18152,14 @@ class FakeGitRepository extends GitRepository {
   history;
 
   @override
-  Future<List<GitCommit>> loadHistory({int limit = 500, int skip = 0}) =>
-      loader(skip, limit);
+  Future<List<GitCommit>> loadHistory({
+    int limit = 500,
+    int skip = 0,
+    Set<String> hiddenTips = const {},
+  }) {
+    onLoadHistory?.call(hiddenTips);
+    return loader(skip, limit);
+  }
 
   @override
   Future<String?> loadOriginUrl() =>
@@ -19615,4 +18853,107 @@ void _commitProfileTests() {
     expect(joined, contains('config --local user.name doortts'));
     expect(joined, contains('config --local user.email doortts@gmail.com'));
   });
+}
+
+/// One commit with one real file: enough for the workspace to draw a diff whose
+/// split can be dragged.
+FakeGitRepository _widthFixtureRepository() => FakeGitRepository(
+  (_, _) async => [commit('1', 'commit')],
+  files: (_, _) async => const [
+    GitFileChange(path: 'lib/a.dart', status: 'M', additions: 1, deletions: 1),
+    GitFileChange(path: 'lib/b.dart', status: 'M', additions: 2, deletions: 0),
+  ],
+  diff: (_, _, _, _, _) async => const [
+    DiffLine(kind: DiffLineKind.hunk, text: '@@ -1 +1 @@'),
+    DiffLine(kind: DiffLineKind.delete, text: 'old', oldNumber: 1),
+    DiffLine(kind: DiffLineKind.add, text: 'new', newNumber: 1),
+  ],
+  content: (_, _, _) async => Uint8List.fromList('new\n'.codeUnits),
+  history: (_, file) async => [
+    GitFileHistoryRecord(
+      commit: commit('1', 'commit'),
+      path: file.path,
+      oldPath: null,
+      status: 'M',
+    ),
+  ],
+);
+
+/// Mounts a [FullDiffWorkspace] over a session it owns and initializes, the way
+/// the retired full-diff route did, so screen-level tests can drive one
+/// without threading a controller through every case.
+class OwnedFullDiffWorkspace extends StatefulWidget {
+  const OwnedFullDiffWorkspace({
+    required this.repository,
+    required this.commits,
+    this.initialIndex = 0,
+    this.initialPreferences = const FullDiffPreferences(),
+    this.columnWidths = const FullDiffColumnWidths(),
+    this.onColumnWidthsChanged,
+    this.onPreferencesChanged,
+    this.editorService,
+    this.editorForTesting,
+    this.documentLoaderForTesting,
+    this.avatarService,
+    this.commitMessageCache,
+    this.showRemoteAvatars = true,
+    super.key,
+  });
+
+  final FullDiffRepository repository;
+  final List<GitCommit> commits;
+  final int initialIndex;
+  final FullDiffPreferences initialPreferences;
+  final FullDiffColumnWidths columnWidths;
+  final ValueChanged<FullDiffColumnWidths>? onColumnWidthsChanged;
+  final ValueChanged<FullDiffPreferences>? onPreferencesChanged;
+  final ExternalEditorService? editorService;
+  final Widget? editorForTesting;
+  final Future<WorkingTreeTextDocument> Function(String relativePath)?
+  documentLoaderForTesting;
+  final AvatarService? avatarService;
+  final FullDiffCommitMessageCache? commitMessageCache;
+  final bool showRemoteAvatars;
+
+  @override
+  State<OwnedFullDiffWorkspace> createState() => _OwnedFullDiffWorkspaceState();
+}
+
+class _OwnedFullDiffWorkspaceState extends State<OwnedFullDiffWorkspace> {
+  late final FullDiffSessionController _controller = FullDiffSessionController(
+    repository: widget.repository,
+    commits: widget.commits,
+    initialIndex: widget.initialIndex,
+    initialPreferences: widget.initialPreferences,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_controller.initialize());
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: fullDiffCanvas,
+    body: FullDiffWorkspace(
+      controller: _controller,
+      onBack: () {},
+      columnWidths: widget.columnWidths,
+      onColumnWidthsChanged: widget.onColumnWidthsChanged,
+      onPreferencesChanged: widget.onPreferencesChanged,
+      editorService: widget.editorService,
+      editorForTesting: widget.editorForTesting,
+      documentLoaderForTesting: widget.documentLoaderForTesting,
+      avatarService: widget.avatarService,
+      commitMessageCache: widget.commitMessageCache,
+      showRemoteAvatars: widget.showRemoteAvatars,
+    ),
+  );
 }

@@ -28,6 +28,7 @@ class UnifiedPresentationView extends StatelessWidget {
     this.showHunkHeaders = true,
     this.compactRows = false,
     this.currentMarkerColor = fullDiffAccent,
+    this.currentTint,
     this.header,
     super.key,
   });
@@ -49,6 +50,7 @@ class UnifiedPresentationView extends StatelessWidget {
   final bool showHunkHeaders;
   final bool compactRows;
   final Color currentMarkerColor;
+  final Color? currentTint;
   final Widget? header;
 
   @override
@@ -111,10 +113,13 @@ class UnifiedPresentationView extends StatelessWidget {
                   (line.kind == DiffLineKind.add ||
                       line.kind == DiffLineKind.delete),
               wordRanges: wordRanges,
-              compactGutter: true,
+              // Unified shows where a line sat and where it landed, so it
+              // carries both numbers and lets the sign ride with the source.
+              compactGutter: false,
               richRenderingEnabled: richRenderingEnabled,
               compact: compactRows,
               currentMarkerColor: currentMarkerColor,
+              currentTint: currentTint,
               selectionOrder: FullDiffSelectionOrder(row: item.sourceRow!),
             );
           } else {

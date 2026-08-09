@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 
 import 'avatars.dart';
 import 'git.dart';
+import 'github_api.dart';
+import 'github_auth.dart';
 import 'monitor_screen.dart';
 import 'pr_monitor.dart';
 import 'settings.dart';
@@ -22,7 +24,6 @@ void main(List<String> args) {
           requestedPath: launch.repositoryPath,
           branch: branch,
           gitExecutable: launch.gitExecutable,
-          ghExecutable: launch.ghExecutable,
         ),
       );
       return;
@@ -31,7 +32,6 @@ void main(List<String> args) {
       YogitBootstrap(
         requestedPath: launch.repositoryPath,
         gitExecutable: launch.gitExecutable,
-        ghExecutable: launch.ghExecutable,
       ),
     );
   } on FormatException catch (error) {
@@ -43,13 +43,11 @@ class LaunchOptions {
   const LaunchOptions({
     required this.repositoryPath,
     required this.gitExecutable,
-    this.ghExecutable,
     this.monitorBranch,
   });
 
   final String repositoryPath;
   final String gitExecutable;
-  final String? ghExecutable;
 
   /// When set, this instance is a monitor window for the branch, not a
   /// timeline.
@@ -58,17 +56,31 @@ class LaunchOptions {
 
 LaunchOptions launchOptionsFromArgs(List<String> args) {
   final suppliedGit = _optionValue(args, '--git');
-  final suppliedGh = _optionValue(args, '--gh');
   return LaunchOptions(
     repositoryPath: repositoryPathFromArgs(args),
     gitExecutable: suppliedGit == null
         ? resolveExecutable('git')
         : _validatedExecutable('--git', suppliedGit),
-    ghExecutable: suppliedGh == null
-        ? resolveOptionalExecutable('gh')
-        : _validatedExecutable('--gh', suppliedGh),
     monitorBranch: _optionValue(args, '--monitor'),
   );
+}
+
+/// The `.app` bundle this instance runs from, or null outside one — a dev run
+/// or a test has no bundle to relaunch or to open.
+String? appBundlePath() {
+  final segments = Platform.resolvedExecutable.split('/');
+  final index = segments.lastIndexWhere((segment) => segment.endsWith('.app'));
+  return index < 0 ? null : segments.sublist(0, index + 1).join('/');
+}
+
+/// Which GitHub server answers for [host]: the one the user selected when the
+/// remote lives on it, and the host's own endpoint otherwise. A monitored
+/// repository is not always on the selected server.
+String apiBaseUrlForHost(String host, AppSettings settings) {
+  final derived = githubApiBaseUrl(host);
+  return Uri.parse(settings.githubApiBaseUrl).host == Uri.parse(derived).host
+      ? settings.githubApiBaseUrl
+      : derived;
 }
 
 String repositoryPathFromArgs(List<String> args) =>
@@ -99,8 +111,8 @@ class MonitorBootstrap extends StatefulWidget {
     required this.requestedPath,
     required this.branch,
     required this.gitExecutable,
-    this.ghExecutable,
     this.runner = runProcess,
+    this.settingsStore,
     this.windowFrameController,
     super.key,
   });
@@ -108,8 +120,10 @@ class MonitorBootstrap extends StatefulWidget {
   final String requestedPath;
   final String branch;
   final String gitExecutable;
-  final String? ghExecutable;
   final CommandRunner runner;
+
+  /// Where the selected GitHub server comes from; the real file by default.
+  final SettingsStore? settingsStore;
   final WindowFrameController? windowFrameController;
 
   @override
@@ -120,11 +134,25 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
   late final WindowFrameController _controller =
       widget.windowFrameController ?? WindowFrameController();
   late final Future<
-    ({GitRepository repository, RemoteRepository? remote, String root})
+    ({
+      GitRepository repository,
+      RemoteRepository? remote,
+      String root,
+      String apiBaseUrl,
+      String? token,
+    })
   >
   _boot = _resolve();
 
-  Future<({GitRepository repository, RemoteRepository? remote, String root})>
+  Future<
+    ({
+      GitRepository repository,
+      RemoteRepository? remote,
+      String root,
+      String apiBaseUrl,
+      String? token,
+    })
+  >
   _resolve() async {
     final root = await resolveRepositoryRoot(
       widget.requestedPath,
@@ -137,10 +165,21 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
       runner: widget.runner,
     );
     final url = await repository.loadOriginUrl();
+    final remote = url == null ? null : RemoteRepository.tryParse(url);
+    final settings = await (widget.settingsStore ?? SettingsStore()).load();
+    // With no remote there is no host to derive a server from, so the token
+    // question falls back to the selected one; the notice for a missing origin
+    // comes right after the one for a missing login either way.
+    final apiBaseUrl = remote == null
+        ? settings.githubApiBaseUrl
+        : apiBaseUrlForHost(remote.host, settings);
     return (
       repository: repository,
-      remote: url == null ? null : RemoteRepository.tryParse(url),
+      remote: remote,
       root: root,
+      apiBaseUrl: apiBaseUrl,
+      // Read here so build() stays synchronous.
+      token: await GithubTokenStore(runner: widget.runner).read(apiBaseUrl),
     );
   }
 
@@ -152,33 +191,37 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
     home: FutureBuilder(
       future: _boot,
       builder: (context, snapshot) {
+        // Every branch below is wrapped: a monitor window without controls
+        // is a window the user cannot close.
         if (snapshot.hasError) {
           return _monitorNotice('Git 저장소가 아닙니다: ${widget.requestedPath}');
         }
         final boot = snapshot.data;
         if (boot == null) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
+          return _monitorWindow(
+            const Scaffold(body: Center(child: CircularProgressIndicator())),
+            zoomOnEntry: false,
           );
         }
-        if (widget.ghExecutable == null) {
-          return _monitorNotice('모니터링에는 GitHub CLI(gh)가 필요합니다.');
+        if (boot.token?.isNotEmpty != true) {
+          return _monitorNotice(
+            'GitHub 연결이 필요합니다 — 설정에서 서버에 로그인하세요.',
+            openBundle: appBundlePath(),
+          );
         }
         final remote = boot.remote;
         if (remote == null) {
           return _monitorNotice('origin 원격을 찾을 수 없어 PR을 읽을 수 없습니다.');
         }
-        return MonitorWindow(
-          controller: _controller,
-          child: MonitorScreen(
+        return _monitorWindow(
+          MonitorScreen(
             repository: boot.repository,
             branch: widget.branch,
             repositoryName: boot.root.split('/').last,
             service: PrMonitorService(
               remote: remote,
               monitoredBranch: widget.branch,
-              ghExecutable: widget.ghExecutable!,
-              runner: widget.runner,
+              api: GitHubApi(apiBaseUrl: boot.apiBaseUrl, token: boot.token!),
             ),
           ),
         );
@@ -186,8 +229,46 @@ class _MonitorBootstrapState extends State<MonitorBootstrap> {
     ),
   );
 
-  Widget _monitorNotice(String message) => Scaffold(
-    body: Center(child: Text(message, style: const TextStyle(fontSize: 14))),
+  Widget _monitorWindow(Widget child, {bool zoomOnEntry = true}) =>
+      MonitorWindow(
+        controller: _controller,
+        zoomOnEntry: zoomOnEntry,
+        child: child,
+      );
+
+  /// [openBundle] is the app bundle the 설정 열기 button relaunches; outside a
+  /// bundle there is nothing to open, so the button stays away.
+  Widget _monitorNotice(String message, {String? openBundle}) => _monitorWindow(
+    zoomOnEntry: false,
+    Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(message, style: const TextStyle(fontSize: 14)),
+            if (openBundle != null) ...[
+              const SizedBox(height: 12),
+              TextButton(
+                key: const Key('monitor-open-settings'),
+                onPressed: () =>
+                    unawaited(widget.runner('/usr/bin/open', [openBundle])),
+                child: const Text('설정 열기', style: TextStyle(fontSize: 13)),
+              ),
+            ],
+            const SizedBox(height: 14),
+            Text(
+              'esc 또는 왼쪽 위 닫기 버튼으로 창을 닫습니다',
+              style: TextStyle(
+                fontSize: 11,
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurface.withValues(alpha: 0.45),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
   );
 }
 
@@ -195,7 +276,6 @@ class YogitBootstrap extends StatefulWidget {
   const YogitBootstrap({
     required this.requestedPath,
     required this.gitExecutable,
-    this.ghExecutable,
     this.runner = runProcess,
     this.rawRunner = runRawProcess,
     this.windowFrameController,
@@ -204,7 +284,6 @@ class YogitBootstrap extends StatefulWidget {
 
   final String requestedPath;
   final String gitExecutable;
-  final String? ghExecutable;
   final CommandRunner runner;
   final RawCommandRunner rawRunner;
   final WindowFrameController? windowFrameController;
@@ -261,7 +340,6 @@ class _YogitBootstrapState extends State<YogitBootstrap> {
             runner: widget.runner,
             rawRunner: widget.rawRunner,
           ),
-          ghExecutable: widget.ghExecutable,
           windowFrameController: _windowFrameController,
         );
       }
@@ -286,7 +364,6 @@ class YogitApp extends StatefulWidget {
     required this.repository,
     this.settingsStore,
     this.avatarService,
-    this.ghExecutable,
     this.discoverAvatars = true,
     this.windowFrameController,
     this.repositoryFactory,
@@ -300,7 +377,6 @@ class YogitApp extends StatefulWidget {
   final GitRepository Function(String root)? repositoryFactory;
   final SettingsStore? settingsStore;
   final AvatarService? avatarService;
-  final String? ghExecutable;
   final bool discoverAvatars;
   final WindowFrameController? windowFrameController;
 
@@ -319,10 +395,14 @@ class _YogitAppState extends State<YogitApp> {
   @override
   void initState() {
     super.initState();
-    unawaited(_loadSettings());
-    if (_avatarService == null && widget.discoverAvatars) {
-      unawaited(_discoverAvatarService());
-    }
+    // Discovery waits for the settings: which server answers for the origin
+    // depends on the one the user selected.
+    unawaited(() async {
+      await _loadSettings();
+      if (_avatarService == null && widget.discoverAvatars) {
+        await _discoverAvatarService();
+      }
+    }());
   }
 
   Future<void> _loadSettings() async {
@@ -363,17 +443,23 @@ class _YogitAppState extends State<YogitApp> {
     }
   }
 
+  /// No token for the origin's server means no avatars: the REST calls would
+  /// only come back 401, and the rows already read fine with initials.
   Future<void> _discoverAvatarService() async {
-    final ghExecutable = widget.ghExecutable;
-    if (ghExecutable == null) return;
     final repository = _repository;
     final url = await repository.loadOriginUrl();
     final remote = url == null ? null : RemoteRepository.tryParse(url);
-    if (mounted && identical(_repository, repository) && remote != null) {
+    if (remote == null) return;
+    final apiBaseUrl = apiBaseUrlForHost(remote.host, _settings);
+    final token = await GithubTokenStore(
+      runner: repository.runner,
+    ).read(apiBaseUrl);
+    if (token == null) return;
+    if (mounted && identical(_repository, repository)) {
       setState(
         () => _avatarService = AvatarService(
           remote: remote,
-          ghExecutable: ghExecutable,
+          api: GitHubApi(apiBaseUrl: apiBaseUrl, token: token),
         ),
       );
     }
@@ -392,18 +478,14 @@ class _YogitAppState extends State<YogitApp> {
   /// The monitor runs as its own app instance, so it gets a real window of
   /// its own. Outside a bundle (dev runs, tests) there is nothing to launch.
   void _openMonitor(String branch) {
-    final segments = Platform.resolvedExecutable.split('/');
-    final bundleIndex = segments.lastIndexWhere(
-      (segment) => segment.endsWith('.app'),
-    );
-    if (bundleIndex < 0) return;
+    final bundlePath = appBundlePath();
+    if (bundlePath == null) return;
     unawaited(
       _repository.runner('/usr/bin/open', [
         ...monitorLaunchArguments(
-          bundlePath: segments.sublist(0, bundleIndex + 1).join('/'),
+          bundlePath: bundlePath,
           root: _repository.root,
           gitExecutable: _repository.gitExecutable,
-          ghExecutable: widget.ghExecutable,
           branch: branch,
         ),
       ]),
@@ -413,11 +495,8 @@ class _YogitAppState extends State<YogitApp> {
   void _openSettings(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (context) => SettingsScreen(
-          settings: _settings,
-          avatarService: _avatarService,
-          onChanged: _changeSettings,
-        ),
+        builder: (context) =>
+            SettingsScreen(settings: _settings, onChanged: _changeSettings),
       ),
     );
   }
@@ -459,6 +538,17 @@ class _YogitAppState extends State<YogitApp> {
                   );
                 }
               : null,
+          hiddenRefs: {...?_settings.hiddenRefs[_repository.root]},
+          onHiddenRefsChanged: _settingsLoaded
+              ? (refs) => _changeSettings(
+                  _settings.copyWith(
+                    hiddenRefs: {
+                      ..._settings.hiddenRefs,
+                      _repository.root: refs.toList()..sort(),
+                    },
+                  ),
+                )
+              : null,
           showRemoteAvatars: _settingsLoaded && _settings.showAvatars,
           preferredPreviewPlacement: _settings.previewPlacement,
           preferredBranch: _settingsLoaded
@@ -471,6 +561,8 @@ class _YogitAppState extends State<YogitApp> {
           refPalette: _settings.refPalette,
           refPaletteAssignments: _settings.refPaletteAssignments,
           branchPreviewMode: _settings.branchPreviewMode,
+          timelineFont: _settings.timelineFont,
+          timelineFontSize: _settings.timelineFontSize,
           mergeMessageTemplate: _settings.mergeMessageTemplate,
           rebaseMergeMessageTemplate: _settings.rebaseMergeMessageTemplate,
           previewWidth: _settings.previewWidth,

@@ -595,9 +595,10 @@ void main() {
         of: find.byKey(const Key('unified-line-0-0')),
         matching: find.text('10'),
       ),
-      findsOneWidget,
+      findsNWidgets(2),
+      reason: '문맥 줄은 옛 번호와 새 번호를 나란히 단다',
     );
-    final header = find.text('Configure · lines 10–16 · change 1 of 2');
+    final header = find.text('@@ -10,7 +10,7 @@ Configure');
     expect(
       tester.getTopLeft(find.text('context before 1')).dy,
       lessThan(tester.getTopLeft(header).dy),
@@ -911,7 +912,7 @@ void main() {
       document: twoHunkDocument,
     );
 
-    final header = find.text('Configure · lines 10–16 · change 1 of 2');
+    final header = find.text('@@ -10,7 +10,7 @@ Configure');
     expect(
       find.descendant(
         of: find.byKey(const Key('side-by-side-row-0-0')),
@@ -1060,8 +1061,14 @@ void main() {
       expect(find.byKey(lastKey), findsNothing);
       expect(find.byType(IntrinsicHeight), findsNothing);
 
-      controller.jumpTo(controller.position.maxScrollExtent);
-      await tester.pumpAndSettle();
+      // A lazy list only estimates what it has not built, so the far end moves
+      // as rows mount under the jump. Land on it the way a scroll does.
+      var previousExtent = -1.0;
+      while (controller.position.maxScrollExtent != previousExtent) {
+        previousExtent = controller.position.maxScrollExtent;
+        controller.jumpTo(previousExtent);
+        await tester.pumpAndSettle();
+      }
 
       expect(find.byKey(lastKey), findsOneWidget);
     });
@@ -1371,15 +1378,17 @@ void main() {
     expect((richText.text as TextSpan).style?.fontSize, 12);
     expect((richText.text as TextSpan).style?.height, 21 / 12);
     expect(tester.widget<Text>(find.text('314')).style?.fontSize, 10);
-    expect(tester.widget<Text>(find.text('+')).style?.fontSize, 10);
+    // The sign left the gutter for the source, so it takes the source's size.
+    expect(tester.widget<Text>(find.text('+')).style?.fontSize, 12);
     final spans = (richText.text as TextSpan).children!.cast<TextSpan>();
     expect(
-      spans.any(
-        (span) =>
-            span.style?.backgroundColor == fullDiffAddedWord &&
-            span.style?.decoration == TextDecoration.underline,
-      ),
+      spans.any((span) => span.style?.backgroundColor == fullDiffAddedWord),
       isTrue,
+    );
+    expect(
+      spans.every((span) => span.style?.decoration != TextDecoration.underline),
+      isTrue,
+      reason: '한글 밑줄이 음절마다 끊겨 보여서 틴트만 남겼다',
     );
   });
 
@@ -1418,9 +1427,7 @@ void main() {
     expect(await emphasisFor(DiffLineKind.delete), fullDiffDeletedWord);
   });
 
-  testWidgets('hunk headers use the approved compact type size', (
-    tester,
-  ) async {
+  testWidgets('hunk headers carry git\'s own header line', (tester) async {
     await tester.pumpWidget(
       qaApp(
         FullDiffHunkHeader(
@@ -1431,9 +1438,13 @@ void main() {
       ),
     );
 
+    final header = tester.widget<Text>(find.textContaining('@@'));
+    expect(header.style?.fontSize, 11);
+    expect(header.style?.color, fullDiffAccent);
     expect(
-      tester.widget<Text>(find.textContaining('lines')).style?.fontSize,
-      12,
+      tester.getSize(find.byType(FullDiffHunkHeader)).height,
+      fullDiffSourceRowHeight,
+      reason: '시안의 hunk 줄은 소스 한 줄 높이다',
     );
   });
 

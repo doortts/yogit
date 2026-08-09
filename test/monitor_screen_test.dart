@@ -6,8 +6,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/avatars.dart';
 import 'package:yogit/git.dart';
+import 'package:yogit/github_api.dart';
+import 'package:yogit/main.dart';
 import 'package:yogit/monitor_screen.dart';
 import 'package:yogit/pr_monitor.dart';
+import 'package:yogit/settings.dart';
 import 'package:yogit/window_frame.dart';
 
 MonitoredPullRequest pr({
@@ -118,24 +121,36 @@ void main() {
   });
 
   group('MonitorScreen', () {
-    PrMonitorService service(
-      Object? Function(List<String> arguments) respond, {
-      List<int>? callCount,
-    }) => PrMonitorService(
-      remote: const RemoteRepository(
-        host: 'github.company.com',
-        owner: 'team',
-        repository: 'yonalist',
-      ),
-      monitoredBranch: 'dev',
-      ghExecutable: 'gh',
-      runner: (executable, arguments, {workingDirectory, environment}) async {
-        callCount?.add(1);
-        final body = respond(arguments);
-        if (body == null) return ProcessResult(1, 4, '', 'gh: Not logged in');
-        return ProcessResult(1, 0, jsonEncode(body), '');
-      },
-    );
+    /// [respond] returns one poll's `data`, or null to fail the request the way
+    /// GitHub does — HTTP 200 with an `errors` array.
+    PrMonitorService service(Map<String, Object?>? Function() respond) =>
+        PrMonitorService(
+          remote: const RemoteRepository(
+            host: 'github.company.com',
+            owner: 'team',
+            repository: 'yonalist',
+          ),
+          monitoredBranch: 'dev',
+          api: GitHubApi(
+            apiBaseUrl: 'https://github.company.com/api/v3',
+            token: 'token-1',
+            send: (uri, {required method, required headers, body}) async {
+              final data = respond();
+              return (
+                status: 200,
+                body: jsonEncode(
+                  data == null
+                      ? {
+                          'errors': [
+                            {'message': 'gh: Not logged in'},
+                          ],
+                        }
+                      : {'data': data},
+                ),
+              );
+            },
+          ),
+        );
 
     GitRepository localRepository() => GitRepository(
       '/repo',
@@ -163,81 +178,83 @@ void main() {
       'isDraft': false,
       'mergeable': 'MERGEABLE',
       'reviewDecision': reviewDecision,
-      'reviews': reviews,
-      'statusCheckRollup': const <Object>[],
-      'commits': const [<String, Object?>{}],
+      'latestReviews': {'totalCount': reviews.length, 'nodes': reviews},
+      'commits': {
+        'totalCount': 3,
+        'nodes': [
+          {
+            'commit': {'statusCheckRollup': null},
+          },
+        ],
+      },
     };
 
-    Object? respondWithPrs(List<String> arguments) {
-      if (arguments.contains('view')) {
-        return {
-          'comments': [
-            {'body': '중복 구현 — #17로 대체'},
-          ],
-        };
-      }
-      if (arguments.contains('merged')) {
-        return [
-          {
-            'number': 20,
-            'title': 'palette fix',
-            'author': {'login': 'sc'},
-            'baseRefName': 'dev',
-            'mergedAt': '2026-08-07T01:00:00Z',
-            'mergedBy': {'login': 'sc'},
-            'mergeCommit': {'oid': 'abc123'},
-          },
-          {
-            'number': 19,
-            'title': 'audit recovery',
-            'author': {'login': 'jh'},
-            'baseRefName': 'release/1.4',
-            'mergedAt': '2026-08-06T01:00:00Z',
-            'mergedBy': {'login': 'jh'},
-            'mergeCommit': null,
-          },
-        ];
-      }
-      if (arguments.contains('closed')) {
-        return [
-          {
-            'number': 18,
-            'title': 'dup lane cache',
-            'author': {'login': 'mk'},
-            'baseRefName': 'dev',
-            'closedAt': '2026-08-04T01:00:00Z',
-          },
-        ];
-      }
-      return [
+    Map<String, Object?> review(String login, String state) => {
+      'author': {'login': login},
+      'state': state,
+    };
+
+    Map<String, Object?> snapshot({
+      List<Map<String, Object?>> open = const [],
+      List<Map<String, Object?>> merged = const [],
+      List<Map<String, Object?>> closed = const [],
+    }) => {
+      'repository': {
+        'open': {'nodes': open},
+        'merged': {'nodes': merged},
+        'closed': {'nodes': closed},
+      },
+    };
+
+    Map<String, Object?> snapshotWithPrs() => snapshot(
+      open: [
         openPr(
           number: 22,
           reviews: [
-            {
-              'author': {'login': 'jh'},
-              'state': 'APPROVED',
-            },
-            {
-              'author': {'login': 'mk'},
-              'state': 'APPROVED',
-            },
-            {
-              'author': {'login': 'yj'},
-              'state': 'APPROVED',
-            },
-            {
-              'author': {'login': 'ab'},
-              'state': 'APPROVED',
-            },
-            {
-              'author': {'login': 'cd'},
-              'state': 'COMMENTED',
-            },
+            review('jh', 'APPROVED'),
+            review('mk', 'APPROVED'),
+            review('yj', 'APPROVED'),
+            review('ab', 'APPROVED'),
+            review('cd', 'COMMENTED'),
           ],
         ),
         openPr(number: 21, author: 'mk', reviewDecision: null),
-      ];
-    }
+      ],
+      merged: [
+        {
+          'number': 20,
+          'title': 'palette fix',
+          'author': {'login': 'sc'},
+          'baseRefName': 'dev',
+          'mergedAt': '2026-08-07T01:00:00Z',
+          'mergedBy': {'login': 'sc'},
+          'mergeCommit': {'oid': 'abc123'},
+        },
+        {
+          'number': 19,
+          'title': 'audit recovery',
+          'author': {'login': 'jh'},
+          'baseRefName': 'release/1.4',
+          'mergedAt': '2026-08-06T01:00:00Z',
+          'mergedBy': {'login': 'jh'},
+          'mergeCommit': null,
+        },
+      ],
+      closed: [
+        {
+          'number': 18,
+          'title': 'dup lane cache',
+          'author': {'login': 'mk'},
+          'baseRefName': 'dev',
+          'closedAt': '2026-08-04T01:00:00Z',
+          'comments': {
+            'nodes': [
+              {'body': '중복 구현 — #17로 대체'},
+            ],
+          },
+        },
+      ],
+    );
 
     Widget app(Widget child) => MaterialApp(home: child);
 
@@ -256,7 +273,7 @@ void main() {
             repository: localRepository(),
             branch: 'dev',
             repositoryName: 'yonalist',
-            service: service(respondWithPrs),
+            service: service(snapshotWithPrs),
           ),
         ),
       );
@@ -300,9 +317,7 @@ void main() {
             repository: localRepository(),
             branch: 'dev',
             repositoryName: 'yonalist',
-            service: service(
-              (arguments) => arguments.contains('open') ? [] : <Object>[],
-            ),
+            service: service(snapshot),
           ),
         ),
       );
@@ -328,9 +343,7 @@ void main() {
               repository: localRepository(),
               branch: 'dev',
               repositoryName: 'yonalist',
-              service: service(
-                (arguments) => arguments.contains('open') ? [] : <Object>[],
-              ),
+              service: service(snapshot),
             ),
           ),
         ),
@@ -343,23 +356,86 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
       expect(calls, contains('closeWindow'));
+
+      // The traffic lights clear the screen's own top bar content.
+      final buttons = tester.getRect(find.byKey(const Key('window-close')));
+      final title = tester.getRect(find.text('yonalist / dev'));
+      expect(buttons.right, lessThan(title.left));
     });
 
-    testWidgets('a gh failure shows the banner and retry reloads', (
+    testWidgets('every monitor state can close its own window', (tester) async {
+      final opened = <List<String>>[];
+      final calls = <String>[];
+      const channel = MethodChannel('test/yogit-notice-window');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call.method);
+            return null;
+          });
+
+      await tester.pumpWidget(
+        MonitorBootstrap(
+          requestedPath: '/repo',
+          branch: 'dev',
+          gitExecutable: '/usr/bin/git',
+          settingsStore: _FixedSettingsStore(),
+          windowFrameController: WindowFrameController(channel: channel),
+          runner:
+              (executable, arguments, {workingDirectory, environment}) async {
+                if (executable == '/usr/bin/open') {
+                  opened.add(arguments);
+                  return ProcessResult(1, 0, '', '');
+                }
+                if (arguments.contains('rev-parse')) {
+                  return ProcessResult(1, 0, '/repo\n', '');
+                }
+                return ProcessResult(1, 1, '', 'no origin');
+              },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('GitHub 연결이 필요합니다 — 설정에서 서버에 로그인하세요.'), findsOneWidget);
+      // Outside an .app bundle there is nothing to open, so the button is away.
+      expect(find.byKey(const Key('monitor-open-settings')), findsNothing);
+      expect(opened, isEmpty);
+
+      // The notice is a real window: traffic lights, esc, and a drag region.
+      calls.clear();
+      await tester.tap(find.byKey(const Key('window-minimize')));
+      await tester.pumpAndSettle();
+      expect(calls, ['minimizeWindow']);
+
+      calls.clear();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(calls, ['closeWindow']);
+
+      calls.clear();
+      await tester.tap(find.byKey(const Key('window-close')));
+      await tester.pumpAndSettle();
+      expect(calls, ['closeWindow']);
+
+      calls.clear();
+      await tester.drag(
+        find.byKey(const Key('monitor-drag')),
+        const Offset(30, 12),
+      );
+      await tester.pumpAndSettle();
+      expect(calls, ['startDrag']);
+    });
+
+    testWidgets('an API failure shows the banner and retry reloads', (
       tester,
     ) async {
       var failing = true;
-      final calls = <int>[];
       await tester.pumpWidget(
         app(
           MonitorScreen(
             repository: localRepository(),
             branch: 'dev',
             repositoryName: 'yonalist',
-            service: service(
-              (arguments) => failing ? null : respondWithPrs(arguments),
-              callCount: calls,
-            ),
+            service: service(() => failing ? null : snapshotWithPrs()),
           ),
         ),
       );
@@ -376,4 +452,13 @@ void main() {
       expect(find.text('#22 feat: palette'), findsOneWidget);
     });
   });
+}
+
+/// Settings that never touch the disk: the boot future gates a spinner, and
+/// real file IO cannot complete while pumpAndSettle animates one.
+class _FixedSettingsStore extends SettingsStore {
+  _FixedSettingsStore() : super(File('/tmp/yogit-monitor-test-unused.json'));
+
+  @override
+  Future<AppSettings> load() async => const AppSettings();
 }
