@@ -3297,6 +3297,32 @@ void main() {
     );
   });
 
+  test('loadHistory decorates a tip without the origin/HEAD alias', () async {
+    final root = await Directory.systemTemp.createTemp('yogit_head_log_');
+    final remote = await Directory.systemTemp.createTemp(
+      'yogit_head_log_bare_',
+    );
+    addTearDown(() => root.delete(recursive: true));
+    addTearDown(() => remote.delete(recursive: true));
+
+    await _git(remote, ['init', '--bare']);
+    await _initRepository(root);
+    await File('${root.path}/file.txt').writeAsString('base\n');
+    await _git(root, ['add', 'file.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+    await _git(root, ['remote', 'add', 'origin', remote.path]);
+    await _git(root, ['push', '-u', 'origin', 'main']);
+    await _git(root, ['remote', 'set-head', 'origin', 'main']);
+
+    // git really does decorate the tip with both names, e.g.
+    // `main, origin/main, origin/HEAD`. Only the alias goes.
+    final commits = await GitRepository(root.path).loadHistory();
+    final names = commits.first.refs.map((ref) => ref.name).toList();
+
+    expect(names, contains('origin/main'));
+    expect(names, isNot(contains('origin/HEAD')));
+  });
+
   test('loadRefs leaves origin/HEAD out of the remote list', () async {
     final root = await Directory.systemTemp.createTemp('yogit_remote_head_');
     final remote = await Directory.systemTemp.createTemp('yogit_origin_head_');
