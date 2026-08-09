@@ -138,7 +138,7 @@ void main() {
 
         expect(
           painter.width,
-          lessThanOrEqualTo(tester.getSize(label).width - 1),
+          lessThanOrEqualTo(tester.getSize(label).width - 2),
           reason: 'refs 폭 $width: 글자가 칸 끝에 닿아 마지막 획이 깎인다',
         );
       }

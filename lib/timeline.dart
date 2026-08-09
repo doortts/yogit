@@ -2237,8 +2237,9 @@ class _TimelineScreenState extends State<TimelineScreen>
   static const _refChipPadding = 10.0;
 
   /// The room a fitted ref name keeps clear of its box, for the ink a glyph
-  /// draws beyond the width it reports.
-  static const _refNameInkCushion = 1.0;
+  /// draws beyond the width it reports. A trailing descender at these sizes
+  /// reaches about a point past its advance, so two is the safe side of one.
+  static const _refNameInkCushion = 2.0;
   static const _refGlyphWidth = 16.0;
 
   /// Every box a row draws inside itself — a ref chip, a date heading — is this

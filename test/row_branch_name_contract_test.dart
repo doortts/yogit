@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/git.dart';
+import 'package:yogit/settings.dart';
 import 'package:yogit/timeline.dart';
 import 'package:yogit/window_frame.dart';
 
@@ -167,6 +168,61 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(rowName(2), findsOneWidget, reason: '클릭까지 갈 필요 없다');
+  });
+
+  testWidgets('the dimmed chip leaves room for the ink it draws', (
+    tester,
+  ) async {
+    // The same cushion a real chip keeps: a glyph inks a hair past the width
+    // it reports, and a name cut to exactly its box loses that hair.
+    for (var width = 90.0; width <= 200; width += 1) {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1400, 900);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TimelineScreen(
+            repository: FakeGitRepository(
+              (_, _) async => [
+                commit(
+                  'a',
+                  'tip',
+                  parents: ['b'],
+                  refs: const [GitRef(name: 'feature/pr-monitoring')],
+                ),
+                commit('b', 'middle', parents: ['c']),
+                commit('c', 'root'),
+              ],
+            ),
+            controller: controller,
+            columnWidths: TimelineColumnWidths(refs: width),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+
+      final label = find.descendant(
+        of: rowName(1),
+        matching: find.byWidgetPredicate(
+          (widget) => widget is Text && (widget.data?.isNotEmpty ?? false),
+        ),
+      );
+      if (label.evaluate().isEmpty) continue;
+      final text = tester.widget<Text>(label);
+      final painter = TextPainter(
+        text: TextSpan(text: text.data, style: text.style),
+        textDirection: TextDirection.ltr,
+      )..layout();
+
+      expect(
+        painter.width,
+        lessThanOrEqualTo(tester.getSize(label).width - 2),
+        reason: 'refs 폭 $width: 흐린 칩도 마지막 획이 깎이면 안 된다',
+      );
+    }
+    tester.view.resetDevicePixelRatio();
+    tester.view.resetPhysicalSize();
   });
 
   testWidgets('only the focused row says it', (tester) async {
