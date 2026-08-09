@@ -2072,6 +2072,25 @@ class _TimelineScreenState extends State<TimelineScreen>
     );
   }
 
+  /// 프레임이 굳었다가 되살아난 적이 있을 때만 나오는 표시. 평소에는 자리를
+  /// 차지하지 않는다. 사용자가 "가끔 멈춰요"라고 할 때 이 줄 하나가 원인을
+  /// 짚어준다 — 로그도 예외도 안 남는 종류의 멈춤이라서다.
+  Widget _frameRevivalNotice() => ValueListenableBuilder<int>(
+    valueListenable: WindowFrameController.frameRevivals,
+    builder: (context, count, _) => count == 0
+        ? const SizedBox.shrink()
+        : Tooltip(
+            message:
+                '창이 다시 보이는데도 화면 갱신이 꺼져 있어 $count번 되살렸습니다. '
+                'macOS가 창 상태를 늦게 알려줄 때 생깁니다.',
+            child: Text(
+              key: const Key('frame-revival-notice'),
+              '화면 갱신 복구 $count',
+              style: TextStyle(color: behindOrange, fontSize: 10),
+            ),
+          ),
+  );
+
   Widget _legend(String label, Widget dot) => Padding(
     padding: const EdgeInsets.only(right: 12),
     child: Row(

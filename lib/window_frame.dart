@@ -8,11 +8,46 @@ enum PreviewPlacement { closed, right, bottom, left }
 class WindowFrameController extends ChangeNotifier {
   WindowFrameController({
     MethodChannel channel = const MethodChannel('yogit/window'),
-  }) : _channel = channel;
+    WidgetsBinding? binding,
+  }) : _channel = channel,
+       _binding = binding ?? WidgetsBinding.instance {
+    _channel.setMethodCallHandler(_handleNativeCall);
+  }
 
   final MethodChannel _channel;
+  final WidgetsBinding _binding;
+
+  /// 멈춘 프레임을 되살린 횟수. 창 하나가 겪는 상태라 프로세스 전체가 같은 값을
+  /// 본다. 0이 아니면 이 실행에서 화면이 굳은 적이 있다는 뜻이고, 사용자가 "가끔
+  /// 멈춰요"라고 할 때 짚을 수 있는 유일한 흔적이다.
+  static final frameRevivals = ValueNotifier<int>(0);
 
   PreviewPlacement previewPlacement = PreviewPlacement.closed;
+
+  Future<Object?> _handleNativeCall(MethodCall call) async {
+    if (call.method == 'windowBecameVisible') _reviveStalledFrames();
+    return null;
+  }
+
+  /// 창이 다시 보이는데도 프레임이 꺼져 있으면, 가려짐에서 돌아온 사실을 embedder가
+  /// 놓친 것이다. 그대로 두면 예약된 프레임이 영영 돌지 않아 입력은 들어가는데
+  /// 화면만 굳는다. 진짜로 가려진 창의 정상적인 절전과 다투지 않도록, 꺼져 있을
+  /// 때만 lifecycle을 되돌려 파이프라인을 다시 세운다.
+  void _reviveStalledFrames() {
+    if (_binding.framesEnabled) return;
+    frameRevivals.value++;
+    debugPrint(
+      'yogit: 창이 보이는데 프레임이 꺼져 있어 되살립니다 '
+      '(${frameRevivals.value}번째).',
+    );
+    _binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  }
+
+  @override
+  void dispose() {
+    _channel.setMethodCallHandler(null);
+    super.dispose();
+  }
 
   Future<void> setPreview(PreviewPlacement placement) async {
     if (placement == previewPlacement) return;

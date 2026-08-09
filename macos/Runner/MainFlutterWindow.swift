@@ -12,6 +12,7 @@ class MainFlutterWindow: NSWindow {
   static var workspace: WorkspaceOpening = NSWorkspace.shared
 
   private var previewBaseFrame: NSRect?
+  private var channel: FlutterMethodChannel?
 
   static func openFile(path: String) -> Bool {
     workspace.open(URL(fileURLWithPath: path))
@@ -39,6 +40,8 @@ class MainFlutterWindow: NSWindow {
       name: "yogit/window",
       binaryMessenger: flutterViewController.engine.binaryMessenger
     )
+    self.channel = channel
+    self.watchVisibility()
     channel.setMethodCallHandler { [weak self] call, result in
       switch call.method {
       case "setPreview":
@@ -88,6 +91,35 @@ class MainFlutterWindow: NSWindow {
     }
 
     super.awakeFromNib()
+  }
+
+  /// Whether the window is on screen for the user right now. AppKit is the only
+  /// side that knows: Flutter turns its frames off while a window is covered,
+  /// and if the engine misses the way back the app keeps its frames off and the
+  /// picture freezes. Every notification that can end a covered stretch reports
+  /// the window back to Dart, which revives the frames only if they really are
+  /// still off.
+  private func watchVisibility() {
+    let center = NotificationCenter.default
+    for name in [
+      NSWindow.didChangeOcclusionStateNotification,
+      NSWindow.didDeminiaturizeNotification,
+      NSWindow.didBecomeKeyNotification,
+    ] {
+      center.addObserver(forName: name, object: self, queue: .main) {
+        [weak self] _ in self?.reportVisibility()
+      }
+    }
+    center.addObserver(
+      forName: NSApplication.didBecomeActiveNotification,
+      object: NSApp,
+      queue: .main
+    ) { [weak self] _ in self?.reportVisibility() }
+  }
+
+  private func reportVisibility() {
+    guard occlusionState.contains(.visible), !isMiniaturized else { return }
+    channel?.invokeMethod("windowBecameVisible", arguments: nil)
   }
 
   /// The native directory chooser, or nil when the user cancels.

@@ -11968,6 +11968,45 @@ void main() {
     },
   );
 
+  testWidgets('a window back in sight revives frames only when they are off', (
+    tester,
+  ) async {
+    const channel = MethodChannel('test/yogit-visibility');
+    final controller = WindowFrameController(
+      channel: channel,
+      binding: tester.binding,
+    );
+    addTearDown(controller.dispose);
+    // 카운터는 프로세스 하나짜리라, 올려 둔 채 나가면 다음 시험의 상태 표시줄에
+    // 남는다.
+    final before = WindowFrameController.frameRevivals.value;
+    addTearDown(() => WindowFrameController.frameRevivals.value = before);
+
+    Future<void> reportVisible() =>
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .handlePlatformMessage(
+              channel.name,
+              channel.codec.encodeMethodCall(
+                const MethodCall('windowBecameVisible'),
+              ),
+              (_) {},
+            );
+
+    // 프레임이 살아 있는 평범한 창은 건드리지 않는다. 진짜로 가려진 창의 절전과
+    // 다투면 배터리만 태운다.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await reportVisible();
+    expect(WindowFrameController.frameRevivals.value, before);
+
+    // 가려진 사이에 프레임이 꺼졌고 embedder가 복귀를 놓친 자리. 창이 보인다는
+    // 소식만으로 파이프라인을 다시 세운다.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    expect(tester.binding.framesEnabled, isFalse);
+    await reportVisible();
+    expect(tester.binding.framesEnabled, isTrue);
+    expect(WindowFrameController.frameRevivals.value, before + 1);
+  });
+
   testWidgets(
     'bootstrap can recover from a non-repository with the folder picker',
     (tester) async {

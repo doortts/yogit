@@ -253,6 +253,7 @@ extension _TimelineChrome on _TimelineScreenState {
                       _legend('commit', const LegendDot()),
                       _legend('merge', const LegendDot(filled: true)),
                       _legend('WIP', const LegendDot(dashed: true)),
+                      _frameRevivalNotice(),
                     ],
                   )
                 : Row(
