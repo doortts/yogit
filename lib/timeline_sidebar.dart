@@ -487,37 +487,35 @@ extension _TimelineSidebar on _TimelineScreenState {
     required int ahead,
     required int behind,
     required String against,
-  }) => Flexible(
-    child: Tooltip(
-      message: [
-        if (ahead > 0) '$against보다 $ahead개 커밋 앞서 있습니다',
-        if (behind > 0) '$against보다 $behind개 커밋 뒤처져 있습니다',
-      ].join(' · '),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 36),
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerRight,
-          child: Text.rich(
-            key: key,
-            TextSpan(
-              children: [
-                if (ahead > 0)
-                  TextSpan(
-                    text: '+$ahead',
-                    style: const TextStyle(color: successGreen),
-                  ),
-                if (ahead > 0 && behind > 0) const TextSpan(text: ' '),
-                if (behind > 0)
-                  TextSpan(
-                    text: '−$behind',
-                    style: const TextStyle(color: remoteBehindRed),
-                  ),
-              ],
-            ),
-            maxLines: 1,
-            style: const TextStyle(fontSize: 11),
+  }) => Tooltip(
+    message: [
+      if (ahead > 0) '$against보다 $ahead개 커밋 앞서 있습니다',
+      if (behind > 0) '$against보다 $behind개 커밋 뒤처져 있습니다',
+    ].join(' · '),
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 36),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerRight,
+        child: Text.rich(
+          key: key,
+          TextSpan(
+            children: [
+              if (ahead > 0)
+                TextSpan(
+                  text: '+$ahead',
+                  style: const TextStyle(color: successGreen),
+                ),
+              if (ahead > 0 && behind > 0) const TextSpan(text: ' '),
+              if (behind > 0)
+                TextSpan(
+                  text: '−$behind',
+                  style: const TextStyle(color: remoteBehindRed),
+                ),
+            ],
           ),
+          maxLines: 1,
+          style: const TextStyle(fontSize: 11),
         ),
       ),
     ),
@@ -592,65 +590,88 @@ extension _TimelineSidebar on _TimelineScreenState {
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Flexible(
-                child: _refLabel(
-                  node.segment,
-                  // A ref says its whole path; a folder has nothing beyond the
-                  // segment the row already draws.
-                  whole: name ?? node.segment,
-                  style: TextStyle(
-                    color: current || hovered ? _palette.text : _palette.muted,
-                    fontSize: 13,
+          // The counts hang off the row's right edge rather than trailing the
+          // name, so they line up down the pane whatever each name's length.
+          // The name's Row keeps that much room clear — and on a pane too
+          // narrow to hold name, HEAD chip and counts at once, the chip is what
+          // goes: the row already carries the current branch's own colour.
+          LayoutBuilder(
+            builder: (context, rowSize) {
+              final reserve = ahead > 0 || behind > 0 ? 40.0 : 0.0;
+              // The chip needs about 34pt and the name deserves the rest.
+              final showHead = current && rowSize.maxWidth - reserve >= 52;
+              return Stack(
+                children: [
+                  Padding(
+                    padding: EdgeInsets.only(right: reserve),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: _refLabel(
+                            node.segment,
+                            // A ref says its whole path; a folder has nothing beyond the
+                            // segment the row already draws.
+                            whole: name ?? node.segment,
+                            style: TextStyle(
+                              color: current || hovered
+                                  ? _palette.text
+                                  : _palette.muted,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                        if (showHead) const SizedBox(width: 2),
+                        if (showHead)
+                          Tooltip(
+                            message: '현재 체크아웃된 브랜치입니다',
+                            child: Container(
+                              key: Key('sidebar-head-$name'),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 2,
+                                vertical: 1,
+                              ),
+                              decoration: BoxDecoration(
+                                color: iconColor.withValues(alpha: 0.12),
+                                border: Border.all(
+                                  color: iconColor.withValues(alpha: 0.8),
+                                ),
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                              child: Text(
+                                'HEAD',
+                                style: TextStyle(
+                                  color: iconColor,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.3,
+                                  fontFamily: technicalFontFamily,
+                                  fontFamilyFallback: technicalFontFallback,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-              ),
-              if (current) const SizedBox(width: 2),
-              if (current)
-                Tooltip(
-                  message: '현재 체크아웃된 브랜치입니다',
-                  child: Container(
-                    key: Key('sidebar-head-$name'),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 2,
-                      vertical: 1,
-                    ),
-                    decoration: BoxDecoration(
-                      color: iconColor.withValues(alpha: 0.12),
-                      border: Border.all(
-                        color: iconColor.withValues(alpha: 0.8),
-                      ),
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                    child: Text(
-                      'HEAD',
-                      style: TextStyle(
-                        color: iconColor,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.3,
-                        fontFamily: technicalFontFamily,
-                        fontFamilyFallback: technicalFontFallback,
+                  if (ahead > 0 || behind > 0)
+                    Positioned(
+                      right: 0,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: _divergenceBadge(
+                          key: Key('sidebar-${section.name}-divergence-$name'),
+                          ahead: ahead,
+                          behind: behind,
+                          // Each side names the other: a local row is measured
+                          // against its remote, a remote row against its local.
+                          against: section == _RefSection.local ? '원격' : '로컬',
+                        ),
                       ),
                     ),
-                  ),
-                ),
-              if (ahead > 0 || behind > 0) ...[
-                const SizedBox(width: 4),
-                // On a row too narrow for the name, the HEAD chip and the
-                // badge together, the badge gives ground rather than letting
-                // the row overflow — its FittedBox scales the pair down.
-                _divergenceBadge(
-                  key: Key('sidebar-${section.name}-divergence-$name'),
-                  ahead: ahead,
-                  behind: behind,
-                  // Each side names the other: a local row is measured against
-                  // its remote, a remote row against its local.
-                  against: section == _RefSection.local ? '원격' : '로컬',
-                ),
-              ],
-            ],
+                ],
+              );
+            },
           ),
           // When the branch was cut, in the Date column's own words.
           if (birth != null)
@@ -1127,11 +1148,16 @@ extension _TimelineSidebarFlows on _TimelineScreenState {
     }
   }
 
+  /// [dim] is the chip a row wears for the branch it merely sits on, rather
+  /// than one it is the tip of: the same chip at a fraction of its weight, so
+  /// it reads as context and never as a ref pointing here.
   Widget _refChip(
     GitCommit commit,
     GitRef ref,
     Color color, {
     int? paletteIndex,
+    bool dim = false,
+    Key? key,
   }) {
     final colors = paletteIndex == null
         ? refPaletteColorsForName(
@@ -1140,15 +1166,17 @@ extension _TimelineSidebarFlows on _TimelineScreenState {
             refPaletteAssignments: widget.refPaletteAssignments,
           )
         : refPaletteColorsAt(paletteIndex, widget.refPalette);
+    const fade = 0.45;
     final background = _comparison == null
-        ? colors.base.withValues(alpha: .18)
-        : color.withValues(alpha: .14);
+        ? colors.base.withValues(alpha: dim ? .18 * fade : .18)
+        : color.withValues(alpha: dim ? .14 * fade : .14);
     final border = _comparison == null
-        ? colors.text.withValues(alpha: .30)
-        : color.withValues(alpha: .55);
-    final foreground = _comparison == null ? colors.text : color;
+        ? colors.text.withValues(alpha: dim ? .30 * fade : .30)
+        : color.withValues(alpha: dim ? .55 * fade : .55);
+    final plain = _comparison == null ? colors.text : color;
+    final foreground = dim ? plain.withValues(alpha: fade) : plain;
     return Container(
-      key: Key('ref-chip-${commit.sha}-${ref.name}'),
+      key: key ?? Key('ref-chip-${commit.sha}-${ref.name}'),
       padding: const EdgeInsets.symmetric(horizontal: 5),
       decoration: BoxDecoration(
         color: background,

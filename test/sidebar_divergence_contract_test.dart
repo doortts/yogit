@@ -126,20 +126,17 @@ void main() {
     expect(label(tester, badge('hotfix')), '−7');
   });
 
-  testWidgets('the numbers sit against the name, not a stop away', (
-    tester,
-  ) async {
+  testWidgets('the numbers line up down the pane', (tester) async {
     await pumpSidebar(tester);
 
-    // 로컬 행에는 자리를 예약할 hover 버튼이 없다 — 숫자가 이름에 붙어야 한다.
-    final label = find.descendant(
-      of: find.byKey(const Key('sidebar-ref-hotfix')),
-      matching: find.text('hotfix'),
+    // 이름 길이가 서로 다른 행들. 숫자칸은 이름을 따라다니지 않고 한 세로줄에 선다.
+    // (글자 자체는 칸 안에서 축소될 수 있으므로 칸을 잰다.)
+    Rect slot(String branch) => tester.getRect(
+      find.ancestor(of: badge(branch), matching: find.byType(FittedBox)).first,
     );
-    expect(
-      tester.getRect(badge('hotfix')).left - tester.getRect(label).right,
-      lessThanOrEqualTo(4),
-    );
+
+    expect(slot('release').right, closeTo(slot('hotfix').right, 0.5));
+    expect(slot('main').right, closeTo(slot('hotfix').right, 0.5));
   });
 
   testWidgets('nothing to say means no badge', (tester) async {

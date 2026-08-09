@@ -193,7 +193,7 @@ extension _TimelineRows on _TimelineScreenState {
             lineTip != null && _resolvingDeletedBranchTips.contains(lineTip),
         // A commit partway down a line says which branch it sits on. The tip
         // itself already wears the chip, so it is not asked twice.
-        lineName: selected && refs.isEmpty
+        lineName: (selected || hovered) && refs.isEmpty
             ? _branchLineNames[row.branch]
             : null,
       );
@@ -679,84 +679,82 @@ extension _TimelineRows on _TimelineScreenState {
     String? deletedBranchName,
     bool deletedBranchLoading = false,
     String? lineName,
-  }) => SizedBox(
-    key: Key('refs-cell-$index'),
-    width: _w('refs'),
-    child: refs.isEmpty
-        ? deletedBranchLoading
-              ? Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 5),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '브랜치 이름 찾는 중…',
-                      key: Key('deleted-branch-loading-${commit.sha}'),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: _palette.muted, fontSize: 11),
-                    ),
-                  ),
-                )
-              : deletedBranchName != null
-              ? _deletedBranchLabel(commit, deletedBranchName, color)
-              : lineName == null
-              ? null
-              : Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 5),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      lineName,
-                      key: Key('row-branch-name-$index'),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: _palette.muted, fontSize: 11),
-                    ),
-                  ),
-                )
-        : LayoutBuilder(
-            builder: (context, constraints) {
-              // Chips split the cell evenly, each keeping at least 40px, and
-              // whatever no longer fits simply does not show.
-              const inset = _TimelineScreenState._refsCellInset;
-              final width = constraints.maxWidth - inset * 2;
-              final slots = math.max(1, (width / _minChipWidth).floor());
-              final shown = refs.take(slots).toList();
-              final slot = width / shown.length;
-              return Stack(
-                children: [
-                  for (var index = 0; index < shown.length; index++)
-                    Positioned(
-                      left: inset + index * slot,
-                      top:
-                          (TimelineScreen.rowHeight -
-                              _TimelineScreenState._rowChipHeight) /
-                          2,
-                      width: slot,
-                      height: _TimelineScreenState._rowChipHeight,
-                      child: _refChip(
-                        commit,
-                        shown[index],
-                        color,
-                        paletteIndex: _comparison == null && index == 0
-                            ? _branchPaletteIndexes[branch]
-                            : null,
+  }) {
+    // The branch a row merely sits on wears the same chip its tip does, only
+    // dimmed — same shape, same colour, a fraction of the weight — so the two
+    // read as one vocabulary rather than two.
+    final dim = refs.isEmpty && deletedBranchName == null && lineName != null;
+    final shownRefs = dim ? [GitRef(name: lineName)] : refs;
+    // The loop below reuses the name `index` for the chip slot.
+    final cellIndex = index;
+    return SizedBox(
+      key: Key('refs-cell-$index'),
+      width: _w('refs'),
+      child: shownRefs.isEmpty
+          ? deletedBranchLoading
+                ? Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '브랜치 이름 찾는 중…',
+                        key: Key('deleted-branch-loading-${commit.sha}'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: _palette.muted, fontSize: 11),
                       ),
                     ),
-                  if (showConnector)
-                    Positioned(
-                      key: Key('ref-chip-connector-${commit.sha}'),
-                      left: constraints.maxWidth - inset,
-                      right: 0,
-                      top: (TimelineScreen.rowHeight - 1) / 2,
-                      height: 1,
-                      child: ColoredBox(color: color),
-                    ),
-                ],
-              );
-            },
-          ),
-  );
+                  )
+                : deletedBranchName != null
+                ? _deletedBranchLabel(commit, deletedBranchName, color)
+                : null
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                // Chips split the cell evenly, each keeping at least 40px, and
+                // whatever no longer fits simply does not show.
+                const inset = _TimelineScreenState._refsCellInset;
+                final width = constraints.maxWidth - inset * 2;
+                final slots = math.max(1, (width / _minChipWidth).floor());
+                final shown = shownRefs.take(slots).toList();
+                final slot = width / shown.length;
+                return Stack(
+                  children: [
+                    for (var index = 0; index < shown.length; index++)
+                      Positioned(
+                        left: inset + index * slot,
+                        top:
+                            (TimelineScreen.rowHeight -
+                                _TimelineScreenState._rowChipHeight) /
+                            2,
+                        width: slot,
+                        height: _TimelineScreenState._rowChipHeight,
+                        child: _refChip(
+                          commit,
+                          shown[index],
+                          color,
+                          paletteIndex: _comparison == null && index == 0
+                              ? _branchPaletteIndexes[branch]
+                              : null,
+                          dim: dim,
+                          key: dim ? Key('row-branch-name-$cellIndex') : null,
+                        ),
+                      ),
+                    // No arrow for a dimmed chip: nothing points at this row.
+                    if (showConnector && !dim)
+                      Positioned(
+                        key: Key('ref-chip-connector-${commit.sha}'),
+                        left: constraints.maxWidth - inset,
+                        right: 0,
+                        top: (TimelineScreen.rowHeight - 1) / 2,
+                        height: 1,
+                        child: ColoredBox(color: color),
+                      ),
+                  ],
+                );
+              },
+            ),
+    );
+  }
 
   /// Wide enough for the longest ref in full, capped by the timeline viewport.
   double _refsModalWidth(List<GitRef> refs) {

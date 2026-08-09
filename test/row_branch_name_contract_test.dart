@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -121,7 +122,51 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(rowName(1), findsOneWidget);
-    expect(tester.widget<Text>(rowName(1)).data, 'main');
+    expect(
+      find.descendant(of: rowName(1), matching: find.text('main')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('it wears the same chip a tip does, only dimmed', (tester) async {
+    await pumpTimeline(tester);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+
+    BoxDecoration decorationOf(Finder finder) =>
+        tester.widget<Container>(finder).decoration! as BoxDecoration;
+
+    final tip = decorationOf(find.byKey(const Key('ref-chip-a-main')));
+    final onLine = decorationOf(rowName(1));
+
+    expect(onLine.borderRadius, tip.borderRadius, reason: '같은 모양이어야 한다');
+    expect(onLine.color!.a, lessThan(tip.color!.a), reason: '같은 색을 흐리게');
+    expect(
+      (onLine.border! as Border).top.color.a,
+      lessThan((tip.border! as Border).top.color.a),
+    );
+
+    // 이 행을 가리키는 ref가 없으니 그래프로 향하는 연결선도 없다.
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('refs-cell-1')),
+        matching: find.byKey(const Key('ref-chip-connector-b')),
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets('hovering a row is enough to name its line', (tester) async {
+    await pumpTimeline(tester);
+    expect(rowName(2), findsNothing);
+
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(find.byKey(const Key('refs-cell-2'))));
+    await tester.pumpAndSettle();
+
+    expect(rowName(2), findsOneWidget, reason: '클릭까지 갈 필요 없다');
   });
 
   testWidgets('only the focused row says it', (tester) async {
