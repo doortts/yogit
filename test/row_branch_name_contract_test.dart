@@ -72,6 +72,28 @@ void main() {
       expect(branchLineNames(rows), isEmpty);
     });
 
+    test('the working tree row does not swallow its line name', () {
+      // 작업 트리 행은 체크아웃한 브랜치 줄 맨 위에 앉고 ref를 달 수 없다. 그
+      // 행에서 줄 이름을 포기하면 기준 브랜치만 이름을 잃는다 — 커밋되지 않은
+      // 변경이 있는 동안 내내.
+      final rows = layoutGraph([
+        commit('', 'working tree', parents: ['a']),
+        commit(
+          'a',
+          'tip',
+          parents: ['b'],
+          refs: const [GitRef(name: 'main')],
+        ),
+        commit('b', 'middle', parents: ['c']),
+        commit('c', 'root'),
+      ]);
+
+      final names = branchLineNames(rows);
+      for (final row in rows) {
+        expect(names[row.branch], 'main');
+      }
+    });
+
     test('a branch tip wins over a tag on the same commit', () {
       final rows = layoutGraph([
         commit(

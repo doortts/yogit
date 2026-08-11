@@ -791,7 +791,10 @@ Map<int, String> branchLineNames(List<GraphRow> rows) {
   final names = <int, String>{};
   final seen = <int>{};
   for (final row in rows) {
-    if (!seen.add(row.branch)) continue;
+    // 작업 트리 행은 커밋이 아니라 ref를 달 수 없다. 그 행에서 줄 이름을 포기하면
+    // 그 아래 진짜 tip이 달고 있는 이름까지 같이 잃는다 — 체크아웃한 브랜치, 즉
+    // 대개 기준 브랜치만 커밋되지 않은 변경이 있는 동안 이름 없이 남는다.
+    if (row.commit.isWorkingTree || !seen.add(row.branch)) continue;
     final refs = row.commit.refs;
     if (refs.isEmpty) continue;
     final pick = refs.firstWhere((ref) => !ref.isTag, orElse: () => refs.first);

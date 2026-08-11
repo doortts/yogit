@@ -16563,12 +16563,16 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-middle')), findsOneWidget);
+    // 자기 ref 칩은 없다. 대신 그 줄의 이름이 흐린 칩으로 얹힌다 — 작업 트리 행이
+    // 맨 위에 있어도 마찬가지다.
+    expect(find.byKey(const Key('ref-chip-middle-$long')), findsNothing);
     expect(
       find.descendant(
-        of: find.byKey(const Key('refs-cell-2')),
-        matching: find.byType(Text),
+        of: find.byKey(const Key('row-branch-name-2')),
+        // 좁은 칸이라 앞이 잘리고 꼬리가 남는다 — 칩이 잘리는 방식 그대로다.
+        matching: find.textContaining('e-indeed'),
       ),
-      findsNothing,
+      findsOneWidget,
     );
     // Aligned with the BRANCH / TAG column, showing that line's name.
     expect(
