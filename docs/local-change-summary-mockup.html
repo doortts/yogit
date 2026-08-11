@@ -37,7 +37,11 @@
   /* 알림 카드 */
   .card {
     display: inline-block;
-    background: var(--card); color: var(--text);
+    /* 설명하는 그 역사 위에 서므로 뒤가 비친다. 흐림이 글자를 지켜 준다. */
+    background: rgba(44, 44, 46, .78); color: var(--text);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid var(--border);
     border-radius: 5px; padding: 12px 16px;
     box-shadow: 0 5px 18px rgba(0,0,0,.5);
     font-size: 13px; min-width: 420px; max-width: 640px;
@@ -190,7 +194,8 @@
 
 <h2>화면 어디에 서나</h2>
 <p class="note">
-  방금 답한 물음이 서 있던 자리 — 화면 한가운데다. 저장소가 바뀌었다는 물음에
+  방금 답한 물음이 서 있던 자리 — 화면 한가운데다. 판은 반투명이라 아래의 커밋들이 비친다:
+  설명하고 있는 그 역사를 가리지 않는다. 저장소가 바뀌었다는 물음에
   <b>새로고침</b>이라고 답하면, 그 답이 무엇을 불러왔는지가 같은 자리에 이어서 선다.
   답을 한 곳과 답이 오는 곳이 다르면 눈이 화면을 가로질러야 한다.
 </p>

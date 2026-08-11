@@ -901,7 +901,10 @@ class _GrowingChipLayout extends SingleChildLayoutDelegate {
 
   @override
   Offset getPositionForChild(Size size, Size childSize) => Offset(
-    math.max(_margin, math.min(anchor.left, size.width - childSize.width - _margin)),
+    math.max(
+      _margin,
+      math.min(anchor.left, size.width - childSize.width - _margin),
+    ),
     anchor.center.dy - childSize.height / 2,
   );
 
@@ -1000,70 +1003,80 @@ class LocalChangeNotice extends StatelessWidget {
       // The press that dismisses is still the press the reader meant: it
       // selects the row it landed on, and the notice goes with it.
       onTapOutside: (_) => onDismiss(),
-      child: Container(
-        key: const Key('local-change-notice'),
-        constraints: const BoxConstraints(minWidth: 420, maxWidth: 640),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: palette.raised,
-          borderRadius: BorderRadius.circular(5),
-          border: Border.all(color: palette.border),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x80000000),
-              blurRadius: 18,
-              offset: Offset(0, 5),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Flexible(
-                  child: Text(
-                    headline,
-                    key: const Key('local-change-notice-headline'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: palette.text, fontSize: 13),
-                  ),
+      // The card stands over the very rows it is describing, so it lets them
+      // through rather than blanking them out — the reader can see the
+      // history it is being told about. The blur behind it is what keeps the
+      // text readable over a list of commit subjects.
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(5),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Container(
+            key: const Key('local-change-notice'),
+            constraints: const BoxConstraints(minWidth: 420, maxWidth: 640),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: palette.raised.withValues(alpha: 0.78),
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(color: palette.border),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x80000000),
+                  blurRadius: 18,
+                  offset: Offset(0, 5),
                 ),
-                const SizedBox(width: 20),
-                // A notice that will not leave on its own has to show the way
-                // out.
-                _EscHint(palette: palette, onPressed: onDismiss),
               ],
             ),
-            if (detail) ...[
-              const SizedBox(height: 9),
-              Divider(height: 1, color: palette.border),
-              const SizedBox(height: 8),
-              for (final line in lines)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 2),
-                  child: Text(
-                    line,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: palette.text, fontSize: 13),
-                  ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        headline,
+                        key: const Key('local-change-notice-headline'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: palette.text, fontSize: 13),
+                      ),
+                    ),
+                    const SizedBox(width: 20),
+                    // A notice that will not leave on its own has to show the way
+                    // out.
+                    _EscHint(palette: palette, onPressed: onDismiss),
+                  ],
                 ),
-              for (final commit in commits)
-                _NoticeCommitRow(commit: commit, palette: palette),
-              if (more > 0)
-                Padding(
-                  padding: const EdgeInsets.only(left: 17, top: 3),
-                  child: Text(
-                    '외 $more개',
-                    key: const Key('local-change-notice-more'),
-                    style: TextStyle(color: palette.muted, fontSize: 12),
-                  ),
-                ),
-            ],
-          ],
+                if (detail) ...[
+                  const SizedBox(height: 9),
+                  Divider(height: 1, color: palette.border),
+                  const SizedBox(height: 8),
+                  for (final line in lines)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 2),
+                      child: Text(
+                        line,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: palette.text, fontSize: 13),
+                      ),
+                    ),
+                  for (final commit in commits)
+                    _NoticeCommitRow(commit: commit, palette: palette),
+                  if (more > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 17, top: 3),
+                      child: Text(
+                        '외 $more개',
+                        key: const Key('local-change-notice-more'),
+                        style: TextStyle(color: palette.muted, fontSize: 12),
+                      ),
+                    ),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );

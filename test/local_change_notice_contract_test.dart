@@ -342,6 +342,20 @@ void _mockupParity() {
     final card = tester.getRect(find.byKey(const Key('local-change-notice')));
     final screen = tester.getRect(find.byType(MaterialApp));
 
+    // 뒤의 커밋들이 비쳐 보인다 — 설명하고 있는 그 역사 위에 서기 때문이다.
+    final panel =
+        tester.widget<Container>(find.byKey(const Key('local-change-notice')))
+            .decoration! as BoxDecoration;
+    expect(panel.color!.a, lessThan(1.0));
+    expect(
+      find.ancestor(
+        of: find.byKey(const Key('local-change-notice')),
+        matching: find.byType(BackdropFilter),
+      ),
+      findsOneWidget,
+      reason: '비치되 읽히려면 뒤가 흐려져야 한다',
+    );
+
     // 방금 답한 물음이 서 있던 자리 — 화면 한가운데다.
     expect(card.center.dx, closeTo(screen.center.dx, 0.5));
     expect(card.center.dy, closeTo(screen.center.dy, 0.5));
