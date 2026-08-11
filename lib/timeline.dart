@@ -2902,6 +2902,31 @@ class _TimelineScreenState extends State<TimelineScreen>
     fontSize: _supportingFontSize,
   );
 
+  /// Whether a chip [width] wide has to cut [ref]'s name. Measured the way the
+  /// chip is built: its own side padding, the glyph and the gap after it, then
+  /// the name in the type the row actually paints with.
+  ///
+  /// A point either way only moves where the whole-name copy starts opening,
+  /// which is a far cheaper mistake than cutting a name that fits.
+  bool _refNameIsCut(
+    GitRef ref,
+    Color color,
+    double width,
+    BuildContext context,
+  ) {
+    if (_comparison != null || !width.isFinite) return false;
+    final inherited = DefaultTextStyle.of(context).style;
+    final glyph = ref.isHead || ref.isTag
+        ? _textWidth(
+                ref.isHead ? '✓' : '◇',
+                inherited.merge(const TextStyle(fontSize: 10)),
+              ) +
+              3
+        : 0.0;
+    final room = width - _refChipPadding - glyph - _refNameInkCushion;
+    return _textWidth(ref.name, inherited.merge(_refNameStyle(color))) > room;
+  }
+
   /// A chip gives its name up from the front to fit its share of the cell — see
   /// [fitRefName], which the chip measures against the room it actually got.
   /// The modal sizes itself to its longest name instead, so it shows every name

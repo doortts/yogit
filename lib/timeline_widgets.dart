@@ -702,6 +702,113 @@ class _SideTooltipState extends State<SideTooltip> {
   );
 }
 
+/// A chip that grows to its whole name while the mouse is on it.
+///
+/// The BRANCH / TAG column cuts a name from the front, and a name whose front
+/// is gone cannot be read at all. Rather than answer with a tooltip in some
+/// other voice, the chip itself opens to full width in its own place, keeping
+/// its colour and its border, and lies over the graph column while it does.
+/// The reader sees the thing they were already looking at, larger.
+///
+/// [whole] is drawn instead of [child] only while hovered, and only when the
+/// caller says the name was cut — a chip already showing its whole name has
+/// nothing to open.
+class GrowingChip extends StatefulWidget {
+  const GrowingChip({
+    required this.whole,
+    required this.child,
+    this.grown = true,
+    super.key,
+  });
+
+  /// The same chip, sized to its whole name.
+  final Widget whole;
+  final Widget child;
+
+  /// Whether the name is cut at all. False leaves the chip inert.
+  final bool grown;
+
+  @override
+  State<GrowingChip> createState() => _GrowingChipState();
+}
+
+class _GrowingChipState extends State<GrowingChip> {
+  final _overlay = OverlayPortalController();
+  final _anchorKey = GlobalKey(debugLabel: 'growing chip anchor');
+
+  Rect? get _anchorRect {
+    final box = _anchorKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return null;
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  @override
+  void didUpdateWidget(covariant GrowingChip oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // A column drag can widen the cell until the name fits while the mouse is
+    // still on it. The open copy would then say the same thing twice.
+    if (!widget.grown && _overlay.isShowing) _overlay.hide();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final anchored = KeyedSubtree(key: _anchorKey, child: widget.child);
+    if (!widget.grown) return anchored;
+    return MouseRegion(
+      onEnter: (_) => _overlay.show(),
+      onExit: (_) => _overlay.hide(),
+      child: OverlayPortal(
+        controller: _overlay,
+        overlayChildBuilder: (context) {
+          final anchor = _anchorRect;
+          if (anchor == null) return const SizedBox.shrink();
+          return Positioned.fill(
+            // The rows underneath stay clickable: the reader is reading, not
+            // aiming at this.
+            child: IgnorePointer(
+              child: CustomSingleChildLayout(
+                delegate: _GrowingChipLayout(anchor: anchor),
+                child: widget.whole,
+              ),
+            ),
+          );
+        },
+        child: anchored,
+      ),
+    );
+  }
+}
+
+/// The grown chip sits exactly where the cut one sat, so nothing appears to
+/// move — it only gets longer. A name too long for the room left of the window
+/// edge slides back just far enough to stay whole.
+class _GrowingChipLayout extends SingleChildLayoutDelegate {
+  const _GrowingChipLayout({required this.anchor});
+
+  final Rect anchor;
+
+  static const _margin = 8.0;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
+      BoxConstraints.loose(
+        Size(
+          math.max(0, constraints.maxWidth - _margin * 2),
+          math.max(0, constraints.maxHeight - _margin * 2),
+        ),
+      );
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) => Offset(
+    math.max(_margin, math.min(anchor.left, size.width - childSize.width - _margin)),
+    anchor.center.dy - childSize.height / 2,
+  );
+
+  @override
+  bool shouldRelayout(_GrowingChipLayout oldDelegate) =>
+      oldDelegate.anchor != anchor;
+}
+
 /// Right of the anchor on the anchor's own line, left of it when the right
 /// edge is out of room, and never past a window edge either way.
 class _SideTooltipLayout extends SingleChildLayoutDelegate {

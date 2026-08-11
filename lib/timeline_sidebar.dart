@@ -1177,8 +1177,10 @@ extension _TimelineSidebarFlows on _TimelineScreenState {
         : color.withValues(alpha: dim ? .55 * fade : .55);
     final plain = _comparison == null ? colors.text : color;
     final foreground = dim ? plain.withValues(alpha: fade) : plain;
-    return Container(
-      key: key ?? Key('ref-chip-${commit.sha}-${ref.name}'),
+    Widget chip({required bool whole}) => Container(
+      key: whole
+          ? Key('ref-chip-whole-${commit.sha}-${ref.name}')
+          : key ?? Key('ref-chip-${commit.sha}-${ref.name}'),
       padding: const EdgeInsets.symmetric(horizontal: 5),
       decoration: BoxDecoration(
         color: background,
@@ -1186,10 +1188,25 @@ extension _TimelineSidebarFlows on _TimelineScreenState {
         borderRadius: BorderRadius.circular(5),
       ),
       child: Row(
+        mainAxisSize: whole ? MainAxisSize.min : MainAxisSize.max,
         children: [
           _refGlyph(ref, foreground, false),
-          _refName(ref, foreground, false),
+          whole
+              ? Text(
+                  ref.name,
+                  maxLines: 1,
+                  softWrap: false,
+                  style: _refNameStyle(foreground),
+                )
+              : _refName(ref, foreground, false),
         ],
+      ),
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) => GrowingChip(
+        grown: _refNameIsCut(ref, foreground, constraints.maxWidth, context),
+        whole: chip(whole: true),
+        child: chip(whole: false),
       ),
     );
   }
