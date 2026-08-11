@@ -175,6 +175,21 @@ extension _TimelineRows on _TimelineScreenState {
     final progress = _commitProgressLabel(commit);
     final badges = _commitBadges(commit);
     final refs = _rowRefs(commit);
+    final rowColor = mergeConflict
+        ? previewConflictPanel
+        : rebaseConflict
+        ? const Color(0xFF8F2F3A)
+        : resolvedRebaseConflict
+        ? previewPurplePanel
+        : rebaseApplying
+        ? const Color(0xFF4D376D)
+        : virtualPreview
+        ? previewPurplePanel
+        : selected
+        ? _palette.background
+        : hovered
+        ? _palette.neutralChip.withValues(alpha: 0.48)
+        : _palette.background;
     Widget refsCell() {
       final lineTip = selected && refs.isEmpty
           ? _deletedBranchTipSha(row.branch)
@@ -185,6 +200,7 @@ extension _TimelineRows on _TimelineScreenState {
         refs,
         rowAccentColor,
         row.branch,
+        rowColor: rowColor,
         showConnector: _comparison == null,
         deletedBranchName: lineTip == null
             ? null
@@ -246,21 +262,6 @@ extension _TimelineRows on _TimelineScreenState {
     final stacked =
         avatarSize * 0.95 <= painter.laneSpacing - CommitGraphPainter.railWidth;
     final mappings = _previewGraph?.mappings ?? const <RebaseGraphMapping>[];
-    final rowColor = mergeConflict
-        ? previewConflictPanel
-        : rebaseConflict
-        ? const Color(0xFF8F2F3A)
-        : resolvedRebaseConflict
-        ? previewPurplePanel
-        : rebaseApplying
-        ? const Color(0xFF4D376D)
-        : virtualPreview
-        ? previewPurplePanel
-        : selected
-        ? _palette.background
-        : hovered
-        ? _palette.neutralChip.withValues(alpha: 0.48)
-        : _palette.background;
     final content = MouseRegion(
       onEnter: (_) => _hoverIndex.value = index,
       onExit: (_) {
@@ -678,6 +679,7 @@ extension _TimelineRows on _TimelineScreenState {
     List<GitRef> refs,
     Color color,
     int branch, {
+    required Color rowColor,
     bool showConnector = true,
     String? deletedBranchName,
     bool deletedBranchLoading = false,
@@ -735,6 +737,7 @@ extension _TimelineRows on _TimelineScreenState {
                           commit,
                           shown[index],
                           color,
+                          rowColor: rowColor,
                           paletteIndex: _comparison == null && index == 0
                               ? _branchPaletteIndexes[branch]
                               : null,

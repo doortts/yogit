@@ -1157,6 +1157,7 @@ extension _TimelineSidebarFlows on _TimelineScreenState {
     GitCommit commit,
     GitRef ref,
     Color color, {
+    Color? rowColor,
     int? paletteIndex,
     bool dim = false,
     Key? key,
@@ -1177,13 +1178,24 @@ extension _TimelineSidebarFlows on _TimelineScreenState {
         : color.withValues(alpha: dim ? .55 * fade : .55);
     final plain = _comparison == null ? colors.text : color;
     final foreground = dim ? plain.withValues(alpha: fade) : plain;
+    // The grown copy lies over the chip it came from and over whatever else
+    // shares the row. A tinted panel would let both show through and the two
+    // names would read on top of each other, so the copy carries the row it
+    // sits on underneath its own tint and comes out opaque.
+    final panel = Color.alphaBlend(
+      background,
+      Color.alphaBlend(rowColor ?? _palette.background, _palette.background),
+    );
     Widget chip({required bool whole}) => Container(
       key: whole
           ? Key('ref-chip-whole-${commit.sha}-${ref.name}')
           : key ?? Key('ref-chip-${commit.sha}-${ref.name}'),
+      // Matching the cut chip's height to the point: a copy a hair short
+      // leaves a line of the old name showing along its edge.
+      height: whole ? _TimelineScreenState._rowChipHeight : null,
       padding: const EdgeInsets.symmetric(horizontal: 5),
       decoration: BoxDecoration(
-        color: background,
+        color: whole ? panel : background,
         border: Border.all(color: border),
         borderRadius: BorderRadius.circular(5),
       ),

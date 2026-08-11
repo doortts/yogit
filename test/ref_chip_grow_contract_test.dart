@@ -84,6 +84,26 @@ void main() {
     );
   });
 
+  testWidgets('it hides the cut name it grew out of, rather than lying over it', (
+    tester,
+  ) async {
+    await pump(tester, name: long);
+    await hover(tester, chip(long));
+
+    final cut = tester.getRect(chip(long));
+    final grown = tester.getRect(whole(long));
+    final decoration =
+        tester.widget<Container>(whole(long)).decoration! as BoxDecoration;
+
+    // 판이 비치면 밑에 깔린 잘린 이름이 겹쳐 읽힌다.
+    expect(decoration.color!.a, 1.0, reason: '자란 칩의 판은 불투명하다');
+    // 그리고 원래 칩을 남김없이 덮는다 — 위아래로 한 줄도 새어 나오면 안 된다.
+    expect(grown.top, cut.top);
+    expect(grown.bottom, cut.bottom);
+    expect(grown.left, cut.left);
+    expect(grown.right, greaterThanOrEqualTo(cut.right));
+  });
+
   testWidgets('it keeps the chip it grew out of', (tester) async {
     await pump(tester, name: long);
     final cut = tester.widget<Container>(chip(long)).decoration! as BoxDecoration;
@@ -92,7 +112,12 @@ void main() {
     final grown =
         tester.widget<Container>(whole(long)).decoration! as BoxDecoration;
 
-    expect(grown.color, cut.color, reason: '같은 색 판');
+    // 판은 불투명해졌지만 눈에는 같은 색이다 — 원래 색을 행 위에 얹은 값이다.
+    expect(
+      grown.color,
+      Color.alphaBlend(cut.color!, const Color(0xFF1C1C1E)),
+      reason: '같은 색으로 보이되 비치지 않는다',
+    );
     expect(
       (grown.border! as Border).top.color,
       (cut.border! as Border).top.color,
@@ -128,6 +153,52 @@ void main() {
       findsNothing,
       reason: '이미 읽히는 것을 덮는 건 방해다',
     );
+  });
+
+  testWidgets('a row full of chips reads one name at a time', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    const first = 'v2-monaco-slash-commands';
+    const second = 'v2-monaco-image-attach';
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TimelineScreen(
+          repository: FakeGitRepository(
+            (_, _) async => [
+              commit(
+                'a',
+                'tip',
+                parents: ['b'],
+                refs: const [GitRef(name: first), GitRef(name: second)],
+              ),
+              commit('b', 'root'),
+            ],
+          ),
+          controller: controller,
+          columnWidths: const TimelineColumnWidths(refs: 180),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final neighbour = tester.getRect(chip(second));
+    await hover(tester, chip(first));
+
+    // 옆 칩 위로 지나가지만 판이 불투명해서 두 이름이 겹쳐 읽히지 않는다.
+    final grown = tester.getRect(whole(first));
+    expect(grown.right, greaterThan(neighbour.left));
+    expect(
+      (tester.widget<Container>(whole(first)).decoration! as BoxDecoration)
+          .color!
+          .a,
+      1.0,
+    );
+    // 그리고 마우스가 올라간 그 칩만 열린다.
+    expect(whole(second), findsNothing);
   });
 
   testWidgets('it closes when the mouse leaves', (tester) async {
