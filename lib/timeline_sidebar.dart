@@ -1218,6 +1218,9 @@ extension _TimelineSidebarFlows on _TimelineScreenState {
       builder: (context, constraints) => GrowingChip(
         grown: _refNameIsCut(ref, foreground, constraints.maxWidth, context),
         whole: chip(whole: true),
+        wholeWidth: _wholeRefChipWidth(ref, foreground, context),
+        revealKey: Key('ref-chip-reveal-${commit.sha}-${ref.name}'),
+        height: _TimelineScreenState._rowChipHeight,
         child: chip(whole: false),
       ),
     );

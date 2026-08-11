@@ -62,6 +62,7 @@ void main() {
 
   Finder chip(String name) => find.byKey(Key('ref-chip-a-$name'));
   Finder whole(String name) => find.byKey(Key('ref-chip-whole-a-$name'));
+  Finder reveal(String name) => find.byKey(Key('ref-chip-reveal-a-$name'));
 
   testWidgets('a cut name opens whole under the mouse', (tester) async {
     await pump(tester, name: long);
@@ -199,6 +200,38 @@ void main() {
     );
     // 그리고 마우스가 올라간 그 칩만 열린다.
     expect(whole(second), findsNothing);
+  });
+
+  testWidgets('it opens over time instead of appearing at full width', (
+    tester,
+  ) async {
+    await pump(tester, name: long);
+    final cut = tester.getRect(chip(long)).width;
+
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(chip(long)));
+    await tester.pump();
+
+    // 첫 프레임에는 잘린 칩 폭 그대로다 — 튀어나오지 않는다.
+    expect(tester.getRect(reveal(long)).width, closeTo(cut, 1));
+
+    // 중간 프레임은 그 사이 어딘가에 있다.
+    await tester.pump(GrowingChip.openDuration ~/ 2);
+    final midway = tester.getRect(reveal(long)).width;
+    expect(midway, greaterThan(cut));
+
+    await tester.pumpAndSettle();
+    final opened = tester.getRect(reveal(long)).width;
+    expect(opened, greaterThan(midway));
+
+    // 그리고 닫히는 길도 한 번에 사라지지 않는다.
+    await mouse.moveTo(const Offset(1200, 700));
+    await tester.pump();
+    await tester.pump(GrowingChip.closeDuration ~/ 2);
+    expect(whole(long), findsOneWidget, reason: '물러나는 동안에도 붙어 있다');
+    expect(tester.getRect(reveal(long)).width, lessThan(opened));
   });
 
   testWidgets('it closes when the mouse leaves', (tester) async {

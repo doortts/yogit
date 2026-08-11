@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -716,25 +717,71 @@ class _SideTooltipState extends State<SideTooltip> {
 class GrowingChip extends StatefulWidget {
   const GrowingChip({
     required this.whole,
+    required this.wholeWidth,
+    required this.height,
     required this.child,
+    this.revealKey,
     this.grown = true,
     super.key,
   });
 
   /// The same chip, sized to its whole name.
   final Widget whole;
+
+  /// How wide [whole] wants to be, so the opening can be paced against it. An
+  /// estimate is enough — the reveal only has to arrive; the last few points
+  /// are covered by opening a little past it.
+  final double wholeWidth;
+
+  /// The height both copies share, which the reveal never changes.
+  final double height;
+
+  /// Key on the window the copy is revealed through, so a test can measure
+  /// what is actually on screen rather than the chip behind it.
+  final Key? revealKey;
+
   final Widget child;
 
   /// Whether the name is cut at all. False leaves the chip inert.
   final bool grown;
 
+  /// Long enough to read as the chip opening rather than swapping, short
+  /// enough that a reader running down a column is never waiting on it.
+  static const openDuration = Duration(milliseconds: 140);
+
+  /// Closing is quicker than opening. A name being taken away needs no
+  /// introduction, and a mouse leaving is usually already on its way
+  /// somewhere else.
+  static const closeDuration = Duration(milliseconds: 90);
+
   @override
   State<GrowingChip> createState() => _GrowingChipState();
 }
 
-class _GrowingChipState extends State<GrowingChip> {
+class _GrowingChipState extends State<GrowingChip>
+    with SingleTickerProviderStateMixin {
   final _overlay = OverlayPortalController();
   final _anchorKey = GlobalKey(debugLabel: 'growing chip anchor');
+
+  /// Built with the state rather than on first hover: a chip whose name always
+  /// fit would otherwise build its first ticker inside dispose, where the
+  /// element it needs to read the ticker mode from is already gone.
+  late final AnimationController _open;
+
+  @override
+  void initState() {
+    super.initState();
+    _open =
+        AnimationController(
+          vsync: this,
+          duration: GrowingChip.openDuration,
+          reverseDuration: GrowingChip.closeDuration,
+        )..addStatusListener((status) {
+          // The copy stays mounted until it has finished closing, or the name
+          // would vanish mid-retreat.
+          if (status == AnimationStatus.dismissed) _overlay.hide();
+        });
+  }
 
   Rect? get _anchorRect {
     final box = _anchorKey.currentContext?.findRenderObject() as RenderBox?;
@@ -742,12 +789,28 @@ class _GrowingChipState extends State<GrowingChip> {
     return box.localToGlobal(Offset.zero) & box.size;
   }
 
+  void _show() {
+    if (!_overlay.isShowing) _overlay.show();
+    _open.forward();
+  }
+
+  void _hide() => _open.reverse();
+
   @override
   void didUpdateWidget(covariant GrowingChip oldWidget) {
     super.didUpdateWidget(oldWidget);
     // A column drag can widen the cell until the name fits while the mouse is
     // still on it. The open copy would then say the same thing twice.
-    if (!widget.grown && _overlay.isShowing) _overlay.hide();
+    if (!widget.grown && _overlay.isShowing) {
+      _open.value = 0;
+      _overlay.hide();
+    }
+  }
+
+  @override
+  void dispose() {
+    _open.dispose();
+    super.dispose();
   }
 
   @override
@@ -755,8 +818,8 @@ class _GrowingChipState extends State<GrowingChip> {
     final anchored = KeyedSubtree(key: _anchorKey, child: widget.child);
     if (!widget.grown) return anchored;
     return MouseRegion(
-      onEnter: (_) => _overlay.show(),
-      onExit: (_) => _overlay.hide(),
+      onEnter: (_) => _show(),
+      onExit: (_) => _hide(),
       child: OverlayPortal(
         controller: _overlay,
         overlayChildBuilder: (context) {
@@ -768,7 +831,7 @@ class _GrowingChipState extends State<GrowingChip> {
             child: IgnorePointer(
               child: CustomSingleChildLayout(
                 delegate: _GrowingChipLayout(anchor: anchor),
-                child: widget.whole,
+                child: _reveal(anchor),
               ),
             ),
           );
@@ -777,6 +840,34 @@ class _GrowingChipState extends State<GrowingChip> {
       ),
     );
   }
+
+  /// The chip is drawn whole from the first frame and shown through a window
+  /// that widens from exactly the cut chip's edge. Nothing reflows as it opens
+  /// — the letters are already in their final places, waiting to be uncovered
+  /// — and the moving edge keeps the chip's own corner radius, so what grows
+  /// still reads as the chip.
+  Widget _reveal(Rect anchor) => AnimatedBuilder(
+    animation: _open,
+    builder: (context, child) {
+      final fraction = Curves.easeOutCubic.transform(_open.value);
+      return ClipRRect(
+        key: widget.revealKey,
+        borderRadius: BorderRadius.circular(5),
+        child: SizedBox(
+          // Opening a little past the measured width keeps a name whose
+          // measurement came up short from resting under its own clip.
+          width: ui.lerpDouble(anchor.width, widget.wholeWidth + 4, fraction),
+          height: widget.height,
+          child: child,
+        ),
+      );
+    },
+    child: OverflowBox(
+      alignment: Alignment.centerLeft,
+      maxWidth: double.infinity,
+      child: widget.whole,
+    ),
+  );
 }
 
 /// The grown chip sits exactly where the cut one sat, so nothing appears to

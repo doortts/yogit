@@ -2908,13 +2908,10 @@ class _TimelineScreenState extends State<TimelineScreen>
   ///
   /// A point either way only moves where the whole-name copy starts opening,
   /// which is a far cheaper mistake than cutting a name that fits.
-  bool _refNameIsCut(
-    GitRef ref,
-    Color color,
-    double width,
-    BuildContext context,
-  ) {
-    if (_comparison != null || !width.isFinite) return false;
+  /// How wide the chip would be with its whole name on show: its own side
+  /// padding, the glyph and the gap after it, and the name in the type the row
+  /// actually paints with.
+  double _wholeRefChipWidth(GitRef ref, Color color, BuildContext context) {
     final inherited = DefaultTextStyle.of(context).style;
     final glyph = ref.isHead || ref.isTag
         ? _textWidth(
@@ -2923,8 +2920,19 @@ class _TimelineScreenState extends State<TimelineScreen>
               ) +
               3
         : 0.0;
-    final room = width - _refChipPadding - glyph - _refNameInkCushion;
-    return _textWidth(ref.name, inherited.merge(_refNameStyle(color))) > room;
+    return _refChipPadding +
+        glyph +
+        _textWidth(ref.name, inherited.merge(_refNameStyle(color)));
+  }
+
+  bool _refNameIsCut(
+    GitRef ref,
+    Color color,
+    double width,
+    BuildContext context,
+  ) {
+    if (_comparison != null || !width.isFinite) return false;
+    return _wholeRefChipWidth(ref, color, context) + _refNameInkCushion > width;
   }
 
   /// A chip gives its name up from the front to fit its share of the cell — see
