@@ -475,18 +475,15 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   final _localChangeNoticeOverlay = OverlayPortalController();
 
-  /// 화면에서 자리를 차지하지 않는 걸개. 카드는 상태 표시줄 바로 위 왼쪽 아래에
-  /// 뜬다 — 타임라인을 가리지 않는 자리다.
+  /// 화면에서 자리를 차지하지 않는 걸개. 카드는 방금 답한 물음이 서 있던 자리에
+  /// — 화면 한가운데에 — 이어서 선다. 답을 한 곳과 답이 오는 곳이 같아야 눈이
+  /// 화면 반대편까지 가지 않는다.
   Widget _localChangeNoticeHost() => OverlayPortal(
     controller: _localChangeNoticeOverlay,
     overlayChildBuilder: (context) {
       final notice = _localChangeNotice;
       if (notice == null) return const SizedBox.shrink();
-      return Positioned(
-        left: 16,
-        bottom: _TimelineScreenState._statusBarHeight + 16,
-        child: notice,
-      );
+      return Positioned.fill(child: Center(child: notice));
     },
     child: const SizedBox.shrink(),
   );

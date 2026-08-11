@@ -342,9 +342,9 @@ void _mockupParity() {
     final card = tester.getRect(find.byKey(const Key('local-change-notice')));
     final screen = tester.getRect(find.byType(MaterialApp));
 
-    // 왼쪽 아래, 상태 표시줄 위 — 시안의 마지막 그림 그대로.
-    expect(card.left, 16);
-    expect(screen.bottom - card.bottom, 29 + 16);
+    // 방금 답한 물음이 서 있던 자리 — 화면 한가운데다.
+    expect(card.center.dx, closeTo(screen.center.dx, 0.5));
+    expect(card.center.dy, closeTo(screen.center.dy, 0.5));
     // 시안이 잡은 너비: 최소 380, 최대 640.
     expect(card.width, greaterThanOrEqualTo(420));
     expect(card.width, lessThanOrEqualTo(640));

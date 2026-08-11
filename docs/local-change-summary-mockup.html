@@ -86,7 +86,10 @@
     color: var(--dim); font-size: 12px;
   }
   .stage .fake-row .h { font-family: ui-monospace, Menlo, monospace; color: #6d3b3b; }
-  .stage .placed { position: absolute; left: 16px; bottom: 16px; }
+  .stage .placed {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+  }
   .stage .statusbar {
     position: absolute; left: 0; right: 0; bottom: 0; height: 29px;
     background: var(--surface); border-top: 1px solid var(--border);
@@ -187,7 +190,9 @@
 
 <h2>화면 어디에 서나</h2>
 <p class="note">
-  지금 스낵바가 서던 자리 그대로 — 왼쪽 아래, 상태 표시줄 위. 타임라인을 가리지 않는 쪽이다.
+  방금 답한 물음이 서 있던 자리 — 화면 한가운데다. 저장소가 바뀌었다는 물음에
+  <b>새로고침</b>이라고 답하면, 그 답이 무엇을 불러왔는지가 같은 자리에 이어서 선다.
+  답을 한 곳과 답이 오는 곳이 다르면 눈이 화면을 가로질러야 한다.
 </p>
 <div class="stage">
   <div class="fake-row"><span class="h">32ee935</span><span>fix: let the app say a thing once, not twice</span></div>
@@ -195,8 +200,9 @@
   <div class="fake-row"><span class="h">9af12b0</span><span>feat(timeline): let deleted branches reload without a question</span></div>
   <div class="fake-row"><span class="h">bcec85b</span><span>fix: open a cut name from the tail the reader was already on</span></div>
   <div class="fake-row"><span class="h">2bbc2e9</span><span>feat: let a cut ref name open rather than appear</span></div>
+  <div class="fake-row"><span class="h">f5c42bd</span><span>fix: let the grown chip cover what it grew out of</span></div>
   <div class="placed">
-    <div class="card" style="min-width:400px">
+    <div class="card" style="min-width:420px">
       <div class="head">
         <span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">3개 들어옴</span>
         <span class="esc"><span class="keycap">esc</span> 닫기</span>
