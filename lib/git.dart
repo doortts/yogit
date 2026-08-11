@@ -2145,10 +2145,21 @@ class GitRepository implements FullDiffRepository {
   /// line they are on never send git anything. A repository with no reflog —
   /// expired, or never written — folds to nothing rather than failing.
   ///
-  /// [limit] caps how far back the read goes: an old repository's reflog runs
-  /// to tens of megabytes, and the oldest entries name branches nobody is
-  /// looking at.
-  Future<Map<String, String>> loadReflogBranchNames({int limit = 20000}) async {
+  /// [limit] is a time budget wearing the shape of a count. The fold runs on
+  /// the isolate that draws, at roughly 0.7µs an entry, so 7000 spends about
+  /// 5ms — a third of a frame, once, and never a dropped one. Twice that
+  /// already costs a whole frame.
+  ///
+  /// The cap only ever bites where a repository writes more than this in the
+  /// 90 days git keeps a reflog for. A repository at twenty entries a day
+  /// carries under two thousand and loses nothing; one at eighty is covered to
+  /// the day the reflog itself expires. What falls off the end is always the
+  /// oldest branches, which are the ones nobody points at.
+  ///
+  /// Counting is the only axis that holds: `--since` filters reflog entries by
+  /// the date of the commit they point at rather than the date on the entry,
+  /// so it cannot bound a horizon.
+  Future<Map<String, String>> loadReflogBranchNames({int limit = 7000}) async {
     try {
       return deletedBranchNamesFromReflog(
         await _run([

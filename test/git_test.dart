@@ -232,7 +232,6 @@ void main() {
     expect(await repository.loadReflogBranchNames(limit: 500), {
       'gone-tip': 'feature/gone',
     });
-    // 오래된 저장소의 reflog는 수십 MB까지 자란다. 상한이 그 바닥을 막는다.
     expect(arguments, [
       'reflog',
       'show',
@@ -241,6 +240,11 @@ void main() {
       '500',
       'HEAD',
     ]);
+
+    // 기본 상한은 그리는 isolate에서 5ms쯤 쓰는 지점이다. 숫자를 올리면 그 예산을
+    // 올리는 것이니, 바꿀 때 함께 읽히도록 여기에 묶어 둔다.
+    await repository.loadReflogBranchNames();
+    expect(arguments[4], '7000');
   });
 
   test('a repository with no reflog folds to nothing, not an error', () async {
