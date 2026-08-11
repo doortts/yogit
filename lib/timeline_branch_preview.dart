@@ -826,19 +826,41 @@ extension _TimelineBranchPreview on _TimelineScreenState {
         children: [
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  '리베이스 진행 $current/${preview.total}',
-                  style: TextStyle(
-                    color: _palette.text,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
+              // 진행 표시가 이 카드의 요점이라 제 폭을 지킨다. 유연한 쪽에 두면
+              // 이름 하나 길어진 것만으로 글자가 세로로 한 자씩 쌓이고, 그러고도
+              // 모자라면 카드 밖으로 넘친다.
+              Text(
+                '리베이스 진행 $current/${preview.total}',
+                style: TextStyle(
+                  color: _palette.text,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
-              Text(
-                '${comparison.compareRef} → ${comparison.baseRef}',
-                style: TextStyle(color: _palette.muted, fontSize: 10),
+              const SizedBox(width: 10),
+              // 어느 브랜치인지는 화면 위쪽이 이미 말하고 있다. 여기서는 이 줄이
+              // 양보하되, 앞에서 잘라 `→ main`을 남긴다 — 뒤쪽이 답이라서다.
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    const style = TextStyle(fontSize: 10);
+                    final resolved = DefaultTextStyle.of(
+                      context,
+                    ).style.merge(style);
+                    return Text(
+                      fitRefName(
+                        '${comparison.compareRef} → ${comparison.baseRef}',
+                        constraints.maxWidth,
+                        (text) => _textWidth(text, resolved),
+                      ),
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.clip,
+                      textAlign: TextAlign.right,
+                      style: style.copyWith(color: _palette.muted),
+                    );
+                  },
+                ),
               ),
             ],
           ),
