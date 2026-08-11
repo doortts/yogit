@@ -1196,7 +1196,10 @@ extension _TimelineSidebarFlows on _TimelineScreenState {
       padding: const EdgeInsets.symmetric(horizontal: 5),
       decoration: BoxDecoration(
         color: whole ? panel : background,
-        border: Border.all(color: border),
+        border: Border.all(
+          color: border,
+          width: _TimelineScreenState._refChipBorder,
+        ),
         borderRadius: BorderRadius.circular(5),
       ),
       child: Row(

@@ -2371,6 +2371,11 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// draws beyond the width it reports. A trailing descender at these sizes
   /// reaches about a point past its advance, so two is the safe side of one.
   static const _refNameInkCushion = 2.0;
+
+  /// The hairline a chip draws around itself. A [Container] lays its child out
+  /// inside the decoration as well as the padding, so this is room the name
+  /// does not get.
+  static const _refChipBorder = 1.0;
   static const _refGlyphWidth = 16.0;
 
   /// Every box a row draws inside itself — a ref chip, a date heading — is this
@@ -2941,8 +2946,13 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// A point either way only moves where the whole-name copy starts opening,
   /// which is a far cheaper mistake than cutting a name that fits.
   /// How wide the chip would be with its whole name on show: its own side
-  /// padding, the glyph and the gap after it, and the name in the type the row
-  /// actually paints with.
+  /// padding, the border it draws inside that, the glyph and the gap after it,
+  /// and the name in the type the row actually paints with.
+  ///
+  /// The border counts because a [Container] lays its child out inside the
+  /// decoration as well as the padding. Forgetting it leaves this two points
+  /// under the room the name is really cut against, and names that overrun by
+  /// exactly that much are judged to fit — cut on screen and refusing to open.
   double _wholeRefChipWidth(GitRef ref, Color color, BuildContext context) {
     final inherited = DefaultTextStyle.of(context).style;
     final glyph = ref.isHead || ref.isTag
@@ -2953,6 +2963,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               3
         : 0.0;
     return _refChipPadding +
+        _refChipBorder * 2 +
         glyph +
         _textWidth(ref.name, inherited.merge(_refNameStyle(color)));
   }

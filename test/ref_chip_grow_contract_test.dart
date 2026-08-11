@@ -259,6 +259,52 @@ void main() {
     expect(tester.getRect(whole(long)).left, closeTo(cut.left, 1));
   });
 
+  testWidgets('a name one point too wide for its chip still opens', (
+    tester,
+  ) async {
+    // 잘림을 판정하는 계산이 칩의 여백을 실제보다 좁게 알고 있으면, 딱 그 차이만큼
+    // 넘치는 이름들만 열리지 않는다. 눈에는 잘려 있는데 마우스를 올려도 아무 일이
+    // 없고, 어느 폭에서 그러는지 알기 전에는 재현도 안 된다. 그래서 폭을 훑는 대신
+    // 경계를 직접 만든다.
+    const name = 'fix/v2-core-window-bugs';
+    const inset = 14.0 * 2;
+
+    // 먼저 이 이름이 통째로 서려면 몇 점이 필요한지 앱에게 물어본다.
+    await pump(tester, name: name, refsWidth: 100);
+    var mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    await mouse.moveTo(tester.getCenter(chip(name)));
+    await tester.pumpAndSettle();
+    final natural = tester.getSize(whole(name)).width;
+    await mouse.removePointer();
+    await tester.pumpAndSettle();
+
+    // 그 언저리를 한 점씩 오가며, 잘렸으면 예외 없이 열리는지 본다. 어긋남은
+    // 몇 점 폭의 창으로만 나타나므로 경계를 비껴가면 아무것도 못 잡는다.
+    for (var slack = -2.0; slack <= 3; slack += 1) {
+      await pump(tester, name: name, refsWidth: natural + slack + inset);
+      final shown = tester
+          .widgetList<Text>(
+            find.descendant(of: chip(name), matching: find.byType(Text)),
+          )
+          .map((text) => text.data)
+          .join();
+      if (shown == name) continue;
+
+      mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      await mouse.moveTo(tester.getCenter(chip(name)));
+      await tester.pumpAndSettle();
+      expect(
+        whole(name),
+        findsOneWidget,
+        reason: '여유 $slack점: "$shown"으로 잘렸는데 열리지 않는다',
+      );
+      await mouse.removePointer();
+      await tester.pumpAndSettle();
+    }
+  });
+
   testWidgets('it closes when the mouse leaves', (tester) async {
     await pump(tester, name: long);
     final mouse = await hover(tester, chip(long));
