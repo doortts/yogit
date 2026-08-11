@@ -2,21 +2,22 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>저장소가 밖에서 바뀌었을 때의 알림 — 시안</title>
+<title>저장소가 밖에서 바뀌었을 때 — 시안</title>
 <style>
   :root {
     --page: #141416;
     --bg: #1c1c1e;
     --surface: #232325;
-    --border: #37373b;
+    --raised: #2c2c2e;
+    --border: #38383a;
     --text: #f5f5f7;
     --muted: #8a8a90;
     --dim: #6a6a70;
-    --green: #5cb270;
-    --red: #d2545e;
+    --green: #8ad6a1;
+    --pink: #f29ab2;
     --blue: #6ea8fe;
-    --hash: #e0605f;
-    --card: #2c2c2e;   /* palette.raised — 테마마다 바뀐다 */
+    --hash: #ef6c63;
+    --primary: #0a84ff;
   }
   * { box-sizing: border-box; }
   body {
@@ -24,37 +25,88 @@
     font: 13px/1.55 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
   }
   h1 { font-size: 19px; margin: 0 0 4px; font-weight: 650; }
-  .lede { color: var(--muted); margin: 0 0 26px; max-width: 78ch; }
-  h2 { font-size: 14px; margin: 36px 0 8px; font-weight: 650; }
-  .note { color: var(--muted); margin: 0 0 14px; max-width: 80ch; }
+  .lede { color: var(--muted); margin: 0 0 26px; max-width: 80ch; }
+  h2 {
+    font-size: 14px; margin: 38px 0 8px; font-weight: 650;
+    display: flex; align-items: baseline; gap: 9px;
+  }
+  h2 .tag {
+    font-size: 10px; font-weight: 600; letter-spacing: .04em;
+    padding: 2px 7px; border-radius: 999px;
+    background: rgba(110,168,254,.16); color: var(--blue);
+  }
+  .note { color: var(--muted); margin: 0 0 14px; max-width: 82ch; }
   .note b { color: var(--text); font-weight: 600; }
   code {
     font-family: ui-monospace, Menlo, monospace; font-size: 12px;
     background: var(--surface); padding: 1px 5px; border-radius: 4px;
   }
   .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
 
-  /* 알림 카드 */
+  /* 물음 상자 — YogitAlert */
+  .alert {
+    background: var(--raised);
+    border: .5px solid var(--border);
+    border-radius: 22px;
+    padding: 16px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.5);
+    width: 520px;
+  }
+  .alert.narrow { width: 280px; }
+  .alert .title {
+    font-size: 13px; font-weight: 700; letter-spacing: -.08px; line-height: 1.35;
+  }
+  .alert .message { font-size: 11px; line-height: 1.5; opacity: .82; margin-top: 5px; }
+  .alert .ask { font-size: 11px; line-height: 1.5; opacity: .82; margin-top: 9px; }
+  /* 상자가 넓어져도 답은 그대로다 — 248은 좁은 상자의 안쪽 폭이다. */
+  .alert .buttons {
+    display: flex; gap: 7px; margin-top: 13px;
+    width: 248px; margin-left: auto;
+  }
+  .alert.narrow .buttons { width: auto; }
+  .alert .btn {
+    flex: 1; text-align: center; border-radius: 999px;
+    padding: 7px 0; font-size: 13px; font-weight: 600;
+  }
+  .alert .btn.quiet { background: #3a3a3c; color: var(--text); }
+  .alert .btn.go { background: var(--primary); color: #fff; }
+
+  /* 변경 목록 */
+  .block {
+    margin-top: 9px; padding: 8px 10px; border-radius: 6px;
+    background: rgba(28,28,30,.5);
+  }
+  .summary {
+    display: flex; align-items: center; white-space: nowrap;
+    font-size: 12.5px; padding-bottom: 6px;
+  }
+  .summary + .items { border-top: 1px solid var(--border); padding-top: 6px; }
+  .sep { color: var(--dim); margin: 0 6px; }
+  .op { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--blue); }
+  .in { color: var(--green); }
+  .out { color: var(--pink); }
+  .name { font-weight: 600; }
+  .item { display: flex; align-items: baseline; gap: 7px; padding: 1px 0; white-space: nowrap; }
+  .item .mark { width: 8px; font-weight: 700; }
+  .item.plus .mark { color: var(--green); }
+  .item.minus .mark { color: var(--pink); }
+  .item .id { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--hash); }
+  .item .subject { font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+  .item.minus .subject, .item.minus .id { opacity: .62; }
+  .rest { color: var(--dim); font-size: 11.5px; padding: 3px 0 0 15px; }
+  .branchline { padding: 1px 0; white-space: nowrap; font-size: 12.5px; }
+
+  /* 머무는 카드 — 묻지 않는 변화용 */
   .card {
     display: inline-block;
-    /* 설명하는 그 역사 위에 서므로 뒤가 비친다. 흐림이 글자를 지켜 준다. */
-    background: rgba(44, 44, 46, .78); color: var(--text);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
-    border: 1px solid var(--border);
-    border-radius: 5px; padding: 12px 16px;
-    box-shadow: 0 5px 18px rgba(0,0,0,.5);
-    font-size: 13px; min-width: 420px; max-width: 640px;
+    background: rgba(44,44,46,.78);
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    border: 1px solid var(--border); border-radius: 5px;
+    padding: 12px 16px; box-shadow: 0 5px 18px rgba(0,0,0,.5);
+    min-width: 420px; max-width: 640px;
   }
-  .card.row { display: inline-flex; align-items: center; white-space: nowrap; min-width: 0; }
-  .sep { color: var(--dim); margin: 0 7px; }
-  .op { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--blue); }
-  .in { color: var(--green); }
-  .out { color: var(--red); }
-  .sha { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--dim); }
-  .name { font-weight: 600; }
-
-  .head { display: flex; align-items: center; white-space: nowrap; }
+  .card .head { display: flex; align-items: center; white-space: nowrap; }
   .esc {
     margin-left: auto; padding-left: 20px;
     display: inline-flex; align-items: center; gap: 6px;
@@ -62,205 +114,204 @@
   }
   .keycap {
     font-family: ui-monospace, Menlo, monospace; font-size: 10.5px;
-    color: var(--muted); background: #26262a;
-    border: 1px solid #46464c; border-radius: 4px;
-    padding: 1px 5px;
-  }
-  .list { margin-top: 9px; border-top: 1px solid #38383a; padding-top: 8px; }
-  .item { display: flex; align-items: baseline; gap: 8px; padding: 2px 0; white-space: nowrap; }
-  .item .mark { width: 9px; font-weight: 700; }
-  .item.plus .mark { color: #8ad6a1; }
-  .item.minus .mark { color: #f29ab2; }
-  .item .id { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #ef6c63; }
-  .item .subject { overflow: hidden; text-overflow: ellipsis; }
-  .item.minus .subject, .item.minus .id { opacity: .62; }
-  .rest { color: var(--dim); font-size: 12px; padding: 3px 0 0 17px; }
-  .branchline { margin-top: 10px; }
-  .branchline:first-child { margin-top: 0; }
-
-  /* 화면 안에서의 자리 */
-  .stage {
-    position: relative; height: 300px; max-width: 900px;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 9px;
-    overflow: hidden;
-  }
-  .stage .fake-row {
-    height: 26px; border-bottom: 1px solid rgba(255,255,255,.03);
-    display: flex; align-items: center; gap: 14px; padding: 0 14px;
-    color: var(--dim); font-size: 12px;
-  }
-  .stage .fake-row .h { font-family: ui-monospace, Menlo, monospace; color: #6d3b3b; }
-  .stage .placed {
-    position: absolute; left: 50%; top: 50%;
-    transform: translate(-50%, -50%);
-  }
-  .stage .statusbar {
-    position: absolute; left: 0; right: 0; bottom: 0; height: 29px;
-    background: var(--surface); border-top: 1px solid var(--border);
-    display: flex; align-items: center; padding: 0 12px;
-    color: var(--dim); font-size: 10px; gap: 14px;
+    color: var(--muted); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;
   }
 
   table { border-collapse: collapse; width: 100%; max-width: 1020px; }
   th { text-align: left; color: var(--muted); font-weight: 600; padding: 8px 14px 8px 0; font-size: 12px; }
   td { padding: 10px 14px 10px 0; vertical-align: top; border-top: 1px solid var(--border); }
   td.what { color: var(--muted); font-size: 12.5px; width: 220px; }
-  td.cost { color: var(--dim); font-size: 12px; width: 120px; }
-  td.cost.free { color: var(--green); }
+  .before { opacity: .5; }
 </style>
 </head>
 <body>
 
-<h1>밖에서 바뀐 저장소를 설명하기</h1>
+<h1>물어보기 전에 무엇이 바뀌었는지 말하기</h1>
 <p class="lede">
-  지금은 <span class="card row" style="padding:6px 10px;opacity:.55">main 브랜치 갱신됨</span>
-  한 줄이 잠깐 스쳤다 사라진다. 무엇이 어떻게 바뀌었는지는 화면을 다시 읽어 스스로 찾아야 하고,
-  읽기 전에 사라지면 그마저도 못 한다. 요약에 더해 <b>실제로 오간 커밋을 목록으로</b> 보이고,
-  <b>읽을 때까지 머문다</b>. 아래 문구는 전부 이 저장소의 실제 reflog와 커밋에서 가져왔다.
+  지금은 <b>두 번에 걸쳐</b> 말한다 — 먼저 "저장소가 바뀌었습니다, 새로 읽어올까요?"라고 묻고,
+  <b>새로고침</b>을 눌러야 무엇이 바뀌었는지 보여 준다. 그런데 무엇이 바뀌었는지를 모르면 그
+  물음에 답할 근거가 없다. 순서를 바꾼다: <b>먼저 보여 주고, 그다음에 묻는다.</b>
 </p>
 
-<h2>머무는 알림</h2>
-<p class="note">
-  스낵바는 잠깐 스쳐 지나가는 물건이라 목록을 담을 자리가 아니다. 같은 자리에 서되
-  <b>스스로 사라지지 않는다</b> — <span class="keycap">esc</span>를 누르거나 카드 바깥을 누르면 닫힌다.
-  천천히 읽어도 되고, 읽는 동안 다른 곳을 누르면 그 클릭은 원래 하려던 일을 그대로 한다.
-</p>
-
-<div class="card">
-  <div class="head">
-    <span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">3개 들어옴</span>
-    <span class="esc"><span class="keycap">esc</span> 닫기</span>
+<h2>지금 <span class="tag">바꾸기 전</span></h2>
+<div class="row before">
+  <div class="alert narrow">
+    <div class="title">저장소가 바뀌었습니다</div>
+    <div class="message">앱 밖에서 HEAD나 브랜치가 변경되었습니다.<br>새로 읽어올까요?</div>
+    <div class="buttons">
+      <div class="btn quiet">나중에</div>
+      <div class="btn go">새로고침</div>
+    </div>
   </div>
-  <div class="list">
-    <div class="item plus"><span class="mark">+</span><span class="id">89a61cb</span><span class="subject">feat: let a remote branch stand as the base to rebase onto</span></div>
-    <div class="item plus"><span class="mark">+</span><span class="id">06fdbd1</span><span class="subject">test: pin the origin/HEAD drop against real git output</span></div>
-    <div class="item plus"><span class="mark">+</span><span class="id">954e6e8</span><span class="subject">fix: stop drawing origin/HEAD as if it were a branch</span></div>
+  <p class="note" style="max-width:34ch;margin-top:6px">
+    무엇이 바뀌었는지는 한 마디도 없다. 답하려면 먼저 눌러 봐야 한다.
+  </p>
+</div>
+
+<h2>바꾼 뒤 — 받아온 커밋</h2>
+<p class="note">
+  제목은 무슨 일이 있었는지 한 줄로 말하고, 그 아래에 오간 커밋이 선다. 물음은 <b>맨 끝</b>이다 —
+  근거를 읽은 뒤에 답하는 순서다.
+</p>
+<div class="alert">
+  <div class="title">저장소가 밖에서 바뀌었습니다</div>
+  <div class="block">
+    <div class="summary">
+      <span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">3개 들어옴</span>
+    </div>
+    <div class="items">
+      <div class="item plus"><span class="mark">+</span><span class="id">89a61cb</span><span class="subject">feat: let a remote branch stand as the base to rebase onto</span></div>
+      <div class="item plus"><span class="mark">+</span><span class="id">06fdbd1</span><span class="subject">test: pin the origin/HEAD drop against real git output</span></div>
+      <div class="item plus"><span class="mark">+</span><span class="id">954e6e8</span><span class="subject">fix: stop drawing origin/HEAD as if it were a branch</span></div>
+    </div>
+  </div>
+  <div class="ask">새로 읽어올까요?</div>
+  <div class="buttons">
+    <div class="btn quiet">나중에</div>
+    <div class="btn go">새로고침</div>
   </div>
 </div>
 
 <h2>역사가 다시 쓰였을 때</h2>
-<p class="note">나간 쪽과 들어온 쪽을 함께 보인다. 나간 커밋은 흐리게 — 이미 이 브랜치의 것이 아니다.</p>
-<div class="card">
-  <div class="head">
-    <span class="name">main</span><span class="sep">·</span><span class="op">rebase</span><span class="sep">·</span>커밋&nbsp;<span class="out">3개 나가고</span>&nbsp;<span class="in">3개 들어옴</span>
-    <span class="esc"><span class="keycap">esc</span> 닫기</span>
-  </div>
-  <div class="list">
-    <div class="item minus"><span class="mark">−</span><span class="id">1064dc9</span><span class="subject">refactor: give the graph its palette and its painters</span></div>
-    <div class="item minus"><span class="mark">−</span><span class="id">d6f98e2</span><span class="subject">refactor: lift the timeline's model out of its screen</span></div>
-    <div class="item minus"><span class="mark">−</span><span class="id">713dc52</span><span class="subject">docs: record how the diff is reached now</span></div>
-    <div class="item plus"><span class="mark">+</span><span class="id">c9afe73</span><span class="subject">refactor: split the timeline screen by what each part draws</span></div>
-    <div class="item plus"><span class="mark">+</span><span class="id">cdc24ef</span><span class="subject">refactor: move the timeline's small parts into their own library</span></div>
-    <div class="item plus"><span class="mark">+</span><span class="id">1064dc9</span><span class="subject">refactor: give the graph its palette and its painters</span></div>
-  </div>
-</div>
-
-<h2>많이 오갔을 때</h2>
 <p class="note">
-  머무는 알림이라도 화면을 덮어서는 안 된다. <b>여덟 줄</b>까지 세우고 나머지는 세어서 말한다.
-  전부를 보는 자리는 타임라인이지 알림이 아니다.
+  여기서 이 시안의 값어치가 가장 크다. 나간 커밋이 있다는 것은 되돌리기 어려운 일이 벌어졌다는
+  뜻이라, 답하기 전에 무엇이 사라졌는지 보여야 한다.
 </p>
-<div class="card">
-  <div class="head">
-    <span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">42개 들어옴</span>
-    <span class="esc"><span class="keycap">esc</span> 닫기</span>
-  </div>
-  <div class="list">
-    <div class="item plus"><span class="mark">+</span><span class="id">32ee935</span><span class="subject">fix: let the app say a thing once, not twice</span></div>
-    <div class="item plus"><span class="mark">+</span><span class="id">04de17c</span><span class="subject">fix: count the chip's own hairline when asking whether a name fits</span></div>
-    <div class="item plus"><span class="mark">+</span><span class="id">9af12b0</span><span class="subject">feat(timeline): let deleted branches reload without a question</span></div>
-    <div class="item plus"><span class="mark">+</span><span class="id">bcec85b</span><span class="subject">fix: open a cut name from the tail the reader was already on</span></div>
-    <div class="item plus"><span class="mark">+</span><span class="id">2bbc2e9</span><span class="subject">feat: let a cut ref name open rather than appear</span></div>
-    <div class="item plus"><span class="mark">+</span><span class="id">f5c42bd</span><span class="subject">fix: let the grown chip cover what it grew out of</span></div>
-    <div class="item plus"><span class="mark">+</span><span class="id">89d85a5</span><span class="subject">feat: open a cut ref name to its whole self under the mouse</span></div>
-    <div class="item plus"><span class="mark">+</span><span class="id">087992f</span><span class="subject">fix: measure a ref name in the type it is actually set in</span></div>
-    <div class="rest">외 34개</div>
-  </div>
-</div>
-
-<h2>브랜치가 여럿 움직였을 때</h2>
-<p class="note">브랜치마다 한 줄씩 서고 커밋 목록은 접는다. 어느 브랜치가 움직였는지가 먼저다.</p>
-<div class="card">
-  <div class="head">
-    <span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">3개 들어옴</span>
-    <span class="esc"><span class="keycap">esc</span> 닫기</span>
-  </div>
-  <div class="list">
-    <div class="branchline head"><span class="name">feature/pr-monitoring</span><span class="sep">·</span><span class="op">reset</span><span class="sep">·</span>커밋&nbsp;<span class="out">2개 물러남</span></div>
-    <div class="branchline head"><span class="name">codex/branch-lane-palette</span> 추가됨<span class="sep">·</span><span class="sha">6805571</span></div>
-    <div class="branchline head"><span class="name">fix/monaco-native-drop</span> 삭제됨</div>
-  </div>
-</div>
-
-<h2>화면 어디에 서나</h2>
-<p class="note">
-  방금 답한 물음이 서 있던 자리 — 화면 한가운데다. 판은 반투명이라 아래의 커밋들이 비친다:
-  설명하고 있는 그 역사를 가리지 않는다. 저장소가 바뀌었다는 물음에
-  <b>새로고침</b>이라고 답하면, 그 답이 무엇을 불러왔는지가 같은 자리에 이어서 선다.
-  답을 한 곳과 답이 오는 곳이 다르면 눈이 화면을 가로질러야 한다.
-</p>
-<div class="stage">
-  <div class="fake-row"><span class="h">32ee935</span><span>fix: let the app say a thing once, not twice</span></div>
-  <div class="fake-row"><span class="h">04de17c</span><span>fix: count the chip's own hairline when asking whether a name fits</span></div>
-  <div class="fake-row"><span class="h">9af12b0</span><span>feat(timeline): let deleted branches reload without a question</span></div>
-  <div class="fake-row"><span class="h">bcec85b</span><span>fix: open a cut name from the tail the reader was already on</span></div>
-  <div class="fake-row"><span class="h">2bbc2e9</span><span>feat: let a cut ref name open rather than appear</span></div>
-  <div class="fake-row"><span class="h">f5c42bd</span><span>fix: let the grown chip cover what it grew out of</span></div>
-  <div class="placed">
-    <div class="card" style="min-width:420px">
-      <div class="head">
-        <span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">3개 들어옴</span>
-        <span class="esc"><span class="keycap">esc</span> 닫기</span>
-      </div>
-      <div class="list">
-        <div class="item plus"><span class="mark">+</span><span class="id">89a61cb</span><span class="subject">feat: let a remote branch stand as the base…</span></div>
-        <div class="item plus"><span class="mark">+</span><span class="id">06fdbd1</span><span class="subject">test: pin the origin/HEAD drop against real git output</span></div>
-        <div class="item plus"><span class="mark">+</span><span class="id">954e6e8</span><span class="subject">fix: stop drawing origin/HEAD as if it were a branch</span></div>
-      </div>
+<div class="alert">
+  <div class="title">저장소가 밖에서 바뀌었습니다</div>
+  <div class="block">
+    <div class="summary">
+      <span class="name">main</span><span class="sep">·</span><span class="op">rebase</span><span class="sep">·</span>커밋&nbsp;<span class="out">3개 나가고</span>&nbsp;<span class="in">3개 들어옴</span>
+    </div>
+    <div class="items">
+      <div class="item minus"><span class="mark">−</span><span class="id">1064dc9</span><span class="subject">refactor: give the graph its palette and its painters</span></div>
+      <div class="item minus"><span class="mark">−</span><span class="id">d6f98e2</span><span class="subject">refactor: lift the timeline's model out of its screen</span></div>
+      <div class="item minus"><span class="mark">−</span><span class="id">713dc52</span><span class="subject">docs: record how the diff is reached now</span></div>
+      <div class="item plus"><span class="mark">+</span><span class="id">c9afe73</span><span class="subject">refactor: split the timeline screen by what each part draws</span></div>
+      <div class="item plus"><span class="mark">+</span><span class="id">cdc24ef</span><span class="subject">refactor: move the timeline's small parts into their own library</span></div>
+      <div class="item plus"><span class="mark">+</span><span class="id">1064dc9</span><span class="subject">refactor: give the graph its palette and its painters</span></div>
     </div>
   </div>
-  <div class="statusbar"><span>commit</span><span>merge</span><span>WIP</span></div>
+  <div class="ask">새로 읽어올까요?</div>
+  <div class="buttons">
+    <div class="btn quiet">나중에</div>
+    <div class="btn go">새로고침</div>
+  </div>
 </div>
+
+<h2>많이 오갔을 때 · 브랜치가 여럿일 때</h2>
+<p class="note">
+  목록은 <b>여덟 줄</b>까지, 나머지는 세어 말한다. 브랜치가 여럿 움직였으면 브랜치마다 한 줄씩
+  서고 커밋 목록은 접는다 — 어느 브랜치인지가 먼저다.
+</p>
+<div class="row">
+  <div class="alert">
+    <div class="title">저장소가 밖에서 바뀌었습니다</div>
+    <div class="block">
+      <div class="summary">
+        <span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">42개 들어옴</span>
+      </div>
+      <div class="items">
+        <div class="item plus"><span class="mark">+</span><span class="id">32ee935</span><span class="subject">fix: let the app say a thing once, not twice</span></div>
+        <div class="item plus"><span class="mark">+</span><span class="id">04de17c</span><span class="subject">fix: count the chip's own hairline when asking whether a name fits</span></div>
+        <div class="item plus"><span class="mark">+</span><span class="id">9af12b0</span><span class="subject">feat(timeline): let deleted branches reload without a question</span></div>
+        <div class="item plus"><span class="mark">+</span><span class="id">bcec85b</span><span class="subject">fix: open a cut name from the tail the reader was already on</span></div>
+        <div class="item plus"><span class="mark">+</span><span class="id">2bbc2e9</span><span class="subject">feat: let a cut ref name open rather than appear</span></div>
+        <div class="item plus"><span class="mark">+</span><span class="id">f5c42bd</span><span class="subject">fix: let the grown chip cover what it grew out of</span></div>
+        <div class="item plus"><span class="mark">+</span><span class="id">89d85a5</span><span class="subject">feat: open a cut ref name to its whole self under the mouse</span></div>
+        <div class="item plus"><span class="mark">+</span><span class="id">087992f</span><span class="subject">fix: measure a ref name in the type it is actually set in</span></div>
+        <div class="rest">외 34개</div>
+      </div>
+    </div>
+    <div class="ask">새로 읽어올까요?</div>
+    <div class="buttons">
+      <div class="btn quiet">나중에</div>
+      <div class="btn go">새로고침</div>
+    </div>
+  </div>
+
+  <div class="alert">
+    <div class="title">저장소가 밖에서 바뀌었습니다</div>
+    <div class="block">
+      <div class="branchline"><span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">3개 들어옴</span></div>
+      <div class="branchline"><span class="name">feature/pr-monitoring</span><span class="sep">·</span><span class="op">reset</span><span class="sep">·</span>커밋&nbsp;<span class="out">2개 물러남</span></div>
+      <div class="branchline"><span class="name">codex/branch-lane-palette</span> 브랜치 추가됨</div>
+      <div class="branchline"><span class="name">fix/monaco-native-drop</span> 브랜치 삭제됨</div>
+    </div>
+    <div class="ask">새로 읽어올까요?</div>
+    <div class="buttons">
+      <div class="btn quiet">나중에</div>
+      <div class="btn go">새로고침</div>
+    </div>
+  </div>
+</div>
+
+<h2>묻지 않는 변화는 카드로 — 지금 그대로</h2>
+<p class="note">
+  브랜치가 사라지기만 한 변화는 잃을 것이 없어 묻지 않고 바로 읽어들인다. 물음이 없으니 물음
+  상자도 없다. 이 경우에만 <b>머무는 카드</b>가 지금처럼 화면 한가운데 선다 —
+  <span class="keycap">esc</span>나 바깥 클릭으로 닫힌다.
+</p>
+<div class="card">
+  <div class="head">
+    <span class="name">feature/pr-monitoring</span> 브랜치 삭제됨
+    <span class="esc"><span class="keycap">esc</span> 닫기</span>
+  </div>
+</div>
+
+<h2>바뀌는 것</h2>
+<table>
+  <tr><th></th><th>지금</th><th>바꾼 뒤</th></tr>
+  <tr>
+    <td class="what">묻는 상자</td>
+    <td>"HEAD나 브랜치가 변경되었습니다" — 무엇인지는 말하지 않음</td>
+    <td>무슨 작업이었고 어떤 커밋이 오갔는지까지</td>
+  </tr>
+  <tr>
+    <td class="what">답한 뒤</td>
+    <td>카드가 떠서 그제야 자세히 말함</td>
+    <td>아무것도 안 뜸 — 이미 읽었다</td>
+  </tr>
+  <tr>
+    <td class="what">묻지 않는 변화</td>
+    <td>카드</td>
+    <td>그대로 카드</td>
+  </tr>
+  <tr>
+    <td class="what">git 호출 시점</td>
+    <td>답한 뒤</td>
+    <td>묻기 전 — 횟수는 같다</td>
+  </tr>
+  <tr>
+    <td class="what">상자 폭</td>
+    <td class="mono">280</td>
+    <td class="mono">520</td>
+  </tr>
+</table>
+
+<h2>손봐야 하는 것 하나</h2>
+<p class="note">
+  <code>YogitAlert.width</code>가 <b>280으로 고정</b>돼 있다. 커밋 제목이 설 자리가 아니라서 이
+  물음만 <b>520</b>으로 넓혀야 한다. 기본값은 280 그대로 두고 이 상자만 값을 넘기면 다른 알림은
+  하나도 건드리지 않는다.
+</p>
+<p class="note">
+  <b>버튼은 넓어지지 않는다.</b> 상자가 넓은 것은 담은 것이 넓기 때문이지 결정이 커졌기
+  때문이 아니다. 답 두 개는 좁은 상자에서 갖던 폭(<span class="mono">248</span>)을 그대로 두고
+  오른쪽에 붙는다 — 좁은 상자에서는 그 폭이 곧 상자의 안쪽이라 지금과 한 픽셀도 다르지 않다.
+</p>
 
 <h2>계약</h2>
 <table>
-  <tr><th>1</th><td>스스로 사라지지 않는다. <span class="keycap">esc</span> 또는 카드 바깥 클릭으로 닫힌다.</td></tr>
-  <tr><td>2</td><td>바깥 클릭은 <b>가로채지 않는다</b> — 누른 그 행이 선택되고, 알림은 닫힌다.</td></tr>
-  <tr><td>3</td><td>열려 있는 동안 <span class="keycap">esc</span>는 이것부터 닫는다. 사이드바 커서나 미리보기는 그다음이다.</td></tr>
-  <tr><td>4</td><td>읽는 중에 저장소가 또 바뀌면 <b>새 내용으로 갈린다</b>. 알림이 쌓이지 않는다.</td></tr>
-  <tr><td>5</td><td>목록은 여덟 줄까지. 넘으면 <span class="mono" style="color:var(--dim)">외 N개</span>.</td></tr>
-  <tr><td>6</td><td>알아내지 못하면 물러난다 — <span class="card row" style="padding:4px 8px"><span class="name">main</span> 갱신됨<span class="sep">·</span><span class="sha">3948f07 → 89a61cb</span></span></td></tr>
-  <tr><td>7</td><td>삭제와 체크아웃 문구는 지금 그대로. 오간 커밋이 없거나 보일 자리가 아니다.</td></tr>
+  <tr><th>1</th><td>묻기 전에 무엇이 바뀌었는지 보인다. 근거 없이 답하게 하지 않는다.</td></tr>
+  <tr><td>2</td><td>물음은 목록 <b>아래</b>에 온다 — 읽고 나서 답하는 순서다.</td></tr>
+  <tr><td>3</td><td>목록은 여덟 줄까지. 넘으면 <span class="mono" style="color:var(--dim)">외 N개</span>.</td></tr>
+  <tr><td>4</td><td>브랜치가 여럿이면 브랜치마다 한 줄, 커밋 목록은 접는다.</td></tr>
+  <tr><td>5</td><td>알아내지 못하면 sha 두 개로 물러난다. 못 알아냈다고 묻기를 그만두지는 않는다.</td></tr>
+  <tr><td>6</td><td><b>나중에</b>를 누르면 지금처럼 그 상태를 기억하고 다시 묻지 않는다.</td></tr>
+  <tr><td>7</td><td>묻지 않는 변화(삭제만)는 지금의 머무는 카드 그대로.</td></tr>
 </table>
-
-<h2>무엇으로 만드나</h2>
-<table>
-  <tr><th>조각</th><th>어디서</th><th>비용</th></tr>
-  <tr><td class="what">브랜치 이름, 이전/이후 SHA</td><td>이미 읽은 지문 두 개의 차이 (<code>MovedTip</code>)</td><td class="cost free">0</td></tr>
-  <tr><td class="what">무슨 작업이었나</td><td><code>git reflog show &lt;branch&gt; -n 1</code>의 첫 낱말</td><td class="cost">git 1회</td></tr>
-  <tr>
-    <td class="what">몇 개 오갔나</td>
-    <td><code>git rev-list --left-right --count old...new</code><br>
-        머리줄은 정확한 수를 말해야 한다. 목록이 여덟에서 잘려도 “42개 들어옴”은 42여야 한다.</td>
-    <td class="cost">git 1회</td>
-  </tr>
-  <tr>
-    <td class="what">오간 커밋</td>
-    <td><code>git log --left-right --oneline -n 9 old...new</code><br>
-        한 번에 양쪽을 <code>&lt;</code>/<code>&gt;</code>로 갈라 준다. 아홉을 읽어 여덟을 세우면
-        아홉째의 존재가 곧 “더 있다”는 뜻이다.</td>
-    <td class="cost">git 1회</td>
-  </tr>
-</table>
-<p class="note" style="margin-top:14px">
-  <b>움직인 브랜치 하나당 git 3회</b>, 그것도 변화가 감지된 순간에만. 커밋 목록은 브랜치가 하나만
-  움직였을 때만 가져오므로 그 경우가 3회, 여럿이면 브랜치마다 2회다. 자세히 묻는 브랜치는
-  <b>셋까지</b>다 — 터미널이 열둘을 건드려도 스물넷을 넘지 않는다. 그 직후 앱은 어차피 타임라인
-  전체를 다시 읽으므로 이 몇 번은 그 재적재에 묻힌다.
-</p>
-<p class="note">
-  실패하면 계약 6번으로 물러난다 — 감시자가 화면을 깨는 물건이 되어서는 안 된다.
-</p>
 
 </body>
 </html>

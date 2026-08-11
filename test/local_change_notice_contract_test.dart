@@ -6,16 +6,17 @@ import 'package:yogit/local_state_signature.dart';
 import 'package:yogit/timeline.dart';
 import 'package:yogit/timeline_palette.dart';
 import 'package:yogit/window_frame.dart';
+import 'package:yogit/yogit_alert.dart';
 
 import 'app_test.dart' show FakeGitRepository, commit;
 
-/// docs/local-change-summary-mockup.html — 밖에서 바뀐 저장소를 설명하는 알림.
-/// 요약 한 줄과 오간 커밋 목록을 들고, 읽을 때까지 머문다.
+/// docs/local-change-summary-mockup.html — 밖에서 저장소가 바뀌면, 무엇이
+/// 바뀌었는지를 먼저 보이고 그다음에 새로 읽을지 묻는다. 근거 없이 답하게 하지
+/// 않는다. 묻지 않는 변화(삭제만)는 머무는 카드로 말한다.
 class _ChangingRepository extends FakeGitRepository {
   _ChangingRepository(super.loader, {required super.refs});
 
-  var signature =
-      'main-tip\nrefs/heads/main\nrefs/heads/main main-tip';
+  var signature = 'main-tip\nrefs/heads/main\nrefs/heads/main main-tip';
 
   String operation = 'pull';
   ({int outgoing, int incoming})? counts = (outgoing: 0, incoming: 3);
@@ -55,14 +56,9 @@ class _ChangingRepository extends FakeGitRepository {
     String after, {
     int limit = 9,
   }) async => moved.take(limit).toList();
-
-  /// 밖에서 무언가 벌어진 척한다.
-  void moveMain(String tip) =>
-      signature = '$tip\nrefs/heads/main\nrefs/heads/main $tip';
 }
 
 void main() {
-  _mockupParity();
   late _ChangingRepository repository;
 
   Future<void> pump(WidgetTester tester, {String? startingAt}) async {
@@ -97,115 +93,88 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// 감시자가 다음 차례에 발견하도록 둔다.
-  Future<void> changeOutside(WidgetTester tester, {String tip = 'new-tip'}) async {
-    repository.moveMain(tip);
+  /// 밖에서 무언가 벌어지고, 감시자가 그것을 발견하게 둔다.
+  Future<void> changeOutside(WidgetTester tester, String signature) async {
+    repository.signature = signature;
     await tester.pump(const Duration(minutes: 1));
     await tester.pumpAndSettle();
-    // HEAD가 움직인 변화는 먼저 물어본다 — 새로 읽겠다고 답해야 알림이 선다.
-    final refresh = find.byKey(const Key('local-change-refresh'));
-    if (refresh.evaluate().isNotEmpty) {
-      await tester.tap(refresh);
-      await tester.pumpAndSettle();
-    }
   }
 
-  Finder notice() => find.byKey(const Key('local-change-notice'));
+  /// HEAD가 움직인 변화 — 묻는 쪽이다.
+  Future<void> moveHead(WidgetTester tester, {String tip = 'new-tip'}) =>
+      changeOutside(tester, '$tip\nrefs/heads/main\nrefs/heads/main $tip');
+
+  /// 브랜치가 사라지기만 한 변화 — 묻지 않는 쪽이다.
+  Future<void> deleteOutside(WidgetTester tester) => changeOutside(
+    tester,
+    'main-tip\nrefs/heads/main\nrefs/heads/main main-tip',
+  );
+
+  const withGone =
+      'main-tip\nrefs/heads/main\n'
+      'refs/heads/main main-tip\nrefs/heads/gone gone-tip';
+
+  Finder ask() => find.text('새로 읽어올까요?');
   Finder headline() => find.byKey(const Key('local-change-notice-headline'));
+  Finder card() => find.byKey(const Key('local-change-notice'));
 
-  testWidgets('요약과 오간 커밋을 함께 말한다', (tester) async {
+  // ── 묻는 쪽 ──────────────────────────────────────────────────────
+  testWidgets('계약 1 — 묻기 전에 무엇이 바뀌었는지 보인다', (tester) async {
     await pump(tester);
-    await changeOutside(tester);
+    await moveHead(tester);
 
-    expect(notice(), findsOneWidget);
+    expect(find.text('저장소가 밖에서 바뀌었습니다'), findsOneWidget);
+    expect(tester.widget<Text>(headline()).data, 'main · pull · 커밋 3개 들어옴');
     expect(
-      tester.widget<Text>(headline()).data,
-      'main · pull · 커밋 3개 들어옴',
+      find.textContaining('feat: let a remote branch stand'),
+      findsOneWidget,
     );
-    expect(find.textContaining('feat: let a remote branch stand'), findsOneWidget);
     expect(find.textContaining('test: pin the origin/HEAD drop'), findsOneWidget);
     expect(find.textContaining('fix: stop drawing origin/HEAD'), findsOneWidget);
+    expect(ask(), findsOneWidget);
   });
 
-  testWidgets('계약 1 — 스스로 사라지지 않는다', (tester) async {
+  testWidgets('계약 2 — 물음은 목록 아래에 온다', (tester) async {
     await pump(tester);
-    await changeOutside(tester);
-    expect(notice(), findsOneWidget);
+    await moveHead(tester);
 
-    // 스낵바라면 진작 물러났을 시간이다.
-    await tester.pump(const Duration(seconds: 30));
-    await tester.pumpAndSettle();
-
-    expect(notice(), findsOneWidget);
-  });
-
-  testWidgets('계약 1 — esc로 닫힌다', (tester) async {
-    await pump(tester);
-    await changeOutside(tester);
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-
-    expect(notice(), findsNothing);
-  });
-
-  testWidgets('계약 2 — 바깥 클릭은 닫되 가로채지 않는다', (tester) async {
-    await pump(tester);
-    await changeOutside(tester);
-
-    // 아래 행을 누른다. 알림은 닫히고, 그 행은 선택된다.
-    await tester.tap(
-      find.descendant(
-        of: find.byKey(const Key('timeline-list')),
-        matching: find.text('the beginning'),
-      ),
-      warnIfMissed: false,
-    );
-    await tester.pumpAndSettle();
-
-    expect(notice(), findsNothing);
-    expect(find.byKey(const Key('selected-row-root')), findsOneWidget);
-  });
-
-  testWidgets('계약 3 — esc는 알림부터 닫는다', (tester) async {
-    await pump(tester);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('preview-panel')), findsOneWidget);
-
-    await changeOutside(tester);
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await tester.pumpAndSettle();
-
-    expect(notice(), findsNothing, reason: '알림이 먼저 닫힌다');
+    // 읽고 나서 답하는 순서다. 물음이 먼저 오면 근거는 뒤늦은 변명이 된다.
     expect(
-      find.byKey(const Key('preview-panel')),
-      findsOneWidget,
-      reason: '미리보기는 그다음 차례다',
+      tester.getRect(ask()).top,
+      greaterThan(tester.getRect(headline()).bottom),
     );
-  });
-
-  testWidgets('계약 4 — 새 변화가 오면 갈린다', (tester) async {
-    await pump(tester);
-    await changeOutside(tester);
-
-    repository.operation = 'reset';
-    repository.counts = (outgoing: 2, incoming: 0);
-    repository.moved = const [
-      (incoming: false, shortSha: 'aaa1111', subject: 'refactor: gone'),
-    ];
-    await changeOutside(tester, tip: 'newer-tip');
-
-    expect(notice(), findsOneWidget, reason: '쌓이지 않는다');
     expect(
-      tester.widget<Text>(headline()).data,
-      'main · reset · 커밋 2개 물러남',
+      tester.getRect(find.byKey(const Key('local-change-refresh'))).top,
+      greaterThan(tester.getRect(ask()).bottom),
     );
   });
 
-  testWidgets('계약 5 — 여덟 줄까지, 나머지는 세어 말한다', (tester) async {
+  testWidgets('답하고 나면 같은 말을 또 하지 않는다', (tester) async {
     await pump(tester);
-    // 시안의 '많이 오갔을 때' 카드를 그대로 세워 본다.
+    await moveHead(tester);
+
+    await tester.tap(find.byKey(const Key('local-change-refresh')));
+    await tester.pumpAndSettle();
+
+    expect(card(), findsNothing, reason: '물음이 이미 다 말했다');
+  });
+
+  testWidgets('계약 6 — 나중에를 누르면 같은 상태를 다시 묻지 않는다', (tester) async {
+    await pump(tester);
+    await moveHead(tester);
+
+    await tester.tap(find.byKey(const Key('local-change-dismiss')));
+    await tester.pumpAndSettle();
+    expect(ask(), findsNothing);
+
+    // 저장소는 그대로다. 같은 읽기로 다시 붙잡지 않는다.
+    await tester.pump(const Duration(minutes: 1));
+    await tester.pumpAndSettle();
+    expect(ask(), findsNothing);
+  });
+
+  testWidgets('계약 3 — 여덟 줄까지, 나머지는 세어 말한다', (tester) async {
+    await pump(tester);
     repository.counts = (outgoing: 0, incoming: 42);
     repository.moved = [
       for (var index = 0; index < 12; index++)
@@ -215,68 +184,44 @@ void main() {
           subject: 'feat: number $index',
         ),
     ];
-    await changeOutside(tester);
+    await moveHead(tester);
 
     expect(find.textContaining('feat: number 7'), findsOneWidget);
     expect(find.textContaining('feat: number 8'), findsNothing);
     expect(
-      tester.widget<Text>(find.byKey(const Key('local-change-notice-more'))).data,
+      tester
+          .widget<Text>(find.byKey(const Key('local-change-notice-more')))
+          .data,
       '외 34개',
     );
   });
 
-  testWidgets('계약 6 — 알아내지 못하면 sha 두 개로 물러난다', (tester) async {
+  testWidgets('계약 4 — 브랜치가 여럿이면 브랜치마다 한 줄', (tester) async {
+    await pump(tester);
+    await changeOutside(
+      tester,
+      'moved-tip\nrefs/heads/main\n'
+      'refs/heads/main moved-tip\nrefs/heads/fresh fresh-tip',
+    );
+
+    expect(tester.widget<Text>(headline()).data, 'main · pull · 커밋 3개 들어옴');
+    expect(find.text('fresh 브랜치 추가됨'), findsOneWidget);
+    // 커밋 목록은 접는다 — 어느 브랜치인지가 먼저다.
+    expect(find.textContaining('feat: let a remote branch stand'), findsNothing);
+  });
+
+  testWidgets('계약 5 — 알아내지 못해도 묻기를 그만두지 않는다', (tester) async {
     await pump(tester);
     repository.operation = '';
     repository.counts = null;
     repository.moved = const [];
-    await changeOutside(tester);
+    await moveHead(tester);
 
     expect(
       tester.widget<Text>(headline()).data,
       'main 갱신됨 · main-tip → new-tip',
     );
-  });
-
-  testWidgets('브랜치가 여럿 움직이면 브랜치마다 한 줄씩', (tester) async {
-    await pump(tester);
-    // main은 움직이고, 다른 브랜치는 생기고 사라졌다.
-    repository.signature =
-        'moved-tip\nrefs/heads/main\n'
-        'refs/heads/main moved-tip\nrefs/heads/fresh fresh-tip';
-    await tester.pump(const Duration(minutes: 1));
-    await tester.pumpAndSettle();
-    final refresh = find.byKey(const Key('local-change-refresh'));
-    if (refresh.evaluate().isNotEmpty) {
-      await tester.tap(refresh);
-      await tester.pumpAndSettle();
-    }
-
-    expect(
-      tester.widget<Text>(headline()).data,
-      'main · pull · 커밋 3개 들어옴',
-      reason: '첫 줄은 움직인 브랜치가 무엇을 했는지 말한다',
-    );
-    expect(find.text('fresh 브랜치 추가됨'), findsOneWidget);
-    // 여럿이 움직였으면 커밋 목록은 접는다 — 어느 브랜치인지가 먼저다.
-    expect(find.textContaining('feat: let a remote branch stand'), findsNothing);
-  });
-
-  testWidgets('한 번에 여럿을 지우면 세어서 말한다', (tester) async {
-    // 넷이 있는 상태에서 시작해, 한 번에 사라지게 한다.
-    await pump(
-      tester,
-      startingAt:
-          'main-tip\nrefs/heads/main\nrefs/heads/main main-tip'
-          '\nrefs/heads/a a\nrefs/heads/b b\nrefs/heads/c c\nrefs/heads/d d',
-    );
-    repository.signature =
-        'main-tip\nrefs/heads/main\nrefs/heads/main main-tip';
-    await tester.pump(const Duration(minutes: 1));
-    await tester.pumpAndSettle();
-
-    // 네 줄이 아니라 한 줄로 센다 — 이름을 나열하는 한계와 같은 선이다.
-    expect(tester.widget<Text>(headline()).data, '브랜치 4개 삭제됨');
+    expect(ask(), findsOneWidget);
   });
 
   testWidgets('나간 커밋과 들어온 커밋을 갈라 보인다', (tester) async {
@@ -287,149 +232,93 @@ void main() {
       (incoming: false, shortSha: 'aaa1111', subject: 'refactor: the old one'),
       (incoming: true, shortSha: 'bbb2222', subject: 'refactor: the new one'),
     ];
-    await changeOutside(tester);
+    await moveHead(tester);
 
     expect(
       tester.widget<Text>(headline()).data,
       'main · rebase · 커밋 1개 나가고 1개 들어옴',
     );
-    expect(find.text('−'), findsOneWidget);
-    expect(find.text('+'), findsOneWidget);
-  });
-}
-
-/// 시안(docs/local-change-summary-mockup.html)이 그린 값들을 하나씩 대조한다.
-/// 문구가 맞아도 색과 자리가 다르면 다른 물건이다.
-void _mockupParity() {
-  testWidgets('시안과 같은 자리, 같은 치수', (tester) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1400, 900);
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    final repository = _ChangingRepository(
-      (_, _) async => [
-        commit('main-tip', 'tip', parents: ['root']),
-        commit('root', 'the beginning'),
-      ],
-      refs: const RepoRefs(
-        local: ['main'],
-        current: 'main',
-        tips: {'main': 'main-tip'},
-      ),
-    );
-    await tester.pumpWidget(
-      MaterialApp(
-        home: TimelineScreen(
-          repository: repository,
-          controller: WindowFrameController(
-            channel: const MethodChannel('test/yogit-window'),
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    repository.moveMain('new-tip');
-    await tester.pump(const Duration(minutes: 1));
-    await tester.pumpAndSettle();
-    final refresh = find.byKey(const Key('local-change-refresh'));
-    if (refresh.evaluate().isNotEmpty) {
-      await tester.tap(refresh);
-      await tester.pumpAndSettle();
-    }
-
-    final card = tester.getRect(find.byKey(const Key('local-change-notice')));
-    final screen = tester.getRect(find.byType(MaterialApp));
-
-    // 뒤의 커밋들이 비쳐 보인다 — 설명하고 있는 그 역사 위에 서기 때문이다.
-    final panel =
-        tester.widget<Container>(find.byKey(const Key('local-change-notice')))
-            .decoration! as BoxDecoration;
-    expect(panel.color!.a, lessThan(1.0));
-    expect(
-      find.ancestor(
-        of: find.byKey(const Key('local-change-notice')),
-        matching: find.byType(BackdropFilter),
-      ),
-      findsOneWidget,
-      reason: '비치되 읽히려면 뒤가 흐려져야 한다',
-    );
-
-    // 방금 답한 물음이 서 있던 자리 — 화면 한가운데다.
-    expect(card.center.dx, closeTo(screen.center.dx, 0.5));
-    expect(card.center.dy, closeTo(screen.center.dy, 0.5));
-    // 시안이 잡은 너비: 최소 380, 최대 640.
-    expect(card.width, greaterThanOrEqualTo(420));
-    expect(card.width, lessThanOrEqualTo(640));
-
-    // 나가는 길을 보여 준다.
-    expect(find.text('esc'), findsOneWidget);
-    expect(find.text('닫기'), findsOneWidget);
-    // 눌러도 닫힌다 — 키보드만의 길이 아니다.
-    await tester.tap(find.byKey(const Key('local-change-notice-dismiss')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('local-change-notice')), findsNothing);
-  });
-
-  testWidgets('시안과 같은 색', (tester) async {
-    tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1400, 900);
-    addTearDown(() {
-      tester.view.resetDevicePixelRatio();
-      tester.view.resetPhysicalSize();
-    });
-    final repository = _ChangingRepository(
-      (_, _) async => [
-        commit('main-tip', 'tip', parents: ['root']),
-        commit('root', 'the beginning'),
-      ],
-      refs: const RepoRefs(
-        local: ['main'],
-        current: 'main',
-        tips: {'main': 'main-tip'},
-      ),
-    )
-      ..operation = 'rebase'
-      ..counts = (outgoing: 1, incoming: 1)
-      ..moved = const [
-        (incoming: false, shortSha: 'aaa1111', subject: 'refactor: the old one'),
-        (incoming: true, shortSha: 'bbb2222', subject: 'refactor: the new one'),
-      ];
-    await tester.pumpWidget(
-      MaterialApp(
-        home: TimelineScreen(
-          repository: repository,
-          controller: WindowFrameController(
-            channel: const MethodChannel('test/yogit-window'),
-          ),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    repository.moveMain('new-tip');
-    await tester.pump(const Duration(minutes: 1));
-    await tester.pumpAndSettle();
-    final refresh = find.byKey(const Key('local-change-refresh'));
-    if (refresh.evaluate().isNotEmpty) {
-      await tester.tap(refresh);
-      await tester.pumpAndSettle();
-    }
-
-    // 들어온 것은 초록, 나간 것은 붉게 — 시안의 두 색 그대로.
     expect(tester.widget<Text>(find.text('+')).style!.color, mainAccent);
     expect(tester.widget<Text>(find.text('−')).style!.color, deletedPink);
-    // 짧은 sha는 타임라인이 해시에 쓰는 그 색, 그 고정폭 글자다.
     final sha = tester.widget<Text>(find.text('bbb2222'));
     expect(sha.style!.color, hashRed);
     expect(sha.style!.fontFamily, 'monospace');
     // 나간 커밋은 한 겹 물러나 보인다.
-    final outgoing = tester.widget<Text>(
-      find.text('refactor: the old one'),
+    expect(
+      tester.widget<Text>(find.text('refactor: the old one')).style!.color!.a,
+      lessThan(
+        tester.widget<Text>(find.text('refactor: the new one')).style!.color!.a,
+      ),
     );
-    final incoming = tester.widget<Text>(
-      find.text('refactor: the new one'),
+  });
+
+  testWidgets('묻는 상자는 넓어져도 버튼은 그대로다', (tester) async {
+    await pump(tester);
+    await moveHead(tester);
+
+    final title = tester.getRect(find.text('저장소가 밖에서 바뀌었습니다'));
+    final later = tester.getRect(find.byKey(const Key('local-change-dismiss')));
+    final refresh = tester.getRect(
+      find.byKey(const Key('local-change-refresh')),
     );
-    expect(outgoing.style!.color!.a, lessThan(incoming.style!.color!.a));
+
+    // 상자는 목록을 담느라 넓어졌지만, 답이 그만큼 커질 이유는 없다.
+    expect(title.width, greaterThan(YogitAlert.width - 32));
+    expect(later.width + refresh.width, closeTo(YogitAlert.width - 32 - 7, 1));
+    expect(later.width, closeTo(refresh.width, 1));
+  });
+
+  // ── 묻지 않는 쪽 ────────────────────────────────────────────────
+  testWidgets('계약 7 — 삭제만 있는 변화는 머무는 카드로 말한다', (tester) async {
+    await pump(tester, startingAt: withGone);
+    await deleteOutside(tester);
+
+    expect(ask(), findsNothing, reason: '잃을 것이 없어 묻지 않는다');
+    expect(card(), findsOneWidget);
+    expect(tester.widget<Text>(headline()).data, 'gone 브랜치 삭제됨');
+
+    // 스낵바라면 진작 물러났을 시간이다.
+    await tester.pump(const Duration(seconds: 30));
+    await tester.pumpAndSettle();
+    expect(card(), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(card(), findsNothing);
+  });
+
+  testWidgets('카드 바깥 클릭은 닫되 가로채지 않는다', (tester) async {
+    await pump(tester, startingAt: withGone);
+    await deleteOutside(tester);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('timeline-list')),
+        matching: find.text('the beginning'),
+      ),
+      warnIfMissed: false,
+    );
+    await tester.pumpAndSettle();
+
+    expect(card(), findsNothing);
+    expect(find.byKey(const Key('selected-row-root')), findsOneWidget);
+  });
+
+  testWidgets('카드는 뒤의 역사가 비치도록 선다', (tester) async {
+    await pump(tester, startingAt: withGone);
+    await deleteOutside(tester);
+
+    final panel = tester.widget<Container>(card()).decoration! as BoxDecoration;
+    expect(panel.color!.a, lessThan(1.0));
+    expect(
+      find.ancestor(of: card(), matching: find.byType(BackdropFilter)),
+      findsOneWidget,
+      reason: '비치되 읽히려면 뒤가 흐려져야 한다',
+    );
+    // 방금 답한 물음이 서 있던 자리 — 화면 한가운데다.
+    final rect = tester.getRect(card());
+    final screen = tester.getRect(find.byType(MaterialApp));
+    expect(rect.center.dx, closeTo(screen.center.dx, 0.5));
+    expect(rect.center.dy, closeTo(screen.center.dy, 0.5));
   });
 }

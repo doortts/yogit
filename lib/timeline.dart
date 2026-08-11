@@ -774,17 +774,29 @@ class _TimelineScreenState extends State<TimelineScreen>
       _localSignature = signature;
       return;
     }
+    // What changed is read before anyone is asked about it: an answer to
+    // "새로 읽어올까요?" needs the change in front of it, not after it.
+    final details = await _localChangeDetails(change);
+    if (!mounted) return;
     if (!change.isPureDeletion) {
       _localChangePromptOpen = true;
       final accepted = await showYogitAlert<bool>(
         context,
-        const YogitAlert(
-          title: '저장소가 바뀌었습니다',
-          message: '앱 밖에서 HEAD나 브랜치가 변경되었습니다. 새로 읽어올까요?',
+        YogitAlert(
+          // Wider than an alert of prose: commit subjects have to be readable
+          // or the list is decoration.
+          boxWidth: 520,
+          title: '저장소가 밖에서 바뀌었습니다',
+          body: details == null
+              ? null
+              : YogitAlertPanel(
+                  child: LocalChangeDetailsView(details: details),
+                ),
+          detail: '새로 읽어올까요?',
           cancelLabel: '나중에',
-          cancelKey: Key('local-change-dismiss'),
+          cancelKey: const Key('local-change-dismiss'),
           confirmLabel: '새로고침',
-          confirmKey: Key('local-change-refresh'),
+          confirmKey: const Key('local-change-refresh'),
         ),
       );
       if (!mounted) return;
@@ -795,21 +807,31 @@ class _TimelineScreenState extends State<TimelineScreen>
         _declinedSignature = signature;
         return;
       }
+      _localSignature = signature;
+      _declinedSignature = null;
+      await _reloadTimelineAfterCherryPick(null);
+      // The question already said what changed. Saying it again once it is
+      // answered is the app talking to itself.
+      return;
     }
     _localSignature = signature;
     _declinedSignature = null;
     await _reloadTimelineAfterCherryPick(null);
-    if (!mounted) return;
-    // A reload that arrives on its own has to say what it took in, and one the
-    // user asked for still owes them the answer.
-    await _raiseLocalChangeNotice(change);
+    if (!mounted || details == null) return;
+    // Nothing asked, so nothing has said it yet. The card is the only place
+    // this reading gets told.
+    _showLocalChangeNotice(
+      LocalChangeNotice(details: details, onDismiss: _dismissLocalChangeNotice),
+    );
   }
 
-  /// Turns what changed into the notice that explains it, asking git only for
+  /// Turns what changed into the lines that explain it, asking git only for
   /// the parts the fingerprint cannot know: what the operation was, and which
   /// commits it moved.
-  Future<void> _raiseLocalChangeNotice(LocalStateChange change) async {
-    if (change.isEmpty) return;
+  Future<LocalChangeDetails?> _localChangeDetails(
+    LocalStateChange change,
+  ) async {
+    if (change.isEmpty) return null;
     final repository = widget.repository;
     final lines = <String>[];
     if (change.headRefChanged) {
@@ -844,7 +866,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     // 기존 한계와 같은 선에서, 넘치면 세어서 말한다.
     lines.addAll(branchLines(change.added, '추가됨'));
     lines.addAll(branchLines(change.removed, '삭제됨'));
-    if (lines.isEmpty) return;
+    if (lines.isEmpty) return null;
     // The commits themselves only fit when one thing happened. Two branches
     // moving is already a list of its own.
     final single = lines.length == 1 && change.moved.length == 1;
@@ -852,31 +874,27 @@ class _TimelineScreenState extends State<TimelineScreen>
         ? await repository.loadMovedCommits(
             change.moved.single.before,
             change.moved.single.after,
-            limit: LocalChangeNotice.maxCommits + 1,
+            limit: LocalChangeDetails.maxCommits + 1,
           )
         : const <MovedCommit>[];
     // 개수는 머리줄을 지으며 이미 셌다. 같은 것을 두 번 묻지 않는다.
     final total = single && firstCounts != null
         ? firstCounts.outgoing + firstCounts.incoming
         : commits.length;
-    if (!mounted) return;
-    _showLocalChangeNotice(
-      LocalChangeNotice(
-        headline: lines.first,
-        lines: lines.skip(1).toList(),
-        commits: commits
-            .take(LocalChangeNotice.maxCommits)
-            .map(
-              (commit) => (
-                incoming: commit.incoming,
-                shortSha: commit.shortSha,
-                subject: commit.subject,
-              ),
-            )
-            .toList(),
-        more: math.max(0, total - LocalChangeNotice.maxCommits),
-        onDismiss: _dismissLocalChangeNotice,
-      ),
+    return LocalChangeDetails(
+      headline: lines.first,
+      lines: lines.skip(1).toList(),
+      commits: commits
+          .take(LocalChangeDetails.maxCommits)
+          .map(
+            (commit) => (
+              incoming: commit.incoming,
+              shortSha: commit.shortSha,
+              subject: commit.subject,
+            ),
+          )
+          .toList(),
+      more: math.max(0, total - LocalChangeDetails.maxCommits),
     );
   }
 

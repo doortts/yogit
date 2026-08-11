@@ -62,6 +62,7 @@ class YogitAlert extends StatelessWidget {
   const YogitAlert({
     required this.title,
     required this.confirmLabel,
+    this.boxWidth = width,
     this.message,
     this.detail,
     this.body,
@@ -84,6 +85,11 @@ class YogitAlert extends StatelessWidget {
   /// The approved mockup's alert width. The shell builds its own surface
   /// rather than using Dialog, so this is exact and not Dialog's floor.
   static const width = 280.0;
+
+  /// How wide this one is. Alerts are prose and stay at [width]; one carrying
+  /// a list of commit subjects has to be wider or the subjects are cut to
+  /// nothing. The buttons keep their own width either way — see [_actions].
+  final double boxWidth;
 
   final String title;
   final String? message;
@@ -116,7 +122,7 @@ class YogitAlert extends StatelessWidget {
     // Every number here is the approved mockup's CSS, one to one: 16px
     // padding, a 13px w700 title, 11px body on a 1.5 line height at 82%,
     // 5px under the title, 13px above the buttons.
-    final contentWidth = width - 32;
+    final contentWidth = boxWidth - 32;
     const titleStyle = TextStyle(
       fontSize: 13,
       fontWeight: FontWeight.w700,
@@ -135,7 +141,7 @@ class YogitAlert extends StatelessWidget {
           side: BorderSide(color: palette.border, width: 0.5),
         ),
         child: SizedBox(
-          width: width,
+          width: boxWidth,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -215,16 +221,46 @@ class YogitAlert extends StatelessWidget {
         cancel,
       ];
     }
+    // The buttons are the same size in every alert, however wide the box is.
+    // A wider box is wider because its content needs the room; stretching the
+    // answers along with it makes the pair read as a bigger decision than it
+    // is.
     return [
-      Row(
-        children: [
-          Expanded(child: cancel),
-          const SizedBox(width: 7),
-          Expanded(child: confirm),
-        ],
+      Align(
+        alignment: Alignment.centerRight,
+        child: SizedBox(
+          width: YogitAlert.width - 32,
+          child: Row(
+            children: [
+              Expanded(child: cancel),
+              const SizedBox(width: 7),
+              Expanded(child: confirm),
+            ],
+          ),
+        ),
       ),
     ];
   }
+}
+
+/// The recessed panel an alert puts its non-prose parts in. [YogitAlertBlock]
+/// fills it with lines of text; anything with a shape of its own goes in
+/// directly.
+class YogitAlertPanel extends StatelessWidget {
+  const YogitAlertPanel({required this.child, super.key});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+    decoration: BoxDecoration(
+      color: TimelineThemePalette.of(context).background.withValues(alpha: 0.5),
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: child,
+  );
 }
 
 /// A left-aligned block for the parts of an alert that are not prose — a path,

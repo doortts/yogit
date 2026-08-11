@@ -2868,14 +2868,16 @@ void main() {
     await tester.pump(const Duration(seconds: 61));
     await tester.pumpAndSettle();
 
+    // 물음이 무엇이 바뀌었는지까지 들고 온다 — 답하기 전에 읽을 수 있다.
     expect(find.byKey(const Key('local-change-refresh')), findsOneWidget);
+    expect(find.textContaining('work'), findsWidgets);
+    expect(find.text('spike 브랜치 삭제됨'), findsOneWidget);
+
     await tester.tap(find.byKey(const Key('local-change-refresh')));
     await tester.pumpAndSettle();
 
-    // The question was asked, and the answer still gets its summary.
-    // 움직인 브랜치는 무엇이 오갔는지까지 말하고, 지워진 것은 제 줄을 갖는다.
-    expect(find.textContaining('work'), findsWidgets);
-    expect(find.text('spike 브랜치 삭제됨'), findsOneWidget);
+    // 그러고 나면 같은 말을 또 하지 않는다.
+    expect(find.byKey(const Key('local-change-notice')), findsNothing);
   });
 
   testWidgets('the ref filter shows a magnifier instead of a hint sentence', (

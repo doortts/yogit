@@ -967,38 +967,17 @@ typedef NoticeCommit = ({bool incoming, String shortSha, String subject});
 /// also what lets it carry the commits themselves rather than a count alone.
 class LocalChangeNotice extends StatelessWidget {
   const LocalChangeNotice({
-    required this.headline,
-    required this.lines,
-    required this.commits,
-    required this.more,
+    required this.details,
     required this.onDismiss,
     super.key,
   });
 
-  /// The first thing that changed, said in full.
-  final String headline;
-
-  /// Everything else that changed, one line each. Empty when only one thing
-  /// did, which is when [commits] gets the room instead.
-  final List<String> lines;
-
-  /// The commits that changed hands, newest first.
-  final List<NoticeCommit> commits;
-
-  /// How many more there were than the card could hold.
-  final int more;
-
+  final LocalChangeDetails details;
   final VoidCallback onDismiss;
-
-  /// The list stops here. The notice stays until it is read, but a card taller
-  /// than this stops being a notice and starts being a window — and the whole
-  /// story is on the timeline behind it either way.
-  static const maxCommits = 8;
 
   @override
   Widget build(BuildContext context) {
     final palette = context.timelineTheme;
-    final detail = lines.isNotEmpty || commits.isNotEmpty || more > 0;
     return TapRegion(
       // The press that dismisses is still the press the reader meant: it
       // selects the row it landed on, and the notice goes with it.
@@ -1027,58 +1006,116 @@ class LocalChangeNotice extends StatelessWidget {
                 ),
               ],
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        headline,
-                        key: const Key('local-change-notice-headline'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: palette.text, fontSize: 13),
-                      ),
-                    ),
-                    const SizedBox(width: 20),
-                    // A notice that will not leave on its own has to show the way
-                    // out.
-                    _EscHint(palette: palette, onPressed: onDismiss),
-                  ],
-                ),
-                if (detail) ...[
-                  const SizedBox(height: 9),
-                  Divider(height: 1, color: palette.border),
-                  const SizedBox(height: 8),
-                  for (final line in lines)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 2),
-                      child: Text(
-                        line,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: palette.text, fontSize: 13),
-                      ),
-                    ),
-                  for (final commit in commits)
-                    _NoticeCommitRow(commit: commit, palette: palette),
-                  if (more > 0)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 17, top: 3),
-                      child: Text(
-                        '외 $more개',
-                        key: const Key('local-change-notice-more'),
-                        style: TextStyle(color: palette.muted, fontSize: 12),
-                      ),
-                    ),
-                ],
-              ],
+            child: LocalChangeDetailsView(
+              details: details,
+              // A notice that will not leave on its own has to show the way
+              // out.
+              trailing: _EscHint(palette: palette, onPressed: onDismiss),
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+/// What changed, as the notice and the question both say it: a headline, the
+/// other things that changed, and the commits that moved.
+class LocalChangeDetails {
+  const LocalChangeDetails({
+    required this.headline,
+    required this.lines,
+    required this.commits,
+    required this.more,
+  });
+
+  /// The first thing that changed, said in full.
+  final String headline;
+
+  /// Everything else that changed, one line each. Empty when only one thing
+  /// did, which is when [commits] gets the room instead.
+  final List<String> lines;
+
+  /// The commits that changed hands, newest first.
+  final List<NoticeCommit> commits;
+
+  /// How many more there were than there was room for.
+  final int more;
+
+  /// The list stops here. Whether it is a notice that stays or a question
+  /// waiting to be answered, taller than this stops being either — and the
+  /// whole story is on the timeline behind it.
+  static const maxCommits = 8;
+
+  bool get hasDetail => lines.isNotEmpty || commits.isNotEmpty || more > 0;
+}
+
+/// Draws [LocalChangeDetails]. The card wraps it in its own panel; the
+/// question that asks whether to reload puts it in the alert's body, so the
+/// reader answers with the change in front of them rather than after it.
+class LocalChangeDetailsView extends StatelessWidget {
+  const LocalChangeDetailsView({
+    required this.details,
+    this.trailing,
+    super.key,
+  });
+
+  final LocalChangeDetails details;
+
+  /// Sits at the end of the headline. The card puts its way out here.
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.timelineTheme;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Flexible(
+              child: Text(
+                details.headline,
+                key: const Key('local-change-notice-headline'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: palette.text, fontSize: 13),
+              ),
+            ),
+            if (trailing case final trailing?) ...[
+              const SizedBox(width: 20),
+              trailing,
+            ],
+          ],
+        ),
+        if (details.hasDetail) ...[
+          const SizedBox(height: 9),
+          Divider(height: 1, color: palette.border),
+          const SizedBox(height: 8),
+          for (final line in details.lines)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text(
+                line,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: palette.text, fontSize: 13),
+              ),
+            ),
+          for (final commit in details.commits)
+            _NoticeCommitRow(commit: commit, palette: palette),
+          if (details.more > 0)
+            Padding(
+              padding: const EdgeInsets.only(left: 17, top: 3),
+              child: Text(
+                '외 ${details.more}개',
+                key: const Key('local-change-notice-more'),
+                style: TextStyle(color: palette.muted, fontSize: 12),
+              ),
+            ),
+        ],
+      ],
     );
   }
 }
