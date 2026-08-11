@@ -841,29 +841,39 @@ class _GrowingChipState extends State<GrowingChip>
     );
   }
 
-  /// The chip is drawn whole from the first frame and shown through a window
-  /// that widens from exactly the cut chip's edge. Nothing reflows as it opens
-  /// — the letters are already in their final places, waiting to be uncovered
-  /// — and the moving edge keeps the chip's own corner radius, so what grows
-  /// still reads as the chip.
+  /// The box grows rightward and the letters the column cut off arrive from
+  /// the left, one after another, until the whole name is standing there.
+  ///
+  /// A name is cut from the front, so what the reader has been looking at is
+  /// its tail. The whole chip is drawn from the first frame and held against
+  /// the RIGHT edge of a window that widens from exactly the cut chip's width:
+  /// the tail therefore starts on the very pixels it already occupied and the
+  /// head emerges from under the left edge as room appears. Aligning the other
+  /// way would put the head on screen in frame one, which is a different piece
+  /// of text than the one being replaced — it reads as a swap however long it
+  /// takes.
+  ///
+  /// Nothing reflows while it opens: every letter is already in its final
+  /// place, waiting to be uncovered.
   Widget _reveal(Rect anchor) => AnimatedBuilder(
     animation: _open,
     builder: (context, child) {
+      // Resting outside the window entirely: a measurement a point short would
+      // otherwise leave the name sitting under its own clip forever.
+      if (_open.isCompleted) return widget.whole;
       final fraction = Curves.easeOutCubic.transform(_open.value);
       return ClipRRect(
         key: widget.revealKey,
         borderRadius: BorderRadius.circular(5),
         child: SizedBox(
-          // Opening a little past the measured width keeps a name whose
-          // measurement came up short from resting under its own clip.
-          width: ui.lerpDouble(anchor.width, widget.wholeWidth + 4, fraction),
+          width: ui.lerpDouble(anchor.width, widget.wholeWidth, fraction),
           height: widget.height,
           child: child,
         ),
       );
     },
     child: OverflowBox(
-      alignment: Alignment.centerLeft,
+      alignment: Alignment.centerRight,
       maxWidth: double.infinity,
       child: widget.whole,
     ),

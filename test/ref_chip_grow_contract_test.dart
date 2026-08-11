@@ -206,7 +206,7 @@ void main() {
     tester,
   ) async {
     await pump(tester, name: long);
-    final cut = tester.getRect(chip(long)).width;
+    final cut = tester.getRect(chip(long));
 
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.addPointer(location: Offset.zero);
@@ -215,23 +215,48 @@ void main() {
     await tester.pump();
 
     // 첫 프레임에는 잘린 칩 폭 그대로다 — 튀어나오지 않는다.
-    expect(tester.getRect(reveal(long)).width, closeTo(cut, 1));
+    expect(tester.getRect(reveal(long)).width, closeTo(cut.width, 1));
 
     // 중간 프레임은 그 사이 어딘가에 있다.
     await tester.pump(GrowingChip.openDuration ~/ 2);
     final midway = tester.getRect(reveal(long)).width;
-    expect(midway, greaterThan(cut));
+    expect(midway, greaterThan(cut.width));
 
     await tester.pumpAndSettle();
-    final opened = tester.getRect(reveal(long)).width;
-    expect(opened, greaterThan(midway));
+    expect(tester.getRect(whole(long)).width, greaterThan(midway));
 
     // 그리고 닫히는 길도 한 번에 사라지지 않는다.
     await mouse.moveTo(const Offset(1200, 700));
     await tester.pump();
+    final closing = tester.getRect(reveal(long)).width;
     await tester.pump(GrowingChip.closeDuration ~/ 2);
     expect(whole(long), findsOneWidget, reason: '물러나는 동안에도 붙어 있다');
-    expect(tester.getRect(reveal(long)).width, lessThan(opened));
+    expect(tester.getRect(reveal(long)).width, lessThan(closing));
+  });
+
+  testWidgets('the tail stays put and the cut head arrives from the left', (
+    tester,
+  ) async {
+    await pump(tester, name: long);
+    final cut = tester.getRect(chip(long));
+
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(chip(long)));
+    await tester.pump();
+
+    // 이름은 앞에서 잘린다. 읽고 있던 것은 꼬리이므로 첫 프레임에서 꼬리가 있던
+    // 자리를 그대로 지켜야 한다 — 여기가 어긋나면 아무리 천천히 열려도 글자가
+    // 통째로 바뀐 것으로 보인다.
+    expect(tester.getRect(whole(long)).right, closeTo(cut.right, 1));
+    // 머리는 아직 창 왼쪽 밖에 있다.
+    expect(tester.getRect(whole(long)).left, lessThan(cut.left));
+
+    await tester.pumpAndSettle();
+
+    // 다 열리면 잘린 칩이 서 있던 그 자리에서 시작한다.
+    expect(tester.getRect(whole(long)).left, closeTo(cut.left, 1));
   });
 
   testWidgets('it closes when the mouse leaves', (tester) async {
