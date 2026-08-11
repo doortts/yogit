@@ -25,6 +25,7 @@ import 'full_diff_workspace.dart';
 import 'full_history_view.dart';
 import 'fuzzy_match.dart';
 import 'git.dart';
+import 'local_state_signature.dart';
 import 'monaco_editor_screen.dart';
 import 'page_scroll_shortcuts.dart';
 import 'preview_header.dart';
@@ -678,38 +679,69 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// Polls the repository's fingerprint and offers to reload when someone
   /// moved HEAD or a branch outside the app — a terminal checkout, a commit
   /// from another tool, a rebase in a second window.
+  ///
+  /// Branches that merely disappeared are the exception and load without being
+  /// asked about. Nothing on screen can be lost to a deletion the user just
+  /// performed, and deleting a dozen branches from a terminal is a dozen
+  /// separate readings — one question each, which no debounce can collapse.
   Future<void> _checkLocalChanges() async {
     if (!mounted || _localChangePromptOpen) return;
     // A mutation the app is running will refresh on its own; interrupting it
-    // with a question would race its own reload.
+    // with a question would race its own reload. The silent path leans on the
+    // same two guards, so it cannot fight an app-initiated change either.
     if (_branchApplyBusy || _pullingRemote != null) return;
     final signature = await widget.repository.loadLocalStateSignature();
     if (!mounted || signature == null) return;
-    if (_localSignature == null) {
+    final previous = _localSignature;
+    if (previous == null) {
       _localSignature = signature;
       return;
     }
-    if (signature == _localSignature || signature == _declinedSignature) return;
-    _localChangePromptOpen = true;
-    final accepted = await showYogitAlert<bool>(
-      context,
-      const YogitAlert(
-        title: '저장소가 바뀌었습니다',
-        message: '앱 밖에서 HEAD나 브랜치가 변경되었습니다. 새로 읽어올까요?',
-        cancelLabel: '나중에',
-        cancelKey: Key('local-change-dismiss'),
-        confirmLabel: '새로고침',
-        confirmKey: Key('local-change-refresh'),
-      ),
+    if (signature == previous || signature == _declinedSignature) return;
+    final change = diffLocalState(
+      parseLocalState(previous),
+      parseLocalState(signature),
     );
-    if (!mounted) return;
-    _localChangePromptOpen = false;
-    if (accepted == true) {
+    // Text that differs while nothing it describes does — a ref list git
+    // handed back in another order — is worth recording, never worth asking
+    // about.
+    if (change.isEmpty) {
       _localSignature = signature;
-      _declinedSignature = null;
-      await _reloadTimelineAfterCherryPick(null);
-    } else {
-      _declinedSignature = signature;
+      return;
+    }
+    if (!change.isPureDeletion) {
+      _localChangePromptOpen = true;
+      final accepted = await showYogitAlert<bool>(
+        context,
+        const YogitAlert(
+          title: '저장소가 바뀌었습니다',
+          message: '앱 밖에서 HEAD나 브랜치가 변경되었습니다. 새로 읽어올까요?',
+          cancelLabel: '나중에',
+          cancelKey: Key('local-change-dismiss'),
+          confirmLabel: '새로고침',
+          confirmKey: Key('local-change-refresh'),
+        ),
+      );
+      if (!mounted) return;
+      _localChangePromptOpen = false;
+      if (accepted != true) {
+        // The declined reading is remembered whole, so the same state does not
+        // come back as the same question.
+        _declinedSignature = signature;
+        return;
+      }
+    }
+    _localSignature = signature;
+    _declinedSignature = null;
+    await _reloadTimelineAfterCherryPick(null);
+    if (!mounted) return;
+    // A reload that arrives on its own has to say what it took in, and one the
+    // user asked for still owes them the answer.
+    final summary = localStateChangeSummary(change);
+    if (summary != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(summary)));
     }
   }
 

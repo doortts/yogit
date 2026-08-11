@@ -2794,6 +2794,86 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  testWidgets('branches deleted outside the app reload without a question', (
+    tester,
+  ) async {
+    var tips =
+        'refs/heads/main aaa\n'
+        'refs/heads/spike ccc\n'
+        'refs/heads/work bbb';
+    var historyLoads = 0;
+    final repository = FakeGitRepository(
+      (_, _) async {
+        historyLoads++;
+        return [commit('1', 'first commit')];
+      },
+      refs: const RepoRefs(local: ['main'], current: 'main'),
+      runner: (executable, arguments, {workingDirectory, environment}) async {
+        if (arguments.first == 'for-each-ref') {
+          return ProcessResult(1, 0, tips, '');
+        }
+        if (arguments.first == 'rev-parse' &&
+            arguments.contains('--symbolic-full-name')) {
+          return ProcessResult(1, 0, 'aaa\nrefs/heads/main', '');
+        }
+        return ProcessResult(1, 0, '', '');
+      },
+    );
+    await tester.pumpWidget(app(repository, controller));
+    await tester.pumpAndSettle();
+
+    final loadsBefore = historyLoads;
+
+    // A terminal sweep drops two branches and touches nothing else, which is
+    // the one shape the timeline can take on by itself.
+    tips = 'refs/heads/main aaa';
+    await tester.pump(const Duration(seconds: 61));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('local-change-refresh')), findsNothing);
+    expect(historyLoads, greaterThan(loadsBefore));
+    expect(find.text('spike, work 브랜치 삭제됨'), findsOneWidget);
+  });
+
+  testWidgets('a deletion that came with a moved tip still asks first', (
+    tester,
+  ) async {
+    var tips =
+        'refs/heads/main aaa\n'
+        'refs/heads/spike ccc\n'
+        'refs/heads/work bbb';
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('1', 'first commit')],
+      refs: const RepoRefs(local: ['main'], current: 'main'),
+      runner: (executable, arguments, {workingDirectory, environment}) async {
+        if (arguments.first == 'for-each-ref') {
+          return ProcessResult(1, 0, tips, '');
+        }
+        if (arguments.first == 'rev-parse' &&
+            arguments.contains('--symbolic-full-name')) {
+          return ProcessResult(1, 0, 'aaa\nrefs/heads/main', '');
+        }
+        return ProcessResult(1, 0, '', '');
+      },
+    );
+    await tester.pumpWidget(app(repository, controller));
+    await tester.pumpAndSettle();
+
+    // A rebase behind the app's back moves `work` and takes `spike` with it.
+    tips =
+        'refs/heads/main aaa\n'
+        'refs/heads/work ddd';
+    await tester.pump(const Duration(seconds: 61));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('local-change-refresh')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('local-change-refresh')));
+    await tester.pumpAndSettle();
+
+    // The question was asked, and the answer still gets its summary.
+    expect(find.text('work 브랜치 갱신됨, spike 브랜치 삭제됨'), findsOneWidget);
+  });
+
   testWidgets('the ref filter shows a magnifier instead of a hint sentence', (
     tester,
   ) async {
