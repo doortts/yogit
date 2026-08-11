@@ -212,8 +212,7 @@ extension _TimelineRows on _TimelineScreenState {
         // ref points at falls back to the name memory already holds — and only
         // to that: hovering a line must never start a lookup.
         lineName: (selected || hovered) && refs.isEmpty
-            ? _branchLineNames[row.branch] ??
-                  _knownDeletedLineName(row.branch)
+            ? _branchLineNames[row.branch] ?? _knownDeletedLineName(row.branch)
             : null,
       );
       if (mergeConflict) {
@@ -361,13 +360,12 @@ extension _TimelineRows on _TimelineScreenState {
                   ),
                   _cell(
                     _w('hash'),
-                    Text(
+                    // A sha never folds onto a second line inside the row.
+                    // Clipped rather than ellipsised: the front of a sha is the
+                    // part worth reading, and '…' would spend room on saying
+                    // so.
+                    _searchableText(
                       commit.isWorkingTree ? '·······' : commit.shortSha,
-                      // A sha never folds onto a second line inside the row.
-                      // Clipped rather than ellipsised: the front of a sha is
-                      // the part worth reading, and '…' would spend room on
-                      // saying so.
-                      maxLines: 1,
                       softWrap: false,
                       overflow: TextOverflow.clip,
                       style: _TimelineScreenState._hashStyle.copyWith(
@@ -408,10 +406,8 @@ extension _TimelineRows on _TimelineScreenState {
                           const SizedBox(width: 3),
                         ],
                         Expanded(
-                          child: Text(
+                          child: _searchableText(
                             commit.subject,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: _palette.text,
                               fontFamily: _fontFamily,

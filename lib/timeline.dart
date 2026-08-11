@@ -56,6 +56,7 @@ part 'timeline_chrome.dart';
 part 'timeline_diff_mode.dart';
 part 'timeline_preview_pane.dart';
 part 'timeline_rows.dart';
+part 'timeline_search.dart';
 part 'timeline_sidebar.dart';
 
 /// The date group heading's box and label.
@@ -500,6 +501,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     _rebuild(() => _localChangeNotice = null);
     if (_localChangeNoticeOverlay.isShowing) _localChangeNoticeOverlay.hide();
   }
+
   var _localChangePromptOpen = false;
   final _fetchingRemotes = ValueNotifier(false);
   final _fetchError = ValueNotifier<Object?>(null);
@@ -523,6 +525,11 @@ class _TimelineScreenState extends State<TimelineScreen>
   bool? _arrivedGoingDown;
   final _filterController = TextEditingController();
   var _filter = '';
+  // 커밋 찾기 — 목록을 거르지 않고 찾은 자리에 불을 켠다.
+  final _searchController = TextEditingController();
+  final _searchFocusNode = FocusNode(debugLabel: 'timeline search');
+  var _searchQuery = '';
+  var _searchOpen = false;
   final _collapsedRefSections = <_RefSection>{};
   final _collapsedRefFolders = <String>{};
   var _showAllTags = false;
@@ -1065,6 +1072,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       node.dispose();
     }
     _filterController.dispose();
+    _searchController.dispose();
+    _searchFocusNode.dispose();
     _focusNode.dispose();
     _sidebarFocusNode.dispose();
     _previewFocusNode.removeListener(_onPaneFocusChanged);
@@ -1375,6 +1384,11 @@ class _TimelineScreenState extends State<TimelineScreen>
       if (_sidebarCollapsed) setState(() => _sidebarCollapsed = false);
       _sidebarFocusNode.requestFocus();
       if (_sidebarCursor == null) _moveSidebarCursor(1);
+      return KeyEventResult.handled;
+    }
+    // ⌘F opens the find field, and opens it again on the search already there.
+    if (event.logicalKey == LogicalKeyboardKey.keyF && shortcutModifierHeld) {
+      _openSearch();
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.enter && _commits.isNotEmpty) {
@@ -2395,59 +2409,68 @@ class _TimelineScreenState extends State<TimelineScreen>
           children: [
             if (_compareRef != null) _branchPreviewSummary(),
             Expanded(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: SizedBox(
-                  key: const Key('timeline-horizontal-content'),
-                  width: fixed + commitWidth,
-                  child: Column(
-                    children: [
-                      SizedBox(
-                        height: _timelineHeaderHeight,
-                        child: Row(
-                          children: [
-                            for (final column in timelineColumns.keys)
-                              if (_columnVisible(column))
-                                _header(column, width(column)),
-                          ],
-                        ),
-                      ),
-                      Expanded(
-                        child: Stack(
-                          children: [
-                            ListView.builder(
-                              key: const Key('timeline-list'),
-                              controller: _scrollController,
-                              itemExtent: TimelineScreen.rowHeight,
-                              itemCount:
-                                  _entries.length + (_showFooter ? 1 : 0),
-                              itemBuilder: (context, index) {
-                                if (index == _entries.length) return _footer();
-                                final entry = _entries[index];
-                                return entry.label == null
-                                    ? _row(index, commitWidth, graphWidth)
-                                    : _dateRow(index, entry, graphWidth);
-                              },
+              // 찾기 줄은 목록 위에 떠 있다. 행 하나를 차지하면 검색을 여는
+              // 것만으로 읽고 있던 역사가 밀려난다.
+              child: Stack(
+                children: [
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(
+                      key: const Key('timeline-horizontal-content'),
+                      width: fixed + commitWidth,
+                      child: Column(
+                        children: [
+                          SizedBox(
+                            height: _timelineHeaderHeight,
+                            child: Row(
+                              children: [
+                                for (final column in timelineColumns.keys)
+                                  if (_columnVisible(column))
+                                    _header(column, width(column)),
+                              ],
                             ),
-                            Positioned.fill(
-                              child: LayoutBuilder(
-                                builder: (context, constraints) =>
-                                    ListenableBuilder(
-                                      listenable: Listenable.merge([
-                                        _selectedIndex,
-                                        _scrollController,
-                                      ]),
-                                      builder: (context, _) =>
-                                          _refsModal(constraints.maxHeight),
-                                    ),
-                              ),
+                          ),
+                          Expanded(
+                            child: Stack(
+                              children: [
+                                ListView.builder(
+                                  key: const Key('timeline-list'),
+                                  controller: _scrollController,
+                                  itemExtent: TimelineScreen.rowHeight,
+                                  itemCount:
+                                      _entries.length + (_showFooter ? 1 : 0),
+                                  itemBuilder: (context, index) {
+                                    if (index == _entries.length) {
+                                      return _footer();
+                                    }
+                                    final entry = _entries[index];
+                                    return entry.label == null
+                                        ? _row(index, commitWidth, graphWidth)
+                                        : _dateRow(index, entry, graphWidth);
+                                  },
+                                ),
+                                Positioned.fill(
+                                  child: LayoutBuilder(
+                                    builder: (context, constraints) =>
+                                        ListenableBuilder(
+                                          listenable: Listenable.merge([
+                                            _selectedIndex,
+                                            _scrollController,
+                                          ]),
+                                          builder: (context, _) =>
+                                              _refsModal(constraints.maxHeight),
+                                        ),
+                                  ),
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
-                ),
+                  if (_searchOpen) _searchBar(),
+                ],
               ),
             ),
           ],
