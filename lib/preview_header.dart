@@ -263,12 +263,21 @@ class _PreviewParentCard extends StatelessWidget {
             ],
             if (body.isNotEmpty) ...[
               const SizedBox(height: 5),
-              Text(
-                body,
-                style: TextStyle(
-                  color: palette.muted,
-                  fontSize: 11,
-                  height: 1.5,
+              // The card hangs off the pointer and cannot be scrolled, so a
+              // long message is read to a point and then cut — ten lines, the
+              // same as the pane below, and fewer when the window is short.
+              // Left whole it grows past the card and paints the overflow
+              // stripes over its own text.
+              Flexible(
+                child: Text(
+                  body,
+                  maxLines: 10,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: palette.muted,
+                    fontSize: 11,
+                    height: 1.5,
+                  ),
                 ),
               ),
             ],

@@ -52,7 +52,10 @@ void main() {
   );
   final parent = commit('a9b3636', 'feat(app): 메뉴바 밝기를 외양에 맞춘다');
 
-  FakeGitRepository repository({List<GitCommit>? commits}) => FakeGitRepository(
+  FakeGitRepository repository({
+    List<GitCommit>? commits,
+    Future<String> Function(String sha)? commitMessage,
+  }) => FakeGitRepository(
     (_, _) async => commits ?? [child, parent],
     files: (_, _) async => const [
       GitFileChange(
@@ -62,14 +65,17 @@ void main() {
         deletions: 1,
       ),
     ],
-    commitMessage: (sha) async => sha == parent.sha
-        ? '${parent.subject}\n\n막대는 파랑이고 팝오버는 민트라 같은 창이 두 색으로 보였다.'
-        : child.subject,
+    commitMessage:
+        commitMessage ??
+        (sha) async => sha == parent.sha
+            ? '${parent.subject}\n\n막대는 파랑이고 팝오버는 민트라 같은 창이 두 색으로 보였다.'
+            : child.subject,
   );
 
   Future<void> pumpPreview(
     WidgetTester tester, {
     List<GitCommit>? commits,
+    Future<String> Function(String sha)? commitMessage,
   }) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1400, 800);
@@ -77,7 +83,12 @@ void main() {
       tester.view.resetDevicePixelRatio();
       tester.view.resetPhysicalSize();
     });
-    await tester.pumpWidget(app(repository(commits: commits), controller));
+    await tester.pumpWidget(
+      app(
+        repository(commits: commits, commitMessage: commitMessage),
+        controller,
+      ),
+    );
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
@@ -191,6 +202,45 @@ void main() {
     expect(card.right, lessThanOrEqualTo(1400));
     expect(card.top, greaterThanOrEqualTo(0));
     expect(card.bottom, lessThanOrEqualTo(800));
+  });
+
+  testWidgets('a long parent message is cut, not spilled', (tester) async {
+    // 카드는 커서에 매달려 있어 스크롤할 수 없다. 긴 메시지를 그대로 두면
+    // 카드 밖으로 넘쳐 제 글자 위에 overflow 줄무늬가 그려진다.
+    const child = GitCommit(
+      sha: '6c1b0a7e4d3f29185a0b7c6d5e4f39281a0b7c6d',
+      shortSha: '6c1b0a7',
+      parents: ['b4e77c1'],
+      author: GitIdentity(name: 'Ada Author', email: 'ada@example.com'),
+      authorTimestamp: 1700000000,
+      committer: GitIdentity(name: 'Cam Committer', email: 'cam@example.com'),
+      committerTimestamp: 1700000120,
+      refs: [],
+      subject: 'fix: 긴 메시지를 가진 부모',
+    );
+    final longParent = commit('b4e77c1', 'fix: 창이 가려진 사이 그림을 되돌린다');
+    await pumpPreview(
+      tester,
+      commits: [child, longParent],
+      commitMessage: (sha) async => sha == longParent.sha
+          ? [
+              longParent.subject,
+              '',
+              for (var line = 1; line <= 40; line++)
+                '본문 $line 번째 줄 — 한 줄로는 끝나지 않을 만큼 길게 이어지는 설명이 여기에 들어간다.',
+            ].join('\n')
+          : child.subject,
+    );
+
+    final pointer = TestPointer(1, PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(
+      pointer.hover(tester.getCenter(find.byKey(const Key('preview-parent')))),
+    );
+    await tester.pumpAndSettle();
+
+    final card = tester.getRect(find.byKey(const Key('preview-parent-card')));
+    expect(card.bottom, lessThanOrEqualTo(800));
+    expect(card.height, lessThan(400), reason: '본문은 열 줄에서 끊긴다');
   });
 
   testWidgets('a long message scrolls in ten lines, with no hash under it', (
