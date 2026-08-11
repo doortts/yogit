@@ -669,6 +669,31 @@ class _TimelineScreenState extends State<TimelineScreen>
     );
   }
 
+  /// How many changes the app itself is part way through. The watcher exists
+  /// to notice what happens *outside* the app; a branch the app is deleting is
+  /// already going to be reported by the code that deleted it, and the two
+  /// telling the reader the same thing is how the same sentence arrives twice.
+  ///
+  /// A count rather than a flag: a reload can be running while a second change
+  /// starts, and the first one finishing must not open the window early.
+  var _repositoryChanges = 0;
+
+  bool get _isChangingRepository =>
+      _repositoryChanges > 0 || _branchApplyBusy || _pullingRemote != null;
+
+  /// Runs [change] with the watcher held off, and leaves the fingerprint on
+  /// what the repository looks like afterwards, so the next reading finds
+  /// nothing to report.
+  Future<T> _changingRepository<T>(Future<T> Function() change) async {
+    _repositoryChanges++;
+    try {
+      return await change();
+    } finally {
+      _repositoryChanges--;
+      if (!_isChangingRepository) await _syncLocalSignature();
+    }
+  }
+
   /// Records what the repository looks like right now as the state the
   /// timeline is showing, so an app-initiated change never prompts.
   Future<void> _syncLocalSignature() async {
@@ -688,10 +713,13 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (!mounted || _localChangePromptOpen) return;
     // A mutation the app is running will refresh on its own; interrupting it
     // with a question would race its own reload. The silent path leans on the
-    // same two guards, so it cannot fight an app-initiated change either.
-    if (_branchApplyBusy || _pullingRemote != null) return;
+    // same guards, so it cannot fight an app-initiated change either.
+    if (_isChangingRepository) return;
     final signature = await widget.repository.loadLocalStateSignature();
-    if (!mounted || signature == null) return;
+    // Reading the fingerprint takes a moment, and the app can start changing
+    // the repository inside it. What comes back then is half the app's own
+    // work, which it is about to report itself.
+    if (!mounted || signature == null || _isChangingRepository) return;
     final previous = _localSignature;
     if (previous == null) {
       _localSignature = signature;
@@ -1457,12 +1485,14 @@ class _TimelineScreenState extends State<TimelineScreen>
   Future<void> _runLocalCheckout(String branch) async {
     if (_pullingRemote != null || _branchApplyBusy) return;
     try {
-      await widget.repository.checkoutLocalBranch(branch);
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('$branch 체크아웃')));
-      await _reloadTimelineAfterCherryPick(null);
+      await _changingRepository(() async {
+        await widget.repository.checkoutLocalBranch(branch);
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$branch 체크아웃')));
+        await _reloadTimelineAfterCherryPick(null);
+      });
     } on ProcessException catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1960,14 +1990,16 @@ class _TimelineScreenState extends State<TimelineScreen>
     );
     if (approved != true || !mounted) return;
     try {
-      await widget.repository.deleteLocalBranch(branch);
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('$branch 브랜치 삭제됨')));
-      // The deleted ref may be the timeline's base or decorate loaded rows, so
-      // the whole page reloads rather than patching refs in place.
-      await _reloadTimelineAfterCherryPick(null);
+      await _changingRepository(() async {
+        await widget.repository.deleteLocalBranch(branch);
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$branch 브랜치 삭제됨')));
+        // The deleted ref may be the timeline's base or decorate loaded rows,
+        // so the whole page reloads rather than patching refs in place.
+        await _reloadTimelineAfterCherryPick(null);
+      });
     } on ProcessException catch (error) {
       if (!mounted) return;
       if (error.message.contains('used by worktree')) {
@@ -2013,19 +2045,23 @@ class _TimelineScreenState extends State<TimelineScreen>
     );
     if (approved != true || !mounted) return;
     try {
-      await widget.repository.removeWorktree(path);
-      await widget.repository.deleteLocalBranch(branch);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            size == null
-                ? '$branch 브랜치와 워크트리 삭제됨'
-                : '$branch 브랜치와 워크트리 삭제됨 · ${byteSizeLabel(size)} 확보',
+      // 클로저 안에서는 위의 널 검사가 이어지지 않으니 여기서 붙잡아 둔다.
+      final worktree = path;
+      await _changingRepository(() async {
+        await widget.repository.removeWorktree(worktree);
+        await widget.repository.deleteLocalBranch(branch);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              size == null
+                  ? '$branch 브랜치와 워크트리 삭제됨'
+                  : '$branch 브랜치와 워크트리 삭제됨 · ${byteSizeLabel(size)} 확보',
+            ),
           ),
-        ),
-      );
-      await _reloadTimelineAfterCherryPick(null);
+        );
+        await _reloadTimelineAfterCherryPick(null);
+      });
     } on ProcessException catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
