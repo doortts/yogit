@@ -280,7 +280,15 @@ void main() {
       if (label.evaluate().isEmpty) continue;
       final text = tester.widget<Text>(label);
       final painter = TextPainter(
-        text: TextSpan(text: text.data, style: text.style),
+        text: TextSpan(
+          text: text.data,
+          // 화면이 실제로 그리는 스타일로 잰다. 칩이 들고 있는 TextStyle에는
+          // 글자 간격이 없고 상속 쪽에만 있어서, 그것만 재면 글자마다 조금씩
+          // 짧게 나오고 이름 끝이 테두리에 깎인다.
+          style: DefaultTextStyle.of(
+            tester.element(label),
+          ).style.merge(text.style),
+        ),
         textDirection: TextDirection.ltr,
       )..layout();
 

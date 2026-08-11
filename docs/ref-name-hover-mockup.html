@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>잘린 브랜치/태그 이름 — hover 시안</title>
+<style>
+  :root {
+    --bg: #1c1c1e;
+    --surface: #232325;
+    --row: #1f1f21;
+    --row-hover: #26262a;
+    --border: #37373b;
+    --text: #f5f5f7;
+    --muted: #8a8a90;
+    --hash: #e0605f;
+    --blue: #6ea8fe;
+    --purple: #c99aff;
+    --green: #5cb270;
+    --selected: #234d72;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 28px 60px;
+    background: #141416;
+    color: var(--text);
+    font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  }
+  h1 { font-size: 19px; margin: 0 0 4px; font-weight: 650; }
+  .lede { color: var(--muted); margin: 0 0 28px; max-width: 70ch; }
+  h2 {
+    font-size: 14px; margin: 34px 0 6px; font-weight: 650;
+    display: flex; align-items: baseline; gap: 9px;
+  }
+  h2 .tag {
+    font-size: 10px; font-weight: 600; letter-spacing: .04em;
+    padding: 2px 7px; border-radius: 999px;
+    background: rgba(110,168,254,.16); color: var(--blue);
+  }
+  h2 .tag.alt { background: rgba(201,154,255,.16); color: var(--purple); }
+  .note { color: var(--muted); margin: 0 0 12px; max-width: 74ch; }
+  .note b { color: var(--text); font-weight: 600; }
+
+  /* ── 타임라인 판 ─────────────────────────────────── */
+  .pane {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    overflow: visible;
+    max-width: 860px;
+  }
+  .head, .row {
+    display: grid;
+    grid-template-columns: 232px 96px 96px 1fr;
+    align-items: center;
+  }
+  .head {
+    height: 30px;
+    border-bottom: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 10.5px; letter-spacing: .07em; font-weight: 600;
+  }
+  .head > div { padding: 0 12px; }
+  .row { height: 30px; position: relative; }
+  .row + .row { border-top: 1px solid rgba(255,255,255,.03); }
+  .row.hovered { background: var(--row-hover); }
+  .row.selected { background: var(--selected); }
+  .cell-refs { padding: 0 8px; min-width: 0; display: flex; align-items: center; }
+  .cell-graph { padding: 0 12px; color: var(--muted); }
+  .cell-hash { padding: 0 12px; color: var(--hash); font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .cell-msg { padding: 0 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* 칩 */
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    height: 19px; padding: 0 5px;
+    border-radius: 5px; border: 1px solid;
+    font-size: 11.5px; white-space: nowrap;
+    max-width: 100%; overflow: hidden;
+  }
+  .chip .glyph { opacity: .8; font-size: 10px; }
+  .chip.b { background: rgba(110,168,254,.18); border-color: rgba(110,168,254,.30); color: var(--blue); }
+  .chip.p { background: rgba(201,154,255,.18); border-color: rgba(201,154,255,.30); color: var(--purple); }
+  .chip.g { background: rgba(92,178,112,.18); border-color: rgba(92,178,112,.30); color: var(--green); }
+  .chip.dim { opacity: .45; }
+
+  /* 그래프 레일 흉내 */
+  .rail { position: relative; height: 100%; }
+  .rail::before {
+    content: ""; position: absolute; left: 14px; top: 0; bottom: 0;
+    width: 2px; background: rgba(110,168,254,.55);
+  }
+  .node {
+    position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--bg); border: 2px solid var(--blue);
+  }
+  .arrow {
+    position: absolute; left: -30px; top: 50%; transform: translateY(-50%);
+    width: 26px; height: 1px; background: rgba(110,168,254,.5);
+  }
+  .arrow::after {
+    content: ""; position: absolute; right: 0; top: -3px;
+    border: 3.5px solid transparent; border-left-color: rgba(110,168,254,.5);
+  }
+
+  /* ── A안: 옆으로 열리는 카드 ─────────────────────── */
+  .sidecard {
+    position: absolute; left: 224px; top: 50%; transform: translateY(-50%);
+    background: rgba(255,255,255,.92); color: #000;
+    padding: 5px 10px; border-radius: 4px;
+    font-size: 13px; white-space: nowrap;
+    box-shadow: 0 3px 12px rgba(0,0,0,.45);
+    z-index: 5;
+  }
+
+  /* ── B안: 칩이 그대로 펴짐 ───────────────────────── */
+  .grown {
+    position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
+    z-index: 5; max-width: none;
+    box-shadow: 0 3px 12px rgba(0,0,0,.45);
+  }
+
+  .legend {
+    display: flex; gap: 22px; flex-wrap: wrap;
+    margin-top: 10px; color: var(--muted); font-size: 12px;
+  }
+  .legend b { color: var(--text); font-weight: 600; }
+  table { border-collapse: collapse; margin-top: 10px; font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 16px 6px 0; vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  code {
+    font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+    background: var(--surface); padding: 1px 5px; border-radius: 4px;
+  }
+</style>
+</head>
+<body>
+
+<h1>잘린 브랜치·태그 이름에 hover하면 전체 이름</h1>
+<p class="lede">
+  BRANCH / TAG 칸은 이름을 <b>앞에서부터</b> 줄인다. 꼬리가 남으니 대개는 알아볼 수 있지만
+  <code>…ne-palette-assignments</code>처럼 앞이 통째로 사라지면 어느 브랜치인지 못 읽는다.
+  잘린 이름에만 hover로 전체를 보여준다. 칸 밖으로 넘어가도 된다.
+</p>
+
+<h2>A안 — 옆으로 열리는 카드 <span class="tag">이미 있는 부품</span></h2>
+<p class="note">
+  사이드바가 잘린 이름에 쓰는 <code>SideTooltip</code>을 그대로 타임라인 칩에 붙인다.
+  행과 <b>같은 줄</b> 오른쪽에 열려서 아래 행을 가리지 않고, 오른쪽 끝에 자리가 없으면 왼쪽으로 비킨다.
+  앱 안에서 이미 한 번 배운 동작이라 새로 익힐 것이 없다.
+</p>
+<div class="pane">
+  <div class="head">
+    <div>BRANCH / TAG</div><div>GRAPH</div><div>HASH</div><div>COMMIT MESSAGE</div>
+  </div>
+  <div class="row">
+    <div class="cell-refs"><span class="chip b"><span class="glyph">⑂</span>demo/conflict-sample</span></div>
+    <div class="cell-graph"><div class="rail"><span class="arrow"></span><span class="node"></span></div></div>
+    <div class="cell-hash">a888a6e</div>
+    <div class="cell-msg">demo: add a sample line where main also adds one</div>
+  </div>
+  <div class="row hovered">
+    <div class="cell-refs"><span class="chip p"><span class="glyph">⑂</span>…ne-palette-assignments</span></div>
+    <div class="cell-graph"><div class="rail"><span class="arrow"></span><span class="node"></span></div></div>
+    <div class="cell-hash">6bc1e88</div>
+    <div class="cell-msg">fix: reject malformed palette records</div>
+    <div class="sidecard">codex/branch-lane-palette-assignments</div>
+  </div>
+  <div class="row">
+    <div class="cell-refs"><span class="chip g"><span class="glyph">◇</span>…before-rebase-merge</span></div>
+    <div class="cell-graph"><div class="rail"><span class="arrow"></span><span class="node"></span></div></div>
+    <div class="cell-hash">5101293</div>
+    <div class="cell-msg">feat: write the merge message before the merge exists</div>
+  </div>
+</div>
+<div class="legend">
+  <span><b>장점</b> 새 부품이 없다 · 사이드바와 같은 동작 · 긴 이름도 한 줄</span>
+  <span><b>단점</b> 브랜치 색이 카드에서 사라진다</span>
+</div>
+
+<h2>B안 — 칩이 제자리에서 펴진다 <span class="tag alt">새로 만들어야 함</span></h2>
+<p class="note">
+  칩이 자기 자리에서 <b>전체 이름 너비만큼 자라</b> GRAPH 칸 위로 넘어간다.
+  브랜치 색과 테두리를 그대로 들고 가서, 읽는 사람이 보던 물건이 그대로 커진 것으로 읽힌다.
+  대신 그래프 레일을 잠깐 덮는다.
+</p>
+<div class="pane">
+  <div class="head">
+    <div>BRANCH / TAG</div><div>GRAPH</div><div>HASH</div><div>COMMIT MESSAGE</div>
+  </div>
+  <div class="row">
+    <div class="cell-refs"><span class="chip b"><span class="glyph">⑂</span>demo/conflict-sample</span></div>
+    <div class="cell-graph"><div class="rail"><span class="arrow"></span><span class="node"></span></div></div>
+    <div class="cell-hash">a888a6e</div>
+    <div class="cell-msg">demo: add a sample line where main also adds one</div>
+  </div>
+  <div class="row hovered">
+    <div class="cell-refs"></div>
+    <div class="cell-graph"><div class="rail"><span class="arrow"></span><span class="node"></span></div></div>
+    <div class="cell-hash">6bc1e88</div>
+    <div class="cell-msg">fix: reject malformed palette records</div>
+    <span class="chip p grown"><span class="glyph">⑂</span>codex/branch-lane-palette-assignments</span>
+  </div>
+  <div class="row">
+    <div class="cell-refs"><span class="chip g"><span class="glyph">◇</span>…before-rebase-merge</span></div>
+    <div class="cell-graph"><div class="rail"><span class="arrow"></span><span class="node"></span></div></div>
+    <div class="cell-hash">5101293</div>
+    <div class="cell-msg">feat: write the merge message before the merge exists</div>
+  </div>
+</div>
+<div class="legend">
+  <span><b>장점</b> 색과 모양이 이어진다 · 자리가 안 바뀐다</span>
+  <span><b>단점</b> 그래프 레일을 덮는다 · 부품을 새로 만든다</span>
+</div>
+
+<h2>어느 경우에 나오나 — 두 안 공통</h2>
+<div class="pane">
+  <div class="head">
+    <div>BRANCH / TAG</div><div>GRAPH</div><div>HASH</div><div>COMMIT MESSAGE</div>
+  </div>
+  <div class="row hovered">
+    <div class="cell-refs"><span class="chip b"><span class="glyph">⑂</span>main</span></div>
+    <div class="cell-graph"><div class="rail"><span class="node"></span></div></div>
+    <div class="cell-hash">1f07726</div>
+    <div class="cell-msg">이름이 다 보인다 → 아무것도 안 뜬다</div>
+  </div>
+  <div class="row hovered">
+    <div class="cell-refs"><span class="chip p"><span class="glyph">⑂</span>…ne-palette-assignments</span></div>
+    <div class="cell-graph"><div class="rail"><span class="node"></span></div></div>
+    <div class="cell-hash">6bc1e88</div>
+    <div class="cell-msg">앞이 잘렸다 → 전체 이름이 뜬다</div>
+    <div class="sidecard">codex/branch-lane-palette-assignments</div>
+  </div>
+  <div class="row hovered">
+    <div class="cell-refs"><span class="chip b dim"><span class="glyph">⑂</span>…e/pr-monitoring</span></div>
+    <div class="cell-graph"><div class="rail"><span class="node"></span></div></div>
+    <div class="cell-hash">4567b71</div>
+    <div class="cell-msg">줄 이름(흐린 칩)도 잘렸으면 똑같이 뜬다</div>
+    <div class="sidecard">feature/pr-monitoring</div>
+  </div>
+  <div class="row selected">
+    <div class="cell-refs"><span class="chip p"><span class="glyph">⑂</span>…ne-palette-assignments</span></div>
+    <div class="cell-graph"><div class="rail"><span class="node"></span></div></div>
+    <div class="cell-hash">6bc1e88</div>
+    <div class="cell-msg">선택만으로는 안 뜬다 — 마우스가 올라와야 한다</div>
+  </div>
+</div>
+
+<h2>계약</h2>
+<table>
+  <tr><th>1</th><td>이름이 칸 안에 다 들어가면 아무것도 안 뜬다. 이미 보이는 것을 덮는 건 방해다.</td></tr>
+  <tr><th>2</th><td>잘린 칩에 마우스가 올라가면 전체 이름이 뜬다. 칸 밖으로 넘어가도 된다.</td></tr>
+  <tr><th>3</th><td>흐린 줄 이름 칩도 같은 규칙을 따른다.</td></tr>
+  <tr><th>4</th><td>마우스가 벗어나면 곧바로 사라진다. 클릭이나 선택은 관계없다.</td></tr>
+  <tr><th>5</th><td>한 행에 칩이 여러 개면 마우스가 올라간 그 칩의 이름만 뜬다.</td></tr>
+  <tr><th>6</th><td>떠 있는 동안 마우스 입력을 가로채지 않는다 — 아래 행을 계속 누를 수 있다.</td></tr>
+</table>
+
+</body>
+</html>

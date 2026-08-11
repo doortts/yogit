@@ -2944,22 +2944,30 @@ class _TimelineScreenState extends State<TimelineScreen>
           style: style,
         )
       : LayoutBuilder(
-          builder: (context, constraints) => Text(
-            fitRefName(
-              name,
-              // A glyph can ink a hair past the advance width it measures, so
-              // a name cut to exactly its box loses the last letter's tail to
-              // the chip's border. Stop one point short of the edge.
-              constraints.maxWidth - _refNameInkCushion,
-              (text) => _textWidth(text, style),
-            ),
-            maxLines: 1,
-            softWrap: false,
-            // The string is already cut to the width; clip only guards against
-            // a font that draws a shade wider than it measures.
-            overflow: TextOverflow.clip,
-            style: style,
-          ),
+          builder: (context, constraints) {
+            // Measure the style the row actually paints with. A chip carries
+            // no letter spacing of its own and inherits a quarter point of it,
+            // so measuring the bare style comes up short by that much per
+            // character — a couple of points on a short name, five on a long
+            // one, and the tail is cut off inside its own box.
+            final painted = DefaultTextStyle.of(context).style.merge(style);
+            return Text(
+              fitRefName(
+                name,
+                // A glyph can ink a hair past the advance width it measures, so
+                // a name cut to exactly its box loses the last letter's tail to
+                // the chip's border. Stop one point short of the edge.
+                constraints.maxWidth - _refNameInkCushion,
+                (text) => _textWidth(text, painted),
+              ),
+              maxLines: 1,
+              softWrap: false,
+              // The string is already cut to the width; clip only guards
+              // against a font that draws a shade wider than it measures.
+              overflow: TextOverflow.clip,
+              style: style,
+            );
+          },
         );
 
   /// The width the timeline viewport has, for clamping the ref modal.
