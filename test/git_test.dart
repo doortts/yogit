@@ -1931,6 +1931,44 @@ void main() {
     expect(probe.existsSync(), isFalse);
   });
 
+  test('a preview directory git never registered is swept once it ages', () async {
+    final root = await Directory.systemTemp.createTemp('yogit_orphan_sweep_');
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    await File('${root.path}/base.txt').writeAsString('base\n');
+    await _git(root, ['add', 'base.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+
+    // 앱이 미리보기 도중 죽으면 장부에 없는 빈 디렉터리만 남는다. 장부를 훑는
+    // 청소는 이런 것을 영영 못 본다.
+    final orphan = await Directory.systemTemp.createTemp(
+      'yogit_rebase_preview_',
+    );
+    final fresh = await Directory.systemTemp.createTemp(
+      'yogit_merge_preview_',
+    );
+    final stranger = await Directory.systemTemp.createTemp('yogit_unrelated_');
+    addTearDown(() async {
+      for (final directory in [orphan, fresh, stranger]) {
+        if (directory.existsSync()) await directory.delete(recursive: true);
+      }
+    });
+    expect(
+      (await Process.run('touch', ['-t', '202001010000', orphan.path])).exitCode,
+      0,
+    );
+
+    await GitRepository(root.path).cleanupStalePreviewWorktrees();
+
+    expect(orphan.existsSync(), isFalse, reason: '오래된 고아는 쓸어낸다');
+    expect(
+      fresh.existsSync(),
+      isTrue,
+      reason: '방금 생긴 것은 지금 돌고 있는 미리보기일 수 있다',
+    );
+    expect(stranger.existsSync(), isTrue, reason: '우리 이름이 아닌 것은 남긴다');
+  });
+
   test('merge preview applies locally and restores both exact tips', () async {
     final fixture = await _branchPreviewFixture();
     addTearDown(() => fixture.root.delete(recursive: true));

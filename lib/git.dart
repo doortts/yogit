@@ -625,6 +625,12 @@ const conflictForecastCommitCeiling = 30;
 /// 일은 없으니, 이보다 오래된 프로브는 강제 종료가 남긴 것이다.
 const staleConflictProbeAge = Duration(hours: 1);
 
+/// How long a preview directory with nothing pointing at it has to sit before
+/// it is taken as abandoned. Longer than the probe's hour because a reader can
+/// leave a preview open on screen and come back to it; a day of no writes at
+/// all means the session that owned it is gone.
+const stalePreviewDirectoryAge = Duration(days: 1);
+
 class MergePreviewSession {
   MergePreviewSession({
     required GitRepository repository,
@@ -2886,6 +2892,38 @@ class GitRepository implements FullDiffRepository {
       }
     }
     await _ignoreCommand(const ['worktree', 'prune'], workingDirectory: root);
+    await _sweepOrphanPreviewDirectories();
+  }
+
+  /// The preview directories no worktree list can name. A preview registers
+  /// itself with git only after the directory exists, so a session killed in
+  /// between leaves a directory nothing points at — invisible to the walk
+  /// above, and it never leaves on its own. They arrive empty and stay
+  /// forever: a hundred and more of them can pile up in a fortnight.
+  ///
+  /// Age is what makes this safe to do by name alone. Another window, or
+  /// another repository's app, may be part way through a preview of its own
+  /// right now, and its directory would look exactly like these. One that has
+  /// sat untouched since yesterday belongs to nobody.
+  Future<void> _sweepOrphanPreviewDirectories() async {
+    final scratch = Directory.systemTemp;
+    if (!await scratch.exists()) return;
+    final cutoff = DateTime.now().subtract(stalePreviewDirectoryAge);
+    await for (final entry in scratch.list(followLinks: false)) {
+      if (entry is! Directory) continue;
+      final name = entry.uri.pathSegments
+          .where((segment) => segment.isNotEmpty)
+          .last;
+      if (!name.startsWith(RegExp(r'yogit_(?:merge|rebase)_preview_'))) {
+        continue;
+      }
+      try {
+        if (entry.statSync().modified.isAfter(cutoff)) continue;
+        await entry.delete(recursive: true);
+      } on FileSystemException {
+        // 다른 프로세스가 방금 치웠거나 권한이 없으면 남겨 둔다.
+      }
+    }
   }
 
   /// [message] is the merge commit's message, verbatim — subject, blank line,
