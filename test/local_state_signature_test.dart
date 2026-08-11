@@ -11,6 +11,8 @@ String signature(String headCommit, String headRef, Map<String, String> tips) =>
     ].join('\n');
 
 void main() {
+  _movedBranchDetail();
+  _movedBranchLine();
   group('parse', () {
     test('reads HEAD and every branch tip while sitting on a branch', () {
       final state = parseLocalState(
@@ -301,6 +303,118 @@ void main() {
           }),
         ),
         'work 체크아웃, work 브랜치 갱신됨, fresh 브랜치 추가됨, spike 브랜치 삭제됨',
+      );
+    });
+  });
+}
+
+/// docs/local-change-summary-mockup.html — 요약 한 줄 뒤에 무슨 작업이었고 어떤
+/// 커밋이 오갔는지를 붙이려면, git이 남긴 문장에서 그 둘을 읽어낼 수 있어야 한다.
+void _movedBranchDetail() {
+  group('branchOperationFromReflog', () {
+    test('git이 쓰는 문장에서 작업 이름만 꺼낸다', () {
+      // 전부 이 저장소의 reflog에 실제로 남아 있는 모양이다.
+      for (final entry in {
+        'commit: fix: let the app say a thing once, not twice': 'commit',
+        'commit (amend): fix: one alert width': 'amend',
+        'commit (merge): Merge branch main': 'merge',
+        'pull: Fast-forward': 'pull',
+        'pull --rebase (pick): fix: one alert width': 'pull',
+        "merge feature/pr-monitoring: Merge made by the 'ort' strategy.":
+            'merge',
+        'rebase (finish): returning to refs/heads/main': 'rebase',
+        'rebase (pick): fix: match the alert to the approved mockup': 'rebase',
+        'reset: moving to 954e6e8': 'reset',
+        'checkout: moving from a to b': 'checkout',
+      }.entries) {
+        expect(branchOperationFromReflog(entry.key), entry.value);
+      }
+    });
+
+    test('읽을 것이 없으면 아무 이름도 지어내지 않는다', () {
+      expect(branchOperationFromReflog(''), isNull);
+      expect(branchOperationFromReflog('   '), isNull);
+    });
+  });
+
+  group('parseMovedCommits', () {
+    test('나간 쪽과 들어온 쪽을 갈라 읽는다', () {
+      // `git log --left-right --oneline old...new`: 왼쪽이 옛 tip이라 <가 나간 것.
+      const output =
+          '< 32ee935 fix: let the app say a thing once, not twice\n'
+          '> 89a61cb feat: let a remote branch stand as the base\n'
+          '> 06fdbd1 test: pin the origin/HEAD drop against real git output\n';
+
+      final commits = parseMovedCommits(output);
+
+      expect(commits, hasLength(3));
+      expect(commits.first.incoming, isFalse);
+      expect(commits.first.shortSha, '32ee935');
+      expect(commits.first.subject, 'fix: let the app say a thing once, not twice');
+      expect(commits.last.incoming, isTrue);
+      expect(commits.last.shortSha, '06fdbd1');
+    });
+
+    test('알아볼 수 없는 줄은 버린다', () {
+      expect(parseMovedCommits('\n rubbish \n< abc\n'), isEmpty);
+    });
+  });
+
+  group('parseMovedCounts', () {
+    test('나간 개수와 들어온 개수를 읽는다', () {
+      expect(parseMovedCounts('3\t0\n'), (outgoing: 3, incoming: 0));
+      expect(parseMovedCounts('2\t5'), (outgoing: 2, incoming: 5));
+    });
+
+    test('git이 답하지 못한 것은 없는 것으로 둔다', () {
+      expect(parseMovedCounts(''), isNull);
+      expect(parseMovedCounts('nonsense'), isNull);
+    });
+  });
+}
+
+/// 시안의 머리줄 문구를 그대로 못박는다.
+void _movedBranchLine() {
+  group('movedBranchLine', () {
+    test('받아온 커밋은 들어온 것으로 말한다', () {
+      expect(
+        movedBranchLine('main', operation: 'pull', outgoing: 0, incoming: 3),
+        'main · pull · 커밋 3개 들어옴',
+      );
+    });
+
+    test('평범한 커밋은 작업 이름을 되풀이하지 않는다', () {
+      expect(
+        movedBranchLine('main', operation: 'commit', outgoing: 0, incoming: 1),
+        'main · 커밋 1개 들어옴',
+      );
+    });
+
+    test('되감긴 것은 물러난 것으로 말한다', () {
+      expect(
+        movedBranchLine('main', operation: 'reset', outgoing: 2, incoming: 0),
+        'main · reset · 커밋 2개 물러남',
+      );
+    });
+
+    test('다시 쓰인 것은 양쪽을 다 말한다', () {
+      expect(
+        movedBranchLine('main', operation: 'rebase', outgoing: 3, incoming: 3),
+        'main · rebase · 커밋 3개 나가고 3개 들어옴',
+      );
+    });
+
+    test('셀 수 없으면 sha 두 개로 물러난다', () {
+      expect(
+        movedBranchLine(
+          'main',
+          operation: null,
+          outgoing: null,
+          incoming: null,
+          before: '3948f07',
+          after: '89a61cb',
+        ),
+        'main 갱신됨 · 3948f07 → 89a61cb',
       );
     });
   });

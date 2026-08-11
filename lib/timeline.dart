@@ -463,6 +463,46 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// A fingerprint the user chose not to load, so the same change is not asked
   /// about twice.
   String? _declinedSignature;
+
+  /// How many moved branches get asked about. Past this the notice states the
+  /// fact and stops spending round trips on a line already too long to read.
+  static const _detailedBranchLimit = 3;
+
+  /// 밖에서 벌어진 변화를 설명하는 알림. 스스로 사라지지 않고, esc나 바깥 클릭을
+  /// 기다린다. 읽는 중에 저장소가 또 바뀌면 새 것으로 갈린다 — 알림이 쌓이면
+  /// 그때부터는 알림이 아니라 잔해다.
+  LocalChangeNotice? _localChangeNotice;
+
+  final _localChangeNoticeOverlay = OverlayPortalController();
+
+  /// 화면에서 자리를 차지하지 않는 걸개. 카드는 상태 표시줄 바로 위 왼쪽 아래에
+  /// 뜬다 — 타임라인을 가리지 않는 자리다.
+  Widget _localChangeNoticeHost() => OverlayPortal(
+    controller: _localChangeNoticeOverlay,
+    overlayChildBuilder: (context) {
+      final notice = _localChangeNotice;
+      if (notice == null) return const SizedBox.shrink();
+      return Positioned(
+        left: 16,
+        bottom: _TimelineScreenState._statusBarHeight + 16,
+        child: notice,
+      );
+    },
+    child: const SizedBox.shrink(),
+  );
+
+  void _showLocalChangeNotice(LocalChangeNotice notice) {
+    _rebuild(() => _localChangeNotice = notice);
+    if (!_localChangeNoticeOverlay.isShowing) {
+      _localChangeNoticeOverlay.show();
+    }
+  }
+
+  void _dismissLocalChangeNotice() {
+    if (_localChangeNotice == null) return;
+    _rebuild(() => _localChangeNotice = null);
+    if (_localChangeNoticeOverlay.isShowing) _localChangeNoticeOverlay.hide();
+  }
   var _localChangePromptOpen = false;
   final _fetchingRemotes = ValueNotifier(false);
   final _fetchError = ValueNotifier<Object?>(null);
@@ -765,12 +805,82 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (!mounted) return;
     // A reload that arrives on its own has to say what it took in, and one the
     // user asked for still owes them the answer.
-    final summary = localStateChangeSummary(change);
-    if (summary != null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(summary)));
+    await _raiseLocalChangeNotice(change);
+  }
+
+  /// Turns what changed into the notice that explains it, asking git only for
+  /// the parts the fingerprint cannot know: what the operation was, and which
+  /// commits it moved.
+  Future<void> _raiseLocalChangeNotice(LocalStateChange change) async {
+    if (change.isEmpty) return;
+    final repository = widget.repository;
+    final lines = <String>[];
+    if (change.headRefChanged) {
+      lines.add(
+        change.currentBranch == null
+            ? 'HEAD 분리됨'
+            : '${change.currentBranch} 체크아웃',
+      );
     }
+    // Asking about every branch a terminal sweep touched would be a dozen
+    // round trips for a line nobody reads to the end. The rest are counted.
+    final detailed = change.moved.take(_detailedBranchLimit);
+    ({int outgoing, int incoming})? firstCounts;
+    for (final tip in detailed) {
+      final counts = await repository.countMovedCommits(tip.before, tip.after);
+      firstCounts ??= counts;
+      lines.add(
+        movedBranchLine(
+          tip.branch,
+          operation: await repository.loadBranchOperation(tip.branch),
+          outgoing: counts?.outgoing,
+          incoming: counts?.incoming,
+          before: tip.before,
+          after: tip.after,
+        ),
+      );
+    }
+    for (final tip in change.moved.skip(_detailedBranchLimit)) {
+      lines.add('${tip.branch} 브랜치 갱신됨');
+    }
+    // 터미널이 한 번에 열두 개를 지우면 열두 줄짜리 카드가 된다. 이름을 나열하는
+    // 기존 한계와 같은 선에서, 넘치면 세어서 말한다.
+    lines.addAll(branchLines(change.added, '추가됨'));
+    lines.addAll(branchLines(change.removed, '삭제됨'));
+    if (lines.isEmpty) return;
+    // The commits themselves only fit when one thing happened. Two branches
+    // moving is already a list of its own.
+    final single = lines.length == 1 && change.moved.length == 1;
+    final commits = single
+        ? await repository.loadMovedCommits(
+            change.moved.single.before,
+            change.moved.single.after,
+            limit: LocalChangeNotice.maxCommits + 1,
+          )
+        : const <MovedCommit>[];
+    // 개수는 머리줄을 지으며 이미 셌다. 같은 것을 두 번 묻지 않는다.
+    final total = single && firstCounts != null
+        ? firstCounts.outgoing + firstCounts.incoming
+        : commits.length;
+    if (!mounted) return;
+    _showLocalChangeNotice(
+      LocalChangeNotice(
+        headline: lines.first,
+        lines: lines.skip(1).toList(),
+        commits: commits
+            .take(LocalChangeNotice.maxCommits)
+            .map(
+              (commit) => (
+                incoming: commit.incoming,
+                shortSha: commit.shortSha,
+                subject: commit.subject,
+              ),
+            )
+            .toList(),
+        more: math.max(0, total - LocalChangeNotice.maxCommits),
+        onDismiss: _dismissLocalChangeNotice,
+      ),
+    );
   }
 
   @override
@@ -1257,7 +1367,10 @@ class _TimelineScreenState extends State<TimelineScreen>
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.escape) {
-      if (_fullDiffOpen) {
+      // 방금 선 알림이 가장 앞의 관심사다. 미리보기나 diff보다 먼저 닫힌다.
+      if (_localChangeNotice != null) {
+        _dismissLocalChangeNotice();
+      } else if (_fullDiffOpen) {
         _closeFullDiff();
       } else if (_previewDiffOpen) {
         _closePreviewDiff();
@@ -1633,6 +1746,9 @@ class _TimelineScreenState extends State<TimelineScreen>
               ],
             ),
           ),
+          // 알림은 오버레이로 뜬다. 화면 구조에 Stack을 얹으면 미리보기 판이
+          // 겹쳐 놓인 것이 되어, 그것이 나란한 형제라는 약속이 깨진다.
+          _localChangeNoticeHost(),
           _statusBar(),
         ],
       ),
@@ -2418,6 +2534,10 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// tall, which is [TimelineScreen.rowHeight] less the hairline of background
   /// the row keeps above and below so stacked chips never touch.
   static const _rowChipHeight = TimelineScreen.rowHeight - 2;
+
+  /// The strip along the bottom. What floats above the timeline has to clear
+  /// it rather than sit on it.
+  static const _statusBarHeight = 29.0;
 
   /// The header label and the hash cell, without the colors that come and go
   /// with hover and selection. Shared with the double-click fit, which measures

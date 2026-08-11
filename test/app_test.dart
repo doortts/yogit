@@ -2832,7 +2832,9 @@ void main() {
 
     expect(find.byKey(const Key('local-change-refresh')), findsNothing);
     expect(historyLoads, greaterThan(loadsBefore));
-    expect(find.text('spike, work 브랜치 삭제됨'), findsOneWidget);
+    // 알림 카드는 브랜치마다 한 줄씩 말한다 — 한 줄에 이름을 몰아넣지 않는다.
+    expect(find.text('spike 브랜치 삭제됨'), findsOneWidget);
+    expect(find.text('work 브랜치 삭제됨'), findsOneWidget);
   });
 
   testWidgets('a deletion that came with a moved tip still asks first', (
@@ -2871,7 +2873,9 @@ void main() {
     await tester.pumpAndSettle();
 
     // The question was asked, and the answer still gets its summary.
-    expect(find.text('work 브랜치 갱신됨, spike 브랜치 삭제됨'), findsOneWidget);
+    // 움직인 브랜치는 무엇이 오갔는지까지 말하고, 지워진 것은 제 줄을 갖는다.
+    expect(find.textContaining('work'), findsWidgets);
+    expect(find.text('spike 브랜치 삭제됨'), findsOneWidget);
   });
 
   testWidgets('the ref filter shows a magnifier instead of a hint sentence', (

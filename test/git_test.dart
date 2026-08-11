@@ -257,6 +257,58 @@ void main() {
     expect(await repository.loadReflogBranchNames(), isEmpty);
   });
 
+  test('a moved branch says what moved it and what came of it', () async {
+    final commands = <List<String>>[];
+    final repository = GitRepository(
+      '/repo',
+      runner: (executable, args, {workingDirectory, environment}) async {
+        commands.add(args);
+        return ProcessResult(1, 0, switch (args.first) {
+          'reflog' => 'pull: Fast-forward\n',
+          'rev-list' => '0\t3\n',
+          _ =>
+            '> 89a61cb feat: let a remote branch stand as the base\n'
+                '> 06fdbd1 test: pin the origin/HEAD drop against real output\n'
+                '> 954e6e8 fix: stop drawing origin/HEAD as if it were a branch\n',
+        }, '');
+      },
+    );
+
+    expect(await repository.loadBranchOperation('main'), 'pull');
+    expect(await repository.countMovedCommits('old', 'new'), (
+      outgoing: 0,
+      incoming: 3,
+    ));
+    final commits = await repository.loadMovedCommits('old', 'new', limit: 9);
+    expect(commits, hasLength(3));
+    expect(commits.first.incoming, isTrue);
+    expect(commits.first.shortSha, '89a61cb');
+
+    expect(commands[0], ['reflog', 'show', '--format=%gs', '-n', '1', 'main']);
+    expect(commands[1], ['rev-list', '--left-right', '--count', 'old...new']);
+    expect(commands[2], [
+      'log',
+      '--left-right',
+      '--oneline',
+      '--no-abbrev-commit=false',
+      '-n',
+      '9',
+      'old...new',
+    ]);
+  });
+
+  test('a repository that cannot answer says nothing, and does not throw', () async {
+    final repository = GitRepository(
+      '/repo',
+      runner: (executable, args, {workingDirectory, environment}) async =>
+          throw const ProcessException('git', ['reflog']),
+    );
+
+    expect(await repository.loadBranchOperation('main'), isNull);
+    expect(await repository.countMovedCommits('old', 'new'), isNull);
+    expect(await repository.loadMovedCommits('old', 'new'), isEmpty);
+  });
+
   test('resolves a saved local branch before current and first local', () {
     const refs = RepoRefs(local: ['main', 'release'], current: 'main');
     expect(resolveBaseBranch(refs, 'release'), 'release');

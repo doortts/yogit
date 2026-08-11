@@ -952,3 +952,213 @@ class _SideTooltipLayout extends SingleChildLayoutDelegate {
   bool shouldRelayout(_SideTooltipLayout oldDelegate) =>
       oldDelegate.anchor != anchor;
 }
+
+/// One line of a [LocalChangeNotice]: a commit that changed hands.
+typedef NoticeCommit = ({bool incoming, String shortSha, String subject});
+
+/// What the timeline says when the repository changed under it — a pull in
+/// another window, a rebase from a terminal.
+///
+/// A line that scrolls past before it is read is no better than silence, so
+/// this one stays: `esc`, or a press anywhere else, takes it away. That is
+/// also what lets it carry the commits themselves rather than a count alone.
+class LocalChangeNotice extends StatelessWidget {
+  const LocalChangeNotice({
+    required this.headline,
+    required this.lines,
+    required this.commits,
+    required this.more,
+    required this.onDismiss,
+    super.key,
+  });
+
+  /// The first thing that changed, said in full.
+  final String headline;
+
+  /// Everything else that changed, one line each. Empty when only one thing
+  /// did, which is when [commits] gets the room instead.
+  final List<String> lines;
+
+  /// The commits that changed hands, newest first.
+  final List<NoticeCommit> commits;
+
+  /// How many more there were than the card could hold.
+  final int more;
+
+  final VoidCallback onDismiss;
+
+  /// The list stops here. The notice stays until it is read, but a card taller
+  /// than this stops being a notice and starts being a window — and the whole
+  /// story is on the timeline behind it either way.
+  static const maxCommits = 8;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.timelineTheme;
+    final detail = lines.isNotEmpty || commits.isNotEmpty || more > 0;
+    return TapRegion(
+      // The press that dismisses is still the press the reader meant: it
+      // selects the row it landed on, and the notice goes with it.
+      onTapOutside: (_) => onDismiss(),
+      child: Container(
+        key: const Key('local-change-notice'),
+        constraints: const BoxConstraints(minWidth: 420, maxWidth: 640),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: palette.raised,
+          borderRadius: BorderRadius.circular(5),
+          border: Border.all(color: palette.border),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x80000000),
+              blurRadius: 18,
+              offset: Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    headline,
+                    key: const Key('local-change-notice-headline'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: palette.text, fontSize: 13),
+                  ),
+                ),
+                const SizedBox(width: 20),
+                // A notice that will not leave on its own has to show the way
+                // out.
+                _EscHint(palette: palette, onPressed: onDismiss),
+              ],
+            ),
+            if (detail) ...[
+              const SizedBox(height: 9),
+              Divider(height: 1, color: palette.border),
+              const SizedBox(height: 8),
+              for (final line in lines)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: Text(
+                    line,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: palette.text, fontSize: 13),
+                  ),
+                ),
+              for (final commit in commits)
+                _NoticeCommitRow(commit: commit, palette: palette),
+              if (more > 0)
+                Padding(
+                  padding: const EdgeInsets.only(left: 17, top: 3),
+                  child: Text(
+                    '외 $more개',
+                    key: const Key('local-change-notice-more'),
+                    style: TextStyle(color: palette.muted, fontSize: 12),
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NoticeCommitRow extends StatelessWidget {
+  const _NoticeCommitRow({required this.commit, required this.palette});
+
+  final NoticeCommit commit;
+  final TimelineThemePalette palette;
+
+  @override
+  Widget build(BuildContext context) {
+    // What left the branch is no longer the branch's: it reads a shade back.
+    final faded = commit.incoming ? 1.0 : 0.62;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
+        children: [
+          SizedBox(
+            width: 17,
+            child: Text(
+              commit.incoming ? '+' : '−',
+              style: TextStyle(
+                color: commit.incoming ? mainAccent : deletedPink,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          Text(
+            commit.shortSha,
+            style: TextStyle(
+              color: hashRed.withValues(alpha: faded),
+              fontFamily: 'monospace',
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              commit.subject,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: palette.text.withValues(alpha: faded),
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EscHint extends StatelessWidget {
+  const _EscHint({required this.palette, required this.onPressed});
+
+  final TimelineThemePalette palette;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: SystemMouseCursors.click,
+    child: GestureDetector(
+      key: const Key('local-change-notice-dismiss'),
+      behavior: HitTestBehavior.opaque,
+      onTap: onPressed,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(
+              color: palette.background,
+              border: Border.all(color: palette.border),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              'esc',
+              style: TextStyle(
+                color: palette.muted,
+                fontFamily: 'monospace',
+                fontSize: 10.5,
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text('닫기', style: TextStyle(color: palette.muted, fontSize: 11)),
+        ],
+      ),
+    ),
+  );
+}

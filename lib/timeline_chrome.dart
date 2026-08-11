@@ -236,7 +236,7 @@ extension _TimelineChrome on _TimelineScreenState {
   );
 
   Widget _normalStatusBarContent() => Container(
-    height: 29,
+    height: _TimelineScreenState._statusBarHeight,
     decoration: BoxDecoration(
       color: _palette.surface,
       border: Border(top: BorderSide(color: _palette.border)),

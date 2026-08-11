@@ -5,6 +5,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'full_diff_limits.dart';
+import 'local_state_signature.dart';
 
 typedef CommandRunner =
     Future<ProcessResult> Function(
@@ -2181,6 +2182,68 @@ class GitRepository implements FullDiffRepository {
       return const {};
     } on GitRepositoryException {
       return const {};
+    }
+  }
+
+  /// What git says it last did to [branch], from that branch's own reflog: a
+  /// pull, a rebase, a reset. Null when the reflog cannot say — expired,
+  /// disabled, or a branch git has no memory of.
+  Future<String?> loadBranchOperation(String branch) async {
+    try {
+      return branchOperationFromReflog(
+        (await _run(['reflog', 'show', '--format=%gs', '-n', '1', branch]))
+            .split('\n')
+            .first,
+      );
+    } on ProcessException {
+      return null;
+    } on GitRepositoryException {
+      return null;
+    }
+  }
+
+  /// How many commits the branch left behind and how many it took on. Counted
+  /// rather than listed, because the summary states the true number while the
+  /// list below it stops at what fits.
+  Future<({int outgoing, int incoming})?> countMovedCommits(
+    String before,
+    String after,
+  ) async {
+    try {
+      return parseMovedCounts(
+        await _run(['rev-list', '--left-right', '--count', '$before...$after']),
+      );
+    } on ProcessException {
+      return null;
+    } on GitRepositoryException {
+      return null;
+    }
+  }
+
+  /// The commits that actually changed hands, newest first, capped at [limit].
+  /// The cap is what keeps a first fetch of a decade-old repository from
+  /// building a notice nobody could read.
+  Future<List<MovedCommit>> loadMovedCommits(
+    String before,
+    String after, {
+    int limit = 9,
+  }) async {
+    try {
+      return parseMovedCommits(
+        await _run([
+          'log',
+          '--left-right',
+          '--oneline',
+          '--no-abbrev-commit=false',
+          '-n',
+          '$limit',
+          '$before...$after',
+        ]),
+      );
+    } on ProcessException {
+      return const [];
+    } on GitRepositoryException {
+      return const [];
     }
   }
 
