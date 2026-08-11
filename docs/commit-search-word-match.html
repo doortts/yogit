@@ -109,7 +109,8 @@
 
 <h2>규칙 <span class="tag">제목</span></h2>
 <ol class="rules">
-  <li><b>질의를 공백으로 쪼갠다.</b> <code>name hover</code>는 낱말 둘이다. 공백이 없으면 낱말 하나.</li>
+  <li><b>질의도 낱말로 쪼갠다.</b> <code>name hover</code>는 낱말 둘이다. 가르는 것은 공백만이
+      아니라 구두점도 마찬가지라, 붙여 넣은 <code>fix(merge)</code>도 낱말 둘로 읽는다.</li>
   <li><b>대상도 낱말로 쪼갠다.</b> 글자와 숫자의 연속이 낱말이고, 나머지는 모두 구분자다 —
       <code>fix(merge):</code>는 <code>fix</code>와 <code>merge</code>, <code>full_diff</code>는 <code>full</code>과 <code>diff</code>.</li>
   <li><b>질의의 낱말이 대상의 어느 낱말 안에 통째로 들어 있으면</b> 그 낱말은 찾힌 것이다.
@@ -192,6 +193,12 @@
       <td><span class="no">못 찾음</span><div class="sample">fix(merge): 충돌 표시를 바로잡는다</div></td>
     </tr>
     <tr class="">
+      <td class="mono q">fix(merge)
+        <div class="why">붙여 넣은 질의도 낱말 둘로 읽는다</div></td>
+      <td><span class="yes">찾음</span><div class="sample"><mark>fix(merge)</mark>: 충돌 표시를 바로잡는다</div></td>
+      <td><span class="yes">찾음</span><div class="sample"><mark>fix</mark>(<mark>merge</mark>): 충돌 표시를 바로잡는다</div></td>
+    </tr>
+    <tr class="">
       <td class="mono q">커밋
         <div class="why">조사가 붙어도 낱말 안에서 찾힌다</div></td>
       <td><span class="yes">찾음</span><div class="sample">feat: 타임라인에서 <mark>커밋</mark>을 찾는다</div></td>
@@ -258,12 +265,12 @@
     </tr>
     <tr>
       <td class="mono q">fix</td>
-      <td class="num ">147</td>
-      <td class="num good">140</td>
+      <td class="num ">146</td>
+      <td class="num good">139</td>
     </tr>
     <tr>
       <td class="mono q">card</td>
-      <td class="num bad">84</td>
+      <td class="num bad">85</td>
       <td class="num good">12</td>
     </tr>
     <tr>

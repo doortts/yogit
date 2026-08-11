@@ -402,7 +402,7 @@ extension _TimelineRows on _TimelineScreenState {
                         ],
                         Expanded(
                           child: _searchableSubject(
-                            commit.subject,
+                            commit,
                             style: TextStyle(
                               color: _palette.text,
                               fontFamily: _fontFamily,

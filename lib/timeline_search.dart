@@ -6,9 +6,15 @@ part of 'timeline.dart';
 /// the selection moves onto that row, so the history around a hit stays
 /// readable instead of being filtered away.
 ///
-/// A subject is read the fuzzy way the sidebar and the repository picker read
-/// names, so `mrgfix` finds `fix(merge): …`. A hash is not: it answers for the
-/// seven characters the column draws, and for a longer hash pasted in whole.
+/// A subject is read by words: each word of the query has to sit inside some
+/// word of the subject, in whatever order, so `name hover` and `hover name`
+/// answer the same and letters scattered across a sentence answer nothing. A
+/// hash is read differently again — it answers for the seven characters the
+/// column draws, and for a longer hash pasted in whole — and one query can ask
+/// both: `89d 카드` narrows by hash and by subject at once.
+
+/// 낱말을 가르는 것: 공백도 구두점도 모두 같은 자리를 한다.
+final _searchWord = RegExp(r'[\p{L}\p{N}]+', unicode: true);
 
 extension _TimelineSearch on _TimelineScreenState {
   void _openSearch() {
@@ -46,22 +52,39 @@ extension _TimelineSearch on _TimelineScreenState {
     );
   }
 
-  /// The rows the query finds, in the order they are drawn. A row is only ever
-  /// a result of something the reader can see light up on it.
+  /// The words the query is made of. Spaces and punctuation both only ever
+  /// separate one from the next, so `fix(merge)` asks for two.
+  List<String> get _searchTerms => _searchOpen
+      ? [
+          for (final word in _searchWord.allMatches(_searchQuery.toLowerCase()))
+            word.group(0)!,
+        ]
+      : const [];
+
+  /// The rows the query finds, in the order they are drawn. Every word of the
+  /// query has to be answered — by the subject or by the hash, in any order
+  /// and not necessarily by the same one — and a row is only ever a result of
+  /// something the reader can see light up on it.
   List<int> get _searchMatches {
-    final query = _searchQuery.trim();
-    if (!_searchOpen || query.isEmpty) return const [];
+    final terms = _searchTerms;
+    if (terms.isEmpty) return const [];
     final matches = <int>[];
     for (var index = 0; index < _entries.length; index++) {
       final entry = _entries[index];
       if (entry.rowIndex < 0) continue;
-      final commit = entry.row.commit;
-      if (_hashPositions(commit) != null ||
-          _subjectPositions(commit.subject) != null) {
-        matches.add(index);
-      }
+      if (_found(entry.row.commit)) matches.add(index);
     }
     return matches;
+  }
+
+  bool _found(GitCommit commit) {
+    final terms = _searchTerms;
+    if (terms.isEmpty) return false;
+    return terms.every(
+      (term) =>
+          wordMatchPositions(commit.subject, term) != null ||
+          _hashTermPositions(commit, term) != null,
+    );
   }
 
   /// Enter walks forward, ⇧Enter back, and both come round the ends rather
@@ -89,36 +112,49 @@ extension _TimelineSearch on _TimelineScreenState {
     _scrollToSelection();
   }
 
-  /// A subject is prose, so it is read the fuzzy way the rest of the app reads
-  /// names: `mrgfix` finds `fix(merge): …`.
-  List<int>? _subjectPositions(String subject) {
-    final query = _searchQuery.trim();
-    if (!_searchOpen || query.isEmpty) return null;
-    return fuzzyMatchPositions(subject, query);
+  /// What the subject has to show for the query: every word of it the subject
+  /// answered for, lit where it sits. A word the hash answered for instead is
+  /// simply not here — and a row the query did not find lights nothing at all,
+  /// however much of the query one of its words could have matched.
+  List<int>? _subjectPositions(GitCommit commit) {
+    if (!_found(commit)) return null;
+    final positions = <int>{};
+    for (final term in _searchTerms) {
+      positions.addAll(wordMatchPositions(commit.subject, term) ?? const []);
+    }
+    return positions.isEmpty ? null : (positions.toList()..sort());
   }
 
-  /// A hash is not prose and is not read fuzzily: `09c` would otherwise find
+  List<int>? _hashPositions(GitCommit commit) {
+    if (!_found(commit)) return null;
+    final positions = <int>{};
+    for (final term in _searchTerms) {
+      positions.addAll(_hashTermPositions(commit, term) ?? const []);
+    }
+    return positions.isEmpty ? null : (positions.toList()..sort());
+  }
+
+  /// A hash is not prose and is not read as prose: `09c` would otherwise find
   /// nearly every commit in the repository, since those three characters turn
   /// up in that order somewhere down almost any forty hex digits — and turn up
   /// where nothing is drawn, so the row would join the results with nothing on
   /// it lit. A hash answers to what the column actually shows, and to a longer
   /// hash pasted in whole, which git itself would read as a prefix.
-  List<int>? _hashPositions(GitCommit commit) {
-    final query = _searchQuery.trim().toLowerCase();
-    if (!_searchOpen || query.isEmpty || commit.isWorkingTree) return null;
+  List<int>? _hashTermPositions(GitCommit commit, String term) {
+    if (commit.isWorkingTree) return null;
     final drawn = commit.shortSha.toLowerCase();
-    final at = drawn.indexOf(query);
+    final at = drawn.indexOf(term);
     if (at >= 0) {
-      return [for (var unit = 0; unit < query.length; unit++) at + unit];
+      return [for (var unit = 0; unit < term.length; unit++) at + unit];
     }
     // A pasted hash runs past the seven characters on screen; all seven of them
     // are what it found.
-    if (!commit.sha.toLowerCase().startsWith(query)) return null;
+    if (!commit.sha.toLowerCase().startsWith(term)) return null;
     return [for (var unit = 0; unit < drawn.length; unit++) unit];
   }
 
-  Widget _searchableSubject(String subject, {required TextStyle style}) =>
-      _litText(subject, _subjectPositions(subject), style: style);
+  Widget _searchableSubject(GitCommit commit, {required TextStyle style}) =>
+      _litText(commit.subject, _subjectPositions(commit), style: style);
 
   Widget _searchableHash(
     GitCommit commit,

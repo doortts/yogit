@@ -21,8 +21,9 @@ void main() {
   final commits = [
     commit('a1b2c3d', 'fix(merge): 충돌 표시를 바로잡는다'),
     commit('b7e0f19', 'feat: 타임라인에서 커밋을 찾는다'),
-    commit('c3d4e5f', 'docs: README 정리'),
-    commit('d9a8b7c', 'fix(preview): 부모 카드가 넘치지 않는다'),
+    // 글자 단위로 읽으면 'nam'이 이 문장에서도 걸린다 — n(find)·a(hash)·m(commit).
+    commit('c3d4e5f', 'feat: find a commit by hash or subject'),
+    commit('d9a8b7c', 'feat: name a clipped sidebar ref in full on hover'),
   ];
 
   Future<void> pumpTimeline(WidgetTester tester) async {
@@ -139,46 +140,100 @@ void main() {
     expect(litText(tester).join(), '89d85a5');
   });
 
+  testWidgets('a query is read by words, not by scattered letters', (
+    tester,
+  ) async {
+    await pumpTimeline(tester);
+    await openSearch(tester);
+
+    // 'nam'은 'name' 안에 있다. 'find a commit by hash'에서 n·a·m을 주워 오지는
+    // 않는다 — 그것이 낱말이 아니라 글자 세 개일 뿐이라서다.
+    await search(tester, 'nam');
+    expect(countLabel(tester), '1/1');
+    expect(litText(tester).join(), 'nam');
+    expect(find.byKey(const Key('selected-row-d9a8b7c')), findsOneWidget);
+
+    // 낱말 하나가 여러 낱말에 걸칠 수는 없다.
+    await search(tester, 'mrgfix');
+    expect(countLabel(tester), '없음');
+
+    // 구두점은 낱말을 가를 뿐이라, 붙여 쓴 질의도 낱말 둘로 읽는다.
+    await search(tester, 'fix(merge)');
+    expect(countLabel(tester), '1/1');
+    expect(find.byKey(const Key('selected-row-a1b2c3d')), findsOneWidget);
+  });
+
+  testWidgets('two words are found in any order', (tester) async {
+    await pumpTimeline(tester);
+    await openSearch(tester);
+
+    await search(tester, 'name hover');
+    expect(countLabel(tester), '1/1');
+    expect(litText(tester).join(' '), 'name hover');
+
+    await search(tester, 'hover name');
+    expect(countLabel(tester), '1/1', reason: '순서를 묻지 않는다');
+    expect(litText(tester).join(' '), 'name hover');
+
+    await search(tester, 'name 없는말');
+    expect(countLabel(tester), '없음', reason: '하나라도 못 찾으면 결과가 아니다');
+    expect(litText(tester), isEmpty, reason: '결과가 아닌 행에는 불도 켜지 않는다');
+  });
+
+  testWidgets('a word may answer from the hash and another from the subject', (
+    tester,
+  ) async {
+    await pumpTimeline(tester);
+    await openSearch(tester);
+
+    await search(tester, 'b7e0 커밋');
+    expect(countLabel(tester), '1/1');
+    expect(litText(tester).join(' '), 'b7e0 커밋');
+  });
+
   testWidgets('Enter walks the matches and comes round the end', (
     tester,
   ) async {
     await pumpTimeline(tester);
     await openSearch(tester);
 
-    // 'fix'는 두 커밋의 제목에 있다.
-    await search(tester, 'fix');
-    expect(countLabel(tester), '1/2');
-    expect(find.byKey(const Key('selected-row-a1b2c3d')), findsOneWidget);
+    // 'feat'는 세 커밋의 제목에 있다.
+    await search(tester, 'feat');
+    expect(countLabel(tester), '1/3');
+    expect(find.byKey(const Key('selected-row-b7e0f19')), findsOneWidget);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(countLabel(tester), '2/2');
-    expect(find.byKey(const Key('selected-row-d9a8b7c')), findsOneWidget);
+    expect(countLabel(tester), '2/3');
+    expect(find.byKey(const Key('selected-row-c3d4e5f')), findsOneWidget);
 
     // 끝에서 한 번 더 가면 처음으로 돈다.
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(countLabel(tester), '1/2');
+    expect(countLabel(tester), '3/3');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(countLabel(tester), '1/3');
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.pumpAndSettle();
-    expect(countLabel(tester), '2/2', reason: '⇧Enter는 반대로 걷는다');
+    expect(countLabel(tester), '3/3', reason: '⇧Enter는 반대로 걷는다');
   });
 
   testWidgets('the buttons walk the same matches as the keys', (tester) async {
     await pumpTimeline(tester);
     await openSearch(tester);
-    await search(tester, 'fix');
+    await search(tester, 'feat');
 
     await tester.tap(find.byKey(const Key('timeline-search-next')));
     await tester.pumpAndSettle();
-    expect(countLabel(tester), '2/2');
+    expect(countLabel(tester), '2/3');
 
     await tester.tap(find.byKey(const Key('timeline-search-previous')));
     await tester.pumpAndSettle();
-    expect(countLabel(tester), '1/2');
+    expect(countLabel(tester), '1/3');
   });
 
   testWidgets('a query nothing answers says so and moves nothing', (
