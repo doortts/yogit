@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>커밋 찾기 — 글자에서 낱말로 (로직 시안)</title>
+<style>
+  :root {
+    --page: #141416;
+    --bg: #1c1c1e;
+    --surface: #232325;
+    --raised: #2c2c2e;
+    --border: #38383a;
+    --text: #f5f5f7;
+    --muted: #8a8a90;
+    --dim: #6a6a70;
+    --green: #8ad6a1;
+    --pink: #f29ab2;
+    --blue: #6ea8fe;
+    --hash: #ef6c63;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 28px 72px; background: var(--page); color: var(--text);
+    font: 13px/1.55 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  }
+  h1 { font-size: 19px; margin: 0 0 4px; font-weight: 650; }
+  .lede { color: var(--muted); margin: 0 0 26px; max-width: 82ch; }
+  h2 {
+    font-size: 14px; margin: 38px 0 8px; font-weight: 650;
+    display: flex; align-items: baseline; gap: 9px;
+  }
+  h2 .tag {
+    font-size: 10px; font-weight: 600; letter-spacing: .04em;
+    padding: 2px 7px; border-radius: 999px;
+    background: rgba(110,168,254,.16); color: var(--blue);
+  }
+  .note { color: var(--muted); margin: 0 0 14px; max-width: 84ch; }
+  .note b { color: var(--text); font-weight: 600; }
+  code, .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  code { background: var(--surface); padding: 1px 5px; border-radius: 4px; }
+  ol.rules { max-width: 84ch; padding-left: 20px; margin: 0 0 18px; }
+  ol.rules li { margin-bottom: 7px; color: var(--muted); }
+  ol.rules li b { color: var(--text); font-weight: 600; }
+  table {
+    border-collapse: collapse; width: 100%; max-width: 1040px;
+    background: var(--bg); border: .5px solid var(--border); border-radius: 8px;
+    overflow: hidden; margin-bottom: 8px;
+  }
+  th, td {
+    text-align: left; padding: 8px 11px; border-bottom: .5px solid var(--border);
+    vertical-align: top;
+  }
+  th {
+    font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--dim); background: var(--surface);
+  }
+  tr:last-child td { border-bottom: none; }
+  td.q { color: var(--blue); white-space: nowrap; }
+  .sample { margin-top: 3px; color: var(--text); }
+  .dim { color: var(--dim); }
+  mark {
+    background: rgba(138,214,161,.34); color: var(--text);
+    font-weight: 700; border-radius: 2px; padding: 0 1px;
+  }
+  .yes { color: var(--green); font-weight: 600; font-size: 11px; }
+  .no { color: var(--dim); font-weight: 600; font-size: 11px; }
+  tr.differs { background: rgba(242,154,178,.07); }
+  tr.differs td.q { box-shadow: inset 2px 0 var(--pink); }
+  .why { color: var(--dim); font-size: 11px; font-family: inherit; margin-top: 3px;
+          white-space: normal; max-width: 22ch; }
+  .num { font-family: ui-monospace, Menlo, monospace; text-align: right; width: 90px; }
+  .num.bad { color: var(--pink); font-weight: 700; }
+  .num.good { color: var(--green); font-weight: 700; }
+  .caption { color: var(--dim); font-size: 11px; margin: 0 0 26px; }
+  .bar {
+    display: inline-block; height: 7px; border-radius: 3px; vertical-align: middle;
+    margin-left: 8px; background: var(--pink); opacity: .5;
+  }
+  .search {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--raised); border: .5px solid var(--border); border-radius: 7px;
+    padding: 6px 8px 6px 11px; width: 300px; box-shadow: 0 6px 16px rgba(0,0,0,.45);
+    margin-bottom: 6px;
+  }
+  .search .field { flex: 1; color: var(--text); font-size: 13px; }
+  .search .count { color: var(--text); font-size: 11px; }
+  .search .glyph { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>커밋 찾기 — 글자에서 낱말로</h1>
+<p class="lede">
+  지금 ⌘F 찾기는 제목을 <b>글자 단위</b>로 훑는다. 질의의 글자가 순서만 지키면 어디에
+  흩어져 있어도 찾은 것으로 친다. 이름을 고를 때는 쓸 만한 규칙이지만, 문장 하나를 두고
+  쓰면 아무 관계 없는 커밋이 결과에 섞인다. 규칙을 <b>낱말 단위</b>로 바꾸고, 질의에
+  공백이 있으면 낱말마다 따로 찾아 <b>순서를 묻지 않는다</b>.
+  아래 예시는 손으로 적은 것이 아니라 이 저장소의 커밋 500개에 규칙을 실제로 돌린
+  결과다.
+</p>
+
+<div class="search">
+  <span class="glyph">⌕</span>
+  <span class="field">name hover</span>
+  <span class="count">1/3</span>
+  <span class="glyph">⌃ ⌄ ✕</span>
+</div>
+<p class="caption">찾기 줄은 그대로다. 바뀌는 것은 그 안에서 무엇을 결과로 삼느냐뿐이다.</p>
+
+<h2>규칙 <span class="tag">제목</span></h2>
+<ol class="rules">
+  <li><b>질의를 공백으로 쪼갠다.</b> <code>name hover</code>는 낱말 둘이다. 공백이 없으면 낱말 하나.</li>
+  <li><b>대상도 낱말로 쪼갠다.</b> 글자와 숫자의 연속이 낱말이고, 나머지는 모두 구분자다 —
+      <code>fix(merge):</code>는 <code>fix</code>와 <code>merge</code>, <code>full_diff</code>는 <code>full</code>과 <code>diff</code>.</li>
+  <li><b>질의의 낱말이 대상의 어느 낱말 안에 통째로 들어 있으면</b> 그 낱말은 찾힌 것이다.
+      낱말 안 어디든 좋다: <code>nam</code>은 <code>name</code>에서, <code>커밋</code>은 <code>커밋을</code>에서 찾힌다.</li>
+  <li><b>질의의 낱말이 모두 찾히면</b> 그 행이 결과다. 어느 낱말이 대상의 어느 낱말에서
+      찾히든 <b>순서는 묻지 않는다</b> — <code>name hover</code>와 <code>hover name</code>은 같은 결과를 낸다.</li>
+  <li>대소문자는 무시한다. 빈 질의는 아무것도 찾지 않는다 — 지금과 같다.</li>
+</ol>
+<p class="note">
+  한 낱말이 <b>여러 낱말에 걸쳐 있을 수는 없다.</b> <code>mrgfix</code>는 이제 아무것도
+  찾지 못한다. 그것이 이 변경의 값이자 값이 치르는 대가다: 흩어진 글자로 얻던 관용을 잃고,
+  대신 결과에 든 행은 모두 이유를 하나씩 보여 준다.
+</p>
+
+<h2>같은 제목, 두 규칙 <span class="tag">검증됨</span></h2>
+<table>
+  <tr>
+    <th>질의</th>
+    <th>지금 — 글자 단위</th>
+    <th>바꾼 뒤 — 낱말 단위</th>
+  </tr>
+    <tr class="">
+      <td class="mono q">card
+        <div class="why">낱말 하나가 그대로 있다</div></td>
+      <td><span class="yes">찾음</span><div class="sample">fix: keep a long parent message inside the <mark>card</mark> that holds it</div></td>
+      <td><span class="yes">찾음</span><div class="sample">fix: keep a long parent message inside the <mark>card</mark> that holds it</div></td>
+    </tr>
+    <tr class="differs">
+      <td class="mono q">card
+        <div class="why">지금은 흩어진 c·a·r·d를 주워 담는다</div></td>
+      <td><span class="yes">찾음</span><div class="sample">feat: say what <mark>c</mark>h<mark>a</mark>nged unde<mark>r</mark> the timeline, an<mark>d</mark> let it be read</div></td>
+      <td><span class="no">못 찾음</span><div class="sample">feat: say what changed under the timeline, and let it be read</div></td>
+    </tr>
+    <tr class="">
+      <td class="mono q">merge
+        <div class="why">괄호와 콜론은 구분자다</div></td>
+      <td><span class="yes">찾음</span><div class="sample">fix(<mark>merge</mark>): 충돌 표시를 바로잡는다</div></td>
+      <td><span class="yes">찾음</span><div class="sample">fix(<mark>merge</mark>): 충돌 표시를 바로잡는다</div></td>
+    </tr>
+    <tr class="differs">
+      <td class="mono q">merge
+        <div class="why">지금은 문장을 가로질러 잡는다</div></td>
+      <td><span class="yes">찾음</span><div class="sample">fix: stop a long branch na<mark>me</mark> f<mark>r</mark>om crushin<mark>g</mark> th<mark>e</mark> rebase progress</div></td>
+      <td><span class="no">못 찾음</span><div class="sample">fix: stop a long branch name from crushing the rebase progress</div></td>
+    </tr>
+    <tr class="">
+      <td class="mono q">nam
+        <div class="why">낱말 안 어디든 좋다</div></td>
+      <td><span class="yes">찾음</span><div class="sample">feat: <mark>nam</mark>e a deleted branch from what the repository already said</div></td>
+      <td><span class="yes">찾음</span><div class="sample">feat: <mark>nam</mark>e a deleted branch from what the repository already said</div></td>
+    </tr>
+    <tr class="differs">
+      <td class="mono q">nam
+        <div class="why">지금은 세 글자를 문장에서 줍는다</div></td>
+      <td><span class="yes">찾음</span><div class="sample">Merge bra<mark>n</mark>ch &#x27;fe<mark>a</mark>ture/pr-<mark>m</mark>onitoring&#x27; into main</div></td>
+      <td><span class="no">못 찾음</span><div class="sample">Merge branch &#x27;feature/pr-monitoring&#x27; into main</div></td>
+    </tr>
+    <tr class="">
+      <td class="mono q">name hover
+        <div class="why">낱말 둘이 각각 제 자리에서 찾힌다</div></td>
+      <td><span class="yes">찾음</span><div class="sample">feat: <mark>name</mark> a clipped sidebar ref in full on <mark>hover</mark></div></td>
+      <td><span class="yes">찾음</span><div class="sample">feat: <mark>name</mark> a clipped sidebar ref in full on <mark>hover</mark></div></td>
+    </tr>
+    <tr class="differs">
+      <td class="mono q">hover name
+        <div class="why">순서를 묻지 않는다 — 위와 같은 결과</div></td>
+      <td><span class="no">못 찾음</span><div class="sample">feat: name a clipped sidebar ref in full on hover</div></td>
+      <td><span class="yes">찾음</span><div class="sample">feat: <mark>name</mark> a clipped sidebar ref in full on <mark>hover</mark></div></td>
+    </tr>
+    <tr class="differs">
+      <td class="mono q">name hover
+        <div class="why">지금은 두 낱말을 이어 붙여 훑는다</div></td>
+      <td><span class="yes">찾음</span><div class="sample">feat: fi<mark>n</mark>d <mark>a</mark> co<mark>m</mark>mit by hash or subj<mark>e</mark>ct wit<mark>ho</mark>ut lea<mark>v</mark>ing th<mark>e</mark> histo<mark>r</mark>y</div></td>
+      <td><span class="no">못 찾음</span><div class="sample">feat: find a commit by hash or subject without leaving the history</div></td>
+    </tr>
+    <tr class="">
+      <td class="mono q">mrgfix
+        <div class="why">한 낱말이 여러 낱말에 걸칠 수는 없다</div></td>
+      <td><span class="no">못 찾음</span><div class="sample">fix(merge): 충돌 표시를 바로잡는다</div></td>
+      <td><span class="no">못 찾음</span><div class="sample">fix(merge): 충돌 표시를 바로잡는다</div></td>
+    </tr>
+    <tr class="">
+      <td class="mono q">커밋
+        <div class="why">조사가 붙어도 낱말 안에서 찾힌다</div></td>
+      <td><span class="yes">찾음</span><div class="sample">feat: 타임라인에서 <mark>커밋</mark>을 찾는다</div></td>
+      <td><span class="yes">찾음</span><div class="sample">feat: 타임라인에서 <mark>커밋</mark>을 찾는다</div></td>
+    </tr>
+    <tr class="">
+      <td class="mono q">타임 커밋
+        <div class="why">두 낱말, 순서 무관</div></td>
+      <td><span class="yes">찾음</span><div class="sample">feat: <mark>타임</mark>라인에서 <mark>커밋</mark>을 찾는다</div></td>
+      <td><span class="yes">찾음</span><div class="sample">feat: <mark>타임</mark>라인에서 <mark>커밋</mark>을 찾는다</div></td>
+    </tr>
+    <tr class="">
+      <td class="mono q">커밋 없는말
+        <div class="why">하나라도 못 찾으면 결과가 아니다</div></td>
+      <td><span class="no">못 찾음</span><div class="sample">feat: 타임라인에서 커밋을 찾는다</div></td>
+      <td><span class="no">못 찾음</span><div class="sample">feat: 타임라인에서 커밋을 찾는다</div></td>
+    </tr>
+</table>
+<p class="caption">
+  칠해진 글자가 곧 불이 켜질 자리다. 분홍 표시가 붙은 줄이 두 규칙의 답이 갈리는 자리이고,
+  모두 이 저장소에 실제로 있는 커밋 제목이다.
+</p>
+
+<h2>해시는 그대로 <span class="tag">변경 없음</span></h2>
+<p class="note">
+  해시는 산문이 아니라서 낱말로 쪼개지 않는다. 지난 수정 그대로, <b>그린 일곱 자리</b> 안에
+  들어 있으면 그 자리에 불이 켜지고, <b>통째로 붙여 넣은 긴 해시</b>는 앞자리로 알아본다.
+  질의에 낱말이 여럿이면 낱말 하나하나가 제목에서든 해시에서든 답을 찾으면 된다 —
+  <code>89d 카드</code>처럼 해시와 제목을 함께 좁힐 수 있다.
+</p>
+<table>
+  <tr><th>질의</th><th>결과</th><th>그려진 일곱 자리</th><th>온전한 해시</th></tr>
+    <tr>
+      <td class="mono q">09c</td>
+      <td><span class="no">못 찾음</span></td>
+      <td class="mono sample">89d85a5</td>
+      <td class="mono dim">89d85a509fc4b3a2918e7d6c5b4a39281f0e6d5c</td>
+    </tr>
+    <tr>
+      <td class="mono q">85a5</td>
+      <td><span class="yes">찾음</span></td>
+      <td class="mono sample">89d<mark>85a5</mark></td>
+      <td class="mono dim">89d85a509fc4b3a2918e7d6c5b4a39281f0e6d5c</td>
+    </tr>
+    <tr>
+      <td class="mono q">89d85a509fc4</td>
+      <td><span class="yes">찾음</span></td>
+      <td class="mono sample"><mark>89d85a5</mark></td>
+      <td class="mono dim">89d85a509fc4b3a2918e7d6c5b4a39281f0e6d5c</td>
+    </tr>
+</table>
+
+<h2>저장소 전체에서 몇 개가 걸리나 <span class="tag">커밋 500개</span></h2>
+<p class="note">
+  같은 질의를 이 저장소의 커밋 500개에 돌린 결과다. 글자 단위는 해시까지 훑던 시절의
+  숫자가 아니라 <b>제목과 해시를 지금 규칙대로</b> 센 것이다.
+</p>
+<table>
+  <tr><th>질의</th><th class="num">글자 단위</th><th class="num">낱말 단위</th></tr>
+    <tr>
+      <td class="mono q">09c</td>
+      <td class="num ">2</td>
+      <td class="num good">2</td>
+    </tr>
+    <tr>
+      <td class="mono q">fix</td>
+      <td class="num ">147</td>
+      <td class="num good">140</td>
+    </tr>
+    <tr>
+      <td class="mono q">card</td>
+      <td class="num bad">84</td>
+      <td class="num good">12</td>
+    </tr>
+    <tr>
+      <td class="mono q">name hover</td>
+      <td class="num ">5</td>
+      <td class="num good">1</td>
+    </tr>
+    <tr>
+      <td class="mono q">nam</td>
+      <td class="num bad">133</td>
+      <td class="num good">28</td>
+    </tr>
+    <tr>
+      <td class="mono q">mrgfix</td>
+      <td class="num ">3</td>
+      <td class="num good">0</td>
+    </tr>
+</table>
+<p class="caption">
+  <code>fix</code>처럼 정말 흔한 낱말은 두 규칙 모두 많이 잡는다. 갈리는 것은
+  <code>card</code>·<code>nam</code>처럼 짧은 질의다 — 글자 단위는 아무 문장에서나 그
+  글자들을 주워 담는다.
+</p>
+
+<h2>안 바꾸는 것</h2>
+<ol class="rules">
+  <li><b>사이드바 브랜치·태그 필터와 저장소 고르기</b>는 지금의 글자 단위 그대로 둔다.
+      거기서 <code>notsp</code>가 <code>notes-split-pane</code>을 찾는 것은 이름을 고르는
+      자리에서 실제로 쓰이는 관용이다. 바뀌는 것은 <b>커밋 찾기</b> 하나다.</li>
+  <li>불이 켜지는 방식, 결과 사이를 걷는 Enter·⇧Enter, 세는 <code>3/17</code>, 행을 거르지
+      않는다는 것 — 모두 그대로다.</li>
+</ol>
+
+<h2>정해 주셔야 할 것 하나</h2>
+<p class="note">
+  낱말 <b>안 어디든</b>(<code>nam</code> → <code>name</code>, <code>진행</code> →
+  <code>재진행</code>) 찾을지, <b>낱말의 앞</b>에서만 찾을지입니다. 위 예시는 모두
+  <b>안 어디든</b>으로 돌린 것입니다. 앞에서만 찾게 하면 결과가 더 줄지만 한국어의 앞가지
+  (<code>재-</code>)와 영어의 접두(<code>sub-</code>)를 놓칩니다.
+</p>
+
+</body>
+</html>
