@@ -290,7 +290,6 @@ void main() {
       'log',
       '--left-right',
       '--oneline',
-      '--no-abbrev-commit=false',
       '-n',
       '9',
       'old...new',
@@ -3530,6 +3529,38 @@ void main() {
           .where((argument) => !argument.startsWith('--format=')),
       everyElement(isNot(contains(' '))),
     );
+  });
+
+  test('a real repository answers what moved, and how', () async {
+    // 가짜 runner는 인자를 그대로 되돌려줄 뿐 git이 그것을 알아듣는지는 모른다.
+    // 실제 git에 물어야 잘못된 플래그가 잡힌다.
+    final root = await Directory.systemTemp.createTemp('yogit_moved_');
+    addTearDown(() => root.delete(recursive: true));
+    await _initRepository(root);
+    await File('${root.path}/file.txt').writeAsString('base\n');
+    await _git(root, ['add', 'file.txt']);
+    await _git(root, ['commit', '-m', 'base']);
+    final before = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+    await File('${root.path}/file.txt').writeAsString('one\n');
+    await _git(root, ['commit', '-am', 'first on top']);
+    await File('${root.path}/file.txt').writeAsString('two\n');
+    await _git(root, ['commit', '-am', 'second on top']);
+    final after = (await _git(root, ['rev-parse', 'HEAD'])).trim();
+
+    final repository = GitRepository(root.path);
+
+    expect(await repository.countMovedCommits(before, after), (
+      outgoing: 0,
+      incoming: 2,
+    ));
+    final commits = await repository.loadMovedCommits(before, after);
+    expect(commits.map((commit) => commit.subject), [
+      'second on top',
+      'first on top',
+    ]);
+    expect(commits.every((commit) => commit.incoming), isTrue);
+    expect(commits.first.shortSha, isNotEmpty);
+    expect(await repository.loadBranchOperation('main'), 'commit');
   });
 
   test('loadHistory decorates a tip without the origin/HEAD alias', () async {

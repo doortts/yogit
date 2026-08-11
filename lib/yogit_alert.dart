@@ -224,10 +224,10 @@ class YogitAlert extends StatelessWidget {
     // The buttons are the same size in every alert, however wide the box is.
     // A wider box is wider because its content needs the room; stretching the
     // answers along with it makes the pair read as a bigger decision than it
-    // is.
+    // is. They sit centred under what they are answering, not pushed to one
+    // side of it.
     return [
       Align(
-        alignment: Alignment.centerRight,
         child: SizedBox(
           width: YogitAlert.width - 32,
           child: Row(

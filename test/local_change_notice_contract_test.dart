@@ -252,7 +252,7 @@ void main() {
     );
   });
 
-  testWidgets('묻는 상자는 넓어져도 버튼은 그대로다', (tester) async {
+  testWidgets('묻는 상자는 넓어져도 버튼은 그대로, 그리고 가운데', (tester) async {
     await pump(tester);
     await moveHead(tester);
 
@@ -266,6 +266,11 @@ void main() {
     expect(title.width, greaterThan(YogitAlert.width - 32));
     expect(later.width + refresh.width, closeTo(YogitAlert.width - 32 - 7, 1));
     expect(later.width, closeTo(refresh.width, 1));
+    // 답하는 자리는 물음 아래 가운데다. 한쪽으로 몰리면 상자가 기운 것처럼 읽힌다.
+    expect(
+      (later.left + refresh.right) / 2,
+      closeTo(title.center.dx, 1),
+    );
   });
 
   // ── 묻지 않는 쪽 ────────────────────────────────────────────────

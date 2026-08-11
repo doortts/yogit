@@ -2234,7 +2234,6 @@ class GitRepository implements FullDiffRepository {
           'log',
           '--left-right',
           '--oneline',
-          '--no-abbrev-commit=false',
           '-n',
           '$limit',
           '$before...$after',

@@ -59,10 +59,11 @@
   }
   .alert .message { font-size: 11px; line-height: 1.5; opacity: .82; margin-top: 5px; }
   .alert .ask { font-size: 11px; line-height: 1.5; opacity: .82; margin-top: 9px; }
-  /* 상자가 넓어져도 답은 그대로다 — 248은 좁은 상자의 안쪽 폭이다. */
+  /* 상자가 넓어져도 답은 그대로다 — 248은 좁은 상자의 안쪽 폭이다.
+     그리고 물음 아래 가운데에 선다. */
   .alert .buttons {
     display: flex; gap: 7px; margin-top: 13px;
-    width: 248px; margin-left: auto;
+    width: 248px; margin-left: auto; margin-right: auto;
   }
   .alert.narrow .buttons { width: auto; }
   .alert .btn {
@@ -299,7 +300,8 @@
 <p class="note">
   <b>버튼은 넓어지지 않는다.</b> 상자가 넓은 것은 담은 것이 넓기 때문이지 결정이 커졌기
   때문이 아니다. 답 두 개는 좁은 상자에서 갖던 폭(<span class="mono">248</span>)을 그대로 두고
-  오른쪽에 붙는다 — 좁은 상자에서는 그 폭이 곧 상자의 안쪽이라 지금과 한 픽셀도 다르지 않다.
+  <b>물음 아래 가운데</b>에 선다 — 좁은 상자에서는 그 폭이 곧 상자의 안쪽이라 지금과 한 픽셀도
+  다르지 않다.
 </p>
 
 <h2>계약</h2>

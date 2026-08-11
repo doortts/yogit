@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/settings.dart';
-import 'package:yogit/timeline.dart';
 import 'package:yogit/window_frame.dart';
 
 import 'app_test.dart'
