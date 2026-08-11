@@ -360,14 +360,9 @@ extension _TimelineRows on _TimelineScreenState {
                   ),
                   _cell(
                     _w('hash'),
-                    // A sha never folds onto a second line inside the row.
-                    // Clipped rather than ellipsised: the front of a sha is the
-                    // part worth reading, and '…' would spend room on saying
-                    // so.
-                    _searchableText(
+                    _searchableHash(
+                      commit,
                       commit.isWorkingTree ? '·······' : commit.shortSha,
-                      softWrap: false,
-                      overflow: TextOverflow.clip,
                       style: _TimelineScreenState._hashStyle.copyWith(
                         color: selected ? _palette.text : hashRed,
                       ),
@@ -406,7 +401,7 @@ extension _TimelineRows on _TimelineScreenState {
                           const SizedBox(width: 3),
                         ],
                         Expanded(
-                          child: _searchableText(
+                          child: _searchableSubject(
                             commit.subject,
                             style: TextStyle(
                               color: _palette.text,

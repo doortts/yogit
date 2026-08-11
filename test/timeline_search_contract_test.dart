@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yogit/git.dart';
 import 'package:yogit/window_frame.dart';
 
 import 'app_test.dart' show FakeGitRepository, app, commit;
@@ -92,6 +93,50 @@ void main() {
     await search(tester, 'd9a8');
     expect(countLabel(tester), '1/1');
     expect(litText(tester).join(), 'd9a8');
+  });
+
+  testWidgets('a hash answers for what it draws, not for its buried middle', (
+    tester,
+  ) async {
+    // '09c'는 40자리 해시 어딘가에는 거의 언제나 그 순서로 들어 있다. 그렇게
+    // 찾으면 저장소의 거의 모든 커밋이 결과가 되고, 정작 화면에는 불이 켜질
+    // 자리가 없다 — 결과에는 있는데 아무것도 안 보이는 행이 생긴다.
+    const drawnSeven = GitCommit(
+      sha: '89d85a509fc4b3a2918e7d6c5b4a39281f0e6d5c',
+      shortSha: '89d85a5',
+      parents: [],
+      author: GitIdentity(name: 'Ada Author', email: 'ada@example.com'),
+      authorTimestamp: 1700000000,
+      committer: GitIdentity(name: 'Cam Committer', email: 'cam@example.com'),
+      committerTimestamp: 1700000120,
+      refs: [],
+      subject: 'feat: 잘린 이름을 마우스 아래에서 펼친다',
+    );
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 800);
+    addTearDown(() {
+      tester.view.resetDevicePixelRatio();
+      tester.view.resetPhysicalSize();
+    });
+    await tester.pumpWidget(
+      app(FakeGitRepository((_, _) async => [drawnSeven]), controller),
+    );
+    await tester.pumpAndSettle();
+    await openSearch(tester);
+
+    await search(tester, '09c');
+    expect(countLabel(tester), '없음');
+    expect(litText(tester), isEmpty);
+
+    // 화면에 그려진 일곱 자리로는 찾는다.
+    await search(tester, '85a5');
+    expect(countLabel(tester), '1/1');
+    expect(litText(tester).join(), '85a5');
+
+    // 통째로 붙여 넣은 긴 해시도 찾고, 그려진 일곱 자리 전부에 불이 켜진다.
+    await search(tester, '89d85a509fc4');
+    expect(countLabel(tester), '1/1');
+    expect(litText(tester).join(), '89d85a5');
   });
 
   testWidgets('Enter walks the matches and comes round the end', (

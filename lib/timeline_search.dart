@@ -6,9 +6,9 @@ part of 'timeline.dart';
 /// the selection moves onto that row, so the history around a hit stays
 /// readable instead of being filtered away.
 ///
-/// Matching is the same fuzzy match the sidebar and the repository picker use,
-/// so `mrgfix` finds `fix(merge): …` and a pasted full hash finds its row even
-/// though only seven characters are drawn.
+/// A subject is read the fuzzy way the sidebar and the repository picker read
+/// names, so `mrgfix` finds `fix(merge): …`. A hash is not: it answers for the
+/// seven characters the column draws, and for a longer hash pasted in whole.
 
 extension _TimelineSearch on _TimelineScreenState {
   void _openSearch() {
@@ -46,9 +46,8 @@ extension _TimelineSearch on _TimelineScreenState {
     );
   }
 
-  /// The rows the query finds, in the order they are drawn. A row answers for
-  /// its whole hash and its subject; the seven characters on screen are only
-  /// how much of the hash fits.
+  /// The rows the query finds, in the order they are drawn. A row is only ever
+  /// a result of something the reader can see light up on it.
   List<int> get _searchMatches {
     final query = _searchQuery.trim();
     if (!_searchOpen || query.isEmpty) return const [];
@@ -57,7 +56,8 @@ extension _TimelineSearch on _TimelineScreenState {
       final entry = _entries[index];
       if (entry.rowIndex < 0) continue;
       final commit = entry.row.commit;
-      if (fuzzyMatch(commit.sha, query) || fuzzyMatch(commit.subject, query)) {
+      if (_hashPositions(commit) != null ||
+          _subjectPositions(commit.subject) != null) {
         matches.add(index);
       }
     }
@@ -89,24 +89,62 @@ extension _TimelineSearch on _TimelineScreenState {
     _scrollToSelection();
   }
 
-  /// Where the query lands in one row's own text, or null when the search has
-  /// nothing to say about it.
-  List<int>? _searchPositions(String text) {
+  /// A subject is prose, so it is read the fuzzy way the rest of the app reads
+  /// names: `mrgfix` finds `fix(merge): …`.
+  List<int>? _subjectPositions(String subject) {
     final query = _searchQuery.trim();
     if (!_searchOpen || query.isEmpty) return null;
-    return fuzzyMatchPositions(text, query);
+    return fuzzyMatchPositions(subject, query);
   }
+
+  /// A hash is not prose and is not read fuzzily: `09c` would otherwise find
+  /// nearly every commit in the repository, since those three characters turn
+  /// up in that order somewhere down almost any forty hex digits — and turn up
+  /// where nothing is drawn, so the row would join the results with nothing on
+  /// it lit. A hash answers to what the column actually shows, and to a longer
+  /// hash pasted in whole, which git itself would read as a prefix.
+  List<int>? _hashPositions(GitCommit commit) {
+    final query = _searchQuery.trim().toLowerCase();
+    if (!_searchOpen || query.isEmpty || commit.isWorkingTree) return null;
+    final drawn = commit.shortSha.toLowerCase();
+    final at = drawn.indexOf(query);
+    if (at >= 0) {
+      return [for (var unit = 0; unit < query.length; unit++) at + unit];
+    }
+    // A pasted hash runs past the seven characters on screen; all seven of them
+    // are what it found.
+    if (!commit.sha.toLowerCase().startsWith(query)) return null;
+    return [for (var unit = 0; unit < drawn.length; unit++) unit];
+  }
+
+  Widget _searchableSubject(String subject, {required TextStyle style}) =>
+      _litText(subject, _subjectPositions(subject), style: style);
+
+  Widget _searchableHash(
+    GitCommit commit,
+    String drawn, {
+    required TextStyle style,
+  }) => _litText(
+    drawn,
+    _hashPositions(commit),
+    style: style,
+    // A sha never folds onto a second line inside the row. Clipped rather than
+    // ellipsised: the front of a sha is the part worth reading, and '…' would
+    // spend room on saying so.
+    overflow: TextOverflow.clip,
+    softWrap: false,
+  );
 
   /// A row's text with the found characters lit. Without a search — or on a
   /// row the search did not find — this is the same [Text] the row always
   /// drew.
-  Widget _searchableText(
-    String text, {
+  Widget _litText(
+    String text,
+    List<int>? positions, {
     required TextStyle style,
     TextOverflow overflow = TextOverflow.ellipsis,
     bool softWrap = true,
   }) {
-    final positions = _searchPositions(text);
     if (positions == null) {
       return Text(
         text,
