@@ -1140,15 +1140,6 @@ void main() {
       await File('${root.path}/shared.txt').writeAsString('main\n');
       await _git(root, ['commit', '-am', 'main']);
       final originalHead = (await _git(root, ['rev-parse', 'HEAD'])).trim();
-      final existingPreviewPaths = {
-        await for (final entry in Directory.systemTemp.list())
-          if (entry is Directory &&
-              entry.uri.pathSegments
-                  .where((segment) => segment.isNotEmpty)
-                  .last
-                  .startsWith('yogit_rebase_'))
-            entry.path,
-      };
 
       final repository = GitRepository(root.path);
       final result = await repository.simulateRebase(
@@ -1162,15 +1153,18 @@ void main() {
       expect((await _git(root, ['rev-parse', 'HEAD'])).trim(), originalHead);
       expect((await _git(root, ['branch', '--show-current'])).trim(), 'main');
       expect((await _git(root, ['status', '--porcelain'])).trim(), isEmpty);
-      expect({
-        await for (final entry in Directory.systemTemp.list())
-          if (entry is Directory &&
-              entry.uri.pathSegments
-                  .where((segment) => segment.isNotEmpty)
-                  .last
-                  .startsWith('yogit_rebase_'))
-            entry.path,
-      }, existingPreviewPaths);
+      // 미리보기가 쓰던 worktree는 이 저장소의 장부에서 사라져야 한다. 임시
+      // 디렉터리 전체를 세지 않는 이유는 그 이름 공간을 이 기계의 다른 yogit도
+      // 함께 쓰기 때문이다 — 앱이 떠 있으면 재는 사이에 하나가 생겼다 사라져서
+      // 이 시험이 제 잘못 없이 빨개진다.
+      expect(
+        (await _git(root, ['worktree', 'list', '--porcelain']))
+            .split('\n')
+            .where((line) => line.startsWith('worktree '))
+            .length,
+        1,
+        reason: '저장소 자신 말고는 남지 않는다',
+      );
     },
   );
 
