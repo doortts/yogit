@@ -35,6 +35,7 @@ import 'timeline_widgets.dart';
 import 'timeline_palette.dart';
 import 'ref_tree.dart';
 import 'search_icon.dart';
+import 'remote_pull_menu.dart';
 import 'repository_branch_selector.dart';
 import 'settings.dart';
 import 'shortcut_modifier.dart';
@@ -1677,13 +1678,20 @@ class _TimelineScreenState extends State<TimelineScreen>
   String? _lastRemoteRowTap;
   int _lastRemoteRowTapMs = 0;
 
-  /// Double-click asks for a fast-forward pull — the one state where the
-  /// outcome is safe and obvious. Every other state does nothing here; the
-  /// action strip already says what that ref can and cannot do.
+  /// One controller per remote row so the row's double-click can open the menu
+  /// its anchor holds.
+  final _pullMenuControllers = <String, MenuController>{};
+
+  /// Double-click: the one state where the outcome is safe and obvious asks
+  /// for a fast-forward pull; every other state opens the menu, which names
+  /// the state and offers what that ref can do instead of mutating anything.
   void _runRemotePullDefault(String remoteBranch) {
     final state = remotePullState(_refs, remoteBranch);
-    if (state?.kind != RemotePullKind.fastForward) return;
-    unawaited(_confirmRemotePull(remoteBranch, state!));
+    if (state?.kind == RemotePullKind.fastForward) {
+      unawaited(_confirmRemotePull(remoteBranch, state!));
+      return;
+    }
+    _pullMenuControllers[remoteBranch]?.open();
   }
 
   Future<void> _confirmRemotePull(

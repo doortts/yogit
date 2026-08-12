@@ -930,6 +930,32 @@ extension _TimelineSidebar on _TimelineScreenState {
                                         ),
                                       ),
                                     ),
+                                  // The menu the double-click opens hangs off
+                                  // the same edge, drawing nothing until then.
+                                  if (pullState != null)
+                                    Positioned(
+                                      right: 2,
+                                      top: 0,
+                                      bottom: 0,
+                                      child: Center(
+                                        child: RemotePullMenu(
+                                          remoteBranch: name,
+                                          state: pullState,
+                                          controller:
+                                              _pullMenuControllers[name] ??=
+                                                  MenuController(),
+                                          onPull: () => unawaited(
+                                            _runRemotePull(name, pullState),
+                                          ),
+                                          onCheckout: () => unawaited(
+                                            _runRemoteCheckout(name, pullState),
+                                          ),
+                                          onCompare: () => unawaited(
+                                            _selectComparison(name),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
                                 ],
                               ),
                             );
