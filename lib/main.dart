@@ -551,6 +551,7 @@ class _YogitAppState extends State<YogitApp> {
                 )
               : null,
           showRemoteAvatars: _settingsLoaded && _settings.showAvatars,
+          precisePush: _settings.precisePush,
           preferredPreviewPlacement: _settings.previewPlacement,
           preferredBranch: _settingsLoaded
               ? _settings.baseBranches[_repository.root]

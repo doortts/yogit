@@ -149,6 +149,7 @@ class TimelineScreen extends StatefulWidget {
     this.hiddenRefs = const {},
     this.onHiddenRefsChanged,
     this.showRemoteAvatars = true,
+    this.precisePush = false,
     this.preferredPreviewPlacement = PreviewPlacement.right,
     this.columnWidths = const TimelineColumnWidths(),
     this.fullDiffColumnWidths = const FullDiffColumnWidths(),
@@ -213,6 +214,11 @@ class TimelineScreen extends StatefulWidget {
   final Set<String> hiddenRefs;
   final ValueChanged<Set<String>>? onHiddenRefsChanged;
   final bool showRemoteAvatars;
+
+  /// Push the tip a confirmation showed instead of the branch name — see
+  /// [AppSettings.precisePush].
+  final bool precisePush;
+
   final PreviewPlacement preferredPreviewPlacement;
   final TimelineColumnWidths columnWidths;
   final FullDiffColumnWidths fullDiffColumnWidths;

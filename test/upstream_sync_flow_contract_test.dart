@@ -39,15 +39,18 @@ void main() {
 
   Future<void> pumpApp(
     WidgetTester tester,
-    FakeGitRepository repository,
-  ) async {
+    FakeGitRepository repository, {
+    bool precisePush = false,
+  }) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1400, 800);
     addTearDown(() {
       tester.view.resetDevicePixelRatio();
       tester.view.resetPhysicalSize();
     });
-    await tester.pumpWidget(app(repository, controller));
+    await tester.pumpWidget(
+      app(repository, controller, precisePush: precisePush),
+    );
     await tester.pumpAndSettle();
   }
 
@@ -114,8 +117,8 @@ void main() {
       remote: 'origin',
       branch: 'main',
       to: 'main',
-      from: 'aaa1111',
-    ), reason: '확인창이 보인 그 끝만 올라간다');
+      from: null,
+    ), reason: '기본은 브랜치 이름으로 올린다 — 사람이 치는 그 형태');
   });
 
   testWidgets('declining the summary moves nothing', (tester) async {
@@ -210,8 +213,8 @@ void main() {
 
     expect(walked, [
       'rebase main aaa1111 -> ddd4444',
-      'push origin main from ddd4444',
-    ], reason: '확인 한 번, 걸음 둘, 순서대로 — 올라가는 것은 잰 그 끝이다');
+      'push origin main from null',
+    ], reason: '확인 한 번, 걸음 둘, 순서대로 — 얹은 뒤의 브랜치가 그대로 올라간다');
   });
 
   testWidgets('a conflicted divergence stands red and runs nothing', (
@@ -449,7 +452,31 @@ void main() {
     await pumpApp(tester, pushOnly);
     await tester.tap(find.byKey(const Key('upstream-sync-push')));
     await tester.pumpAndSettle();
+    expect(commandText(tester), 'git push origin main');
+  });
+
+  testWidgets("'정밀 push' pins the tip the confirmation showed", (tester) async {
+    final pushes = <String?>[];
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('aaa1111', 'local work')],
+      refs: refs(ahead: 1),
+      movedCommitsCallback: (before, after) async => const [
+        (incoming: true, shortSha: 'aaa1111', subject: 'local work'),
+      ],
+      pushBranchCallback:
+          (remote, branch, {toBranch, fromTip, setUpstream = false}) async {
+            pushes.add(fromTip);
+          },
+    );
+    await pumpApp(tester, repository, precisePush: true);
+
+    await tester.tap(find.byKey(const Key('upstream-sync-push')));
+    await tester.pumpAndSettle();
     expect(commandText(tester), 'git push origin aaa1111:refs/heads/main');
+
+    await tester.tap(find.byKey(const Key('upstream-push-confirm')));
+    await tester.pumpAndSettle();
+    expect(pushes.single, 'aaa1111', reason: '적힌 명령과 도는 명령은 같다');
   });
 
   testWidgets('an amber confirmation shows both steps, in order', (
@@ -483,7 +510,7 @@ void main() {
       [
         'git update-ref refs/heads/main ddd4444 aaa1111',
         'git reset --hard',
-        'git push origin ddd4444:refs/heads/main',
+        'git push origin main',
       ].join('\n'),
     );
   });

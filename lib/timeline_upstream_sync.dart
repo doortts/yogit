@@ -98,10 +98,10 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
             subtitle: target,
             title: '${state.branch} 브랜치를 ${state.remote}에 처음 Push할까요?',
             message: '원격에 ${state.branch} 브랜치를 만들고 추적을 연결합니다.',
-            // 아직 원격에 없는 브랜치라 올라갈 끝은 로컬 ref 이름 그대로다.
+            // 아직 원격에 없는 브랜치라 받는 쪽 이름은 로컬 이름 그대로다.
             footer: CommandPreview([
-              'git push -u ${state.remote} refs/heads/${state.branch}:'
-                  'refs/heads/${state.branch}',
+              'git push -u ${state.remote} '
+                  '${_upstreamRefspec(state, state.localTip!, ownName: true)}',
             ]),
             confirmLabel: 'Push',
             confirmKey: const Key('upstream-first-push-confirm'),
@@ -113,6 +113,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
             state.remote!,
             state.branch!,
             setUpstream: true,
+            fromTip: _upstreamPinnedTip(state.localTip!),
           );
         }, failure: 'Push 실패');
       case UpstreamSyncKind.pushOnly:
@@ -145,13 +146,11 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
         );
         if (approved != true) return;
         await _runUpstreamAction(() async {
-          // 확인창이 보인 그 끝을 올린다 — 창이 열린 사이에 도착한 커밋이
-          // 소리 없이 딸려 올라가지 않는다.
           await widget.repository.pushBranch(
             state.remote!,
             state.branch!,
             toBranch: _upstreamBranchName(state),
-            fromTip: state.localTip,
+            fromTip: _upstreamPinnedTip(state.localTip!),
           );
         }, failure: 'Push 실패');
       case UpstreamSyncKind.divergedClean:
@@ -199,7 +198,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
             state.remote!,
             state.branch!,
             toBranch: _upstreamBranchName(state),
-            fromTip: state.virtualTip,
+            fromTip: _upstreamPinnedTip(state.virtualTip!),
           );
         }, failure: 'Push 실패');
       default:
@@ -227,11 +226,31 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
     if (state.checkedOut) 'git reset --hard',
   ];
 
-  /// Push 한 걸음. 올라가는 것은 [tip]이 가리키는 그 끝이고, 받는 쪽 이름은
-  /// upstream이 정한 이름이다 — main이 origin/trunk를 추적하면 trunk로 간다.
+  /// 올릴 끝을 박을지 — '정밀 push'가 켜져 있을 때만 확인창이 보인 [tip]을
+  /// 그대로 박는다. 꺼져 있으면 브랜치 이름으로 올리므로, 확인창이 열린 사이에
+  /// 커밋이 생겼다면 그것까지 함께 올라간다.
+  String? _upstreamPinnedTip(String tip) => widget.precisePush ? tip : null;
+
+  /// 명령에 적힐 refspec. 실제 실행과 같은 함수로 지으므로 적힌 것과 도는 것이
+  /// 어긋날 수 없다. 박을 때는 읽기 좋은 짧은 해시로 적지만 가리키는 커밋은
+  /// 같다. 처음 Push는 받는 쪽 이름이 없으므로 [ownName]으로 로컬 이름을 쓴다.
+  String _upstreamRefspec(
+    UpstreamSyncState state,
+    String tip, {
+    bool ownName = false,
+  }) {
+    final pinned = _upstreamPinnedTip(tip);
+    return GitRepository.pushRefspec(
+      branch: state.branch!,
+      toBranch: ownName ? null : _upstreamBranchName(state),
+      fromTip: pinned == null ? null : shortSha(pinned),
+    );
+  }
+
+  /// Push 한 걸음. 받는 쪽 이름은 upstream이 정한 이름이다 — main이
+  /// origin/trunk를 추적하면 trunk로 간다.
   String _upstreamPushCommand(UpstreamSyncState state, String tip) =>
-      'git push ${state.remote} ${shortSha(tip)}:'
-      'refs/heads/${_upstreamBranchName(state) ?? state.branch}';
+      'git push ${state.remote} ${_upstreamRefspec(state, tip)}';
 
   /// '외 N개'를 누를 때 도는 조회. 확인창을 여는 조회는 열여덟 개로 가볍게 두고,
   /// 나머지는 실제로 펼친 사람만 값을 치른다.

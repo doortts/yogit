@@ -406,6 +406,7 @@ enum TimelineFontChoice {
 class AppSettings {
   const AppSettings({
     this.showAvatars = true,
+    this.precisePush = false,
     this.timelineTheme = TimelineThemeKind.systemGraphite,
     this.previewPlacement = PreviewPlacement.right,
     this.branchPreviewMode = BranchPreviewMode.merge,
@@ -495,6 +496,12 @@ class AppSettings {
   ];
 
   final bool showAvatars;
+
+  /// Push the exact tip the confirmation showed (`<sha>:refs/heads/main`)
+  /// instead of the branch name (`main`). Off by default: the plain form is
+  /// what a person types, and the difference only shows when a commit lands
+  /// while the dialog is open.
+  final bool precisePush;
   final TimelineThemeKind timelineTheme;
   final PreviewPlacement previewPlacement;
   final BranchPreviewMode branchPreviewMode;
@@ -624,6 +631,7 @@ class AppSettings {
 
   AppSettings copyWith({
     bool? showAvatars,
+    bool? precisePush,
     TimelineThemeKind? timelineTheme,
     PreviewPlacement? previewPlacement,
     BranchPreviewMode? branchPreviewMode,
@@ -654,6 +662,7 @@ class AppSettings {
     List<String>? customGithubApiBaseUrls,
   }) => AppSettings(
     showAvatars: showAvatars ?? this.showAvatars,
+    precisePush: precisePush ?? this.precisePush,
     timelineTheme: timelineTheme ?? this.timelineTheme,
     previewPlacement: previewPlacement ?? this.previewPlacement,
     branchPreviewMode: branchPreviewMode ?? this.branchPreviewMode,
@@ -769,6 +778,7 @@ class AppSettings {
       showAvatars: value['showAvatars'] is bool
           ? value['showAvatars'] as bool
           : true,
+      precisePush: value['precisePush'] == true,
       timelineTheme: TimelineThemeKind.parse(value['timelineTheme']),
       previewPlacement: switch (value['previewPlacement']) {
         'bottom' => PreviewPlacement.bottom,
@@ -874,6 +884,7 @@ class AppSettings {
 
   Map<String, Object> toJson() => {
     'showAvatars': showAvatars,
+    'precisePush': precisePush,
     'timelineTheme': timelineTheme.storageValue,
     'previewPlacement': previewPlacement.name,
     'branchPreviewMode': branchPreviewMode.name,
@@ -909,6 +920,7 @@ class AppSettings {
   bool operator ==(Object other) =>
       other is AppSettings &&
       showAvatars == other.showAvatars &&
+      precisePush == other.precisePush &&
       timelineTheme == other.timelineTheme &&
       previewPlacement == other.previewPlacement &&
       branchPreviewMode == other.branchPreviewMode &&
@@ -942,6 +954,7 @@ class AppSettings {
   @override
   int get hashCode => Object.hashAll([
     showAvatars,
+    precisePush,
     timelineTheme,
     previewPlacement,
     branchPreviewMode,
@@ -1921,6 +1934,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
             value: _settings.showAvatars,
             onChanged: (value) =>
                 _change(_settings.copyWith(showAvatars: value)),
+          ),
+          SwitchListTile(
+            key: const Key('precise-push-toggle'),
+            contentPadding: EdgeInsets.zero,
+            title: const Text(
+              '정밀 push',
+              style: TextStyle(color: Color(0xFFE8EAF2), fontSize: 13),
+            ),
+            subtitle: const Text(
+              '확인창이 보인 커밋까지만 올립니다 — git push origin '
+              '<커밋>:refs/heads/<브랜치>. 끄면 git push origin <브랜치>로 '
+              '올리고, 확인창이 열린 사이에 커밋이 생기면 그것도 함께 올라갑니다.',
+              style: TextStyle(color: Color(0xFF8D94A8), fontSize: 11),
+            ),
+            value: _settings.precisePush,
+            onChanged: (value) =>
+                _change(_settings.copyWith(precisePush: value)),
           ),
           const SizedBox(height: 24),
           _laneColors(),

@@ -4673,6 +4673,25 @@ class GitRepository implements FullDiffRepository {
     ],
   ]);
 
+  /// What a push sends, in one place so the command a confirmation shows and
+  /// the command that runs cannot drift apart.
+  ///
+  /// Plainly `main` when the two sides share a name — the shape a person would
+  /// type. `main:trunk` when the upstream goes by another name. And with
+  /// [fromTip], the pinned form `<sha>:refs/heads/main`: exactly the tip the
+  /// confirmation showed, so a commit that lands while the dialog is open
+  /// stays behind. Precise, and no longer what a person would type — which is
+  /// why it is a setting rather than the default.
+  static String pushRefspec({
+    required String branch,
+    String? toBranch,
+    String? fromTip,
+  }) {
+    final to = toBranch ?? branch;
+    if (fromTip != null) return '$fromTip:refs/heads/$to';
+    return to == branch ? branch : '$branch:$to';
+  }
+
   /// Sends [branch] up to [remote]. Never forced: if the remote moved since
   /// the last look, git refuses and the refusal comes back as the answer —
   /// the caller re-measures instead of overwriting someone else's work.
@@ -4681,7 +4700,7 @@ class GitRepository implements FullDiffRepository {
   /// — `main` tracking `origin/trunk` measures against trunk, so it pushes to
   /// trunk; assuming the same name would quietly create a second branch.
   /// [fromTip] pins what goes up to the tip the confirmation showed: a commit
-  /// lands while the dialog is open is not quietly pushed along with it.
+  /// that lands while the dialog is open is not quietly pushed along with it.
   Future<void> pushBranch(
     String remote,
     String branch, {
@@ -4694,7 +4713,7 @@ class GitRepository implements FullDiffRepository {
     'push',
     if (setUpstream) '-u',
     remote,
-    '${fromTip ?? 'refs/heads/$branch'}:refs/heads/${toBranch ?? branch}',
+    pushRefspec(branch: branch, toBranch: toBranch, fromTip: fromTip),
   ]);
 
   /// One replay, measured and thrown away: can [localTip]'s own commits sit

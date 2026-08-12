@@ -18263,8 +18263,10 @@ Widget app(
   List<CommitProfile> commitProfiles = const [],
   String mergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
   String rebaseMergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
+  bool precisePush = false,
 }) => MaterialApp(
   home: TimelineScreen(
+    precisePush: precisePush,
     repository: repository,
     controller: controller,
     branchPreviewMode: branchPreviewMode,

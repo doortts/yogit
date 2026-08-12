@@ -5085,6 +5085,29 @@ void main() {
     },
   );
 
+  test('a push refspec is the plain branch name until a tip pins it', () {
+    // 기본: 사람이 치는 그 형태.
+    expect(GitRepository.pushRefspec(branch: 'main'), 'main');
+    // upstream 이름이 다르면 받는 쪽을 밝힌다.
+    expect(
+      GitRepository.pushRefspec(branch: 'main', toBranch: 'trunk'),
+      'main:trunk',
+    );
+    // '정밀 push': 확인창이 보인 그 끝을 박는다.
+    expect(
+      GitRepository.pushRefspec(branch: 'main', fromTip: 'aaa1111'),
+      'aaa1111:refs/heads/main',
+    );
+    expect(
+      GitRepository.pushRefspec(
+        branch: 'main',
+        toBranch: 'trunk',
+        fromTip: 'aaa1111',
+      ),
+      'aaa1111:refs/heads/trunk',
+    );
+  });
+
   test('pushBranch pinned to a tip sends that tip and nothing newer', () async {
     final fixture = await _upstreamFixture();
     await File('${fixture.root.path}/file.txt').writeAsString('shown\n');
