@@ -535,6 +535,9 @@ class _TimelineScreenState extends State<TimelineScreen>
   );
   var _upstreamSyncBusy = false;
 
+  /// 충돌 해결 흐름이 잠깐 빌린 기준 브랜치 — 흐름이 끝나면 여기로 돌아온다.
+  String? _upstreamConflictReturnBase;
+
   // 커밋 찾기 — 목록을 거르지 않고 찾은 자리에 불을 켠다.
   final _searchController = TextEditingController();
   final _searchFocusNode = FocusNode(debugLabel: 'timeline search');

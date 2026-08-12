@@ -209,7 +209,35 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
     ).showSnackBar(SnackBar(content: Text('$failure: ${message.trim()}')));
   }
 
-  /// P4에서 브랜치 diff의 충돌 해결 흐름으로 연결된다. 그때까지 빨간 버튼은
-  /// tooltip이 충돌 파일을 말하는 데서 멈춘다.
-  void _openUpstreamConflictFlow() {}
+  /// 빨간 버튼: 기준을 upstream ref로, 비교를 로컬 브랜치로 하는 브랜치 diff에
+  /// rebase 모드로 들어간다 — 재연이 충돌 지점에 멈춰 있는 그 화면, 그 부품
+  /// 그대로. 흐름이 끝나면(적용이든 포기든) 기준 브랜치가 돌아온다.
+  void _openUpstreamConflictFlow() {
+    final state = _upstreamSync.state;
+    if (state.kind != UpstreamSyncKind.divergedConflict ||
+        !_upstreamSyncEnabled) {
+      return;
+    }
+    final upstreamRef = state.upstreamRef;
+    final branch = state.branch;
+    if (upstreamRef == null ||
+        branch == null ||
+        !_refs.remote.contains(upstreamRef)) {
+      return;
+    }
+    _upstreamConflictReturnBase = branch;
+    if (_branchPreviewMode != BranchPreviewMode.rebase) {
+      _setBranchPreviewMode(BranchPreviewMode.rebase);
+    }
+    _selectBaseBranch(upstreamRef);
+    unawaited(_selectComparison(branch));
+  }
+
+  /// 브랜치 diff가 닫힐 때 한 번 — 충돌 흐름이 빌려 간 기준을 되돌린다.
+  void _restoreUpstreamConflictBase() {
+    final returnBase = _upstreamConflictReturnBase;
+    if (returnBase == null) return;
+    _upstreamConflictReturnBase = null;
+    if (_refs.local.contains(returnBase)) _selectBaseBranch(returnBase);
+  }
 }

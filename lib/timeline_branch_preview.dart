@@ -1854,6 +1854,7 @@ extension _TimelineBranchPreviewFlows on _TimelineScreenState {
     });
     _scheduleRatchetUpdate();
     _focusNode.requestFocus();
+    _restoreUpstreamConflictBase();
   }
 
   Future<void> _prepareBranchPreviewApply() async {

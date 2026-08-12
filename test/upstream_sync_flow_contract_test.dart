@@ -4,7 +4,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/window_frame.dart';
 
-import 'app_test.dart' show FakeGitRepository, app, branchComparison, commit;
+import 'app_test.dart'
+    show
+        FakeGitRepository,
+        FakeRebasePreviewSession,
+        app,
+        branchComparison,
+        commit;
 
 /// 캡슐이 툴바의 기준 브랜치 곁에 서고, refs가 실릴 때마다 판정이 다시 서며,
 /// Push는 오갈 커밋의 영수증을 보인 뒤에만 원격을 움직인다. 주황 확인 한 번에
@@ -227,6 +233,133 @@ void main() {
     await tester.tap(find.byKey(const Key('upstream-sync-conflict')));
     await tester.pumpAndSettle();
     expect(acted, 0, reason: '빨강은 실행이 아니다');
+  });
+
+  testWidgets('the red door opens the conflict flow, aimed the right way', (
+    tester,
+  ) async {
+    // 어긋남 + 충돌 판정. 빨강을 누르면 기준 upstream, 비교 로컬 브랜치의
+    // 브랜치 diff가 rebase 모드로 열린다 — 기존 충돌 해결 화면 그대로.
+    final previews = <({String base, String compare})>[];
+    late FakeGitRepository repository;
+    repository = FakeGitRepository(
+      (_, _) async => [commit('aaa1111', 'local work')],
+      refs: RepoRefs(
+        local: const ['main'],
+        remote: const ['origin/main'],
+        remoteNames: const ['origin'],
+        current: 'main',
+        tips: const {'main': 'aaa1111', 'origin/main': 'bbb2222'},
+        localTips: const {'main': 'aaa1111'},
+        aheadBehind: const {'main': BranchAheadBehind(ahead: 1, behind: 1)},
+        upstreams: const {'main': 'origin/main'},
+        upstreamRemotes: const {'main': 'origin'},
+      ),
+      measureUpstreamRebaseCallback:
+          ({required remoteTip, required localTip}) async =>
+              RebasePreviewResult(
+                status: RebasePreviewStatus.conflict,
+                baseTip: remoteTip,
+                compareTip: localTip,
+                conflictFiles: const ['lib/a.dart'],
+              ),
+      compareBranchesCallback: (base, compare) async {
+        previews.add((base: base, compare: compare));
+        return branchComparison(compareRef: compare, compareTip: 'aaa1111');
+      },
+      openRebasePreviewCallback:
+          ({required baseRef, required compareRef}) async =>
+              FakeRebasePreviewSession(
+                repository,
+                const RebasePreviewResult(
+                  status: RebasePreviewStatus.conflict,
+                  baseTip: 'bbb2222',
+                  compareTip: 'aaa1111',
+                  conflictFiles: ['lib/a.dart'],
+                ),
+              ),
+    );
+    await pumpApp(tester, repository);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('upstream-sync-conflict')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('upstream-sync-conflict')));
+    await tester.pumpAndSettle();
+
+    expect(previews.single, (
+      base: 'origin/main',
+      compare: 'main',
+    ), reason: '잰 그 방향 그대로 — upstream 위에 로컬을 얹는다');
+    expect(find.byKey(const Key('branch-preview-summary')), findsOneWidget);
+    expect(
+      find.byKey(const Key('upstream-sync-capsule')),
+      findsNothing,
+      reason: '흐름이 도는 동안 기준은 원격 ref라 캡슐은 물러난다',
+    );
+  });
+
+  testWidgets('leaving the conflict flow restores the base branch', (
+    tester,
+  ) async {
+    late FakeGitRepository repository;
+    repository = FakeGitRepository(
+      (_, _) async => [commit('aaa1111', 'local work')],
+      refs: RepoRefs(
+        local: const ['main'],
+        remote: const ['origin/main'],
+        remoteNames: const ['origin'],
+        current: 'main',
+        tips: const {'main': 'aaa1111', 'origin/main': 'bbb2222'},
+        localTips: const {'main': 'aaa1111'},
+        aheadBehind: const {'main': BranchAheadBehind(ahead: 1, behind: 1)},
+        upstreams: const {'main': 'origin/main'},
+        upstreamRemotes: const {'main': 'origin'},
+      ),
+      measureUpstreamRebaseCallback:
+          ({required remoteTip, required localTip}) async =>
+              RebasePreviewResult(
+                status: RebasePreviewStatus.conflict,
+                baseTip: remoteTip,
+                compareTip: localTip,
+                conflictFiles: const ['lib/a.dart'],
+              ),
+      compareBranchesCallback: (base, compare) async =>
+          branchComparison(compareRef: compare, compareTip: 'aaa1111'),
+      openRebasePreviewCallback:
+          ({required baseRef, required compareRef}) async =>
+              FakeRebasePreviewSession(
+                repository,
+                const RebasePreviewResult(
+                  status: RebasePreviewStatus.conflict,
+                  baseTip: 'bbb2222',
+                  compareTip: 'aaa1111',
+                  conflictFiles: ['lib/a.dart'],
+                ),
+              ),
+    );
+    await pumpApp(tester, repository);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('upstream-sync-conflict')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('upstream-sync-capsule')), findsNothing);
+
+    // 그만두기 — 브랜치 diff를 닫는다. (해제 버튼은 선택 메뉴 안에 산다.)
+    await tester.tap(find.byKey(const Key('branch-diff-selector')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('branch-diff-clear')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('upstream-sync-capsule')),
+      findsOneWidget,
+      reason: '기준 브랜치가 돌아오고 캡슐도 돌아온다',
+    );
+    expect(
+      find.byKey(const Key('upstream-sync-conflict')),
+      findsOneWidget,
+      reason: '로컬은 무변 — 판정도 그대로 충돌이다',
+    );
   });
 
   testWidgets('a branch diff underway shows the verdict but locks the verbs', (
