@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/git.dart';
+import 'package:yogit/working_tree_status.dart';
 
 import 'full_diff_git_test.dart' show createGitFixture, runGit, writeAndCommit;
 
@@ -27,6 +28,24 @@ Future<void> _write(Directory root, String path, String contents) async {
   await file.parent.create(recursive: true);
   await file.writeAsString(contents);
 }
+
+/// `line 1` … `line [count]`, with [edits] replacing whole lines by number.
+/// Two edits far enough apart give the diff two hunks at -U3.
+String _numbered(
+  int count, {
+  Map<int, String> edits = const {},
+  String ending = '\n',
+  bool trailing = true,
+}) {
+  final body = [
+    for (var line = 1; line <= count; line++) edits[line] ?? 'line $line',
+  ].join(ending);
+  return trailing ? '$body$ending' : body;
+}
+
+/// The index copy of [path], byte for byte.
+Future<String> _indexBlob(Directory root, String path) =>
+    runGit(root, ['show', ':$path']);
 
 void main() {
   test('loadWorkingTreeStatus reads both sections from a real repository', () async {
@@ -261,5 +280,304 @@ void main() {
     );
 
     expect((await runGit(root, ['log', '-1', '--format=%s'])).trim(), 'base');
+  });
+
+  test('stageHunk stages exactly one of two hunks', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'a.txt', _numbered(20), 'base');
+    final both = _numbered(
+      20,
+      edits: {3: 'line 3 changed', 17: 'line 17 changed'},
+    );
+    await _write(root, 'a.txt', both);
+
+    await GitRepository(root.path).stageHunk(
+      'a.txt',
+      0,
+      expected: (oldStart: 1, oldCount: 6, newStart: 1, newCount: 6),
+    );
+
+    expect(
+      await _indexBlob(root, 'a.txt'),
+      _numbered(20, edits: {3: 'line 3 changed'}),
+    );
+    expect(await File('${root.path}/a.txt').readAsString(), both);
+    final staged = await runGit(root, ['diff', '--cached']);
+    expect(staged, contains('+line 3 changed'));
+    expect(staged, isNot(contains('line 17 changed')));
+  });
+
+  test('staging the second hunk first leaves the first hunk unstaged and intact', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'a.txt', _numbered(20), 'base');
+    final both = _numbered(
+      20,
+      edits: {3: 'line 3 changed', 17: 'line 17 changed'},
+    );
+    await _write(root, 'a.txt', both);
+
+    await GitRepository(root.path).stageHunk(
+      'a.txt',
+      1,
+      expected: (oldStart: 14, oldCount: 7, newStart: 14, newCount: 7),
+    );
+
+    expect(
+      await _indexBlob(root, 'a.txt'),
+      _numbered(20, edits: {17: 'line 17 changed'}),
+    );
+    expect(await File('${root.path}/a.txt').readAsString(), both);
+    final unstaged = await runGit(root, ['diff']);
+    expect(unstaged, contains('+line 3 changed'));
+    expect(unstaged, isNot(contains('line 17 changed')));
+  });
+
+  test('two consecutive stageHunk calls survive because each re-reads the diff', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'a.txt', _numbered(20), 'base');
+    final both = _numbered(
+      20,
+      edits: {3: 'line 3 changed', 17: 'line 17 changed'},
+    );
+    await _write(root, 'a.txt', both);
+    final repository = GitRepository(root.path);
+
+    await repository.stageHunk(
+      'a.txt',
+      1,
+      expected: (oldStart: 14, oldCount: 7, newStart: 14, newCount: 7),
+    );
+    // 남은 헝크는 목록에서 0번으로 밀렸다. 새로 뜬 diff의 0번이라 좌표가 맞는다.
+    await repository.stageHunk(
+      'a.txt',
+      0,
+      expected: (oldStart: 1, oldCount: 6, newStart: 1, newCount: 6),
+    );
+
+    expect(await _indexBlob(root, 'a.txt'), both);
+    expect(await runGit(root, ['diff']), isEmpty);
+  });
+
+  test('stageHunk refuses a moved hunk and stages nothing', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'a.txt', _numbered(20), 'base');
+    await _write(
+      root,
+      'a.txt',
+      'line 0\n${_numbered(20, edits: {3: 'line 3 changed', 17: 'line 17 changed'})}',
+    );
+
+    await expectLater(
+      GitRepository(root.path).stageHunk(
+        'a.txt',
+        0,
+        expected: (oldStart: 1, oldCount: 6, newStart: 1, newCount: 6),
+      ),
+      throwsA(isA<HunkMovedException>()),
+    );
+
+    expect(await runGit(root, ['diff', '--cached']), isEmpty);
+  });
+
+  test('unstageHunk returns one hunk to the worktree-only side', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'a.txt', _numbered(20), 'base');
+    final both = _numbered(
+      20,
+      edits: {3: 'line 3 changed', 17: 'line 17 changed'},
+    );
+    await _write(root, 'a.txt', both);
+    await runGit(root, ['add', '--', 'a.txt']);
+
+    await GitRepository(root.path).unstageHunk(
+      'a.txt',
+      0,
+      expected: (oldStart: 1, oldCount: 6, newStart: 1, newCount: 6),
+    );
+
+    expect(
+      await _indexBlob(root, 'a.txt'),
+      _numbered(20, edits: {17: 'line 17 changed'}),
+    );
+    expect(await File('${root.path}/a.txt').readAsString(), both);
+    expect(await runGit(root, ['diff']), contains('+line 3 changed'));
+  });
+
+  test('unstageHunk on a staged new file empties its index entry', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'seed.txt', 'seed\n', 'base');
+    await _write(root, 'fresh.txt', 'fresh one\nfresh two\n');
+    await runGit(root, ['add', '--', 'fresh.txt']);
+
+    await GitRepository(root.path).unstageHunk(
+      'fresh.txt',
+      0,
+      expected: (oldStart: 0, oldCount: 0, newStart: 1, newCount: 2),
+    );
+
+    expect(await runGit(root, ['status', '--porcelain']), '?? fresh.txt\n');
+    expect(
+      await File('${root.path}/fresh.txt').readAsString(),
+      'fresh one\nfresh two\n',
+    );
+  });
+
+  test('discardHunk removes the hunk from the worktree only', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'a.txt', _numbered(20), 'base');
+    await _write(root, 'a.txt', _numbered(20, edits: {10: 'line 10 staged'}));
+    await runGit(root, ['add', '--', 'a.txt']);
+    await _write(
+      root,
+      'a.txt',
+      _numbered(
+        20,
+        edits: {
+          3: 'line 3 changed',
+          10: 'line 10 staged',
+          17: 'line 17 changed',
+        },
+      ),
+    );
+
+    await GitRepository(root.path).discardHunk(
+      'a.txt',
+      0,
+      expected: (oldStart: 1, oldCount: 6, newStart: 1, newCount: 6),
+    );
+
+    expect(
+      await File('${root.path}/a.txt').readAsString(),
+      _numbered(
+        20,
+        edits: {10: 'line 10 staged', 17: 'line 17 changed'},
+      ),
+    );
+    expect(
+      await _indexBlob(root, 'a.txt'),
+      _numbered(20, edits: {10: 'line 10 staged'}),
+    );
+    expect(
+      await runGit(root, ['diff', '--cached']),
+      contains('+line 10 staged'),
+    );
+  });
+
+  test('hunk operations keep a file without trailing newline byte-identical', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'a.txt', _numbered(20, trailing: false), 'base');
+    await _write(
+      root,
+      'a.txt',
+      _numbered(
+        20,
+        edits: {3: 'line 3 changed', 20: 'line 20 changed'},
+        trailing: false,
+      ),
+    );
+    final repository = GitRepository(root.path);
+
+    await repository.stageHunk(
+      'a.txt',
+      1,
+      expected: (oldStart: 17, oldCount: 4, newStart: 17, newCount: 4),
+    );
+
+    final tail = _numbered(
+      20,
+      edits: {20: 'line 20 changed'},
+      trailing: false,
+    );
+    expect(await _indexBlob(root, 'a.txt'), tail);
+
+    await repository.discardHunk(
+      'a.txt',
+      0,
+      expected: (oldStart: 1, oldCount: 6, newStart: 1, newCount: 6),
+    );
+
+    expect(await File('${root.path}/a.txt').readAsString(), tail);
+    expect(await runGit(root, ['diff']), isEmpty);
+  });
+
+  test('hunk operations keep CRLF line endings byte-identical', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await runGit(root, ['config', 'core.autocrlf', 'false']);
+    await writeAndCommit(root, 'a.txt', _numbered(20, ending: '\r\n'), 'base');
+    final both = _numbered(
+      20,
+      edits: {3: 'line 3 changed', 17: 'line 17 changed'},
+      ending: '\r\n',
+    );
+    await _write(root, 'a.txt', both);
+    final repository = GitRepository(root.path);
+
+    await repository.stageHunk(
+      'a.txt',
+      0,
+      expected: (oldStart: 1, oldCount: 6, newStart: 1, newCount: 6),
+    );
+
+    final head = _numbered(20, edits: {3: 'line 3 changed'}, ending: '\r\n');
+    expect(await _indexBlob(root, 'a.txt'), head);
+    expect(await File('${root.path}/a.txt').readAsString(), both);
+
+    await repository.discardHunk(
+      'a.txt',
+      0,
+      expected: (oldStart: 14, oldCount: 7, newStart: 14, newCount: 7),
+    );
+
+    expect(await File('${root.path}/a.txt').readAsString(), head);
+    expect(await runGit(root, ['diff']), isEmpty);
+  });
+
+  test('stageHunk builds the patch with the algorithm the caller passes', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'a.txt', _numbered(20), 'base');
+    await _write(
+      root,
+      'a.txt',
+      _numbered(20, edits: {3: 'line 3 changed', 17: 'line 17 changed'}),
+    );
+    final commands = <List<String>>[];
+    final repository = GitRepository(
+      root.path,
+      runner: (executable, arguments, {workingDirectory, environment}) {
+        commands.add(arguments);
+        return Process.run(
+          executable,
+          arguments,
+          workingDirectory: workingDirectory,
+          environment: environment,
+        );
+      },
+    );
+
+    await repository.stageHunk(
+      'a.txt',
+      0,
+      expected: (oldStart: 1, oldCount: 6, newStart: 1, newCount: 6),
+      algorithm: DiffAlgorithm.patience,
+    );
+
+    expect(
+      commands.firstWhere((arguments) => arguments.first == 'diff'),
+      containsAllInOrder(['--diff-algorithm=patience', '--', ':(literal)a.txt']),
+    );
+    expect(
+      await _indexBlob(root, 'a.txt'),
+      _numbered(20, edits: {3: 'line 3 changed'}),
+    );
   });
 }

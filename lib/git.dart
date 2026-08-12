@@ -3573,6 +3573,94 @@ class GitRepository implements FullDiffRepository {
     return (await _run(const ['rev-parse', 'HEAD'])).trim();
   }
 
+  /// Stages hunk [hunkIndex] of [path] and nothing else.
+  Future<void> stageHunk(
+    String path,
+    int hunkIndex, {
+    required HunkRange expected,
+    DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
+  }) => _applyHunk(
+    path,
+    hunkIndex,
+    expected: expected,
+    algorithm: algorithm,
+    source: const [],
+    apply: const ['--cached'],
+  );
+
+  /// Takes hunk [hunkIndex] back out of the index, leaving the worktree alone.
+  Future<void> unstageHunk(
+    String path,
+    int hunkIndex, {
+    required HunkRange expected,
+    DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
+  }) => _applyHunk(
+    path,
+    hunkIndex,
+    expected: expected,
+    algorithm: algorithm,
+    source: const ['--cached'],
+    apply: const ['--cached', '-R'],
+  );
+
+  /// Throws hunk [hunkIndex] away in the worktree, leaving the index alone.
+  Future<void> discardHunk(
+    String path,
+    int hunkIndex, {
+    required HunkRange expected,
+    DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
+  }) => _applyHunk(
+    path,
+    hunkIndex,
+    expected: expected,
+    algorithm: algorithm,
+    source: const [],
+    apply: const ['-R'],
+  );
+
+  /// Cuts hunk [hunkIndex] out of a diff read here and now, then hands it to
+  /// `git apply`. Reading the diff again is what makes a single hunk safe to
+  /// apply: the side the patch is measured against is the index either way, so
+  /// skipping the other hunks cannot shift a coordinate, and [expected] catches
+  /// a screen that has gone stale since it drew the hunk.
+  ///
+  /// [algorithm] is the one the screen is showing, since a hunk the caller can
+  /// point at has to be a hunk this diff also produces.
+  Future<void> _applyHunk(
+    String path,
+    int hunkIndex, {
+    required HunkRange expected,
+    required DiffAlgorithm algorithm,
+    required List<String> source,
+    required List<String> apply,
+  }) async {
+    final patch = extractHunkPatch(
+      await _run([
+        'diff',
+        ...safeDiffArguments,
+        '--unified=3',
+        ...algorithm.gitArguments,
+        ...source,
+        '--',
+        ':(literal)$path',
+      ]),
+      hunkIndex,
+      expected: expected,
+    );
+    // 패치는 파일로 준다 — runner에 stdin이 없다. 작업 트리에 두면 그 자체가
+    // untracked 변경이라 plumbing 디렉터리에 쓴다.
+    final scratch = await Directory(
+      (await _run(const ['rev-parse', '--absolute-git-dir'])).trim(),
+    ).createTemp('yogit_hunk_');
+    try {
+      final file = File('${scratch.path}/hunk.patch');
+      await file.writeAsString(patch);
+      await _run(['apply', ...apply, '--whitespace=nowarn', file.path]);
+    } finally {
+      await scratch.delete(recursive: true);
+    }
+  }
+
   Future<String> _cherryPickPreflight(String sha) async {
     final current = (await _run(['branch', '--show-current'])).trim();
     if (current.isEmpty) {
