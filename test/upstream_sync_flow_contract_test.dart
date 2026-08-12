@@ -14,7 +14,7 @@ import 'app_test.dart'
         commit;
 
 /// 캡슐이 툴바의 기준 브랜치 곁에 서고, refs가 실릴 때마다 판정이 다시 서며,
-/// Push는 오갈 커밋의 영수증을 보인 뒤에만 원격을 움직인다. 주황 확인 한 번에
+/// Push는 오갈 커밋의 목록을 보인 뒤에만 원격을 움직인다. 주황 확인 한 번에
 /// 받아 얹기와 Push 두 걸음이 이어진다. docs/upstream-sync-mockup.html 계약.
 void main() {
   late WindowFrameController controller;
@@ -70,7 +70,7 @@ void main() {
     expect(find.byKey(const Key('upstream-sync-dot')), findsOneWidget);
   });
 
-  testWidgets('a push shows its receipt and only then moves the remote', (
+  testWidgets('a push shows what will move and only then moves the remote', (
     tester,
   ) async {
     final pushes =
@@ -97,12 +97,12 @@ void main() {
     await tester.tap(find.byKey(const Key('upstream-sync-push')));
     await tester.pumpAndSettle();
 
-    // 영수증: 올라갈 커밋과 원격 ref의 이동이 해시로 선다. 아직 아무 일도
+    // 목록: 올라갈 커밋과 원격 ref의 이동이 해시로 선다. 아직 아무 일도
     // 하지 않았다.
-    expect(find.byKey(const Key('push-receipt-push-block')), findsOneWidget);
+    expect(find.byKey(const Key('push-summary-push-block')), findsOneWidget);
     expect(find.textContaining('local work'), findsWidgets);
     final footnote = tester
-        .widget<Text>(find.byKey(const Key('push-receipt-footnote')))
+        .widget<Text>(find.byKey(const Key('push-summary-footnote')))
         .data!;
     expect(footnote, contains('bbb2222'));
     expect(footnote, contains('aaa1111'));
@@ -115,10 +115,10 @@ void main() {
       branch: 'main',
       to: 'main',
       from: 'aaa1111',
-    ), reason: '영수증이 보인 그 끝만 올라간다');
+    ), reason: '확인창이 보인 그 끝만 올라간다');
   });
 
-  testWidgets('declining the receipt moves nothing', (tester) async {
+  testWidgets('declining the summary moves nothing', (tester) async {
     var pushed = 0;
     final repository = FakeGitRepository(
       (_, _) async => [commit('aaa1111', 'local work')],
@@ -194,15 +194,15 @@ void main() {
     await pumpApp(tester, repository);
     await tester.pumpAndSettle();
 
-    // 판정: 주황. Push를 누르면 두 블록 영수증.
+    // 판정: 주황. Push를 누르면 두 블록 목록.
     await tester.tap(find.byKey(const Key('upstream-sync-push')));
     await tester.pumpAndSettle();
     expect(
       find.text('받아 얹은 뒤 Push할까요? (Pull Rebase and Push)'),
       findsOneWidget,
     );
-    expect(find.byKey(const Key('push-receipt-pull-block')), findsOneWidget);
-    expect(find.byKey(const Key('push-receipt-push-block')), findsOneWidget);
+    expect(find.byKey(const Key('push-summary-pull-block')), findsOneWidget);
+    expect(find.byKey(const Key('push-summary-push-block')), findsOneWidget);
     expect(walked, isEmpty);
 
     await tester.tap(find.byKey(const Key('upstream-rebase-push-confirm')));
@@ -285,7 +285,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('받아 얹을까요? (Pull --rebase)'), findsOneWidget);
-    expect(find.byKey(const Key('push-receipt-pull-block')), findsOneWidget);
+    expect(find.byKey(const Key('push-summary-pull-block')), findsOneWidget);
     expect(
       find.textContaining('해시가 달라집니다'),
       findsOneWidget,
@@ -331,7 +331,7 @@ void main() {
     expect(pushes.single, (to: null, up: true));
   });
 
-  testWidgets('the receipt never claims fewer commits than will travel', (
+  testWidgets('the summary never claims fewer commits than will travel', (
     tester,
   ) async {
     final repository = FakeGitRepository(
@@ -357,7 +357,7 @@ void main() {
     expect(find.text('외 3개'), findsOneWidget);
   });
 
-  testWidgets('a receipt line stands in a fixed-width face, hash and all', (
+  testWidgets('a summary line stands in a fixed-width face, hash and all', (
     tester,
   ) async {
     final repository = FakeGitRepository(
@@ -382,7 +382,7 @@ void main() {
         tester
             .widget<Text>(
               find.descendant(
-                of: find.byKey(const Key('push-receipt-push-block')),
+                of: find.byKey(const Key('push-summary-push-block')),
                 matching: find.text(label),
               ),
             )
@@ -394,7 +394,9 @@ void main() {
     }
   });
 
-  testWidgets('the push receipt says which address origin is', (tester) async {
+  testWidgets('the push confirmation says which address origin is', (
+    tester,
+  ) async {
     final repository = FakeGitRepository(
       (_, _) async => [commit('aaa1111', 'local work')],
       refs: refs(ahead: 1),
@@ -525,13 +527,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('work 11'), findsNothing, reason: '접힌 목록은 아홉 줄에서 멈춘다');
 
-    await tester.tap(find.byKey(const Key('push-receipt-push-more')));
+    await tester.tap(find.byKey(const Key('push-summary-push-more')));
     await tester.pumpAndSettle();
     expect(find.text('work 11'), findsOneWidget);
     expect(find.text('접기'), findsOneWidget);
     expect(find.text('외 18개'), findsOneWidget, reason: '읽어 오지 못한 나머지도 센다');
 
-    await tester.tap(find.byKey(const Key('push-receipt-push-more')));
+    await tester.tap(find.byKey(const Key('push-summary-push-more')));
     await tester.pumpAndSettle();
     expect(find.text('work 11'), findsNothing);
     expect(find.text('외 21개'), findsOneWidget);

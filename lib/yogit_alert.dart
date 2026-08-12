@@ -91,7 +91,7 @@ class YogitAlert extends StatelessWidget {
 
   /// The width an alert takes when its body is a list of commits: subjects
   /// have to stay readable or the list is decoration. Shared so the repository
-  /// change notice and the Pull/Push receipts stand at the same size.
+  /// change notice and the Pull/Push confirmations stand at the same size.
   static const listWidth = 520.0;
 
   /// How wide this one is. Alerts are prose and stay at [width]; one carrying

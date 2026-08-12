@@ -40,7 +40,7 @@ import 'settings.dart';
 import 'shortcut_modifier.dart';
 import 'timeline_theme.dart';
 import 'typography.dart';
-import 'upstream_push_receipt.dart';
+import 'upstream_push_summary.dart';
 import 'upstream_sync.dart';
 import 'upstream_sync_capsule.dart';
 import 'vim_navigation.dart';

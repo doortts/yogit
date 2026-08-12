@@ -35,7 +35,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
 
   /// Pull: 초록(빨리감기)은 확인 없이 즉시 — 로컬을 움직이되 역사는 그대로다.
   /// 주황은 받아 얹기라 로컬 커밋의 해시가 달라지므로, 무엇이 들어오고 무엇이
-  /// 다시 쓰이는지 영수증을 보인 뒤에만 움직인다.
+  /// 다시 쓰이는지 오갈 커밋 목록을 보인 뒤에만 움직인다.
   Future<void> _upstreamPull() async {
     final state = _upstreamSync.state;
     switch (state.kind) {
@@ -55,7 +55,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
           YogitAlert(
             boxWidth: YogitAlert.listWidth,
             title: '받아 얹을까요? (Pull --rebase)',
-            body: PushReceipt(
+            body: PushSummary(
               branch: state.branch!,
               incoming: moved.incoming,
               incomingTotal: state.behind,
@@ -126,7 +126,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
             boxWidth: YogitAlert.listWidth,
             subtitle: target,
             title: '${state.branch} 브랜치를 ${state.remote}에 Push할까요?',
-            body: PushReceipt(
+            body: PushSummary(
               branch: state.branch!,
               incoming: const [],
               outgoing: moved.outgoing,
@@ -145,7 +145,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
         );
         if (approved != true) return;
         await _runUpstreamAction(() async {
-          // 영수증이 보인 그 끝을 올린다 — 확인창이 열린 사이에 도착한 커밋이
+          // 확인창이 보인 그 끝을 올린다 — 창이 열린 사이에 도착한 커밋이
           // 소리 없이 딸려 올라가지 않는다.
           await widget.repository.pushBranch(
             state.remote!,
@@ -165,7 +165,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
             boxWidth: YogitAlert.listWidth,
             subtitle: target,
             title: '받아 얹은 뒤 Push할까요? (Pull Rebase and Push)',
-            body: PushReceipt(
+            body: PushSummary(
               branch: state.branch!,
               incoming: moved.incoming,
               incomingTotal: state.behind,
@@ -236,7 +236,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
   /// '외 N개'를 누를 때 도는 조회. 확인창을 여는 조회는 열여덟 개로 가볍게 두고,
   /// 나머지는 실제로 펼친 사람만 값을 치른다.
   /// ponytail: 1000-commit shared window, 500 per side; the tail keeps counting
-  /// past it, so raise both only if a receipt ever has to show more.
+  /// past it, so raise both only if a summary ever has to show more.
   Future<List<MovedCommit>> Function() _upstreamRestLoader(
     UpstreamSyncState state, {
     required bool pushSide,
@@ -260,7 +260,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
     return splitRemoteBranchName(upstreamRef, _refs.remoteNames)?.branch;
   }
 
-  /// 영수증에 설 커밋들. `<`가 들어올(pull) 쪽, `>`가 올라갈(push) 쪽이다 —
+  /// 확인창 목록에 설 커밋들. `<`가 들어올(pull) 쪽, `>`가 올라갈(push) 쪽이다 —
   /// incoming이라는 이름과 방향이 엇갈리므로 여기서 한 번만 갈라 담는다.
   /// 기본 아홉 개는 양쪽 합계라 한쪽이 다른 쪽을 굶길 수 있다 — 창을 넓혀
   /// 각 블록이 저마다 아홉 줄까지 서고, 넘친 것은 '외 N개'가 정직하게 센다.

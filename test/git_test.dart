@@ -5088,7 +5088,7 @@ void main() {
   test('pushBranch pinned to a tip sends that tip and nothing newer', () async {
     final fixture = await _upstreamFixture();
     await File('${fixture.root.path}/file.txt').writeAsString('shown\n');
-    await _git(fixture.root, ['commit', '-am', 'shown on the receipt']);
+    await _git(fixture.root, ['commit', '-am', 'shown in the confirmation']);
     final shownTip = (await _git(fixture.root, ['rev-parse', 'main'])).trim();
     // 확인창이 열린 사이에 커밋이 하나 더 붙었다.
     await File('${fixture.root.path}/file.txt').writeAsString('later\n');
@@ -5100,7 +5100,7 @@ void main() {
     expect(
       (await _git(fixture.remote, ['rev-parse', 'main'])).trim(),
       shownTip,
-      reason: '영수증이 보인 그 끝까지만 올라간다',
+      reason: '확인창이 보인 그 끝까지만 올라간다',
     );
   });
 

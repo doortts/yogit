@@ -124,9 +124,9 @@ Future<void> pushBranch(String remote, String branch, {bool setUpstream = false}
   브랜치 선택기 다음에 끼운다. 선택기 내부 로직은 건드리지 않는다.
 - tooltip: 판정 문장 + `measuredAt` 상대 시각. 기존 `_tooltip`/`SideTooltip` 재사용.
 
-### Push 확인창 — 커밋 영수증
+### Push 확인창 — 오갈 커밋 목록
 
-- `YogitAlert` 골격에 내용물 `PushReceipt` 위젯: `LocalChangeNotice`의
+- `YogitAlert` 골격에 내용물 `PushSummary` 위젯: `LocalChangeNotice`의
   블록(요약줄 + `MovedCommit` 행) 렌더링을 공용 위젯 `MovedCommitBlock`으로
   추출해 둘이 같이 쓴다 — 형식이 한 곳에서 관리된다.
 - 초록 Push: 블록 하나(`main · push · 커밋 N개 올라감`, ↑ 표식) + "원격 main이

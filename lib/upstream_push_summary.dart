@@ -100,8 +100,8 @@ class CommandPreview extends StatelessWidget {
 /// 커밋이 서고 물음은 맨 끝이다 — 무엇이 움직이는지 읽은 뒤에 답하는 순서.
 /// 주황(받아 얹고 Push)일 때는 두 걸음이 블록 둘로 선다.
 /// docs/upstream-sync-mockup.html '누르면' 절이 계약이다.
-class PushReceipt extends StatelessWidget {
-  const PushReceipt({
+class PushSummary extends StatelessWidget {
+  const PushSummary({
     required this.branch,
     required this.incoming,
     required this.outgoing,
@@ -124,7 +124,7 @@ class PushReceipt extends StatelessWidget {
   final String footnote;
 
   /// 실제 오갈 개수 — 목록은 아홉 개에서 잘려도 요약과 '외 N개'는 이 수를
-  /// 말한다. 영수증이 실물보다 적게 말하는 일은 없어야 한다.
+  /// 말한다. 목록이 실물보다 적게 말하는 일은 없어야 한다.
   final int? incomingTotal;
   final int? outgoingTotal;
 
@@ -137,17 +137,17 @@ class PushReceipt extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = context.timelineTheme;
     return Column(
-      key: const Key('push-receipt'),
+      key: const Key('push-summary'),
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // 목록이 비어도 올 것이 있으면 블록은 선다 — 창이 한쪽으로 쏠려도
-        // 영수증에서 걸음 하나가 통째로 사라지지는 않는다.
+        // 확인창에서 걸음 하나가 통째로 사라지지는 않는다.
         // ponytail: 18-commit shared window; query the two sides separately
-        // if a receipt ever needs full rows on both under extreme skew.
+        // if a summary ever needs full rows on both under extreme skew.
         if ((incomingTotal ?? incoming.length) > 0)
-          _ReceiptBlock(
-            key: const Key('push-receipt-pull-block'),
+          _SummaryBlock(
+            key: const Key('push-summary-pull-block'),
             branch: branch,
             op: 'pull --rebase',
             count: '커밋 ${incomingTotal ?? incoming.length}개 들어옴',
@@ -156,12 +156,12 @@ class PushReceipt extends StatelessWidget {
             total: incomingTotal ?? incoming.length,
             mark: '+',
             markColor: mainAccent,
-            moreKey: const Key('push-receipt-pull-more'),
+            moreKey: const Key('push-summary-pull-more'),
             loadRest: loadIncomingRest,
           ),
         if ((outgoingTotal ?? outgoing.length) > 0)
-          _ReceiptBlock(
-            key: const Key('push-receipt-push-block'),
+          _SummaryBlock(
+            key: const Key('push-summary-push-block'),
             branch: branch,
             op: 'push',
             count: '커밋 ${outgoingTotal ?? outgoing.length}개 올라감',
@@ -170,14 +170,14 @@ class PushReceipt extends StatelessWidget {
             total: outgoingTotal ?? outgoing.length,
             mark: '↑',
             markColor: previewControlBlue,
-            moreKey: const Key('push-receipt-push-more'),
+            moreKey: const Key('push-summary-push-more'),
             loadRest: loadOutgoingRest,
           ),
         Padding(
           padding: const EdgeInsets.only(top: 9),
           child: Text(
             footnote,
-            key: const Key('push-receipt-footnote'),
+            key: const Key('push-summary-footnote'),
             style: TextStyle(
               color: palette.text.withValues(alpha: 0.82),
               fontSize: 11,
@@ -190,11 +190,11 @@ class PushReceipt extends StatelessWidget {
   }
 }
 
-/// 영수증의 한 걸음. 목록은 아홉 줄에서 멈추고 '외 N개'가 남은 수를 센다 —
+/// 오갈 커밋 목록의 한 걸음. 목록은 아홉 줄에서 멈추고 '외 N개'가 남은 수를 센다 —
 /// 누르면 나머지를 그때 읽어 와 아홉 줄 높이 안에서 구른다. 창은 커지지 않고,
 /// 다시 누르면 접힌다. 펼침은 블록마다 따로다.
-class _ReceiptBlock extends StatefulWidget {
-  const _ReceiptBlock({
+class _SummaryBlock extends StatefulWidget {
+  const _SummaryBlock({
     required this.branch,
     required this.op,
     required this.count,
@@ -220,10 +220,10 @@ class _ReceiptBlock extends StatefulWidget {
   final Future<List<MovedCommit>> Function()? loadRest;
 
   @override
-  State<_ReceiptBlock> createState() => _ReceiptBlockState();
+  State<_SummaryBlock> createState() => _SummaryBlockState();
 }
 
-class _ReceiptBlockState extends State<_ReceiptBlock> {
+class _SummaryBlockState extends State<_SummaryBlock> {
   /// 스크롤 영역의 키: 접힌 목록과 같은 아홉 줄 높이.
   static const _openHeight = 168.0;
 
