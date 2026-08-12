@@ -463,6 +463,10 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   /// 패널 전체가 한 번에 한 조작만 한다 — index.lock 경합을 UI에서 막는다.
   var _commitModeBusy = false;
+
+  /// 열린 diff가 보고 있는 축. 세션의 어댑터가 이 값을 물고 있어서 축을 바꾸면
+  /// 세션을 다시 세운다.
+  var _commitDiffArea = WorkingTreeArea.unstaged;
   var _commitUnstagedCollapsed = false;
   var _commitStagedCollapsed = false;
   final _commitTitle = TextEditingController();

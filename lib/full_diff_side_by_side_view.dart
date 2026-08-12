@@ -31,6 +31,7 @@ class SideBySidePresentationView extends StatelessWidget {
     this.onSplitRatioChanged,
     this.onSplitRatioChangeEnd,
     this.showHunkHeaders = true,
+    this.hunkActions,
     this.compactRows = false,
     this.currentMarkerColor = fullDiffAccent,
     this.currentTint,
@@ -58,6 +59,10 @@ class SideBySidePresentationView extends StatelessWidget {
   final ValueChanged<double>? onSplitRatioChanged;
   final VoidCallback? onSplitRatioChangeEnd;
   final bool showHunkHeaders;
+
+  /// What each hunk header offers to do to its hunk. Null everywhere but the
+  /// commit panel's diff.
+  final List<Widget> Function(DiffHunk hunk)? hunkActions;
   final bool compactRows;
   final Color currentMarkerColor;
   final Color? currentTint;
@@ -139,6 +144,7 @@ class SideBySidePresentationView extends StatelessWidget {
                       hunk: hunk,
                       path: newPath,
                       hunkCount: document.hunks.length,
+                      actions: hunkActions?.call(hunk) ?? const [],
                     ),
                   )
                 : const SizedBox.shrink();

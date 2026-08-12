@@ -7,6 +7,7 @@ import 'full_diff_theme.dart';
 import 'git.dart';
 import 'shortcut_modifier.dart';
 import 'typography.dart';
+import 'working_tree_status.dart';
 
 export 'full_diff_algorithm_chooser.dart'
     show DiffAlgorithmDetails, diffAlgorithmDescription;
@@ -46,6 +47,10 @@ class GlobalFileBar extends StatelessWidget {
     required this.onFocusModeChanged,
     this.showShortcutHints = false,
     this.editorError,
+    this.commitArea,
+    this.onCommitAreaSelected,
+    this.commitAreaEnabled,
+    this.onStageFile,
     super.key,
   });
 
@@ -61,6 +66,16 @@ class GlobalFileBar extends StatelessWidget {
   final ValueChanged<bool> onFocusModeChanged;
   final bool showShortcutHints;
   final String? editorError;
+
+  /// Which side of the index this diff is reading. Null outside the commit
+  /// panel, and then the bar looks exactly as it always has.
+  final WorkingTreeArea? commitArea;
+  final ValueChanged<WorkingTreeArea>? onCommitAreaSelected;
+  final bool Function(WorkingTreeArea area)? commitAreaEnabled;
+
+  /// Stage File on the worktree side, Unstage File on the index side — the
+  /// area names the button. Null while the panel is busy or has no file.
+  final VoidCallback? onStageFile;
 
   @override
   Widget build(BuildContext context) {
@@ -147,6 +162,27 @@ class GlobalFileBar extends StatelessWidget {
             runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
+              if (commitArea case final area?) ...[
+                FullDiffSegmentedControl<WorkingTreeArea>(
+                  key: const Key('commit-area-segment'),
+                  groupLabel: '작업 트리 영역',
+                  values: WorkingTreeArea.values,
+                  selected: area,
+                  labelFor: _areaLabel,
+                  isEnabled: commitAreaEnabled,
+                  onSelected: onCommitAreaSelected ?? (_) {},
+                  semanticsHintFor: (value) =>
+                      '${_areaLabel(value)} 영역의 diff로 전환',
+                ),
+                _HeaderButton(
+                  controlKey: const Key('commit-file-action'),
+                  label: area == WorkingTreeArea.unstaged
+                      ? 'Stage File'
+                      : 'Unstage File',
+                  enabled: onStageFile != null,
+                  onPressed: onStageFile ?? () {},
+                ),
+              ],
               FullDiffShortcutHint(
                 visible: showShortcutHints,
                 label: shortcutLabel('⇧F'),
@@ -790,6 +826,9 @@ class _HeaderToggle extends StatelessWidget {
     ),
   );
 }
+
+String _areaLabel(WorkingTreeArea area) =>
+    area == WorkingTreeArea.unstaged ? 'Unstaged' : 'Staged';
 
 String _viewLabel(FullDiffView view) => switch (view) {
   FullDiffView.diff => 'Diff',

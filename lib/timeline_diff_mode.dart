@@ -151,10 +151,15 @@ extension _TimelineDiffMode on _TimelineScreenState {
   /// area, or hands it back. A closed preview opens first — it is the file
   /// navigation the diff mode relies on.
   void _openFullDiff(GitCommit commit, String? path, {bool focusDiff = true}) {
+    // 커밋 모드의 diff는 축 하나에 묶인 어댑터를 통해 읽고, 그 어댑터는 어떤
+    // 커밋을 줘도 작업 트리를 답하므로 이웃 커밋을 데리고 다니지 않는다.
+    final commitMode = commit.isWorkingTree && _cherryPickState == null;
     final controller = FullDiffSessionController(
-      repository: widget.repository,
-      commits: List<GitCommit>.unmodifiable(_commits),
-      initialIndex: math.max(0, _commits.indexOf(commit)),
+      repository: commitMode
+          ? WorkingTreeAreaRepository(widget.repository, _commitDiffArea)
+          : widget.repository,
+      commits: commitMode ? [commit] : List<GitCommit>.unmodifiable(_commits),
+      initialIndex: commitMode ? 0 : math.max(0, _commits.indexOf(commit)),
       initialPreferences:
           _pendingFullDiffPreferences ?? widget.fullDiffPreferences,
       initialPath: path,
@@ -385,17 +390,28 @@ extension _TimelineDiffMode on _TimelineScreenState {
     unawaited(controller.selectHistoryEntry(entry));
   }
 
-  Widget _embeddedFullDiff(FullDiffSessionController controller) =>
-      FullDiffWorkspace(
-        controller: controller,
-        onBack: _closeFullDiff,
-        focusNode: _diffFocusNode,
-        onMovePane: _movePaneFocus,
-        columnWidths:
-            _pendingFullDiffColumnWidths ?? widget.fullDiffColumnWidths,
-        onColumnWidthsChanged: _forwardFullDiffColumnWidths,
-        onPreferencesChanged: _forwardFullDiffPreferences,
-        avatarService: widget.avatarService,
-        showRemoteAvatars: widget.showRemoteAvatars,
-      );
+  Widget _embeddedFullDiff(FullDiffSessionController controller) {
+    final repository = controller.repository;
+    final area = repository is WorkingTreeAreaRepository
+        ? repository.area
+        : null;
+    return FullDiffWorkspace(
+      controller: controller,
+      onBack: _closeFullDiff,
+      focusNode: _diffFocusNode,
+      onMovePane: _movePaneFocus,
+      columnWidths: _pendingFullDiffColumnWidths ?? widget.fullDiffColumnWidths,
+      onColumnWidthsChanged: _forwardFullDiffColumnWidths,
+      onPreferencesChanged: _forwardFullDiffPreferences,
+      avatarService: widget.avatarService,
+      showRemoteAvatars: widget.showRemoteAvatars,
+      commitArea: area,
+      onCommitAreaSelected: area == null ? null : _selectCommitArea,
+      commitAreaEnabled: area == null ? null : _commitAreaSelectable,
+      onStageFile: area == null || _commitModeBusy
+          ? null
+          : () => unawaited(_stageSelectedCommitFile(area)),
+      hunkActions: area == null ? null : _commitHunkActions,
+    );
+  }
 }

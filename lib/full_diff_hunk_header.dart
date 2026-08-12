@@ -10,6 +10,7 @@ class FullDiffHunkHeader extends StatelessWidget {
     required this.hunk,
     required this.path,
     required this.hunkCount,
+    this.actions = const <Widget>[],
     super.key,
   });
 
@@ -17,21 +18,36 @@ class FullDiffHunkHeader extends StatelessWidget {
   final String path;
   final int hunkCount;
 
+  /// What this hunk can be done to, drawn at the right end. Empty everywhere
+  /// but the commit panel's diff.
+  final List<Widget> actions;
+
   @override
   Widget build(BuildContext context) => ColoredBox(
     color: fullDiffHunkHeader,
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      child: Text(
-        hunk.unifiedHeader(hunk.context.isEmpty ? path : hunk.context),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(
-          fontFamily: technicalFontFamily,
-          fontFamilyFallback: technicalFontFallback,
-          fontSize: 11,
-          height: fullDiffSourceRowHeight / 11,
-          color: fullDiffAccent,
+    child: SizedBox(
+      height: fullDiffSourceRowHeight,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                hunk.unifiedHeader(hunk.context.isEmpty ? path : hunk.context),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontFamily: technicalFontFamily,
+                  fontFamilyFallback: technicalFontFallback,
+                  fontSize: 11,
+                  height: fullDiffSourceRowHeight / 11,
+                  color: fullDiffAccent,
+                ),
+              ),
+            ),
+            for (final action in actions)
+              Padding(padding: const EdgeInsets.only(left: 6), child: action),
+          ],
         ),
       ),
     ),

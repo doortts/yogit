@@ -178,65 +178,68 @@ extension _TimelineCommitPanel on _TimelineScreenState {
     final slash = entry.path.lastIndexOf('/');
     return HoverBuilder(
       key: Key('commit-row-${area.name}-${entry.path}'),
-      builder: (hovered) => SizedBox(
-        height: 26,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 12,
-                child: Text(
-                  letter,
-                  style: TextStyle(
-                    color: entry.conflicted
-                        ? previewConflict
-                        : switch (letter) {
-                            'D' => deletedPink,
-                            'R' || 'C' => renamedPurple,
-                            _ => mainAccent,
-                          },
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w700,
+      builder: (hovered) => InkWell(
+        onTap: () => _openCommitAreaDiff(area, entry.path),
+        child: SizedBox(
+          height: 26,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 12,
+                  child: Text(
+                    letter,
+                    style: TextStyle(
+                      color: entry.conflicted
+                          ? previewConflict
+                          : switch (letter) {
+                              'D' => deletedPink,
+                              'R' || 'C' => renamedPurple,
+                              _ => mainAccent,
+                            },
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text.rich(
-                  TextSpan(
-                    children: [
-                      if (slash >= 0)
-                        TextSpan(
-                          text: entry.path.substring(0, slash + 1),
-                          style: TextStyle(color: _palette.muted),
-                        ),
-                      TextSpan(text: entry.path.substring(slash + 1)),
-                    ],
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _palette.text,
-                    fontSize: 11.5,
-                    fontFamily: technicalFontFamily,
-                    fontFamilyFallback: technicalFontFallback,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        if (slash >= 0)
+                          TextSpan(
+                            text: entry.path.substring(0, slash + 1),
+                            style: TextStyle(color: _palette.muted),
+                          ),
+                        TextSpan(text: entry.path.substring(slash + 1)),
+                      ],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: _palette.text,
+                      fontSize: 11.5,
+                      fontFamily: technicalFontFamily,
+                      fontFamilyFallback: technicalFontFallback,
+                    ),
                   ),
                 ),
-              ),
-              if (entry.untracked) _commitRowChip('untracked'),
-              if (entry.conflicted)
-                _commitRowChip('충돌', color: previewConflict),
-              if (entry.submodule) _commitRowChip('서브모듈'),
-              if (hovered)
-                ..._commitRowActions(entry, area, hasHead: hasHead)
-              else ...[
-                if ((additions ?? 0) > 0)
-                  _commitRowStat('+$additions', mainAccent),
-                if ((deletions ?? 0) > 0)
-                  _commitRowStat('−$deletions', hashRed),
+                if (entry.untracked) _commitRowChip('untracked'),
+                if (entry.conflicted)
+                  _commitRowChip('충돌', color: previewConflict),
+                if (entry.submodule) _commitRowChip('서브모듈'),
+                if (hovered)
+                  ..._commitRowActions(entry, area, hasHead: hasHead)
+                else ...[
+                  if ((additions ?? 0) > 0)
+                    _commitRowStat('+$additions', mainAccent),
+                  if ((deletions ?? 0) > 0)
+                    _commitRowStat('−$deletions', hashRed),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -340,6 +343,202 @@ extension _TimelineCommitPanel on _TimelineScreenState {
       ),
     ),
   );
+
+  /// 파일 행과 filebar 세그먼트가 함께 쓰는 자리. 축이 그대로면 열린 세션에서
+  /// 파일만 고르고, 축이 바뀌면 세션을 다시 세운다 — 어댑터가 축을 final로 물고
+  /// 있어 갈아 끼울 수가 없다.
+  void _openCommitAreaDiff(WorkingTreeArea area, String? path) {
+    final commit = _selectedCommit;
+    if (commit == null || !commit.isWorkingTree) return;
+    if (_fullDiffOpen && _commitDiffArea == area) {
+      _showFullDiffFile(path);
+      return;
+    }
+    final previous = _fullDiffSession;
+    _rebuild(() => _commitDiffArea = area);
+    _openFullDiff(commit, path, focusDiff: false);
+    previous
+      ?..removeListener(_followFullDiffSession)
+      ..dispose();
+  }
+
+  /// 세그먼트 전환. 보고 있던 경로가 반대 축에도 있으면 그 파일로, 없으면 그 축의
+  /// 첫 파일로 간다.
+  void _selectCommitArea(WorkingTreeArea area) {
+    final path = _fullDiffSession?.state.selectedFile?.path;
+    final entries = _commitAreaEntries(area);
+    _openCommitAreaDiff(
+      area,
+      entries.any((entry) => entry.path == path) ? path : null,
+    );
+  }
+
+  List<WorkingTreeEntry> _commitAreaEntries(WorkingTreeArea area) =>
+      (area == WorkingTreeArea.unstaged
+          ? _commitStatus?.unstaged
+          : _commitStatus?.staged) ??
+      const [];
+
+  bool _commitAreaSelectable(WorkingTreeArea area) =>
+      area == _commitDiffArea || _commitAreaEntries(area).isNotEmpty;
+
+  WorkingTreeEntry? _commitEntryFor(String path) {
+    for (final entry in _commitStatus?.entries ?? const <WorkingTreeEntry>[]) {
+      if (entry.path == path) return entry;
+    }
+    return null;
+  }
+
+  /// filebar의 Stage File / Unstage File — 패널 행의 것과 같은 조작이고, 무엇을
+  /// 하는지는 보고 있는 축이 정한다.
+  Future<void> _stageSelectedCommitFile(WorkingTreeArea area) async {
+    final path = _fullDiffSession?.state.selectedFile?.path;
+    if (path == null) return;
+    final entry = _commitEntryFor(path);
+    final hasHead = _selectedCommit?.parents.isNotEmpty ?? true;
+    await _runCommitAction(
+      area == WorkingTreeArea.staged
+          ? () => widget.repository.unstageFiles([
+              path,
+              ?entry?.origPath,
+            ], hasHead: hasHead)
+          : entry?.conflicted ?? false
+          ? () => widget.repository.stageResolvedFile(path)
+          : () => widget.repository.stageFiles([path]),
+    );
+  }
+
+  /// 헝크 헤더가 다는 버튼. 축이 무엇을 걸 수 있는지 정하고, 헝크로 다룰 수 없는
+  /// 파일에는 아무것도 걸지 않는다 — untracked에는 헝크가 없고, rename의 부분
+  /// 적용은 두 경로가 얽히며, 바이너리·서브모듈·심볼릭 링크는 헝크가 의미를 갖지
+  /// 않는다.
+  List<Widget> _commitHunkActions(DiffHunk hunk) {
+    final state = _fullDiffSession?.state;
+    final path = state?.selectedFile?.path;
+    if (state == null || path == null) return const [];
+    // 거대 컨텍스트 한 덩이의 부분 적용은 의미가 없다.
+    if (state.appliedScope != DiffScope.hunks) return const [];
+    final entry = _commitEntryFor(path);
+    if (entry == null) return const [];
+    final unstaged = _commitDiffArea == WorkingTreeArea.unstaged;
+    if (entry.untracked ||
+        entry.conflicted ||
+        entry.submodule ||
+        entry.symlink ||
+        entry.origPath != null ||
+        (unstaged ? entry.unstagedBinary : entry.stagedBinary)) {
+      return const [];
+    }
+    // 공백 무시 보기의 패치는 컨텍스트가 실제 바이트와 달라 적용이 깨진다.
+    final blocked = state.appliedIgnoreWhitespace
+        ? '공백 무시 보기에서는 Hunk 단위로 조작할 수 없습니다'
+        : null;
+    final expected = (
+      oldStart: hunk.oldStart,
+      oldCount: hunk.oldCount,
+      newStart: hunk.newStart,
+      newCount: hunk.newCount,
+    );
+    final algorithm = state.appliedAlgorithm;
+    return [
+      _commitHunkButton(
+        key: Key('commit-${unstaged ? 'stage' : 'unstage'}-hunk-${hunk.index}'),
+        label: unstaged ? 'Stage Hunk' : 'Unstage Hunk',
+        color: mainAccent,
+        blocked: blocked,
+        onTap: () => _runCommitAction(
+          unstaged
+              ? () => widget.repository.stageHunk(
+                  path,
+                  hunk.index,
+                  expected: expected,
+                  algorithm: algorithm,
+                )
+              : () => widget.repository.unstageHunk(
+                  path,
+                  hunk.index,
+                  expected: expected,
+                  algorithm: algorithm,
+                ),
+        ),
+      ),
+      if (unstaged)
+        _commitHunkButton(
+          key: Key('commit-discard-hunk-${hunk.index}'),
+          label: 'Discard Hunk',
+          color: deletedPink,
+          blocked: blocked,
+          onTap: () =>
+              _confirmCommitDiscardHunk(path, hunk.index, expected, algorithm),
+        ),
+    ];
+  }
+
+  Widget _commitHunkButton({
+    required Key key,
+    required String label,
+    required Color color,
+    required String? blocked,
+    required Future<void> Function() onTap,
+  }) {
+    final button = InkWell(
+      key: key,
+      borderRadius: BorderRadius.circular(5),
+      onTap: blocked != null || _commitModeBusy
+          ? null
+          : () => unawaited(onTap()),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 1),
+        decoration: BoxDecoration(
+          border: Border.all(color: color.withValues(alpha: 0.45)),
+          borderRadius: BorderRadius.circular(5),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: blocked == null ? color : color.withValues(alpha: 0.4),
+            fontSize: 11,
+            height: 1,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+    if (blocked == null) return button;
+    return Tooltip(
+      message: blocked,
+      waitDuration: _tooltipDelay,
+      child: button,
+    );
+  }
+
+  Future<void> _confirmCommitDiscardHunk(
+    String path,
+    int hunkIndex,
+    HunkRange expected,
+    DiffAlgorithm algorithm,
+  ) async {
+    final approved = await showYogitAlert<bool>(
+      context,
+      const YogitAlert(
+        title: '이 Hunk를 버릴까요?',
+        message: '이 Hunk의 변경이 작업 트리에서 사라집니다. 되돌릴 수 없습니다.',
+        role: YogitAlertRole.destructive,
+        confirmLabel: 'Discard Hunk',
+        confirmKey: Key('commit-discard-confirm'),
+        cancelKey: Key('commit-discard-cancel'),
+      ),
+    );
+    if (approved != true || !mounted) return;
+    await _runCommitAction(
+      () => widget.repository.discardHunk(
+        path,
+        hunkIndex,
+        expected: expected,
+        algorithm: algorithm,
+      ),
+    );
+  }
 
   /// Discard만이 파괴적이라 확인창을 먼저 띄운다. untracked 파일은 되돌릴 인덱스
   /// 사본이 없어 Discard가 곧 파일 삭제이고, 확인창이 그렇게 말한다.
@@ -672,7 +871,8 @@ extension _TimelineCommitPanel on _TimelineScreenState {
   }
 
   /// 조작 뒤 목록을 다시 읽는다. 빈 sha를 키로 쓰는 미리보기 캐시 셋은 무효화되지
-  /// 않는 함정이라 여기서 끊는다.
+  /// 않는 함정이라 여기서 끊는다. 커밋 모드로 열린 diff는 파일 목록도 패치도
+  /// 낡았으므로 같이 다시 읽는다.
   Future<void> _reloadCommitMode({bool timelineToo = false}) async {
     _rebuild(() {
       _commitStatusRequest = null;
@@ -680,6 +880,10 @@ extension _TimelineCommitPanel on _TimelineScreenState {
       _previewFileLists.remove('');
       _previewDiffs.removeWhere((key, _) => key.sha.isEmpty);
     });
+    if (_fullDiffSession case final session?
+        when session.repository is WorkingTreeAreaRepository) {
+      await session.refreshWorkingTree();
+    }
     if (timelineToo) await _reloadTimelineAfterCherryPick(null);
   }
 }

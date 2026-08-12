@@ -26,6 +26,7 @@ class UnifiedPresentationView extends StatelessWidget {
     this.scrollTargetKey,
     this.debugMetrics,
     this.showHunkHeaders = true,
+    this.hunkActions,
     this.compactRows = false,
     this.currentMarkerColor = fullDiffAccent,
     this.currentTint,
@@ -48,6 +49,10 @@ class UnifiedPresentationView extends StatelessWidget {
   final GlobalKey? scrollTargetKey;
   final FullDiffLazyBuildMetrics? debugMetrics;
   final bool showHunkHeaders;
+
+  /// What each hunk header offers to do to its hunk. Null everywhere but the
+  /// commit panel's diff.
+  final List<Widget> Function(DiffHunk hunk)? hunkActions;
   final bool compactRows;
   final Color currentMarkerColor;
   final Color? currentTint;
@@ -129,6 +134,7 @@ class UnifiedPresentationView extends StatelessWidget {
                       hunk: hunk,
                       path: path,
                       hunkCount: document.hunks.length,
+                      actions: hunkActions?.call(hunk) ?? const [],
                     ),
                   )
                 : const SizedBox.shrink();

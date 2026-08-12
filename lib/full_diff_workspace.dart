@@ -27,6 +27,7 @@ import 'page_scroll_shortcuts.dart';
 import 'settings.dart';
 import 'shortcut_modifier.dart';
 import 'typography.dart';
+import 'working_tree_status.dart';
 
 class _ReturnToTimelineIntent extends Intent {
   const _ReturnToTimelineIntent();
@@ -106,6 +107,11 @@ class FullDiffWorkspace extends StatefulWidget {
     this.showRemoteAvatars = true,
     this.focusNode,
     this.onMovePane,
+    this.commitArea,
+    this.onCommitAreaSelected,
+    this.commitAreaEnabled,
+    this.onStageFile,
+    this.hunkActions,
     super.key,
   });
 
@@ -131,6 +137,15 @@ class FullDiffWorkspace extends StatefulWidget {
 
   /// ← and → out of the diff, as the embedder orders its panes.
   final ValueChanged<int>? onMovePane;
+
+  /// The commit panel's diff, when this is one: which side of the index it
+  /// reads, and what the file bar and the hunk headers can do to it. All null
+  /// otherwise, and then nothing here is drawn.
+  final WorkingTreeArea? commitArea;
+  final ValueChanged<WorkingTreeArea>? onCommitAreaSelected;
+  final bool Function(WorkingTreeArea area)? commitAreaEnabled;
+  final VoidCallback? onStageFile;
+  final List<Widget> Function(DiffHunk hunk)? hunkActions;
 
   @override
   State<FullDiffWorkspace> createState() => _FullDiffWorkspaceState();
@@ -1128,6 +1143,10 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
                       onOpenEditor: _openEditor,
                       onViewSelected: _selectPrimaryView,
                       onFocusModeChanged: _controller.setFocusMode,
+                      commitArea: widget.commitArea,
+                      onCommitAreaSelected: widget.onCommitAreaSelected,
+                      commitAreaEnabled: widget.commitAreaEnabled,
+                      onStageFile: widget.onStageFile,
                     ),
                     GlobalDiffToolbar(
                       algorithmChooserKey: _algorithmChooserKey,
@@ -1406,6 +1425,7 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
         controller: _contentScroll,
         scrollTarget: state.fullFileScrollTarget,
         scrollTargetKey: _fullFileScrollTargetKey,
+        hunkActions: widget.hunkActions,
       ),
       DiffLayout.sideBySide => SideBySidePresentationView(
         currentMarkerColor: _currentMarkerColor,
@@ -1428,6 +1448,7 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
         splitRatio: _sideBySideRatio,
         onSplitRatioChanged: _resizeSideBySide,
         onSplitRatioChangeEnd: _saveColumnWidths,
+        hunkActions: widget.hunkActions,
       ),
     };
     return _withRefreshError(presentation, state.patch.error);

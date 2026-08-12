@@ -18359,6 +18359,9 @@ class FakeGitRepository extends GitRepository {
     this.unstageFilesCallback,
     this.discardWorktreeFileCallback,
     this.commitIndexCallback,
+    this.areaFiles,
+    this.areaDiff,
+    this.hunkActionCallback,
     this.commitMessage,
     this.deletedBranchNameCallback,
     this.measureUpstreamRebaseCallback,
@@ -18479,6 +18482,23 @@ class FakeGitRepository extends GitRepository {
   discardWorktreeFileCallback;
   final Future<String> Function(String message, bool amend)?
   commitIndexCallback;
+
+  /// 커밋 모드의 축별 진입로. 없으면 그 축은 비어 있다.
+  final Future<List<GitFileChange>> Function(WorkingTreeArea area)? areaFiles;
+  final Future<List<DiffLine>> Function(
+    WorkingTreeArea area,
+    GitFileChange file,
+  )?
+  areaDiff;
+
+  /// stage·unstage·discard Hunk 셋을 한 슬롯이 받는다 — 절차가 같고 이름만 다르다.
+  final Future<void> Function(
+    String action,
+    String path,
+    int hunkIndex,
+    HunkRange expected,
+  )?
+  hunkActionCallback;
   final Future<String> Function(String sha)? commitMessage;
   final Future<String?> Function(String tipSha, Iterable<GitCommit> commits)?
   deletedBranchNameCallback;
@@ -18892,6 +18912,62 @@ class FakeGitRepository extends GitRepository {
     }
     _requireFakedMutation('commitIndex');
     return super.commitIndex(message: message, amend: amend);
+  }
+
+  @override
+  Future<List<GitFileChange>> loadAreaFiles(WorkingTreeArea area) =>
+      areaFiles?.call(area) ?? Future.value(const []);
+
+  @override
+  Future<List<DiffLine>> loadAreaDiff(
+    WorkingTreeArea area,
+    GitFileChange file, {
+    DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
+    bool ignoreWhitespace = false,
+    DiffScope scope = DiffScope.hunks,
+  }) => areaDiff?.call(area, file) ?? Future.value(const []);
+
+  @override
+  Future<Uint8List> loadIndexBytes(String path) {
+    if (identical(runner, runProcess)) return Future.value(Uint8List(0));
+    return super.loadIndexBytes(path);
+  }
+
+  @override
+  Future<void> stageHunk(
+    String path,
+    int hunkIndex, {
+    required HunkRange expected,
+    DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
+  }) => _hunkAction('stage', path, hunkIndex, expected);
+
+  @override
+  Future<void> unstageHunk(
+    String path,
+    int hunkIndex, {
+    required HunkRange expected,
+    DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
+  }) => _hunkAction('unstage', path, hunkIndex, expected);
+
+  @override
+  Future<void> discardHunk(
+    String path,
+    int hunkIndex, {
+    required HunkRange expected,
+    DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
+  }) => _hunkAction('discard', path, hunkIndex, expected);
+
+  Future<void> _hunkAction(
+    String action,
+    String path,
+    int hunkIndex,
+    HunkRange expected,
+  ) {
+    if (hunkActionCallback case final callback?) {
+      return callback(action, path, hunkIndex, expected);
+    }
+    _requireFakedMutation('${action}Hunk');
+    return Future.value();
   }
 
   @override
