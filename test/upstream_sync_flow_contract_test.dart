@@ -411,14 +411,78 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('push-target')), findsOneWidget);
-    expect(find.text('git@github.com:doortts/yogit.git'), findsOneWidget);
     expect(
       find.descendant(
         of: find.byKey(const Key('push-target')),
-        matching: find.text('origin'),
+        matching: find.text('origin:'),
       ),
       findsOneWidget,
-      reason: '어느 원격의 주소인지도 선다',
+      reason: '어느 원격의 주소인지도 선다 — 키보드로 칠 수 있는 글자로만',
+    );
+    // 주소는 끌어서 고르고 복사할 수 있다. 고르는 것은 주소뿐이라 복사한
+    // 값에 이름표가 딸려 오지 않는다.
+    final url = tester.widget<SelectableText>(
+      find.byKey(const Key('push-target-url')),
+    );
+    expect(url.data, 'git@github.com:doortts/yogit.git');
+  });
+
+  String commandText(WidgetTester tester) => tester
+      .widget<SelectableText>(find.byKey(const Key('command-preview-text')))
+      .data!;
+
+  testWidgets('a push confirmation shows the command it will run', (
+    tester,
+  ) async {
+    // 올릴 것만: 잰 그 끝이 upstream이 정한 이름으로 올라간다.
+    final pushOnly = FakeGitRepository(
+      (_, _) async => [commit('aaa1111', 'local work')],
+      refs: refs(ahead: 1),
+      movedCommitsCallback: (before, after) async => const [
+        (incoming: true, shortSha: 'aaa1111', subject: 'local work'),
+      ],
+      pushBranchCallback:
+          (remote, branch, {toBranch, fromTip, setUpstream = false}) async {},
+    );
+    await pumpApp(tester, pushOnly);
+    await tester.tap(find.byKey(const Key('upstream-sync-push')));
+    await tester.pumpAndSettle();
+    expect(commandText(tester), 'git push origin aaa1111:refs/heads/main');
+  });
+
+  testWidgets('an amber confirmation shows both steps, in order', (
+    tester,
+  ) async {
+    // 재연은 이미 끝났으므로 남은 일은 ref를 옮기고 올리는 것뿐이다. 체크아웃되어
+    // 있으니 작업 트리를 따라오게 하는 줄이 하나 더 선다.
+    final diverged = FakeGitRepository(
+      (_, _) async => [commit('aaa1111', 'local work')],
+      refs: refs(ahead: 1, behind: 1),
+      measureUpstreamRebaseCallback:
+          ({required remoteTip, required localTip}) async =>
+              RebasePreviewResult(
+                status: RebasePreviewStatus.clean,
+                baseTip: remoteTip,
+                compareTip: localTip,
+                virtualTip: 'ddd4444',
+              ),
+      movedCommitsCallback: (before, after) async => const [
+        (incoming: false, shortSha: 'bbb2222', subject: 'remote work'),
+        (incoming: true, shortSha: 'aaa1111', subject: 'local work'),
+      ],
+      pushBranchCallback:
+          (remote, branch, {toBranch, fromTip, setUpstream = false}) async {},
+    );
+    await pumpApp(tester, diverged);
+    await tester.tap(find.byKey(const Key('upstream-sync-push')));
+    await tester.pumpAndSettle();
+    expect(
+      commandText(tester),
+      [
+        'git update-ref refs/heads/main ddd4444 aaa1111',
+        'git reset --hard',
+        'git push origin ddd4444:refs/heads/main',
+      ].join('\n'),
     );
   });
 

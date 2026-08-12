@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/timeline_theme.dart';
 import 'package:yogit/yogit_alert.dart';
-import 'package:yogit/typography.dart';
 
 void main() {
   const style = TextStyle(fontSize: 11, height: 1.45);
@@ -222,28 +221,6 @@ void main() {
   ) async {
     const text = '이 브랜치는 아래 워크트리에 체크아웃되어 있어 지금은 삭제할 수 없습니다';
     expect(laidOut(text, 120), text);
-  });
-
-  testWidgets('a long address loses its head, never its repository name', (
-    tester,
-  ) async {
-    const url = 'git@github.example.com:some-long-team-name/yogit.git';
-    const mono = TextStyle(
-      fontFamily: technicalFontFamily,
-      fontFamilyFallback: technicalFontFallback,
-      fontSize: 11,
-      height: 1.5,
-    );
-    String fitted(double width) =>
-        truncateHead(url, style: mono, maxWidth: width);
-
-    // Room to spare: nothing is cut.
-    expect(fitted(2000), url);
-
-    final narrow = fitted(120);
-    expect(narrow, startsWith('…'));
-    expect(url, endsWith(narrow.substring(1)));
-    expect(narrow, contains('yogit.git'));
   });
 
   testWidgets('sentences that still overflow on their own are left alone', (

@@ -65,6 +65,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
                   '얹힌 커밋은 해시가 달라집니다.',
               loadIncomingRest: _upstreamRestLoader(state, pushSide: false),
             ),
+            footer: CommandPreview(_upstreamRebaseCommands(state)),
             confirmLabel: '받아 얹기',
             confirmKey: const Key('upstream-rebase-pull-confirm'),
           ),
@@ -97,6 +98,11 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
             subtitle: target,
             title: '${state.branch} 브랜치를 ${state.remote}에 처음 Push할까요?',
             message: '원격에 ${state.branch} 브랜치를 만들고 추적을 연결합니다.',
+            // 아직 원격에 없는 브랜치라 올라갈 끝은 로컬 ref 이름 그대로다.
+            footer: CommandPreview([
+              'git push -u ${state.remote} refs/heads/${state.branch}:'
+                  'refs/heads/${state.branch}',
+            ]),
             confirmLabel: 'Push',
             confirmKey: const Key('upstream-first-push-confirm'),
           ),
@@ -130,6 +136,9 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
                   '${shortSha(state.localTip!)}로 움직입니다.',
               loadOutgoingRest: _upstreamRestLoader(state, pushSide: true),
             ),
+            footer: CommandPreview([
+              _upstreamPushCommand(state, state.localTip!),
+            ]),
             confirmLabel: 'Push',
             confirmKey: const Key('upstream-push-confirm'),
           ),
@@ -168,6 +177,10 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
               loadIncomingRest: _upstreamRestLoader(state, pushSide: false),
               loadOutgoingRest: _upstreamRestLoader(state, pushSide: true),
             ),
+            footer: CommandPreview([
+              ..._upstreamRebaseCommands(state),
+              _upstreamPushCommand(state, state.virtualTip!),
+            ]),
             confirmLabel: '받아 얹고 Push',
             confirmKey: const Key('upstream-rebase-push-confirm'),
           ),
@@ -203,6 +216,22 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
     if (url == null) return null;
     return PushTarget(remote: remote, url: url);
   }
+
+  /// 확인을 누르면 도는 명령 그대로. 받아 얹기가 `git rebase`로 서지 않는 이유는
+  /// 재연이 이미 숨은 worktree에서 끝났기 때문이다 — 남은 일은 브랜치 ref를 그
+  /// 결과로 옮기는 것뿐이고, 체크아웃되어 있을 때만 작업 트리가 따라 움직인다.
+  /// 해시는 확인창이 보인 그 해시이므로, 적힌 명령과 도는 명령은 어긋나지 않는다.
+  List<String> _upstreamRebaseCommands(UpstreamSyncState state) => [
+    'git update-ref refs/heads/${state.branch} '
+        '${shortSha(state.virtualTip!)} ${shortSha(state.localTip!)}',
+    if (state.checkedOut) 'git reset --hard',
+  ];
+
+  /// Push 한 걸음. 올라가는 것은 [tip]이 가리키는 그 끝이고, 받는 쪽 이름은
+  /// upstream이 정한 이름이다 — main이 origin/trunk를 추적하면 trunk로 간다.
+  String _upstreamPushCommand(UpstreamSyncState state, String tip) =>
+      'git push ${state.remote} ${shortSha(tip)}:'
+      'refs/heads/${_upstreamBranchName(state) ?? state.branch}';
 
   /// '외 N개'를 누를 때 도는 조회. 확인창을 여는 조회는 열여덟 개로 가볍게 두고,
   /// 나머지는 실제로 펼친 사람만 값을 치른다.

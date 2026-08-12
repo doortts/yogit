@@ -51,38 +51,6 @@ String layoutAlertMessage(
   return sentences.join('\n');
 }
 
-/// Trims [text] from the FRONT until it fits, so the tail survives: a remote
-/// address loses its host before it loses the repository's own name. Returns
-/// the text untouched when it already fits.
-String truncateHead(
-  String text, {
-  required TextStyle style,
-  required double maxWidth,
-}) {
-  double widthOf(String value) {
-    final painter = TextPainter(
-      text: TextSpan(text: value, style: style),
-      textDirection: TextDirection.ltr,
-      maxLines: 1,
-    )..layout();
-    return painter.width;
-  }
-
-  if (widthOf(text) <= maxWidth) return text;
-  // The longest tail that still fits, ellipsis included.
-  var low = 0;
-  var high = text.length;
-  while (low < high) {
-    final mid = (low + high + 1) ~/ 2;
-    if (widthOf('…${text.substring(text.length - mid)}') <= maxWidth) {
-      low = mid;
-    } else {
-      high = mid - 1;
-    }
-  }
-  return '…${text.substring(text.length - low)}';
-}
-
 /// What the alert is asking for. Only the badge and the confirm button's color
 /// differ; a destructive action stays on the right so the button the user
 /// reaches for does not move between dialogs.
@@ -100,6 +68,7 @@ class YogitAlert extends StatelessWidget {
     this.message,
     this.detail,
     this.body,
+    this.footer,
     this.cancelLabel = '취소',
     this.role = YogitAlertRole.normal,
     this.confirmKey,
@@ -143,6 +112,9 @@ class YogitAlert extends StatelessWidget {
 
   /// Anything that is not prose: a path, a summary, a form.
   final Widget? body;
+
+  /// The last thing above the buttons — what pressing the primary will run.
+  final Widget? footer;
   final String confirmLabel;
   final String cancelLabel;
   final YogitAlertRole role;
@@ -223,6 +195,10 @@ class YogitAlert extends StatelessWidget {
                       color: palette.text.withValues(alpha: 0.65),
                     ),
                   ),
+                ],
+                if (footer case final footer?) ...[
+                  const SizedBox(height: 10),
+                  footer,
                 ],
                 const SizedBox(height: 13),
                 ..._actions(context, palette),

@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>알림창 — 직각 박스, 집을 수 있는 주소, 실행할 명령어 시안</title>
+<style>
+  :root {
+    --page: #141416;
+    --bg: #1c1c1e;
+    --surface: #232325;
+    --raised: #2c2c2e;
+    --border: #38383a;
+    --text: #f5f5f7;
+    --muted: #8a8a90;
+    --dim: #6a6a70;
+    --green: #8ad6a1;
+    --amber: #f0a35e;
+    --blue: #6ea8fe;
+    --hash: #ef6c63;
+    --primary: #0a84ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 28px 72px; background: var(--page); color: var(--text);
+    font: 13px/1.55 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  }
+  h1 { font-size: 19px; margin: 0 0 4px; font-weight: 650; }
+  .lede { color: var(--muted); margin: 0 0 26px; max-width: 84ch; }
+  h2 {
+    font-size: 14px; margin: 38px 0 8px; font-weight: 650;
+    display: flex; align-items: baseline; gap: 9px;
+  }
+  h2 .tag {
+    font-size: 10px; font-weight: 600; letter-spacing: .04em;
+    padding: 2px 7px; border-radius: 999px;
+    background: rgba(110,168,254,.16); color: var(--blue);
+  }
+  .note { color: var(--muted); margin: 0 0 14px; max-width: 84ch; }
+  .note b { color: var(--text); font-weight: 600; }
+  code, .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  code { background: var(--surface); padding: 1px 5px; border-radius: 3px; }
+  ul.rules { max-width: 84ch; padding-left: 20px; margin: 0 0 18px; }
+  ul.rules li { margin-bottom: 7px; color: var(--muted); }
+  ul.rules li b { color: var(--text); font-weight: 600; }
+  .caption { color: var(--dim); font-size: 11px; margin: 8px 0 26px; max-width: 84ch; }
+  .row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+  .stamp {
+    display: inline-block; font-size: 10px; font-weight: 600; letter-spacing: .04em;
+    padding: 2px 7px; margin-bottom: 8px;
+    background: rgba(138,214,161,.16); color: var(--green);
+  }
+  .stamp.b { background: rgba(110,168,254,.16); color: var(--blue); }
+  .stamp.old { background: rgba(240,163,94,.16); color: var(--amber); }
+
+  /* ── 알림창 ─────────────────────────────────────────── */
+  .alert {
+    background: var(--raised); border: .5px solid var(--border); border-radius: 22px;
+    padding: 16px; width: 520px; box-shadow: 0 12px 40px rgba(0,0,0,.5);
+  }
+  .alert.square, .alert.square .block, .alert.square .cmd { border-radius: 0; }
+  .alert .title { font-size: 13px; font-weight: 700; line-height: 1.35; }
+  .alert .ask { font-size: 11px; line-height: 1.5; opacity: .82; margin-top: 9px; }
+  .alert .buttons {
+    display: flex; gap: 7px; margin-top: 13px;
+    width: 248px; margin-left: auto; margin-right: auto;
+  }
+  .alert .btn {
+    flex: 1; text-align: center; padding: 7px 0; font-size: 13px; font-weight: 600;
+  }
+  .alert .btn { border-radius: 999px; }
+  .alert.square .btn:not(.capsule) { border-radius: 0; }
+  .alert .btn.quiet { background: #3a3a3c; }
+  .alert .btn.go { background: var(--primary); color: #fff; }
+
+  .origin {
+    display: flex; align-items: baseline; gap: 8px; margin-top: 4px;
+    font-size: 11px; color: var(--muted); white-space: nowrap;
+  }
+  .origin .url {
+    font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--muted);
+    overflow: hidden; text-overflow: ellipsis; user-select: all; cursor: text;
+  }
+  .origin .url::selection { background: rgba(110,168,254,.35); color: var(--text); }
+
+  .block {
+    margin-top: 9px; padding: 8px 10px; background: rgba(28,28,30,.5);
+  }
+  .block { border-radius: 6px; }
+  .summary {
+    display: flex; align-items: center; white-space: nowrap;
+    font-size: 12.5px; padding-bottom: 6px;
+  }
+  .summary + .items { border-top: 1px solid var(--border); padding-top: 6px; }
+  .sep { color: var(--dim); margin: 0 6px; }
+  .op { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--blue); }
+  .up { color: var(--blue); }
+  .in { color: var(--green); }
+  .name { font-weight: 600; }
+  .item {
+    display: flex; align-items: baseline; gap: 7px; padding: 1px 0; white-space: nowrap;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .item .mark { width: 8px; font-weight: 700; color: var(--blue); }
+  .item.plus .mark { color: var(--green); }
+  .item .id { font-size: 11.5px; color: var(--hash); }
+  .item .subject { font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+  .more { margin-top: 3px; padding-left: 15px; font-size: 12px; color: var(--blue); }
+
+  /* ── 실행할 명령어 ─────────────────────────────────── */
+  .cmd {
+    margin-top: 10px; padding: 7px 9px; background: rgba(20,20,22,.75);
+    border: .5px solid var(--border);
+    font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; line-height: 1.7;
+    color: var(--text); white-space: pre; overflow-x: auto;
+    user-select: all; cursor: text;
+  }
+  .cmd { border-radius: 6px; }
+  .cmd .lbl {
+    display: block; font-family: -apple-system, sans-serif; font-size: 10px;
+    letter-spacing: .04em; color: var(--dim); margin-bottom: 3px; user-select: none;
+  }
+  .cmd .note2 { color: var(--dim); }
+</style>
+</head>
+<body>
+
+<h1>알림창 — 직각으로, 주소는 집을 수 있게, 명령어는 미리</h1>
+<p class="lede">
+  세 가지를 함께 고친다. 모서리를 <b>직각</b>으로 세우고, 원격 주소 줄에서
+  <b>키보드로 못 치는 글자를 없애고 주소를 끌어서 복사</b>할 수 있게 하고,
+  버튼 바로 위에 <b>실제로 돌아갈 git 명령</b>을 미리 세운다 — 누르기 전에
+  무엇이 실행되는지 그 글자 그대로 읽는다.
+</p>
+
+<h2>1 · 모서리 <span class="tag" style="background:rgba(240,163,94,.16);color:var(--amber)">취소됨 — 지금의 rounded 유지</span></h2>
+<p class="note">
+  직각으로 세우는 안은 접었다. 아래 세 상자는 <b>모서리를 그대로 둔 채</b> 나머지 둘이
+  어떻게 서는지 보여 준다.
+</p>
+<div class="row">
+  <div>
+    <span class="stamp old">지금 — 주소도 명령어도 없다</span>
+    <div class="alert">
+      <div class="title">main 브랜치를 origin에 Push할까요?</div>
+      <div class="origin"><span>origin</span><span class="sep">·</span><span class="url">https://github.com/doortts/yogit</span></div>
+      <div class="block">
+        <div class="summary"><span class="name">main</span><span class="sep">·</span><span class="op">push</span><span class="sep">·</span>커밋&nbsp;<span class="up">44개 올라감</span></div>
+        <div class="items">
+          <div class="item"><span class="mark">↑</span><span class="id">f1862dc</span><span class="subject">fix(ui): ask for a fixed-width family that actually exists</span></div>
+          <div class="item"><span class="mark">↑</span><span class="id">88ee298</span><span class="subject">style(sync): set the commit lists in monospace</span></div>
+        </div>
+        <div class="more">외 42개</div>
+      </div>
+      <div class="ask">원격 main 브랜치가 ef8220d에서 f1862dc로 움직입니다.</div>
+      <div class="buttons"><span class="btn quiet">취소</span><span class="btn go">Push</span></div>
+    </div>
+  </div>
+  <div>
+    <span class="stamp">시안 — 주소와 명령어가 선 모습</span>
+    <div class="alert">
+      <div class="title">main 브랜치를 origin에 Push할까요?</div>
+      <div class="origin"><span>origin:</span><span class="url">https://github.com/doortts/yogit</span></div>
+      <div class="block">
+        <div class="summary"><span class="name">main</span><span class="sep">·</span><span class="op">push</span><span class="sep">·</span>커밋&nbsp;<span class="up">44개 올라감</span></div>
+        <div class="items">
+          <div class="item"><span class="mark">↑</span><span class="id">f1862dc</span><span class="subject">fix(ui): ask for a fixed-width family that actually exists</span></div>
+          <div class="item"><span class="mark">↑</span><span class="id">88ee298</span><span class="subject">style(sync): set the commit lists in monospace</span></div>
+        </div>
+        <div class="more">외 42개</div>
+      </div>
+      <div class="ask">원격 main 브랜치가 ef8220d에서 f1862dc로 움직입니다.</div>
+      <div class="cmd"><span class="lbl">실행할 명령</span>git push origin f1862dc:refs/heads/main</div>
+      <div class="buttons"><span class="btn quiet capsule">취소</span><span class="btn go capsule">Push</span></div>
+    </div>
+  </div>
+  <div>
+    <span class="stamp b">같은 시안 · 받아 얹기 없이 Push만</span>
+    <div class="alert">
+      <div class="title">main 브랜치를 origin에 Push할까요?</div>
+      <div class="origin"><span>origin:</span><span class="url">https://github.com/doortts/yogit</span></div>
+      <div class="block">
+        <div class="summary"><span class="name">main</span><span class="sep">·</span><span class="op">push</span><span class="sep">·</span>커밋&nbsp;<span class="up">44개 올라감</span></div>
+        <div class="items">
+          <div class="item"><span class="mark">↑</span><span class="id">f1862dc</span><span class="subject">fix(ui): ask for a fixed-width family that actually exists</span></div>
+          <div class="item"><span class="mark">↑</span><span class="id">88ee298</span><span class="subject">style(sync): set the commit lists in monospace</span></div>
+        </div>
+        <div class="more">외 42개</div>
+      </div>
+      <div class="ask">원격 main 브랜치가 ef8220d에서 f1862dc로 움직입니다.</div>
+      <div class="cmd"><span class="lbl">실행할 명령</span>git push origin f1862dc:refs/heads/main</div>
+      <div class="buttons"><span class="btn quiet">취소</span><span class="btn go">Push</span></div>
+    </div>
+  </div>
+</div>
+<p class="caption">
+  모서리는 지금 그대로 22px이다 — 이 절은 나머지 두 변경이 기존 창에 어떻게
+  얹히는지 보는 자리로만 남긴다.
+</p>
+
+<h2>2 · 원격 주소 <span class="tag">origin: 주소 · 끌어서 복사</span></h2>
+<p class="note">
+  가운뎃점(<code>·</code>)은 키보드로 바로 못 치는 글자라 주소 줄에서 뺀다 —
+  <code>origin:</code> 뒤에 주소가 바로 선다, 콜론 하나로. 주소는 끌어서 고를 수 있고
+  <code>⌘C</code>로 복사된다. 고르는 것은 <b>주소만</b>이라, 복사한 것을 그대로
+  <code>git remote add</code>에 붙여도 <code>origin ·</code> 같은 군더더기가 따라오지 않는다.
+</p>
+<div class="row">
+  <div>
+    <span class="stamp old">지금</span>
+    <div class="alert" style="width:420px">
+      <div class="title">main 브랜치를 origin에 Push할까요?</div>
+      <div class="origin"><span>origin</span><span class="sep">·</span><span style="font-family:ui-monospace,Menlo,monospace">https://github.com/doortts/yogit</span></div>
+      <div class="ask">주소는 글자일 뿐 — 고를 수도, 복사할 수도 없다.</div>
+    </div>
+  </div>
+  <div>
+    <span class="stamp">시안</span>
+    <div class="alert" style="width:420px">
+      <div class="title">main 브랜치를 origin에 Push할까요?</div>
+      <div class="origin"><span>origin:</span><span class="url">https://github.com/doortts/yogit</span></div>
+      <div class="ask">주소를 끌어 보세요 — 고르고 복사됩니다.</div>
+    </div>
+  </div>
+</div>
+<p class="caption">
+  영수증 요약줄(<span class="mono">main · push · 커밋 44개 올라감</span>)의 가운뎃점은
+  그대로 둔다 — 그 줄은 치거나 복사할 글이 아니라 읽는 표다. 그쪽도 없애려면 말해 주세요.
+</p>
+
+<h2>3 · 실행할 명령 <span class="tag">버튼 바로 위</span></h2>
+<p class="note">
+  각 확인창은 자기가 <b>실제로 돌릴 git 명령</b>을 그대로 세운다. 여러 걸음이면
+  여러 줄이고, 순서가 곧 실행 순서다. 이 상자도 끌어서 복사된다 — 터미널에서
+  직접 해 보고 싶을 때 그대로 붙인다.
+</p>
+<div class="row">
+  <div>
+    <span class="stamp b">Push만 (초록)</span>
+    <div class="alert" style="width:470px">
+      <div class="title">main 브랜치를 origin에 Push할까요?</div>
+      <div class="origin"><span>origin:</span><span class="url">https://github.com/doortts/yogit</span></div>
+      <div class="ask">원격 main 브랜치가 ef8220d에서 f1862dc로 움직입니다.</div>
+      <div class="cmd"><span class="lbl">실행할 명령</span>git push origin f1862dc:refs/heads/main</div>
+      <div class="buttons"><span class="btn quiet capsule">취소</span><span class="btn go capsule">Push</span></div>
+    </div>
+  </div>
+  <div>
+    <span class="stamp b">처음 Push</span>
+    <div class="alert" style="width:470px">
+      <div class="title">feature/x 브랜치를 origin에 처음 Push할까요?</div>
+      <div class="origin"><span>origin:</span><span class="url">https://github.com/doortts/yogit</span></div>
+      <div class="ask">원격에 feature/x 브랜치를 만들고 추적을 연결합니다.</div>
+      <div class="cmd"><span class="lbl">실행할 명령</span>git push -u origin refs/heads/feature/x:refs/heads/feature/x</div>
+      <div class="buttons"><span class="btn quiet capsule">취소</span><span class="btn go capsule">Push</span></div>
+    </div>
+  </div>
+</div>
+<div class="row">
+  <div>
+    <span class="stamp b">받아 얹기 (주황 Pull)</span>
+    <div class="alert" style="width:470px">
+      <div class="title">받아 얹을까요? (Pull --rebase)</div>
+      <div class="ask">충돌 없음은 방금 재연으로 확인했습니다. 얹힌 커밋은 해시가 달라집니다.</div>
+      <div class="cmd"><span class="lbl">실행할 명령</span>git update-ref refs/heads/main ddd4444 aaa1111
+git reset --hard<span class="note2">        # 체크아웃되어 있을 때만</span></div>
+      <div class="buttons"><span class="btn quiet capsule">취소</span><span class="btn go capsule">받아 얹기</span></div>
+    </div>
+  </div>
+  <div>
+    <span class="stamp b">받아 얹고 Push (주황 Push)</span>
+    <div class="alert" style="width:470px">
+      <div class="title">받아 얹은 뒤 Push할까요? (Pull Rebase and Push)</div>
+      <div class="origin"><span>origin:</span><span class="url">https://github.com/doortts/yogit</span></div>
+      <div class="ask">충돌 없음은 방금 재연으로 확인했습니다. 얹힌 커밋은 해시가 달라집니다.</div>
+      <div class="cmd"><span class="lbl">실행할 명령</span>git update-ref refs/heads/main ddd4444 aaa1111
+git reset --hard<span class="note2">        # 체크아웃되어 있을 때만</span>
+git push origin ddd4444:refs/heads/main</div>
+      <div class="buttons"><span class="btn quiet capsule">취소</span><span class="btn go capsule">받아 얹고 Push</span></div>
+    </div>
+  </div>
+</div>
+<p class="caption">
+  받아 얹기가 <code>git rebase</code>로 서지 않는 이유: 재연은 이미 숨은 worktree에서
+  끝났고(그래서 &lsquo;충돌 없음&rsquo;을 말할 수 있다), 확인을 누른 뒤 남는 일은 <b>브랜치 ref를
+  그 결과로 옮기는 것</b>뿐이다. 있지도 않은 <code>git pull --rebase</code>를 적어 두면
+  확인창이 거짓을 말한다.
+</p>
+
+<h2>규칙</h2>
+<ul class="rules">
+  <li>모서리는 <b>바꾸지 않는다</b> — 직각 안은 취소됐다.</li>
+  <li>명령어 줄은 <b>실제로 실행하는 인자 그대로</b>다. 다만 자격증명 프롬프트를 막는
+      <code>-c credential.interactive=never</code>는 적지 않는다 — 그건 행위가 아니라
+      이 앱이 늘 두르는 안전장치다.</li>
+  <li>해시는 <b>확인창이 보인 그 해시</b>다. 창이 열린 사이 브랜치가 움직였으면 실행이
+      거절되므로, 적힌 명령과 실제로 도는 명령이 어긋나는 일은 없다.</li>
+  <li>명령이 없는 확인창(삭제 확인·프로필 편집처럼 git 한 줄로 안 떨어지는 것)에는
+      이 상자가 <b>서지 않는다</b>. 억지로 채우지 않는다.</li>
+  <li>주소와 명령어 상자는 <b>고를 수 있고</b>(끌기·⌘C) 그 밖의 글자는 지금처럼 고를 수
+      없다 — 알림창에서 고르기가 필요한 자리는 이 둘뿐이다.</li>
+</ul>
+</body>
+</html>

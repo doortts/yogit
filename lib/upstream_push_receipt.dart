@@ -3,13 +3,13 @@ import 'package:flutter/material.dart';
 import 'local_state_signature.dart';
 import 'timeline_palette.dart';
 import 'timeline_theme.dart';
-import 'yogit_alert.dart';
 import 'typography.dart';
 
 /// Push 확인창의 제목 아래 한 줄: 'origin'이 실제로 어디인지. 올리기 전에
-/// 회사 저장소인지 포크인지 눈으로 확인할 마지막 자리다. 주소가 길면 앞을
-/// 잘라 저장소 이름이 남는다 — 호스트보다 그쪽이 알아볼 값이다.
-/// docs/push-receipt-detail-mockup.html 시안 B가 계약이다.
+/// 회사 저장소인지 포크인지 눈으로 확인할 마지막 자리다. `origin: 주소` —
+/// 키보드로 못 치는 글자는 쓰지 않고, 주소는 끌어서 골라 복사할 수 있다.
+/// 고르는 것은 주소뿐이라 복사한 값에 이름표가 딸려 오지 않는다.
+/// docs/alert-square-command-mockup.html이 계약이다.
 class PushTarget extends StatelessWidget {
   const PushTarget({required this.remote, required this.url, super.key});
 
@@ -19,42 +19,79 @@ class PushTarget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = context.timelineTheme;
-    const urlStyle = TextStyle(
-      fontFamily: technicalFontFamily,
-      fontFamilyFallback: technicalFontFallback,
-      fontSize: 11,
-      height: 1.5,
-    );
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // 원격 이름과 가운뎃점이 먹는 폭만큼 주소가 쓸 자리가 줄어든다.
-        final labelStyle = TextStyle(fontSize: 11, color: palette.muted);
-        final label = TextPainter(
-          text: TextSpan(text: '$remote  ·  ', style: labelStyle),
-          textDirection: TextDirection.ltr,
-        )..layout();
-        return Row(
-          key: const Key('push-target'),
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text(remote, style: labelStyle),
-            Text('  ·  ', style: TextStyle(fontSize: 11, color: palette.muted)),
-            Flexible(
-              child: Text(
-                truncateHead(
-                  url,
-                  style: urlStyle,
-                  maxWidth: constraints.maxWidth - label.width,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: urlStyle.copyWith(color: palette.muted),
-              ),
+    return Row(
+      key: const Key('push-target'),
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        Text('$remote:', style: TextStyle(fontSize: 11, color: palette.muted)),
+        const SizedBox(width: 6),
+        Flexible(
+          child: SelectableText(
+            url,
+            key: const Key('push-target-url'),
+            maxLines: 1,
+            style: TextStyle(
+              color: palette.muted,
+              fontFamily: technicalFontFamily,
+              fontFamilyFallback: technicalFontFallback,
+              fontSize: 11,
+              height: 1.5,
             ),
-          ],
-        );
-      },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 버튼 바로 위: 확인을 누르면 실제로 돌아갈 git 명령. 여러 걸음이면 여러
+/// 줄이고 순서가 곧 실행 순서다. 이 상자도 끌어서 복사된다 — 터미널에서 직접
+/// 해 보려면 그대로 붙이면 된다. 늘 두르는 자격증명 차단 인자
+/// (`-c credential.interactive=never`)는 행위가 아니므로 적지 않는다.
+class CommandPreview extends StatelessWidget {
+  const CommandPreview(this.lines, {super.key});
+
+  final List<String> lines;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.timelineTheme;
+    return Container(
+      key: const Key('command-preview'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+      decoration: BoxDecoration(
+        color: palette.background.withValues(alpha: 0.75),
+        border: Border.all(color: palette.border, width: 0.5),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '실행할 명령',
+            style: TextStyle(
+              color: palette.muted,
+              fontSize: 10,
+              letterSpacing: 0.4,
+            ),
+          ),
+          const SizedBox(height: 3),
+          SelectableText(
+            lines.join('\n'),
+            key: const Key('command-preview-text'),
+            style: TextStyle(
+              color: palette.text,
+              fontFamily: technicalFontFamily,
+              fontFamilyFallback: technicalFontFallback,
+              fontSize: 11.5,
+              height: 1.6,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
