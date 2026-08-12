@@ -50,6 +50,38 @@ String layoutAlertMessage(
   return sentences.join('\n');
 }
 
+/// Trims [text] from the FRONT until it fits, so the tail survives: a remote
+/// address loses its host before it loses the repository's own name. Returns
+/// the text untouched when it already fits.
+String truncateHead(
+  String text, {
+  required TextStyle style,
+  required double maxWidth,
+}) {
+  double widthOf(String value) {
+    final painter = TextPainter(
+      text: TextSpan(text: value, style: style),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+    )..layout();
+    return painter.width;
+  }
+
+  if (widthOf(text) <= maxWidth) return text;
+  // The longest tail that still fits, ellipsis included.
+  var low = 0;
+  var high = text.length;
+  while (low < high) {
+    final mid = (low + high + 1) ~/ 2;
+    if (widthOf('…${text.substring(text.length - mid)}') <= maxWidth) {
+      low = mid;
+    } else {
+      high = mid - 1;
+    }
+  }
+  return '…${text.substring(text.length - low)}';
+}
+
 /// What the alert is asking for. Only the badge and the confirm button's color
 /// differ; a destructive action stays on the right so the button the user
 /// reaches for does not move between dialogs.
@@ -63,6 +95,7 @@ class YogitAlert extends StatelessWidget {
     required this.title,
     required this.confirmLabel,
     this.boxWidth = width,
+    this.subtitle,
     this.message,
     this.detail,
     this.body,
@@ -97,6 +130,11 @@ class YogitAlert extends StatelessWidget {
   final double boxWidth;
 
   final String title;
+
+  /// A quiet line directly under the title, for what the title refers to
+  /// rather than what it asks — the address behind `origin`, say.
+  final Widget? subtitle;
+
   final String? message;
 
   /// A quieter second paragraph — the consequence, the size, the caveat.
@@ -154,6 +192,10 @@ class YogitAlert extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(title, style: titleStyle.copyWith(color: palette.text)),
+                if (subtitle case final subtitle?) ...[
+                  const SizedBox(height: 4),
+                  subtitle,
+                ],
                 if (message case final message?) ...[
                   const SizedBox(height: 5),
                   Text(

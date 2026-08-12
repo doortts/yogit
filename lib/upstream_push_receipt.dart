@@ -3,6 +3,59 @@ import 'package:flutter/material.dart';
 import 'local_state_signature.dart';
 import 'timeline_palette.dart';
 import 'timeline_theme.dart';
+import 'yogit_alert.dart';
+
+/// Push 확인창의 제목 아래 한 줄: 'origin'이 실제로 어디인지. 올리기 전에
+/// 회사 저장소인지 포크인지 눈으로 확인할 마지막 자리다. 주소가 길면 앞을
+/// 잘라 저장소 이름이 남는다 — 호스트보다 그쪽이 알아볼 값이다.
+/// docs/push-receipt-detail-mockup.html 시안 B가 계약이다.
+class PushTarget extends StatelessWidget {
+  const PushTarget({required this.remote, required this.url, super.key});
+
+  final String remote;
+  final String url;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.timelineTheme;
+    const urlStyle = TextStyle(
+      fontFamily: 'monospace',
+      fontSize: 11,
+      height: 1.5,
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 원격 이름과 가운뎃점이 먹는 폭만큼 주소가 쓸 자리가 줄어든다.
+        final labelStyle = TextStyle(fontSize: 11, color: palette.muted);
+        final label = TextPainter(
+          text: TextSpan(text: '$remote  ·  ', style: labelStyle),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        return Row(
+          key: const Key('push-target'),
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Text(remote, style: labelStyle),
+            Text('  ·  ', style: TextStyle(fontSize: 11, color: palette.muted)),
+            Flexible(
+              child: Text(
+                truncateHead(
+                  url,
+                  style: urlStyle,
+                  maxWidth: constraints.maxWidth - label.width,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: urlStyle.copyWith(color: palette.muted),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
 
 /// Push 확인창의 몸통: 저장소 변경 알림과 같은 형식으로, 요약줄 아래 오갈
 /// 커밋이 서고 물음은 맨 끝이다 — 무엇이 움직이는지 읽은 뒤에 답하는 순서.
@@ -16,6 +69,8 @@ class PushReceipt extends StatelessWidget {
     required this.footnote,
     this.incomingTotal,
     this.outgoingTotal,
+    this.loadIncomingRest,
+    this.loadOutgoingRest,
     super.key,
   });
 
@@ -34,6 +89,11 @@ class PushReceipt extends StatelessWidget {
   final int? incomingTotal;
   final int? outgoingTotal;
 
+  /// '외 N개'를 누를 때에야 나머지를 읽어 온다 — 확인창을 여는 조회는 가볍게
+  /// 두고, 값은 실제로 펼친 사람만 치른다. null이면 그 블록은 세기만 한다.
+  final Future<List<MovedCommit>> Function()? loadIncomingRest;
+  final Future<List<MovedCommit>> Function()? loadOutgoingRest;
+
   @override
   Widget build(BuildContext context) {
     final palette = context.timelineTheme;
@@ -47,28 +107,32 @@ class PushReceipt extends StatelessWidget {
         // ponytail: 18-commit shared window; query the two sides separately
         // if a receipt ever needs full rows on both under extreme skew.
         if ((incomingTotal ?? incoming.length) > 0)
-          _block(
-            palette,
+          _ReceiptBlock(
             key: const Key('push-receipt-pull-block'),
+            branch: branch,
             op: 'pull --rebase',
             count: '커밋 ${incomingTotal ?? incoming.length}개 들어옴',
             countColor: mainAccent,
             commits: incoming,
-            more: (incomingTotal ?? incoming.length) - incoming.length,
+            total: incomingTotal ?? incoming.length,
             mark: '+',
             markColor: mainAccent,
+            moreKey: const Key('push-receipt-pull-more'),
+            loadRest: loadIncomingRest,
           ),
         if ((outgoingTotal ?? outgoing.length) > 0)
-          _block(
-            palette,
+          _ReceiptBlock(
             key: const Key('push-receipt-push-block'),
+            branch: branch,
             op: 'push',
             count: '커밋 ${outgoingTotal ?? outgoing.length}개 올라감',
             countColor: previewControlBlue,
             commits: outgoing,
-            more: (outgoingTotal ?? outgoing.length) - outgoing.length,
+            total: outgoingTotal ?? outgoing.length,
             mark: '↑',
             markColor: previewControlBlue,
+            moreKey: const Key('push-receipt-push-more'),
+            loadRest: loadOutgoingRest,
           ),
         Padding(
           padding: const EdgeInsets.only(top: 9),
@@ -85,66 +149,86 @@ class PushReceipt extends StatelessWidget {
       ],
     );
   }
+}
 
-  Widget _block(
-    TimelineThemePalette palette, {
-    required Key key,
-    required String op,
-    required String count,
-    required Color countColor,
-    required List<MovedCommit> commits,
-    required int more,
-    required String mark,
-    required Color markColor,
-  }) => Container(
-    key: key,
-    margin: const EdgeInsets.only(top: 9),
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-    decoration: BoxDecoration(
-      color: palette.background.withValues(alpha: 0.5),
-      borderRadius: BorderRadius.circular(6),
-    ),
-    child: Column(
+/// 영수증의 한 걸음. 목록은 아홉 줄에서 멈추고 '외 N개'가 남은 수를 센다 —
+/// 누르면 나머지를 그때 읽어 와 아홉 줄 높이 안에서 구른다. 창은 커지지 않고,
+/// 다시 누르면 접힌다. 펼침은 블록마다 따로다.
+class _ReceiptBlock extends StatefulWidget {
+  const _ReceiptBlock({
+    required this.branch,
+    required this.op,
+    required this.count,
+    required this.countColor,
+    required this.commits,
+    required this.total,
+    required this.mark,
+    required this.markColor,
+    required this.moreKey,
+    required this.loadRest,
+    super.key,
+  });
+
+  final String branch;
+  final String op;
+  final String count;
+  final Color countColor;
+  final List<MovedCommit> commits;
+  final int total;
+  final String mark;
+  final Color markColor;
+  final Key moreKey;
+  final Future<List<MovedCommit>> Function()? loadRest;
+
+  @override
+  State<_ReceiptBlock> createState() => _ReceiptBlockState();
+}
+
+class _ReceiptBlockState extends State<_ReceiptBlock> {
+  /// 스크롤 영역의 키: 접힌 목록과 같은 아홉 줄 높이.
+  static const _openHeight = 168.0;
+
+  bool _open = false;
+  bool _loading = false;
+  List<MovedCommit>? _rest;
+
+  List<MovedCommit> get _shown =>
+      _open ? _rest ?? widget.commits : widget.commits;
+
+  Future<void> _toggle() async {
+    if (_open) {
+      setState(() => _open = false);
+      return;
+    }
+    if (_rest != null) {
+      setState(() => _open = true);
+      return;
+    }
+    final loader = widget.loadRest;
+    if (loader == null) return;
+    setState(() => _loading = true);
+    final loaded = await loader();
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      // 읽어 온 것이 이미 보이는 것보다 적으면 — 그새 원격이 움직였거나 조회가
+      // 실패했다 — 보이던 목록을 그대로 두고 펼치지 않는다.
+      if (loaded.length <= widget.commits.length) return;
+      _rest = loaded;
+      _open = true;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.timelineTheme;
+    final shown = _shown;
+    final more = widget.total - shown.length;
+    final rows = Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: Text.rich(
-            TextSpan(
-              children: [
-                TextSpan(
-                  text: branch,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-                TextSpan(
-                  text: '  ·  ',
-                  style: TextStyle(color: palette.muted),
-                ),
-                TextSpan(
-                  text: op,
-                  style: TextStyle(
-                    color: previewControlBlue,
-                    fontFamily: 'monospace',
-                    fontSize: 11.5,
-                  ),
-                ),
-                TextSpan(
-                  text: '  ·  ',
-                  style: TextStyle(color: palette.muted),
-                ),
-                TextSpan(
-                  text: count,
-                  style: TextStyle(color: countColor),
-                ),
-              ],
-            ),
-            style: TextStyle(color: palette.text, fontSize: 12.5),
-          ),
-        ),
-        Divider(height: 1, color: palette.border),
-        const SizedBox(height: 6),
-        for (final commit in commits)
+        for (final commit in shown)
           Padding(
             padding: const EdgeInsets.only(bottom: 2),
             child: Row(
@@ -154,9 +238,9 @@ class PushReceipt extends StatelessWidget {
                 SizedBox(
                   width: 17,
                   child: Text(
-                    mark,
+                    widget.mark,
                     style: TextStyle(
-                      color: markColor,
+                      color: widget.markColor,
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
                     ),
@@ -182,7 +266,8 @@ class PushReceipt extends StatelessWidget {
               ],
             ),
           ),
-        if (more > 0)
+        // 펼쳐도 남는 것이 있으면(500 천장) 스크롤 끝에서 계속 센다.
+        if (_open && more > 0)
           Padding(
             padding: const EdgeInsets.only(left: 17, top: 3),
             child: Text(
@@ -191,6 +276,110 @@ class PushReceipt extends StatelessWidget {
             ),
           ),
       ],
-    ),
-  );
+    );
+    return Container(
+      margin: const EdgeInsets.only(top: 9),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: palette.background.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: widget.branch,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  TextSpan(
+                    text: '  ·  ',
+                    style: TextStyle(color: palette.muted),
+                  ),
+                  TextSpan(
+                    text: widget.op,
+                    style: TextStyle(
+                      color: previewControlBlue,
+                      fontFamily: 'monospace',
+                      fontSize: 11.5,
+                    ),
+                  ),
+                  TextSpan(
+                    text: '  ·  ',
+                    style: TextStyle(color: palette.muted),
+                  ),
+                  TextSpan(
+                    text: widget.count,
+                    style: TextStyle(color: widget.countColor),
+                  ),
+                ],
+              ),
+              style: TextStyle(color: palette.text, fontSize: 12.5),
+            ),
+          ),
+          Divider(height: 1, color: palette.border),
+          const SizedBox(height: 6),
+          if (_open)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: _openHeight),
+              child: SingleChildScrollView(child: rows),
+            )
+          else
+            rows,
+          if (_open || (more > 0 && widget.loadRest != null))
+            _MoreLink(
+              key: widget.moreKey,
+              label: _loading
+                  ? '불러오는 중'
+                  : _open
+                  ? '접기'
+                  : '외 $more개',
+              onTap: _loading ? null : _toggle,
+            )
+          else if (more > 0)
+            Padding(
+              padding: const EdgeInsets.only(left: 17, top: 3),
+              child: Text(
+                '외 $more개',
+                style: TextStyle(color: palette.muted, fontSize: 12),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// '외 N개' / '접기' — 세기만 하던 글자가 누를 자리가 된다.
+class _MoreLink extends StatelessWidget {
+  const _MoreLink({required this.label, required this.onTap, super.key});
+
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.timelineTheme;
+    return Padding(
+      padding: const EdgeInsets.only(left: 17, top: 3),
+      child: MouseRegion(
+        cursor: onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: onTap,
+          child: Text(
+            label,
+            style: TextStyle(
+              color: onTap == null ? palette.muted : previewControlBlue,
+              fontSize: 12,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

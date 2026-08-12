@@ -4601,9 +4601,13 @@ class GitRepository implements FullDiffRepository {
     }
   }
 
-  Future<String?> loadOriginUrl() async {
+  Future<String?> loadOriginUrl() => loadRemoteUrl('origin');
+
+  /// Where a remote actually points. Null when the remote is gone or git
+  /// refuses to say — a caller shows the address or nothing, never a guess.
+  Future<String?> loadRemoteUrl(String remote) async {
     try {
-      final value = (await _run(['remote', 'get-url', 'origin'])).trim();
+      final value = (await _run(['remote', 'get-url', remote])).trim();
       return value.isEmpty ? null : value;
     } on ProcessException {
       return null;

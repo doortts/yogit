@@ -356,6 +356,85 @@ void main() {
     expect(find.text('외 3개'), findsOneWidget);
   });
 
+  testWidgets('the push receipt says which address origin is', (tester) async {
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('aaa1111', 'local work')],
+      refs: refs(ahead: 1),
+      originUrlCallback: () async => 'git@github.com:doortts/yogit.git',
+      movedCommitsCallback: (before, after) async => const [
+        (incoming: true, shortSha: 'aaa1111', subject: 'local work'),
+      ],
+      pushBranchCallback:
+          (remote, branch, {toBranch, fromTip, setUpstream = false}) async {},
+    );
+    await pumpApp(tester, repository);
+
+    await tester.tap(find.byKey(const Key('upstream-sync-push')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('push-target')), findsOneWidget);
+    expect(find.text('git@github.com:doortts/yogit.git'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('push-target')),
+        matching: find.text('origin'),
+      ),
+      findsOneWidget,
+      reason: '어느 원격의 주소인지도 선다',
+    );
+  });
+
+  testWidgets('no address read means no address line', (tester) async {
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('aaa1111', 'local work')],
+      refs: refs(ahead: 1),
+      originUrlCallback: () async => null,
+      movedCommitsCallback: (before, after) async => const [
+        (incoming: true, shortSha: 'aaa1111', subject: 'local work'),
+      ],
+      pushBranchCallback:
+          (remote, branch, {toBranch, fromTip, setUpstream = false}) async {},
+    );
+    await pumpApp(tester, repository);
+
+    await tester.tap(find.byKey(const Key('upstream-sync-push')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('push-target')), findsNothing);
+    expect(find.byKey(const Key('upstream-push-confirm')), findsOneWidget);
+  });
+
+  testWidgets('the cut tail opens on a tap and closes again', (tester) async {
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('aaa1111', 'local work')],
+      refs: refs(ahead: 30),
+      // 확인창을 열 때도, 펼칠 때도 같은 조회가 답한다 — 여기서는 열두 개까지만
+      // 알고 있고, 서른 개 중 나머지는 끝에서 계속 센다.
+      movedCommitsCallback: (before, after) async => [
+        for (var index = 0; index < 12; index++)
+          (incoming: true, shortSha: 'c$index', subject: 'work $index'),
+      ],
+      pushBranchCallback:
+          (remote, branch, {toBranch, fromTip, setUpstream = false}) async {},
+    );
+    await pumpApp(tester, repository);
+
+    await tester.tap(find.byKey(const Key('upstream-sync-push')));
+    await tester.pumpAndSettle();
+    expect(find.text('work 11'), findsNothing, reason: '접힌 목록은 아홉 줄에서 멈춘다');
+
+    await tester.tap(find.byKey(const Key('push-receipt-push-more')));
+    await tester.pumpAndSettle();
+    expect(find.text('work 11'), findsOneWidget);
+    expect(find.text('접기'), findsOneWidget);
+    expect(find.text('외 18개'), findsOneWidget, reason: '읽어 오지 못한 나머지도 센다');
+
+    await tester.tap(find.byKey(const Key('push-receipt-push-more')));
+    await tester.pumpAndSettle();
+    expect(find.text('work 11'), findsNothing);
+    expect(find.text('외 21개'), findsOneWidget);
+  });
+
   testWidgets('a fetch that finds news re-arms the judgement', (tester) async {
     var loads = 0;
     final repository = FakeGitRepository(

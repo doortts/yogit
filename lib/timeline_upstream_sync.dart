@@ -63,6 +63,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
               footnote:
                   '충돌 없음은 방금 재연으로 확인했습니다. '
                   '얹힌 커밋은 해시가 달라집니다.',
+              loadIncomingRest: _upstreamRestLoader(state, pushSide: false),
             ),
             confirmLabel: '받아 얹기',
             confirmKey: const Key('upstream-rebase-pull-confirm'),
@@ -87,9 +88,13 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
     final state = _upstreamSync.state;
     switch (state.kind) {
       case UpstreamSyncKind.firstPush:
+        // 새 브랜치가 어디에 생기는지가 바로 이 물음이므로 주소가 선다.
+        final target = await _upstreamTarget(state);
+        if (!mounted) return;
         final approved = await showYogitAlert<bool>(
           context,
           YogitAlert(
+            subtitle: target,
             title: '${state.branch} 브랜치를 ${state.remote}에 처음 Push할까요?',
             message: '원격에 ${state.branch} 브랜치를 만들고 추적을 연결합니다.',
             confirmLabel: 'Push',
@@ -107,10 +112,13 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
       case UpstreamSyncKind.pushOnly:
         final moved = await _upstreamMovedCommits(state);
         if (moved == null || !mounted) return;
+        final target = await _upstreamTarget(state);
+        if (!mounted) return;
         final approved = await showYogitAlert<bool>(
           context,
           YogitAlert(
             boxWidth: YogitAlert.listWidth,
+            subtitle: target,
             title: '${state.branch} 브랜치를 ${state.remote}에 Push할까요?',
             body: PushReceipt(
               branch: state.branch!,
@@ -120,6 +128,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
               footnote:
                   '원격 ${state.branch} 브랜치가 ${shortSha(state.remoteTip!)}에서 '
                   '${shortSha(state.localTip!)}로 움직입니다.',
+              loadOutgoingRest: _upstreamRestLoader(state, pushSide: true),
             ),
             confirmLabel: 'Push',
             confirmKey: const Key('upstream-push-confirm'),
@@ -139,10 +148,13 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
       case UpstreamSyncKind.divergedClean:
         final moved = await _upstreamMovedCommits(state);
         if (moved == null || !mounted) return;
+        final target = await _upstreamTarget(state);
+        if (!mounted) return;
         final approved = await showYogitAlert<bool>(
           context,
           YogitAlert(
             boxWidth: YogitAlert.listWidth,
+            subtitle: target,
             title: '받아 얹은 뒤 Push할까요? (Pull Rebase and Push)',
             body: PushReceipt(
               branch: state.branch!,
@@ -153,6 +165,8 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
               footnote:
                   '충돌 없음은 방금 재연으로 확인했습니다. '
                   '얹힌 커밋은 해시가 달라집니다.',
+              loadIncomingRest: _upstreamRestLoader(state, pushSide: false),
+              loadOutgoingRest: _upstreamRestLoader(state, pushSide: true),
             ),
             confirmLabel: '받아 얹고 Push',
             confirmKey: const Key('upstream-rebase-push-confirm'),
@@ -179,6 +193,35 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
         return;
     }
   }
+
+  /// 제목 아래 설 원격 주소. 못 읽으면(원격이 사라졌거나 git이 거절) 그 줄은
+  /// 서지 않는다 — '알 수 없음'은 답이 아니다.
+  Future<Widget?> _upstreamTarget(UpstreamSyncState state) async {
+    final remote = state.remote;
+    if (remote == null) return null;
+    final url = await widget.repository.loadRemoteUrl(remote);
+    if (url == null) return null;
+    return PushTarget(remote: remote, url: url);
+  }
+
+  /// '외 N개'를 누를 때 도는 조회. 확인창을 여는 조회는 열여덟 개로 가볍게 두고,
+  /// 나머지는 실제로 펼친 사람만 값을 치른다.
+  /// ponytail: 1000-commit shared window, 500 per side; the tail keeps counting
+  /// past it, so raise both only if a receipt ever has to show more.
+  Future<List<MovedCommit>> Function() _upstreamRestLoader(
+    UpstreamSyncState state, {
+    required bool pushSide,
+  }) => () async {
+    final moved = await widget.repository.loadMovedCommits(
+      state.remoteTip!,
+      state.localTip!,
+      limit: 1000,
+    );
+    return [
+      for (final commit in moved)
+        if (commit.incoming == pushSide) commit,
+    ].take(500).toList();
+  };
 
   /// upstream의 원격 쪽 이름 — main이 origin/trunk를 추적하면 trunk. 잰
   /// 브랜치로 올리기 위해서다.

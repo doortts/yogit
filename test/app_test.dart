@@ -18498,9 +18498,14 @@ class FakeGitRepository extends GitRepository {
     return loader(skip, limit);
   }
 
+  /// loadOriginUrl은 이제 이 위를 지나므로 훅은 하나로 족하다. 훅이 없으면
+  /// 주소는 없다 — 진짜 프로세스는 fakeAsync 존에서 영영 안 돌아온다.
   @override
-  Future<String?> loadOriginUrl() =>
-      originUrlCallback?.call() ?? super.loadOriginUrl();
+  Future<String?> loadRemoteUrl(String remote) {
+    if (originUrlCallback case final callback?) return callback();
+    if (identical(runner, runProcess)) return Future.value(null);
+    return super.loadRemoteUrl(remote);
+  }
 
   @override
   Future<String?> loadLocalDeletedBranchName(

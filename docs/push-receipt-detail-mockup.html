@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Push 확인창 — 원격 주소와 나머지 목록 시안</title>
+<style>
+  :root {
+    --page: #141416;
+    --bg: #1c1c1e;
+    --surface: #232325;
+    --raised: #2c2c2e;
+    --border: #38383a;
+    --text: #f5f5f7;
+    --muted: #8a8a90;
+    --dim: #6a6a70;
+    --green: #8ad6a1;
+    --blue: #6ea8fe;
+    --hash: #ef6c63;
+    --primary: #0a84ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 28px 72px; background: var(--page); color: var(--text);
+    font: 13px/1.55 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  }
+  h1 { font-size: 19px; margin: 0 0 4px; font-weight: 650; }
+  .lede { color: var(--muted); margin: 0 0 26px; max-width: 84ch; }
+  h2 {
+    font-size: 14px; margin: 38px 0 8px; font-weight: 650;
+    display: flex; align-items: baseline; gap: 9px;
+  }
+  h2 .tag {
+    font-size: 10px; font-weight: 600; letter-spacing: .04em;
+    padding: 2px 7px; border-radius: 999px;
+    background: rgba(110,168,254,.16); color: var(--blue);
+  }
+  .note { color: var(--muted); margin: 0 0 14px; max-width: 84ch; }
+  .note b { color: var(--text); font-weight: 600; }
+  code, .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  code { background: var(--surface); padding: 1px 5px; border-radius: 4px; }
+  ul.rules { max-width: 84ch; padding-left: 20px; margin: 0 0 18px; }
+  ul.rules li { margin-bottom: 7px; color: var(--muted); }
+  ul.rules li b { color: var(--text); font-weight: 600; }
+  .caption { color: var(--dim); font-size: 11px; margin: 8px 0 26px; max-width: 84ch; }
+  .row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+
+  /* ── 확인 알림 — 지금 앱이 그리는 그대로 ───────────── */
+  .alert {
+    background: var(--raised); border: .5px solid var(--border); border-radius: 22px;
+    padding: 16px; width: 520px; box-shadow: 0 12px 40px rgba(0,0,0,.5);
+  }
+  .alert .title { font-size: 13px; font-weight: 700; line-height: 1.35; }
+  .alert .ask { font-size: 11px; line-height: 1.5; opacity: .82; margin-top: 9px; }
+  .alert .buttons {
+    display: flex; gap: 7px; margin-top: 13px;
+    width: 248px; margin-left: auto; margin-right: auto;
+  }
+  .alert .btn {
+    flex: 1; text-align: center; border-radius: 999px;
+    padding: 7px 0; font-size: 13px; font-weight: 600;
+  }
+  .alert .btn.quiet { background: #3a3a3c; }
+  .alert .btn.go { background: var(--primary); color: #fff; }
+
+  /* 새로 서는 한 줄: 원격 주소 */
+  .origin {
+    display: flex; align-items: baseline; gap: 6px; margin-top: 4px;
+    font-size: 11px; color: var(--muted); white-space: nowrap;
+  }
+  .origin .url {
+    font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--muted);
+    overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left;
+  }
+  .origin .remote { color: var(--dim); }
+
+  .block {
+    margin-top: 9px; padding: 8px 10px; border-radius: 6px;
+    background: rgba(28,28,30,.5);
+  }
+  .summary {
+    display: flex; align-items: center; white-space: nowrap;
+    font-size: 12.5px; padding-bottom: 6px;
+  }
+  .summary + .items { border-top: 1px solid var(--border); padding-top: 6px; }
+  .sep { color: var(--dim); margin: 0 6px; }
+  .op { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--blue); }
+  .up { color: var(--blue); }
+  .name { font-weight: 600; }
+  .items.scroll {
+    max-height: 168px; overflow-y: auto; scrollbar-width: thin;
+    scrollbar-color: #4a4a4e transparent;
+  }
+  .items.scroll::-webkit-scrollbar { width: 7px; }
+  .items.scroll::-webkit-scrollbar-thumb { background: #4a4a4e; border-radius: 4px; }
+  .item { display: flex; align-items: baseline; gap: 7px; padding: 1px 0; white-space: nowrap; }
+  .item .mark { width: 8px; font-weight: 700; color: var(--blue); }
+  .item .id { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--hash); }
+  .item .subject { font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+  .more {
+    margin-top: 3px; padding-left: 15px; font-size: 12px; color: var(--muted);
+  }
+  .more.link { color: var(--blue); cursor: pointer; user-select: none; }
+  .more.link:hover { text-decoration: underline; }
+  .tail { padding-left: 15px; font-size: 12px; color: var(--dim); padding-top: 3px; }
+  .stamp {
+    display: inline-block; font-size: 10px; font-weight: 600; letter-spacing: .04em;
+    padding: 2px 7px; border-radius: 999px; margin-bottom: 8px;
+    background: rgba(138,214,161,.16); color: var(--green);
+  }
+  .stamp.b { background: rgba(110,168,254,.16); color: var(--blue); }
+</style>
+</head>
+<body>
+
+<h1>Push 확인창 — 어디로 올라가는지, 그리고 나머지 스물한 개</h1>
+<p class="lede">
+  확인창은 원격을 움직이기 직전의 마지막 화면이다. 지금은 <b>어느 원격 저장소로</b>
+  올라가는지는 <code>origin</code>이라는 이름뿐이고, 목록은 아홉 줄에서 잘린 채
+  &lsquo;외 21개&rsquo;가 세기만 한다. 두 가지를 고친다 — <b>주소를 제목 아래 한 줄로 세우고</b>,
+  <b>잘린 나머지를 눌러서 펼친다.</b>
+</p>
+
+<h2>1. 원격 주소 <span class="tag">제목 바로 아래</span></h2>
+<p class="note">
+  주소는 제목이 묻는 &lsquo;origin&rsquo;이 실제로 어디인지 말한다 — 회사 저장소인지 포크인지,
+  올리기 전에 눈으로 확인할 마지막 자리다. 제목과 같은 무게로 서면 물음을 흐리므로
+  <b>11px 회색 monospace 한 줄</b>로, 길면 <b>앞쪽을 잘라</b> 저장소 이름이 남게 한다.
+</p>
+<div class="row">
+  <div>
+    <span class="stamp">시안 A · 주소만</span>
+    <div class="alert">
+      <div class="title">main 브랜치를 origin에 Push할까요?</div>
+      <div class="origin"><span class="url">git@github.com:doortts/yogit.git</span></div>
+      <div class="block">
+        <div class="summary">
+          <span class="name">main</span><span class="sep">·</span><span class="op">push</span><span class="sep">·</span>커밋&nbsp;<span class="up">30개 올라감</span>
+        </div>
+        <div class="items">
+          <div class="item"><span class="mark">↑</span><span class="id">e9da638e</span><span class="subject">Merge branch 'image-bullet-improvements' into main</span></div>
+          <div class="item"><span class="mark">↑</span><span class="id">e01ed515</span><span class="subject">fix(desktop): hand the caret on when a cut takes the row it sat in</span></div>
+          <div class="item"><span class="mark">↑</span><span class="id">d7aa0f35</span><span class="subject">feat(desktop): make the image its own stop between the two rows</span></div>
+        </div>
+        <div class="more">외 27개</div>
+      </div>
+      <div class="ask">원격 main 브랜치가 d694188에서 e9da638로 움직입니다.</div>
+      <div class="buttons"><span class="btn quiet">취소</span><span class="btn go">Push</span></div>
+    </div>
+  </div>
+  <div>
+    <span class="stamp b">시안 B · 원격 이름 + 주소</span>
+    <div class="alert">
+      <div class="title">main 브랜치를 origin에 Push할까요?</div>
+      <div class="origin"><span class="remote">origin</span><span class="sep">·</span><span class="url">git@github.com:doortts/yogit.git</span></div>
+      <div class="block">
+        <div class="summary">
+          <span class="name">main</span><span class="sep">·</span><span class="op">push</span><span class="sep">·</span>커밋&nbsp;<span class="up">30개 올라감</span>
+        </div>
+        <div class="items">
+          <div class="item"><span class="mark">↑</span><span class="id">e9da638e</span><span class="subject">Merge branch 'image-bullet-improvements' into main</span></div>
+          <div class="item"><span class="mark">↑</span><span class="id">e01ed515</span><span class="subject">fix(desktop): hand the caret on when a cut takes the row it sat in</span></div>
+          <div class="item"><span class="mark">↑</span><span class="id">d7aa0f35</span><span class="subject">feat(desktop): make the image its own stop between the two rows</span></div>
+        </div>
+        <div class="more">외 27개</div>
+      </div>
+      <div class="ask">원격 main 브랜치가 d694188에서 e9da638로 움직입니다.</div>
+      <div class="buttons"><span class="btn quiet">취소</span><span class="btn go">Push</span></div>
+    </div>
+  </div>
+</div>
+<p class="caption">
+  제목이 이미 <b>origin</b>이라 말하므로 A는 이름을 지우고 주소만 남긴다. B는 어느 이름의
+  주소인지 한 번 더 못 박는다 — 원격이 둘 이상인 저장소에서 값을 한다.
+  <b>A를 권한다</b>: 제목 한 줄 아래 같은 말이 두 번 서지 않는다.
+</p>
+
+<h2>2. 나머지 목록 <span class="tag">눌러서 펼치기</span></h2>
+<p class="note">
+  &lsquo;외 27개&rsquo;는 지금 죽은 글자다. 파란 링크로 세우고 누르면 <b>목록 자리가 스크롤 영역으로
+  바뀌어</b> 나머지가 그 안에 선다. 창은 더 커지지 않는다 — 목록 영역만 아홉 줄 높이에서
+  멈추고 안에서 구른다. 펼친 뒤 링크는 &lsquo;접기&rsquo;가 된다.
+</p>
+<div class="row">
+  <div>
+    <div class="alert">
+      <div class="title">main 브랜치를 origin에 Push할까요?</div>
+      <div class="origin"><span class="url">git@github.com:doortts/yogit.git</span></div>
+      <div class="block">
+        <div class="summary">
+          <span class="name">main</span><span class="sep">·</span><span class="op">push</span><span class="sep">·</span>커밋&nbsp;<span class="up">30개 올라감</span>
+        </div>
+        <div class="items" id="items"></div>
+        <div class="more link" id="toggle">외 27개</div>
+      </div>
+      <div class="ask">원격 main 브랜치가 d694188에서 e9da638로 움직입니다.</div>
+      <div class="buttons"><span class="btn quiet">취소</span><span class="btn go">Push</span></div>
+    </div>
+    <p class="caption">↑ 눌러 보세요 — 실제로 펼쳐지고 접힙니다.</p>
+  </div>
+</div>
+
+<h2>규칙</h2>
+<ul class="rules">
+  <li><b>주소는 Push 확인창에만</b> 선다. Pull(받아 얹기) 확인창은 로컬만 움직이므로
+      주소를 물을 일이 없다. 처음 Push 확인창에는 선다 — 새 브랜치가 어디에 생기는지가
+      바로 그 물음이다.</li>
+  <li>주소를 못 읽으면(원격이 사라졌거나 <code>git remote get-url</code>이 실패) 그 줄은
+      <b>서지 않는다</b>. 빈 줄이나 &lsquo;알 수 없음&rsquo;은 답이 아니다.</li>
+  <li>펼침은 <b>양쪽 블록이 각자</b> 가진다. 받아 얹고 Push는 블록이 둘이니 링크도 둘,
+      각각 자기 목록만 펼친다.</li>
+  <li>펼칠 때 나머지를 <b>그때 읽어 온다</b>. 확인창을 여는 순간의 조회는 지금처럼 가볍고,
+      값을 치르는 건 실제로 누른 사람뿐이다. 읽는 동안 링크 자리에 <code>불러오는 중</code>이
+      한 박자 선다.</li>
+  <li>아주 긴 목록은 <b>500개에서 멈춘다</b>. 그 뒤는 스크롤 끝에 &lsquo;외 N개&rsquo;가 회색으로
+      남아 여전히 정직하게 센다 — 영수증이 실물보다 적게 말하지 않는다는 약속 그대로.</li>
+  <li>펼친 상태로 확인창을 닫으면 그걸로 끝이다. 다음에 열리는 창은 다시 접힌 채 선다 —
+      기억할 만한 상태가 아니다.</li>
+</ul>
+
+<script>
+  const rest = [
+    ['50afb9e7', "feat(desktop): select the image like a character, not the row"],
+    ['79a73118', "feat(desktop): park a caret station on each side of the image"],
+    ['7f949bf3', "fix(desktop): run image copy and cut through keydown inside the editor"],
+    ['e8665a38', "fix(desktop): hug the image with the ring and show the selection"],
+    ['010b31da', "fix(desktop): let the image frame keep its aspect ratio in the row"],
+    ['a7eac52b', "fix(desktop): hand the lightbox scroll area focus on click"],
+    ['33e5bb4c', "fix(desktop): judge the fit by the frame, not by the window"],
+    ['b1c07a90', "feat(notes): keep the export folder between runs"],
+    ['4d2ee611', "fix(notes): stop the title from eating its own trailing space"],
+    ['9c31f0aa', "refactor(notes): pull the row measurer out of the painter"],
+    ['22a8de73', "fix(sync): count the tail commits the receipt could not show"],
+    ['0f5b9e18', "docs: write down what the receipt promises"],
+    ['ae40c2d5', "test(notes): cover the caret stations around an image"],
+    ['6b9a1f37', "chore: bump the analyzer to the version CI runs"],
+    ['d80c4e92', "fix(desktop): keep the caret visible when the row scrolls"],
+    ['1e77ab60', "feat(desktop): drop an image by dragging it onto the row"],
+    ['57cc3d84', "fix(desktop): release the drag ghost when the drop is refused"],
+    ['c2b6f519', "perf(notes): reuse the thumbnail decode across rows"],
+    ['84e1a0d7', "fix(notes): let a pasted image keep its own name"],
+    ['3fd52c88', "test(desktop): cover cut and paste around the image"],
+    ['aa9b7e41', "fix(sync): name the branch the push actually moves"],
+    ['70d3c165', "docs: note the 500-commit ceiling on the receipt list"],
+    ['15e8b2f9', "chore: drop the unused image cache flag"],
+    ['e6a41d03', "fix(desktop): stop the ring from clipping at the row edge"],
+    ['92c7f5ba', "feat(notes): remember the last export format"],
+    ['48b09d27', "fix(notes): keep the export name when the folder changes"],
+    ['c07fa3e5', "refactor(sync): move the receipt into its own file"],
+  ];
+  const head = [
+    ['e9da638e', "Merge branch 'image-bullet-improvements' into main"],
+    ['e01ed515', "fix(desktop): hand the caret on when a cut takes the row it sat in"],
+    ['d7aa0f35', "feat(desktop): make the image its own stop between the two rows"],
+  ];
+  const items = document.getElementById('items');
+  const toggle = document.getElementById('toggle');
+  let open = false;
+  const line = ([id, subject]) =>
+    `<div class="item"><span class="mark">↑</span><span class="id">${id}</span><span class="subject">${subject}</span></div>`;
+  const render = () => {
+    const shown = open ? head.concat(rest) : head;
+    items.innerHTML = shown.map(line).join('');
+    items.classList.toggle('scroll', open);
+    toggle.textContent = open ? '접기' : `외 ${rest.length}개`;
+  };
+  toggle.onclick = () => { open = !open; render(); };
+  render();
+</script>
+</body>
+</html>

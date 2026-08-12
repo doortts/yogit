@@ -223,6 +223,23 @@ void main() {
     expect(laidOut(text, 120), text);
   });
 
+  testWidgets('a long address loses its head, never its repository name', (
+    tester,
+  ) async {
+    const url = 'git@github.example.com:some-long-team-name/yogit.git';
+    const mono = TextStyle(fontFamily: 'monospace', fontSize: 11, height: 1.5);
+    String fitted(double width) =>
+        truncateHead(url, style: mono, maxWidth: width);
+
+    // Room to spare: nothing is cut.
+    expect(fitted(2000), url);
+
+    final narrow = fitted(120);
+    expect(narrow, startsWith('…'));
+    expect(url, endsWith(narrow.substring(1)));
+    expect(narrow, contains('yogit.git'));
+  });
+
   testWidgets('sentences that still overflow on their own are left alone', (
     tester,
   ) async {
