@@ -234,19 +234,123 @@ extension _TimelineSidebar on _TimelineScreenState {
     });
   }
 
+  MenuController _refMenuController(_RefSection section, String name) =>
+      _refMenuControllers['${section.name}:$name'] ??= MenuController();
+
   /// The first click jumps the timeline like any ref row; a second click on
-  /// the same row within the double-click window runs the default pull action.
-  void _tapRemoteRow(String name) {
-    _selectRef(name, remote: true, focusTimeline: false);
+  /// the same row within the double-click window opens what that name can do.
+  /// A remote keeps its own default — a plain fast-forward is asked for
+  /// outright; a local branch or a tag opens the menu.
+  void _tapRefRow(_RefSection section, String name) {
+    _selectRef(
+      name,
+      remote: section == _RefSection.remote,
+      focusTimeline: false,
+    );
+    final row = '${section.name}:$name';
     final now = DateTime.now().millisecondsSinceEpoch;
-    if (_lastRemoteRowTap == name &&
-        now - _lastRemoteRowTapMs <= kDoubleTapTimeout.inMilliseconds) {
-      _lastRemoteRowTap = null;
-      _runRemotePullDefault(name);
+    if (_lastRefRowTap == row &&
+        now - _lastRefRowTapMs <= kDoubleTapTimeout.inMilliseconds) {
+      _lastRefRowTap = null;
+      if (section == _RefSection.remote) {
+        _runRemotePullDefault(name);
+      } else {
+        _refMenuController(section, name).open();
+      }
       return;
     }
-    _lastRemoteRowTap = name;
-    _lastRemoteRowTapMs = now;
+    _lastRefRowTap = row;
+    _lastRefRowTapMs = now;
+  }
+
+  /// What a local branch or a tag can do, in the same menu shape a remote row
+  /// opens. The actions are the sidebar strip's own, so a double-click reaches
+  /// them without travelling up to the strip.
+  ///
+  /// [governed] and [allHidden] are the row's own eye state, so the menu and
+  /// the eye always say the same thing about the graph.
+  Widget _refActionMenu(
+    _RefSection section,
+    String name, {
+    required bool current,
+    required List<String> governed,
+    required bool allHidden,
+  }) {
+    final busy = _pullingRemote != null || _branchApplyBusy;
+    final isLocal = section == _RefSection.local;
+    final isBase = name == _baseBranch;
+    // The local map holds the difference from the local branch's own point of
+    // view — the same value the row's badge reads.
+    final difference = isLocal ? _refs.aheadBehind[name] : null;
+    final ahead = difference?.ahead ?? 0;
+    final behind = difference?.behind ?? 0;
+    final status = [
+      if (current) '체크아웃된 브랜치',
+      if (isBase) '기준 브랜치',
+      if (ahead > 0 || behind > 0)
+        '원격보다 ${[if (ahead > 0) '+$ahead', if (behind > 0) '−$behind'].join(' ')}',
+    ].join(' · ');
+    return RefRowMenu(
+      name: name,
+      headerKey: Key('sidebar-menu-header-$name'),
+      controller: _refMenuController(section, name),
+      status: status.isEmpty
+          ? null
+          : Text(
+              status,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: _palette.muted),
+            ),
+      actions: [
+        if (isLocal)
+          RefMenuAction(
+            key: Key('sidebar-menu-checkout-$name'),
+            title: '체크아웃',
+            subtitle: current ? '이미 여기에 서 있습니다' : 'HEAD를 이 브랜치로 전환',
+            onPressed: current || busy
+                ? null
+                : () => unawaited(_runLocalCheckout(name)),
+          ),
+        // 기준은 브랜치만 될 수 있다 — 태그를 기준으로 삼는 적용 방향이 없다.
+        if (isLocal)
+          RefMenuAction(
+            key: Key('sidebar-menu-base-$name'),
+            title: '기준 브랜치로',
+            subtitle: isBase ? '이미 기준입니다' : '비교와 적용의 기준을 여기로',
+            onPressed: isBase || busy ? null : () => _selectBaseBranch(name),
+          ),
+        RefMenuAction(
+          key: Key('sidebar-menu-compare-$name'),
+          title: '브랜치 diff로 비교',
+          subtitle: isBase ? '기준과 자기 자신은 비교하지 않습니다' : null,
+          onPressed: isBase || busy
+              ? null
+              : () => unawaited(_selectComparison(name)),
+        ),
+        // 태그는 브랜치 선을 이름 짓지 않으니 그래프에서 뺄 것도 없다.
+        if (isLocal)
+          RefMenuAction(
+            key: Key('sidebar-menu-hide-$name'),
+            title: allHidden ? '그래프에 다시 표시' : '그래프에서 숨기기',
+            subtitle: governed.isEmpty ? '체크아웃된 브랜치는 그래프에 남습니다' : null,
+            onPressed: governed.isEmpty
+                ? null
+                : () =>
+                      unawaited(_toggleHiddenRefs(governed, hide: !allHidden)),
+          ),
+        if (isLocal)
+          RefMenuAction(
+            key: Key('sidebar-menu-delete-$name'),
+            title: '브랜치 삭제',
+            subtitle: current ? '체크아웃된 브랜치는 지울 수 없습니다' : null,
+            danger: true,
+            onPressed: current || busy
+                ? null
+                : () => unawaited(_confirmDeleteBranch(name)),
+          ),
+      ],
+    );
   }
 
   /// The sidebar, with a drag handle on its right edge. The timeline sits in the
@@ -835,15 +939,7 @@ extension _TimelineSidebar on _TimelineScreenState {
                                   () => _sidebarCursor = (section, name),
                                 );
                                 _sidebarFocusNode.requestFocus();
-                                if (pullState == null) {
-                                  _selectRef(
-                                    name,
-                                    remote: section == _RefSection.remote,
-                                    focusTimeline: false,
-                                  );
-                                } else {
-                                  _tapRemoteRow(name);
-                                }
+                                _tapRefRow(section, name);
                               },
                               // HEAD is excluded: git refuses to delete the checked-out
                               // branch, so the menu never offers it.
@@ -932,30 +1028,47 @@ extension _TimelineSidebar on _TimelineScreenState {
                                     ),
                                   // The menu the double-click opens hangs off
                                   // the same edge, drawing nothing until then.
-                                  if (pullState != null)
-                                    Positioned(
-                                      right: 2,
-                                      top: 0,
-                                      bottom: 0,
-                                      child: Center(
-                                        child: RemotePullMenu(
-                                          remoteBranch: name,
-                                          state: pullState,
-                                          controller:
-                                              _pullMenuControllers[name] ??=
-                                                  MenuController(),
-                                          onPull: () => unawaited(
-                                            _runRemotePull(name, pullState),
-                                          ),
-                                          onCheckout: () => unawaited(
-                                            _runRemoteCheckout(name, pullState),
-                                          ),
-                                          onCompare: () => unawaited(
-                                            _selectComparison(name),
-                                          ),
-                                        ),
-                                      ),
+                                  // A remote answers with its pull state; a
+                                  // local branch or a tag with its own actions.
+                                  Positioned(
+                                    right: 2,
+                                    top: 0,
+                                    bottom: 0,
+                                    child: Center(
+                                      child: pullState != null
+                                          ? RemotePullMenu(
+                                              remoteBranch: name,
+                                              state: pullState,
+                                              controller: _refMenuController(
+                                                section,
+                                                name,
+                                              ),
+                                              onPull: () => unawaited(
+                                                _runRemotePull(name, pullState),
+                                              ),
+                                              onCheckout: () => unawaited(
+                                                _runRemoteCheckout(
+                                                  name,
+                                                  pullState,
+                                                ),
+                                              ),
+                                              onCompare: () => unawaited(
+                                                _selectComparison(name),
+                                              ),
+                                            )
+                                          // A remote belonging to no known
+                                          // remote has no state to act on.
+                                          : section == _RefSection.remote
+                                          ? const SizedBox.shrink()
+                                          : _refActionMenu(
+                                              section,
+                                              name,
+                                              current: current,
+                                              governed: governed,
+                                              allHidden: allHidden,
+                                            ),
                                     ),
+                                  ),
                                 ],
                               ),
                             );

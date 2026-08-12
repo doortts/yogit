@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'git.dart';
+import 'ref_row_menu.dart';
 import 'timeline_theme.dart';
 
 /// What double-clicking the row (or pressing Enter in the menu) does.
@@ -15,14 +16,11 @@ RemotePullAction remotePullDefaultAction(RemotePullState state) =>
         state.checkedOut ? RemotePullAction.compare : RemotePullAction.checkout,
     };
 
-/// The state-aware menu a remote branch row opens on double-click: header with
-/// the divergence, the default action first and focused, impossible actions
-/// disabled in place instead of hidden.
-///
-/// The row draws nothing for it — the anchor is a zero-size box at the row's
-/// right edge, where the ↓ button used to stand, so the menu opens in the same
-/// place without the button pushing the row's commit counts around.
-class RemotePullMenu extends StatefulWidget {
+/// The state-aware menu a remote branch row opens on double-click. The chrome —
+/// header, default action, disabled-in-place items — is [RefRowMenu]'s, shared
+/// with the local branch and tag rows; this widget only decides which actions a
+/// remote in this state can take, and in what order.
+class RemotePullMenu extends StatelessWidget {
   const RemotePullMenu({
     required this.remoteBranch,
     required this.state,
@@ -44,113 +42,25 @@ class RemotePullMenu extends StatefulWidget {
   final VoidCallback onCompare;
 
   @override
-  State<RemotePullMenu> createState() => _RemotePullMenuState();
-}
-
-class _RemotePullMenuState extends State<RemotePullMenu> {
-  late final _controller = widget.controller ?? MenuController();
-
-  void _run(VoidCallback action) {
-    _controller.close();
-    action();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final palette = TimelineThemePalette.of(context);
-    final state = widget.state;
-    final defaultAction = remotePullDefaultAction(state);
-
-    Widget item({
-      required Key key,
-      required RemotePullAction action,
-      required String title,
-      String? subtitle,
-      VoidCallback? onPressed,
-    }) {
-      final isDefault = onPressed != null && action == defaultAction;
-      final disabled = onPressed == null;
-      final foreground = disabled
-          ? palette.muted.withValues(alpha: 0.55)
-          : isDefault
-          ? Colors.white
-          : palette.text;
-      final secondary = disabled
-          ? palette.muted.withValues(alpha: 0.55)
-          : isDefault
-          ? Colors.white.withValues(alpha: 0.78)
-          : palette.muted;
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: MenuItemButton(
-          key: key,
-          autofocus: isDefault,
-          onPressed: onPressed == null ? null : () => _run(onPressed),
-          style: MenuItemButton.styleFrom(
-            backgroundColor: isDefault
-                ? palette.interactive
-                : Colors.transparent,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            minimumSize: const Size(_menuWidth - 8, 0),
-            maximumSize: const Size(_menuWidth - 8, double.infinity),
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(5),
-            ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 13, color: foreground),
-                    ),
-                  ),
-                  if (isDefault)
-                    Text('⏎', style: TextStyle(fontSize: 12, color: secondary)),
-                ],
-              ),
-              if (subtitle != null)
-                Text(
-                  subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11, color: secondary),
-                ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    Widget separator() =>
-        Divider(height: 9, thickness: 0.5, color: palette.border);
 
     final pullItem = switch (state.kind) {
-      RemotePullKind.fastForward => item(
+      RemotePullKind.fastForward => RefMenuAction(
         key: const Key('remote-pull-pull'),
-        action: RemotePullAction.pull,
         title: 'Pull — ${state.ahead}개 커밋',
         subtitle: state.checkedOut
             ? '현재 브랜치를 fast-forward'
             : '체크아웃 전환 없이 로컬만 전진',
-        onPressed: widget.onPull,
+        onPressed: onPull,
       ),
-      RemotePullKind.diverged => item(
-        key: const Key('remote-pull-pull'),
-        action: RemotePullAction.pull,
+      RemotePullKind.diverged => const RefMenuAction(
+        key: Key('remote-pull-pull'),
         title: 'Pull',
         subtitle: 'fast-forward 불가',
       ),
-      RemotePullKind.upToDate => item(
-        key: const Key('remote-pull-pull'),
-        action: RemotePullAction.pull,
+      RemotePullKind.upToDate => const RefMenuAction(
+        key: Key('remote-pull-pull'),
         title: 'Pull',
         subtitle: '받을 커밋 없음',
       ),
@@ -159,91 +69,53 @@ class _RemotePullMenuState extends State<RemotePullMenu> {
 
     final checkoutItem = state.checkedOut
         ? null
-        : item(
+        : RefMenuAction(
             key: const Key('remote-pull-checkout'),
-            action: RemotePullAction.checkout,
             title: '체크아웃',
             subtitle: switch (state.kind) {
               RemotePullKind.noLocal => '추적 브랜치 ${state.localBranch} 생성',
               RemotePullKind.fastForward => '${state.localBranch}으로 전환 후 pull',
               _ => '${state.localBranch}으로 전환',
             },
-            onPressed: widget.onCheckout,
+            onPressed: onCheckout,
           );
 
-    final compareItem = item(
+    final compareItem = RefMenuAction(
       key: const Key('remote-pull-compare'),
-      action: RemotePullAction.compare,
       title: '브랜치 diff로 비교',
       subtitle: state.kind == RemotePullKind.diverged
           ? 'merge / rebase는 미리보기에서 결정'
           : null,
-      onPressed: widget.onCompare,
+      onPressed: onCompare,
     );
 
-    // The default action comes first; the rest keep a stable order below it,
-    // and a separator sets the last item off like the design's footer row.
+    // The default action comes first — [RefRowMenu] takes the first action the
+    // ref can actually run as its default — and the rest keep a stable order
+    // below it.
+    final defaultAction = remotePullDefaultAction(state);
     final ordered = [
       (RemotePullAction.pull, pullItem),
       (RemotePullAction.checkout, checkoutItem),
       (RemotePullAction.compare, compareItem),
     ];
-    final items = <Widget>[
-      for (final entry in ordered)
-        if (entry.$2 != null && entry.$1 == defaultAction) entry.$2!,
-      for (final entry in ordered)
-        if (entry.$2 != null && entry.$1 != defaultAction) entry.$2!,
-    ];
-    if (items.length > 1) items.insert(items.length - 1, separator());
 
-    return MenuAnchor(
-      controller: _controller,
-      style: MenuStyle(
-        backgroundColor: WidgetStatePropertyAll(palette.raised),
-        padding: const WidgetStatePropertyAll(
-          EdgeInsets.symmetric(vertical: 4),
-        ),
-        shape: WidgetStatePropertyAll(
-          RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: BorderSide(color: palette.border),
-          ),
-        ),
-      ),
-      menuChildren: [
-        SizedBox(
-          key: const Key('remote-pull-header'),
-          width: _menuWidth,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.remoteBranch,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12, color: palette.text),
-                ),
-                _headerStatus(palette),
-                const SizedBox(height: 2),
-              ],
-            ),
-          ),
-        ),
-        separator(),
-        ...items,
+    return RefRowMenu(
+      name: remoteBranch,
+      headerKey: const Key('remote-pull-header'),
+      status: _headerStatus(palette),
+      controller: controller,
+      actions: [
+        for (final entry in ordered)
+          if (entry.$2 case final action?)
+            if (entry.$1 == defaultAction) action,
+        for (final entry in ordered)
+          if (entry.$2 case final action?)
+            if (entry.$1 != defaultAction) action,
       ],
-      // Nothing to see: the row opens this from its own double-click, and the
-      // anchor only says where the menu comes out.
-      builder: (context, controller, child) => const SizedBox.shrink(),
     );
   }
 
-  static const _menuWidth = 240.0;
-
   Widget _headerStatus(TimelineThemePalette palette) {
-    final state = widget.state;
     const green = Color(0xFF63D97C);
     const red = Color(0xFFFF6B6B);
     final muted = TextStyle(fontSize: 11, color: palette.muted);
