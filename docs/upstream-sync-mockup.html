@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>받기와 올리기 — 기준 브랜치의 upstream 동기화 시안</title>
+<style>
+  :root {
+    --page: #141416;
+    --bg: #1c1c1e;
+    --surface: #232325;
+    --raised: #2c2c2e;
+    --border: #38383a;
+    --text: #f5f5f7;
+    --muted: #8a8a90;
+    --dim: #6a6a70;
+    --green: #8ad6a1;
+    --amber: #f0a35e;
+    --red: #ff453a;
+    --blue: #6ea8fe;
+    --hash: #ef6c63;
+    --primary: #0a84ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 28px 72px; background: var(--page); color: var(--text);
+    font: 13px/1.55 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  }
+  h1 { font-size: 19px; margin: 0 0 4px; font-weight: 650; }
+  .lede { color: var(--muted); margin: 0 0 26px; max-width: 84ch; }
+  h2 {
+    font-size: 14px; margin: 38px 0 8px; font-weight: 650;
+    display: flex; align-items: baseline; gap: 9px;
+  }
+  h2 .tag {
+    font-size: 10px; font-weight: 600; letter-spacing: .04em;
+    padding: 2px 7px; border-radius: 999px;
+    background: rgba(110,168,254,.16); color: var(--blue);
+  }
+  .note { color: var(--muted); margin: 0 0 14px; max-width: 84ch; }
+  .note b { color: var(--text); font-weight: 600; }
+  code, .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  code { background: var(--surface); padding: 1px 5px; border-radius: 4px; }
+  ol.rules, ul.rules { max-width: 84ch; padding-left: 20px; margin: 0 0 18px; }
+  ol.rules li, ul.rules li { margin-bottom: 7px; color: var(--muted); }
+  ol.rules li b, ul.rules li b { color: var(--text); font-weight: 600; }
+  table {
+    border-collapse: collapse; width: 100%; max-width: 1080px;
+    background: var(--bg); border: .5px solid var(--border); border-radius: 8px;
+    overflow: hidden; margin-bottom: 8px;
+  }
+  th, td {
+    text-align: left; padding: 8px 11px; border-bottom: .5px solid var(--border);
+    vertical-align: top;
+  }
+  th {
+    font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--dim); background: var(--surface);
+  }
+  tr:last-child td { border-bottom: none; }
+  .caption { color: var(--dim); font-size: 11px; margin: 0 0 26px; }
+
+  /* ── 툴바 재현 ─────────────────────────────────────── */
+  .toolbar {
+    display: flex; align-items: center; gap: 22px;
+    background: var(--bg); border: .5px solid var(--border); border-radius: 10px;
+    padding: 9px 16px; max-width: 1080px; margin-bottom: 6px;
+  }
+  .sel { display: flex; flex-direction: column; gap: 1px; }
+  .sel .cap { font-size: 10px; color: var(--muted); font-weight: 600; }
+  .sel .val { font-size: 14px; font-weight: 600; }
+  .sel .val .arrow { color: var(--muted); font-size: 11px; }
+  .spacer { flex: 1; }
+  .wordmark { font-size: 15px; color: #f9c8dd; font-style: italic; font-weight: 700; }
+
+  /* ── 동기화 캡슐 ───────────────────────────────────── */
+  .capsule {
+    display: inline-flex; align-items: center;
+    background: var(--raised); border: .5px solid var(--border);
+    border-radius: 7px; padding: 3px;
+    gap: 2px;
+  }
+  .capsule .act {
+    display: inline-flex; align-items: center; gap: 5px;
+    border-radius: 5px; padding: 4px 9px;
+    font-size: 12px; font-weight: 600; cursor: default;
+  }
+  .capsule .act .n { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+  .act.pull-ff   { color: var(--green); }
+  .act.push-ok   { color: var(--green); }
+  .act.rebase    { color: var(--amber); }
+  .act.conflict  { color: var(--red); }
+  .act.idle      { color: var(--dim); }
+  .act.hover     { background: #3a3a3c; }
+  .capsule .measuring { color: var(--dim); padding: 4px 9px; font-size: 12px; }
+  .dot-synced {
+    width: 6px; height: 6px; border-radius: 3px; background: var(--green);
+    opacity: .55; margin: 0 6px;
+  }
+
+  .stateline { display: flex; align-items: center; gap: 14px; margin: 10px 0 3px; }
+  .stateline .label { width: 210px; color: var(--muted); font-size: 12px; }
+  .stateline .label b { color: var(--text); }
+  .tip {
+    background: var(--raised); border: .5px solid var(--border); border-radius: 6px;
+    padding: 5px 9px; font-size: 11px; color: var(--text);
+    box-shadow: 0 6px 16px rgba(0,0,0,.45); max-width: 340px;
+  }
+  .tip .dim { color: var(--muted); }
+
+  /* 확인 알림 */
+  .alert {
+    background: var(--raised); border: .5px solid var(--border); border-radius: 22px;
+    padding: 16px; width: 340px; box-shadow: 0 12px 40px rgba(0,0,0,.5);
+  }
+  .alert .title { font-size: 13px; font-weight: 700; line-height: 1.35; }
+  .alert .message { font-size: 11px; line-height: 1.5; opacity: .82; margin-top: 5px; }
+  .alert .buttons { display: flex; gap: 7px; margin-top: 13px; justify-content: center; }
+  .alert .btn {
+    flex: 1; max-width: 120px; text-align: center; border-radius: 999px;
+    padding: 7px 0; font-size: 13px; font-weight: 600;
+  }
+  .alert .btn.quiet { background: #3a3a3c; }
+  .alert .btn.go { background: var(--primary); color: #fff; }
+  .row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+</style>
+</head>
+<body>
+
+<h1>받기와 올리기 — 기준 브랜치의 upstream 동기화</h1>
+<p class="lede">
+  묻기 전에 답해 둔다. 기준 브랜치가 upstream과 어긋나 있으면 그 사실이 이미 재어져
+  있고, 버튼은 &lsquo;무엇을 하겠다&rsquo;가 아니라 <b>&lsquo;하면 어떻게 되는지&rsquo;</b>를 입고 있다.
+  동기화되어 있을 때는 아무것도 말하지 않는다 — 침묵이 곧 &lsquo;다 맞다&rsquo;는 대답이다.
+</p>
+
+<h2>자리 <span class="tag">툴바 · 기준 브랜치 곁</span></h2>
+<p class="note">
+  이 상태는 기준 브랜치의 속성이므로 <b>기준 브랜치 선택기 바로 오른쪽</b>에 선다.
+  사이드바 스트립은 커서가 짚은 ref의 것이고 상태바는 부고란이다 — 대표 기능은
+  브랜치 이름 옆에서 그 브랜치를 말해야 한다. 창이 좁아지면 장식(문구·키캡)이
+  먼저 물러나고 캡슐은 남는다.
+</p>
+<div class="toolbar">
+  <div class="sel"><span class="cap">저장소</span><span class="val">yogit <span class="arrow">▾</span></span></div>
+  <div class="sel"><span class="cap">기준 브랜치</span><span class="val">main <span class="arrow">▾</span></span></div>
+  <span class="capsule">
+    <span class="act pull-ff">↓ <span class="n">2</span> 받기</span>
+    <span class="act push-ok">↑ <span class="n">3</span> 올리기</span>
+  </span>
+  <div class="sel"><span class="cap">브랜치 diff</span><span class="val" style="color:var(--muted)">선택 <span class="arrow">▾</span></span></div>
+  <div class="spacer"></div>
+  <div class="wordmark">Yogit</div>
+</div>
+<p class="caption">동기화 캡슐. 두 동사가 각자의 판정 색을 입는다 — 초록: 그대로 됨 · 주황: 받아 얹기(--rebase)를 거치면 됨 · 빨강: 충돌.</p>
+
+<h2>상태 여섯 <span class="tag">한 사실, 두 문</span></h2>
+<p class="note">
+  판정의 재료는 upstream 대비 <code>ahead</code>(로컬에만 있는 커밋)와
+  <code>behind</code>(원격에만 있는 커밋) 둘뿐이고, 어긋났을 때(<code>ahead&gt;0 ∧ behind&gt;0</code>)의
+  물음은 하나로 수렴한다 — <b>로컬 커밋이 원격 끝 위에 깨끗이 얹히는가.</b>
+  숨은 worktree에서 한 번 재연해 보면(브랜치 diff의 재배치 미리보기와 같은 부품)
+  받기와 올리기 두 버튼의 답이 동시에 나온다.
+</p>
+
+<div class="stateline">
+  <span class="label"><b>동기화됨</b> · ahead 0, behind 0</span>
+  <span class="capsule"><span class="dot-synced"></span></span>
+  <span class="tip"><span class="dim">tooltip:</span> origin/main과 같습니다 · 4분 전에 확인</span>
+</div>
+<div class="stateline">
+  <span class="label"><b>올릴 것만</b> · ahead 3, behind 0</span>
+  <span class="capsule"><span class="act push-ok">↑ <span class="n">3</span> 올리기</span></span>
+  <span class="tip"><span class="dim">tooltip:</span> 그대로 올릴 수 있습니다 — 커밋 3개</span>
+</div>
+<div class="stateline">
+  <span class="label"><b>받을 것만</b> · ahead 0, behind 2</span>
+  <span class="capsule"><span class="act pull-ff">↓ <span class="n">2</span> 받기</span></span>
+  <span class="tip"><span class="dim">tooltip:</span> 빨리감기로 받습니다 — 커밋 2개</span>
+</div>
+<div class="stateline">
+  <span class="label"><b>어긋남, 깨끗</b> · 3↕2, 재연 성공</span>
+  <span class="capsule">
+    <span class="act rebase">↓ <span class="n">2</span> 받아 얹기</span>
+    <span class="act rebase">↑ <span class="n">3</span> 올리기</span>
+  </span>
+  <span class="tip"><span class="dim">tooltip(올리기):</span> 2개를 받아 얹은 뒤 충돌 없이 올릴 수 있습니다</span>
+</div>
+<div class="stateline">
+  <span class="label"><b>어긋남, 충돌</b> · 3↕2, 재연 실패</span>
+  <span class="capsule">
+    <span class="act conflict">↓ <span class="n">2</span> 충돌 2파일</span>
+    <span class="act conflict">↑ <span class="n">3</span></span>
+  </span>
+  <span class="tip"><span class="dim">tooltip:</span> 빨리감기는 불가, 받아 얹으면 lib/a.dart 외 1개가 충돌합니다</span>
+</div>
+<div class="stateline">
+  <span class="label"><b>upstream 없음</b></span>
+  <span class="capsule"><span class="act idle">↑ 처음 올리기</span></span>
+  <span class="tip"><span class="dim">tooltip:</span> origin에 main을 만들고 추적을 연결합니다 (push&nbsp;-u)</span>
+</div>
+<p class="caption">
+  재는 동안은 판정 색 없이 숫자만 희미하게 선다(<span class="mono">↓ 2 ↑ 3 …</span>) —
+  스피너 없음. 판정은 fetch가 끝날 때, 그리고 두 끝(tip) 중 하나가 움직일 때마다 다시 잰다.
+</p>
+
+<h2>누르면 <span class="tag">확인 한 번, 실행 한 번</span></h2>
+<p class="note">
+  초록 버튼은 묻지 않고 해도 안전한 일이지만, 원격을 움직이는 일은 되돌리기 어려우므로
+  <b>올리기만 확인을 거친다.</b> 받기(빨리감기)는 로컬만 움직이니 바로 실행한다.
+  주황 올리기는 두 걸음(받아 얹기 → 올리기)을 하나의 물음으로 묶는다.
+  빨간 버튼은 실행이 아니라 <b>충돌 파일 목록을 여는 문</b>이다 — 해결 흐름은 다음 단계.
+</p>
+<div class="row">
+  <div class="alert">
+    <div class="title">main을 origin에 올릴까요?</div>
+    <div class="message">커밋 3개를 올립니다. 원격의 main이 ec51258에서 78c0285로 움직입니다.</div>
+    <div class="buttons"><div class="btn quiet">그만두기</div><div class="btn go">올리기</div></div>
+  </div>
+  <div class="alert">
+    <div class="title">받아 얹은 뒤 올릴까요?</div>
+    <div class="message">origin의 커밋 2개를 먼저 받아 그 위에 로컬 3개를 얹고(충돌 없음 — 방금 재연으로 확인), 이어서 올립니다.</div>
+    <div class="buttons"><div class="btn quiet">그만두기</div><div class="btn go">받아 얹고 올리기</div></div>
+  </div>
+</div>
+
+<h2>판정표 <span class="tag">git 사실 → 화면</span></h2>
+<table>
+  <tr><th>git 사실</th><th>받기</th><th>올리기</th><th>비용</th></tr>
+  <tr>
+    <td class="mono">ahead 0 · behind 0</td>
+    <td colspan="2">캡슐이 점 하나로 줄어든다 — 침묵</td>
+    <td>공짜 (refs 로드에 이미 있음)</td>
+  </tr>
+  <tr>
+    <td class="mono">ahead&gt;0 · behind 0</td>
+    <td>—</td>
+    <td>초록 · <code>git push</code></td>
+    <td>공짜</td>
+  </tr>
+  <tr>
+    <td class="mono">ahead 0 · behind&gt;0</td>
+    <td>초록 · 빨리감기</td>
+    <td>—</td>
+    <td>공짜</td>
+  </tr>
+  <tr>
+    <td class="mono">ahead&gt;0 · behind&gt;0 · 재연 깨끗</td>
+    <td>주황 · 받아 얹기</td>
+    <td>주황 · 받아 얹고 올리기</td>
+    <td rowspan="2">숨은 worktree 재연 1회<br>(로컬 tip, 원격 tip) 쌍으로 캐시</td>
+  </tr>
+  <tr>
+    <td class="mono">ahead&gt;0 · behind&gt;0 · 재연 충돌</td>
+    <td>빨강 · 파일 N개</td>
+    <td>빨강</td>
+  </tr>
+  <tr>
+    <td class="mono">upstream 미설정</td>
+    <td>—</td>
+    <td>회색 · <code>push -u</code></td>
+    <td>공짜</td>
+  </tr>
+  <tr>
+    <td class="mono">fetch 실패</td>
+    <td colspan="2">마지막 판정 유지, tooltip에 &lsquo;N분 전 기준&rsquo; — 상태바의 기존 재시도가 담당</td>
+    <td>—</td>
+  </tr>
+</table>
+
+<h2>실행 방식 — 체크아웃을 옮기지 않는다</h2>
+<ul class="rules">
+  <li><b>기준 브랜치가 체크아웃되어 있지 않을 때:</b> 받기(빨리감기)는
+      <code>git fetch origin main:main</code>으로 ref만 전진시키고, 받아 얹기는 브랜치 diff
+      적용과 같은 숨은 worktree에서 재연을 실현한 뒤 ref만 옮긴다. 작업 트리는 더럽든
+      말든 상관없다 — 이 앱의 기존 약속 그대로.</li>
+  <li><b>체크아웃되어 있을 때:</b> 작업 트리를 실제로 움직여야 하므로, 트리가 더럽고
+      받을 내용과 겹치면 실행을 거절하고 이유를 말한다. 몰래 stash하지 않는다.</li>
+  <li>재연(dry-run)은 기준 브랜치 하나에 대해서만, 어긋났을 때만, 한 번에 하나만 돈다.
+      (로컬 tip, 원격 tip) 쌍이 같으면 다시 재지 않는다.</li>
+</ul>
+
+<h2>계약</h2>
+<ul class="rules">
+  <li>동기화 상태에서 캡슐은 동사를 보이지 않는다 — 점 하나뿐.</li>
+  <li>ahead만 있으면 올리기 하나, behind만 있으면 받기 하나. 개수는 항상 판정 색과 함께.</li>
+  <li>어긋나면 재연이 끝날 때까지 숫자는 무채색이고, 끝나면 두 버튼이 같은 판정을 입는다.</li>
+  <li>빨간 버튼을 눌러도 아무것도 실행되지 않는다 — 충돌 파일 목록만 연다.</li>
+  <li>올리기는 항상 확인을 거치고, 확인문에는 원격 ref가 어디서 어디로 움직이는지 해시가 적힌다.</li>
+  <li>받기(빨리감기)는 확인 없이 즉시. 완료는 상태바가 아니라 타임라인 자체가 말한다 — 행이 늘어난다.</li>
+  <li>tooltip에는 언제 잰 판정인지가 적힌다.</li>
+</ul>
+
+<h2>정해 주셔야 할 것</h2>
+<ol class="rules">
+  <li><b>주황 올리기의 한 번 누름</b> — 받아 얹기와 올리기를 한 확인으로 묶어 실행(시안)
+      vs 알려만 주고 실행은 두 단계로.</li>
+  <li><b>재연 자동 실행</b> — fetch 후 어긋남이 보이면 자동으로 잰다(시안) vs 캡슐에
+      커서를 올릴 때 잰다.</li>
+  <li><b>충돌 파일 목록의 다음 단계</b> — v1은 목록만(시안) vs 브랜치 diff의 충돌 해결
+      흐름으로 바로 연결.</li>
+</ol>
+
+</body>
+</html>
