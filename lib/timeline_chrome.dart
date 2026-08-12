@@ -245,6 +245,57 @@ extension _TimelineChrome on _TimelineScreenState {
     },
   );
 
+  /// 작업 트리 행을 고르고 있는 동안만 서는 키 힌트 — 시안 statusbar의 넷.
+  /// 좁은 창에서 legend를 밀어내지 않도록 잘려 나간다.
+  Widget _commitModeKeyHints() => ValueListenableBuilder<int>(
+    valueListenable: _selectedIndex,
+    builder: (context, _, _) {
+      if (!(_selectedCommit?.isWorkingTree ?? false)) {
+        return const SizedBox.shrink();
+      }
+      return SingleChildScrollView(
+        key: const Key('commit-key-hints'),
+        scrollDirection: Axis.horizontal,
+        physics: const NeverScrollableScrollPhysics(),
+        child: Row(
+          children: [
+            _commitKeyHint('Space', 'Stage / Unstage'),
+            _commitKeyHint('⌘↵', '커밋'),
+            _commitKeyHint('↑↓', '파일 이동'),
+            _commitKeyHint('Esc', 'diff 닫기'),
+          ],
+        ),
+      );
+    },
+  );
+
+  Widget _commitKeyHint(String cap, String label) => Padding(
+    padding: const EdgeInsets.only(left: 16),
+    child: Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 5),
+          decoration: BoxDecoration(
+            color: _palette.raised,
+            border: Border.all(color: _palette.border),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            cap,
+            style: TextStyle(
+              color: _palette.muted,
+              fontSize: 10,
+              fontFamily: technicalFontFamily,
+              fontFamilyFallback: technicalFontFallback,
+            ),
+          ),
+        ),
+        const SizedBox(width: 5),
+        Text(label, style: TextStyle(color: _palette.muted, fontSize: 11)),
+      ],
+    ),
+  );
+
   Widget _statusBar() => _normalStatusBar();
 
   Widget _normalStatusBar() => LayoutBuilder(
@@ -274,6 +325,7 @@ extension _TimelineChrome on _TimelineScreenState {
                       _legend('WIP', const LegendDot(dashed: true)),
                       _frameRevivalNotice(),
                       _upstreamMeasureNotice(),
+                      Flexible(child: _commitModeKeyHints()),
                     ],
                   )
                 : Row(

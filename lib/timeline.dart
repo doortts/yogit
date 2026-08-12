@@ -467,6 +467,9 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// 열린 diff가 보고 있는 축. 세션의 어댑터가 이 값을 물고 있어서 축을 바꾸면
   /// 세션을 다시 세운다.
   var _commitDiffArea = WorkingTreeArea.unstaged;
+
+  /// Space와 ↑↓이 겨누는 행. 두 섹션을 하나의 평평한 줄로 걷는다.
+  ({WorkingTreeArea area, String path})? _commitCursor;
   var _commitUnstagedCollapsed = false;
   var _commitStagedCollapsed = false;
   final _commitTitle = TextEditingController();
@@ -1390,7 +1393,10 @@ class _TimelineScreenState extends State<TimelineScreen>
               event.logicalKey == LogicalKeyboardKey.arrowUp) &&
           keyboard.isMetaPressed &&
           !keyboard.isShiftPressed) {
-        if (_previewController.previewPlacement != PreviewPlacement.closed) {
+        if (_commitPanelOpen) {
+          _moveCommitCursor(step);
+        } else if (_previewController.previewPlacement !=
+            PreviewPlacement.closed) {
           _stepPreviewFile(step, animate: event is KeyDownEvent);
         }
         return KeyEventResult.handled;
@@ -1445,7 +1451,24 @@ class _TimelineScreenState extends State<TimelineScreen>
       _openSearch();
       return KeyEventResult.handled;
     }
-    if (event.logicalKey == LogicalKeyboardKey.enter && _commits.isNotEmpty) {
+    // ⌘↵ 커밋. 제목칸에 포커스가 있어도 동작한다 — 치고 바로 커밋하는 흐름이다.
+    // 게이트는 커밋 버튼의 것과 같고, 막히면 아래 Enter로 새지 않는다.
+    if (event.logicalKey == LogicalKeyboardKey.enter && shortcutModifierHeld) {
+      if (_commitPanelOpen && _commitReady) unawaited(_commitIndex());
+      return KeyEventResult.handled;
+    }
+    // Space는 커서 행을 축 사이로 넘긴다. 제목·본문을 치는 중에는 스페이스가
+    // 글자라 손대지 않는다 — 그 키 이벤트는 여기까지 버블로 올라온다.
+    if (event.logicalKey == LogicalKeyboardKey.space &&
+        !shortcutModifierHeld &&
+        !_editableDescendantHasFocus &&
+        _commitPanelOpen) {
+      unawaited(_toggleCommitCursorRow());
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.enter &&
+        !shortcutModifierHeld &&
+        _commits.isNotEmpty) {
       _togglePreview();
       return KeyEventResult.handled;
     }

@@ -169,9 +169,11 @@ extension _TimelinePreviewPane on _TimelineScreenState {
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        _cherryPickState == null
-                            ? '파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓'
-                            : '충돌 파일을 해결한 뒤 계속할 수 있습니다',
+                        _cherryPickState != null
+                            ? '충돌 파일을 해결한 뒤 계속할 수 있습니다'
+                            : commit?.isWorkingTree ?? false
+                            ? 'Space Stage/Unstage · ⌘↵ 커밋 · ↑↓ 파일 이동 · Esc diff 닫기'
+                            : '파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(

@@ -176,11 +176,17 @@ extension _TimelineCommitPanel on _TimelineScreenState {
         ? entry.unstagedDeletions
         : entry.stagedDeletions;
     final slash = entry.path.lastIndexOf('/');
+    final cursor = _commitCursor;
+    final selected = cursor?.area == area && cursor?.path == entry.path;
     return HoverBuilder(
       key: Key('commit-row-${area.name}-${entry.path}'),
       builder: (hovered) => InkWell(
-        onTap: () => _openCommitAreaDiff(area, entry.path),
-        child: SizedBox(
+        onTap: () {
+          _rebuild(() => _commitCursor = (area: area, path: entry.path));
+          _openCommitAreaDiff(area, entry.path);
+        },
+        child: Container(
+          color: selected ? _palette.selectedRow : null,
           height: 26,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -373,6 +379,59 @@ extension _TimelineCommitPanel on _TimelineScreenState {
     );
   }
 
+  /// 작업 트리 행이 선택되어 있고 판이 열려 있을 때만 커밋 모드의 키가 산다.
+  bool get _commitPanelOpen =>
+      _cherryPickState == null &&
+      (_selectedCommit?.isWorkingTree ?? false) &&
+      _previewController.previewPlacement != PreviewPlacement.closed;
+
+  /// 커서가 걷는 평평한 줄 — 두 섹션을 이어 붙인 것. 접힌 섹션은 빠진다: 보이지
+  /// 않는 행에 커서가 앉을 자리는 없다.
+  List<({WorkingTreeArea area, String path})> get _commitCursorRows => [
+    for (final area in WorkingTreeArea.values)
+      if (!(area == WorkingTreeArea.unstaged
+          ? _commitUnstagedCollapsed
+          : _commitStagedCollapsed))
+        for (final entry in _commitAreaEntries(area))
+          (area: area, path: entry.path),
+  ];
+
+  void _moveCommitCursor(int delta) {
+    final rows = _commitCursorRows;
+    if (rows.isEmpty) return;
+    final cursor = _commitCursor;
+    final here = rows.indexWhere(
+      (row) => row.area == cursor?.area && row.path == cursor?.path,
+    );
+    final next = here < 0
+        ? (delta > 0 ? 0 : rows.length - 1)
+        : (here + delta).clamp(0, rows.length - 1);
+    _rebuild(() => _commitCursor = rows[next]);
+  }
+
+  /// Space: 커서 행을 그 축의 반대편으로 넘긴다.
+  Future<void> _toggleCommitCursorRow() async {
+    if (_commitCursor case final cursor?) {
+      await _toggleCommitFile(cursor.area, cursor.path);
+    }
+  }
+
+  /// →로 미리보기에 들어올 때 여는 diff. 커서가 없으면 첫 행이다.
+  void _openCommitCursorDiff() {
+    final cursor = _commitCursor ?? _commitCursorRows.firstOrNull;
+    if (cursor == null) return;
+    _rebuild(() => _commitCursor = cursor);
+    _openCommitAreaDiff(cursor.area, cursor.path);
+  }
+
+  /// ⌘↵의 게이트는 커밋 버튼의 것과 같아야 한다 — 버튼이 막는 것을 키가 지나
+  /// 가면 두 입구가 다른 말을 하게 된다.
+  bool get _commitReady =>
+      !_commitModeBusy &&
+      !(_commitStatus?.hasConflict ?? false) &&
+      (_commitStatus?.staged.isNotEmpty ?? false) &&
+      _commitTitle.text.trim().isNotEmpty;
+
   List<WorkingTreeEntry> _commitAreaEntries(WorkingTreeArea area) =>
       (area == WorkingTreeArea.unstaged
           ? _commitStatus?.unstaged
@@ -391,8 +450,12 @@ extension _TimelineCommitPanel on _TimelineScreenState {
 
   /// filebar의 Stage File / Unstage File — 패널 행의 것과 같은 조작이고, 무엇을
   /// 하는지는 보고 있는 축이 정한다.
-  Future<void> _stageSelectedCommitFile(WorkingTreeArea area) async {
-    final path = _fullDiffSession?.state.selectedFile?.path;
+  Future<void> _stageSelectedCommitFile(WorkingTreeArea area) =>
+      _toggleCommitFile(area, _fullDiffSession?.state.selectedFile?.path);
+
+  /// 한 파일을 자기 축의 반대편으로 넘긴다. filebar 버튼과 Space가 같은 자리를
+  /// 지난다.
+  Future<void> _toggleCommitFile(WorkingTreeArea area, String? path) async {
     if (path == null) return;
     final entry = _commitEntryFor(path);
     final hasHead = _selectedCommit?.parents.isNotEmpty ?? true;
@@ -590,11 +653,7 @@ extension _TimelineCommitPanel on _TimelineScreenState {
       child: ValueListenableBuilder<TextEditingValue>(
         valueListenable: _commitTitle,
         builder: (context, title, _) {
-          final ready =
-              !_commitModeBusy &&
-              !blocked &&
-              staged > 0 &&
-              title.text.trim().isNotEmpty;
+          final ready = _commitReady;
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
@@ -875,15 +934,20 @@ extension _TimelineCommitPanel on _TimelineScreenState {
   /// 낡았으므로 같이 다시 읽는다.
   Future<void> _reloadCommitMode({bool timelineToo = false}) async {
     _rebuild(() {
-      _commitStatusRequest = null;
+      _commitStatusRequest = _readWorkingTreeStatus();
       _previewFiles.remove('');
       _previewFileLists.remove('');
       _previewDiffs.removeWhere((key, _) => key.sha.isEmpty);
     });
+    final status = await _commitStatusRequest;
+    if (!mounted) return;
     if (_fullDiffSession case final session?
         when session.repository is WorkingTreeAreaRepository) {
       await session.refreshWorkingTree();
     }
-    if (timelineToo) await _reloadTimelineAfterCherryPick(null);
+    // 마지막 변경까지 버렸으면 작업 트리 행 자체가 없어져야 한다.
+    if (timelineToo || (status?.entries.isEmpty ?? false)) {
+      await _reloadTimelineAfterCherryPick(null);
+    }
   }
 }

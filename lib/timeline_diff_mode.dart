@@ -15,6 +15,12 @@ extension _TimelineDiffMode on _TimelineScreenState {
       );
     }
     _previewFocusNode.requestFocus();
+    // 커밋 패널의 파일은 축이 있는 목록이라 `loadFiles`가 답하는 작업 트리 ↔
+    // HEAD 목록과 다르다. 커서가 앉은 행이 곧 열 파일이다.
+    if (_commitPanelOpen) {
+      _openCommitCursorDiff();
+      return;
+    }
     if (_showsBranchPreviewDiff(commit)) return;
     final key = _previewKey(commit);
     final known =
@@ -106,7 +112,11 @@ extension _TimelineDiffMode on _TimelineScreenState {
       _ => 0,
     };
     if (step == 0) return KeyEventResult.ignored;
-    _stepPreviewFile(step, animate: event is KeyDownEvent);
+    if (_commitPanelOpen) {
+      _moveCommitCursor(step);
+    } else {
+      _stepPreviewFile(step, animate: event is KeyDownEvent);
+    }
     return KeyEventResult.handled;
   }
 
