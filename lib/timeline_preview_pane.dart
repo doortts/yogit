@@ -569,6 +569,9 @@ extension _TimelinePreviewPane on _TimelineScreenState {
   }
 
   Widget _previewBody(GitCommit commit) {
+    // 작업 트리 행에서는 미리보기 판이 커밋 패널이 된다. 체리픽 중이면 여기까지
+    // 오지 않는다 — 그 자리는 충돌 판이 쓴다.
+    if (commit.isWorkingTree) return _commitPanel(commit);
     final branchPreview = _usesBranchPreviewResult(commit);
     final files = _previewFilesFor(commit);
     return FutureBuilder<List<GitFileChange>>(

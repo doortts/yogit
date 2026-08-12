@@ -32,6 +32,7 @@ import 'package:yogit/timeline_palette.dart';
 import 'package:yogit/timeline_theme.dart';
 import 'package:yogit/typography.dart';
 import 'package:yogit/window_frame.dart';
+import 'package:yogit/working_tree_status.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -8407,8 +8408,13 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('Not committed'), findsOneWidget);
-    expect(find.text('No commit object or committer'), findsOneWidget);
+    // 머리줄 아래는 커밋 패널이다. 파일 수와 합계는 커밋 행이 세므로 그리로 내려가
+    // 확인한다.
+    expect(find.byKey(const Key('commit-panel')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('commit-panel')), findsNothing);
     expect(find.text('2 files changed'), findsOneWidget);
     expect(find.text('+8'), findsOneWidget);
     expect(find.text('−1'), findsOneWidget);
@@ -10977,8 +10983,8 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
-    // Timeline row plus the opened preview title.
-    expect(find.text('Uncommitted changes'), findsNWidgets(2));
+    // The timeline row alone: the preview beside it is the commit panel now.
+    expect(find.text('Uncommitted changes'), findsOneWidget);
     expect(find.text('working tree'), findsOneWidget);
     // No date group above the working tree row: it belongs to no day.
     expect(
@@ -15169,11 +15175,12 @@ void main() {
       technicalFontFamily,
     );
 
-    // The working tree row has no commit, so its preview shows no timestamp.
+    // The working tree row has no commit, so its preview — the commit panel —
+    // shows no timestamp.
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.pumpAndSettle();
-    expect(find.text('No commit object or committer'), findsOneWidget);
+    expect(find.byKey(const Key('commit-panel')), findsOneWidget);
     expect(
       find.descendant(of: preview, matching: find.text(exact)),
       findsNothing,
@@ -18347,6 +18354,11 @@ class FakeGitRepository extends GitRepository {
     this.continueCherryPickCallback,
     this.abortCherryPickCallback,
     this.stageResolvedFileCallback,
+    this.workingTreeStatus,
+    this.stageFilesCallback,
+    this.unstageFilesCallback,
+    this.discardWorktreeFileCallback,
+    this.commitIndexCallback,
     this.commitMessage,
     this.deletedBranchNameCallback,
     this.measureUpstreamRebaseCallback,
@@ -18456,6 +18468,17 @@ class FakeGitRepository extends GitRepository {
   final Future<CherryPickResult> Function()? continueCherryPickCallback;
   final Future<void> Function()? abortCherryPickCallback;
   final Future<void> Function(String path)? stageResolvedFileCallback;
+
+  /// 커밋 패널이 읽는 두 축. 훅이 없으면 빈 작업 트리다 — 진짜 프로세스는
+  /// fakeAsync 존에서 영영 안 돌아온다.
+  final Future<WorkingTreeStatus> Function()? workingTreeStatus;
+  final Future<void> Function(List<String> paths)? stageFilesCallback;
+  final Future<void> Function(List<String> paths, bool hasHead)?
+  unstageFilesCallback;
+  final Future<void> Function(String path, bool untracked)?
+  discardWorktreeFileCallback;
+  final Future<String> Function(String message, bool amend)?
+  commitIndexCallback;
   final Future<String> Function(String sha)? commitMessage;
   final Future<String?> Function(String tipSha, Iterable<GitCommit> commits)?
   deletedBranchNameCallback;
@@ -18823,6 +18846,53 @@ class FakeGitRepository extends GitRepository {
   Future<void> stageResolvedFile(String relativePath) =>
       stageResolvedFileCallback?.call(relativePath) ??
       super.stageResolvedFile(relativePath);
+
+  /// 감시자의 지문. `_changingRepository`가 조작마다 읽으므로 가짜 runner가 없는
+  /// 시험에서는 '모름'으로 답한다 — 진짜 프로세스는 돌아오지 않는다.
+  @override
+  Future<String?> loadLocalStateSignature() {
+    if (identical(runner, runProcess)) return Future.value(null);
+    return super.loadLocalStateSignature();
+  }
+
+  @override
+  Future<WorkingTreeStatus> loadWorkingTreeStatus() =>
+      workingTreeStatus?.call() ??
+      Future.value(const WorkingTreeStatus(<WorkingTreeEntry>[]));
+
+  @override
+  Future<void> stageFiles(List<String> paths) {
+    if (stageFilesCallback != null) return stageFilesCallback!(paths);
+    _requireFakedMutation('stageFiles');
+    return super.stageFiles(paths);
+  }
+
+  @override
+  Future<void> unstageFiles(List<String> paths, {required bool hasHead}) {
+    if (unstageFilesCallback != null) {
+      return unstageFilesCallback!(paths, hasHead);
+    }
+    _requireFakedMutation('unstageFiles');
+    return super.unstageFiles(paths, hasHead: hasHead);
+  }
+
+  @override
+  Future<void> discardWorktreeFile(String path, {bool untracked = false}) {
+    if (discardWorktreeFileCallback != null) {
+      return discardWorktreeFileCallback!(path, untracked);
+    }
+    _requireFakedMutation('discardWorktreeFile');
+    return super.discardWorktreeFile(path, untracked: untracked);
+  }
+
+  @override
+  Future<String> commitIndex({required String message, bool amend = false}) {
+    if (commitIndexCallback != null) {
+      return commitIndexCallback!(message, amend);
+    }
+    _requireFakedMutation('commitIndex');
+    return super.commitIndex(message: message, amend: amend);
+  }
 
   @override
   Future<List<DiffLine>> loadDiffBetween(

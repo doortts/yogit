@@ -47,6 +47,7 @@ import 'upstream_sync.dart';
 import 'upstream_sync_capsule.dart';
 import 'vim_navigation.dart';
 import 'window_frame.dart';
+import 'working_tree_status.dart';
 
 /// The graph's painters live in their own library; the timeline is still the
 /// door they are reached through.
@@ -56,6 +57,7 @@ export 'timeline_widgets.dart';
 import 'yogit_alert.dart';
 
 part 'timeline_branch_preview.dart';
+part 'timeline_commit_panel.dart';
 part 'timeline_data.dart';
 part 'timeline_chrome.dart';
 part 'timeline_diff_mode.dart';
@@ -452,6 +454,24 @@ class _TimelineScreenState extends State<TimelineScreen>
   final _previewDiffs = <({String sha, String path}), Future<List<DiffLine>>>{};
   final _previewPaths = <String, String>{};
   var _previewDiffOpen = false;
+
+  /// 커밋 패널이 읽고 있는 작업 트리. 요청은 한 번만 나가고, 조작이 끝나면
+  /// `_reloadCommitMode`가 요청을 버려 다시 읽게 한다. 마지막으로 읽은 값은
+  /// 다시 읽는 동안 목록이 비어 보이지 않도록 남겨 둔다.
+  Future<WorkingTreeStatus>? _commitStatusRequest;
+  WorkingTreeStatus? _commitStatus;
+
+  /// 패널 전체가 한 번에 한 조작만 한다 — index.lock 경합을 UI에서 막는다.
+  var _commitModeBusy = false;
+  var _commitUnstagedCollapsed = false;
+  var _commitStagedCollapsed = false;
+  final _commitTitle = TextEditingController();
+  final _commitBody = TextEditingController();
+  var _commitAmend = false;
+
+  /// amend가 채워 넣은 메시지. 손대지 않은 그대로면 체크를 풀 때 비운다.
+  String? _commitAmendPrefill;
+  String? _commitError;
 
   /// The line a proximity pill asked for, and the one already scrolled to, so a
   /// region is revealed once and the scroll is the user's again afterwards.
@@ -1099,6 +1119,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       node.dispose();
     }
     _filterController.dispose();
+    _commitTitle.dispose();
+    _commitBody.dispose();
     _upstreamSync.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
