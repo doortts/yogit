@@ -41,9 +41,12 @@ class UpstreamSyncState {
     this.behind = 0,
     this.localTip,
     this.remoteTip,
+    this.checkedOut = false,
     this.conflictFiles = const [],
     this.virtualTip,
     this.measuredAt,
+    this.checkedAt,
+    this.measureError,
   });
 
   static const none = UpstreamSyncState(kind: UpstreamSyncKind.hidden);
@@ -69,8 +72,18 @@ class UpstreamSyncState {
   /// divergedClean이 만들어 둔 새 tip — 실행은 ref를 여기로 옮기면 된다.
   final String? virtualTip;
 
+  /// 기준 브랜치가 지금 체크아웃되어 있는가 — Pull의 두 경로를 가른다.
+  final bool checkedOut;
+
   /// 재연이 답한 시각. tooltip의 'N분 전'.
   final DateTime? measuredAt;
+
+  /// 마지막 fetch가 끝난 시각 — synced·pushOnly·pullOnly tooltip의 'N분 전에
+  /// 확인'. refs가 로컬 작업으로 다시 로드돼도 이 시각은 fetch의 것이다.
+  final DateTime? checkedAt;
+
+  /// 재연이 실패했을 때 그 이유. 상태바가 이 문장을 되풀이한다.
+  final String? measureError;
 }
 
 /// 재연 한 번: [remoteTip] 위에 [localTip]의 전용 커밋을 얹어 본다.
@@ -93,14 +106,23 @@ class UpstreamSyncController extends ChangeNotifier {
   UpstreamSyncState _state = UpstreamSyncState.none;
   UpstreamSyncState get state => _state;
 
-  /// 어긋남의 판정, (localTip, remoteTip) 쌍으로. 같은 두 끝은 다시 재지 않는다.
-  final _verdicts = <(String, String), UpstreamSyncState>{};
+  /// 어긋남의 판정, (브랜치, localTip, remoteTip)으로. 같은 물음은 다시 재지
+  /// 않고, 판정은 잰 브랜치의 이름을 달고 있어 남의 것이 되지 못한다.
+  // ponytail: unbounded verdict map — a human-paced session stays in the
+  // hundreds; add an LRU trim if a bot ever drives this.
+  final _verdicts = <(String, String, String), UpstreamSyncState>{};
 
-  /// 마지막으로 성립한 어긋남 판정 — 재연이 실패했을 때 남겨 둘 답.
+  /// 마지막으로 성립한 어긋남 판정 — 재연이 실패했을 때 남겨 둘 답. 브랜치가
+  /// 다르면 남의 답이라 되살리지 않는다.
   UpstreamSyncState? _lastVerdict;
 
-  (String, String)? _measuringPair;
+  (String, String, String)? _measuringPair;
   var _serial = 0;
+
+  /// 마지막 fetch 완료 시각. updateRefs가 실어다 주고, 없으면 이전 값이 산다.
+  DateTime? _checkedAt;
+
+  String? _measureError;
 
   @override
   void dispose() {
@@ -109,8 +131,13 @@ class UpstreamSyncController extends ChangeNotifier {
   }
 
   /// refs가 새로 로드될 때마다 타임라인이 부른다. 감시는 여기서 하지 않는다 —
-  /// tip의 이동은 기존 ref watcher가 이미 본다.
-  void updateRefs(RepoRefs refs, String? baseBranch) {
+  /// tip의 이동은 기존 ref watcher가 이미 본다. [refreshedAt]은 이 refs가
+  /// fetch에서 왔을 때 그 fetch가 끝난 시각이다.
+  void updateRefs(RepoRefs refs, String? baseBranch, {DateTime? refreshedAt}) {
+    if (refreshedAt != null) _checkedAt = refreshedAt;
+    if (_lastVerdict != null && _lastVerdict!.branch != baseBranch) {
+      _lastVerdict = null;
+    }
     final next = _judge(refs, baseBranch);
     // 어긋남이 끝났으면 날던 재연도 끝이다: 끝난 물음의 답이 산 판정을
     // 덮어쓰지 못하게 여기서 무효로 한다.
@@ -126,15 +153,22 @@ class UpstreamSyncController extends ChangeNotifier {
       return UpstreamSyncState.none;
     }
     final upstreamRef = refs.upstreams[branch];
-    final remote = refs.upstreamRemotes[branch] ?? 'origin';
+    // 처음 올릴 원격: 추적이 말해 주면 그것, 아니면 저장소에 원격이 하나뿐일
+    // 때 그 하나. 'origin'은 짐작이 아니라 마지막 관례다.
+    final remote =
+        refs.upstreamRemotes[branch] ??
+        (refs.remoteNames.length == 1 ? refs.remoteNames.single : 'origin');
     final localTip = refs.localTips[branch];
     final remoteTip = upstreamRef == null ? null : refs.tips[upstreamRef];
+    final checkedOut = refs.current == branch;
     if (upstreamRef == null || remoteTip == null) {
       return UpstreamSyncState(
         kind: UpstreamSyncKind.firstPush,
         branch: branch,
         remote: remote,
         localTip: localTip,
+        checkedOut: checkedOut,
+        checkedAt: _checkedAt,
       );
     }
     final counts =
@@ -149,17 +183,44 @@ class UpstreamSyncController extends ChangeNotifier {
       behind: counts.behind,
       localTip: localTip,
       remoteTip: remoteTip,
+      checkedOut: checkedOut,
+      checkedAt: _checkedAt,
+      measureError: _measureError,
     );
     if (counts.ahead == 0 && counts.behind == 0) {
+      _measureError = null;
       return plain(UpstreamSyncKind.synced);
     }
-    if (counts.behind == 0) return plain(UpstreamSyncKind.pushOnly);
-    if (counts.ahead == 0) return plain(UpstreamSyncKind.pullOnly);
+    if (counts.behind == 0) {
+      _measureError = null;
+      return plain(UpstreamSyncKind.pushOnly);
+    }
+    if (counts.ahead == 0) {
+      _measureError = null;
+      return plain(UpstreamSyncKind.pullOnly);
+    }
     // 어긋남 — 재연이 답했었다면 그 답, 아니면 재기 시작.
     if (localTip == null) return UpstreamSyncState.none;
-    final pair = (localTip, remoteTip);
+    final pair = (branch, localTip, remoteTip);
     final verdict = _verdicts[pair];
-    if (verdict != null) return verdict;
+    if (verdict != null) {
+      // 판정은 그때 것이라도 체크아웃과 fetch 시각은 오늘 것을 말한다.
+      return UpstreamSyncState(
+        kind: verdict.kind,
+        branch: verdict.branch,
+        remote: verdict.remote,
+        upstreamRef: verdict.upstreamRef,
+        ahead: verdict.ahead,
+        behind: verdict.behind,
+        localTip: verdict.localTip,
+        remoteTip: verdict.remoteTip,
+        checkedOut: checkedOut,
+        checkedAt: _checkedAt,
+        conflictFiles: verdict.conflictFiles,
+        virtualTip: verdict.virtualTip,
+        measuredAt: verdict.measuredAt,
+      );
+    }
     if (_measuringPair != pair) {
       _measuringPair = pair;
       _startMeasure(pair, plain);
@@ -168,11 +229,11 @@ class UpstreamSyncController extends ChangeNotifier {
   }
 
   void _startMeasure(
-    (String, String) pair,
+    (String, String, String) pair,
     UpstreamSyncState Function(UpstreamSyncKind) plain,
   ) {
     final serial = ++_serial;
-    _measure(remoteTip: pair.$2, localTip: pair.$1)
+    _measure(remoteTip: pair.$3, localTip: pair.$2)
         .then((result) {
           if (serial != _serial || _measuringPair != pair) return;
           _measuringPair = null;
@@ -182,34 +243,62 @@ class UpstreamSyncController extends ChangeNotifier {
             case RebasePreviewStatus.conflict:
               _settle(pair, plain, UpstreamSyncKind.divergedConflict, result);
             case RebasePreviewStatus.failed:
-              // 실패는 답이 아니다: 캐시하지 않아 다음 updateRefs가 다시 재고,
-              // 그동안은 마지막으로 성립한 판정이 남는다.
-              if (_lastVerdict != null) _set(_lastVerdict!);
+              _withhold(result.error ?? '재연이 실패했습니다');
           }
         })
-        .catchError((Object _) {
+        .catchError((Object error) {
           if (serial != _serial || _measuringPair != pair) return;
           _measuringPair = null;
-          if (_lastVerdict != null) _set(_lastVerdict!);
+          _withhold(error.toString());
         });
   }
 
+  /// 실패는 답이 아니다: 캐시하지 않아 다음 updateRefs가 다시 재고, 그동안은
+  /// 이 브랜치의 마지막 판정이 남는다. 남의 브랜치 판정은 updateRefs가 이미
+  /// 지웠으니 되살아날 수 없다. 이유는 상태에 실려 상태바가 되풀이한다.
+  void _withhold(String error) {
+    _measureError = error;
+    final last = _lastVerdict;
+    if (last != null) {
+      _set(last);
+      return;
+    }
+    _set(
+      UpstreamSyncState(
+        kind: _state.kind,
+        branch: _state.branch,
+        remote: _state.remote,
+        upstreamRef: _state.upstreamRef,
+        ahead: _state.ahead,
+        behind: _state.behind,
+        localTip: _state.localTip,
+        remoteTip: _state.remoteTip,
+        checkedOut: _state.checkedOut,
+        checkedAt: _state.checkedAt,
+        measureError: error,
+      ),
+    );
+  }
+
   void _settle(
-    (String, String) pair,
+    (String, String, String) pair,
     UpstreamSyncState Function(UpstreamSyncKind) plain,
     UpstreamSyncKind kind,
     RebasePreviewResult result,
   ) {
+    _measureError = null;
     final base = plain(kind);
     final verdict = UpstreamSyncState(
       kind: kind,
-      branch: base.branch,
+      branch: pair.$1,
       remote: base.remote,
       upstreamRef: base.upstreamRef,
       ahead: base.ahead,
       behind: base.behind,
-      localTip: pair.$1,
-      remoteTip: pair.$2,
+      localTip: pair.$2,
+      remoteTip: pair.$3,
+      checkedOut: base.checkedOut,
+      checkedAt: base.checkedAt,
       conflictFiles: result.conflictFiles,
       virtualTip: result.virtualTip,
       measuredAt: _now(),

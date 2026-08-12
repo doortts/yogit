@@ -3398,7 +3398,12 @@ class GitRepository implements FullDiffRepository {
     final current = (await _run(['branch', '--show-current'])).trim();
     if (current == branch) {
       await _requireCleanWorktree();
-      await _run(['reset', '--hard', next]);
+      // The ref moves first, with the expected value as its guard: an outside
+      // move between the check above and this line is a refusal, not a commit
+      // quietly orphaned by reset. The bare reset then only brings the moved
+      // ref to disk.
+      await _run(['update-ref', 'refs/heads/$branch', next, expected]);
+      await _run(['reset', '--hard']);
       return true;
     }
     final worktreePath = await branchWorktreePath(branch);
@@ -4668,9 +4673,13 @@ class GitRepository implements FullDiffRepository {
   /// the last look, git refuses and the refusal comes back as the answer —
   /// the caller re-measures instead of overwriting someone else's work.
   /// [setUpstream] is the first push of a branch the remote has never held.
+  /// [toBranch] is the upstream's own name when it differs from the local one
+  /// — `main` tracking `origin/trunk` measures against trunk, so it pushes to
+  /// trunk; assuming the same name would quietly create a second branch.
   Future<void> pushBranch(
     String remote,
     String branch, {
+    String? toBranch,
     bool setUpstream = false,
   }) => _runWithoutPrompts([
     '-c',
@@ -4678,8 +4687,36 @@ class GitRepository implements FullDiffRepository {
     'push',
     if (setUpstream) '-u',
     remote,
-    '$branch:$branch',
+    'refs/heads/$branch:refs/heads/${toBranch ?? branch}',
   ]);
+
+  /// One replay, measured and thrown away: can [localTip]'s own commits sit
+  /// on [remoteTip] without conflict? The session's worktree is disposed
+  /// before the answer returns; a clean answer's [RebasePreviewResult.virtualTip]
+  /// survives as ordinary commits until git prunes them, which is long enough
+  /// to realize the move.
+  Future<RebasePreviewResult> measureUpstreamRebase({
+    required String remoteTip,
+    required String localTip,
+  }) async {
+    // The session recognises a conflict by the commit it stopped on, so it
+    // has to know which commits are being replayed — an empty list would
+    // read every conflict as a failure.
+    final replayed = parseGitLog(
+      await _run(['log', '--format=$_gitLogFormat', '$remoteTip..$localTip']),
+    );
+    final session = RebasePreviewSession(
+      repository: this,
+      baseTip: remoteTip,
+      compareTip: localTip,
+      originalCommits: replayed,
+    );
+    try {
+      return await session.start();
+    } finally {
+      await session.dispose();
+    }
+  }
 
   /// Realizes a clean upstream rebase: moves [branch] from [expectedTip] to
   /// [virtualTip], the tip a [RebasePreviewSession] replayed onto the remote.

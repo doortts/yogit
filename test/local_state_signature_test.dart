@@ -7,7 +7,8 @@ String signature(String headCommit, String headRef, Map<String, String> tips) =>
     [
       headCommit,
       headRef,
-      for (final entry in tips.entries) 'refs/heads/${entry.key} ${entry.value}',
+      for (final entry in tips.entries)
+        'refs/heads/${entry.key} ${entry.value}',
     ].join('\n');
 
 void main() {
@@ -27,9 +28,7 @@ void main() {
     });
 
     test('a detached HEAD has no current branch', () {
-      final state = parseLocalState(
-        signature('aaa', 'HEAD', {'main': 'bbb'}),
-      );
+      final state = parseLocalState(signature('aaa', 'HEAD', {'main': 'bbb'}));
 
       expect(state.detached, isTrue);
       expect(state.currentBranch, isNull);
@@ -117,17 +116,20 @@ void main() {
       expect(result.isPureDeletion, isFalse);
     });
 
-    test('a checkout onto another branch moves HEAD without touching a tip', () {
-      final result = change(
-        signature('aaa', 'refs/heads/main', {'main': 'aaa', 'work': 'bbb'}),
-        signature('bbb', 'refs/heads/work', {'main': 'aaa', 'work': 'bbb'}),
-      );
+    test(
+      'a checkout onto another branch moves HEAD without touching a tip',
+      () {
+        final result = change(
+          signature('aaa', 'refs/heads/main', {'main': 'aaa', 'work': 'bbb'}),
+          signature('bbb', 'refs/heads/work', {'main': 'aaa', 'work': 'bbb'}),
+        );
 
-      expect(result.headRefChanged, isTrue);
-      expect(result.headCommitMoved, isTrue);
-      expect(result.moved, isEmpty);
-      expect(result.isPureDeletion, isFalse);
-    });
+        expect(result.headRefChanged, isTrue);
+        expect(result.headCommitMoved, isTrue);
+        expect(result.moved, isEmpty);
+        expect(result.isPureDeletion, isFalse);
+      },
+    );
 
     test('a deletion that also moved HEAD is not a pure deletion', () {
       final result = change(
@@ -350,7 +352,10 @@ void _movedBranchDetail() {
       expect(commits, hasLength(3));
       expect(commits.first.incoming, isFalse);
       expect(commits.first.shortSha, '32ee935');
-      expect(commits.first.subject, 'fix: let the app say a thing once, not twice');
+      expect(
+        commits.first.subject,
+        'fix: let the app say a thing once, not twice',
+      );
       expect(commits.last.incoming, isTrue);
       expect(commits.last.shortSha, '06fdbd1');
     });

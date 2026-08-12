@@ -389,9 +389,7 @@ void main() {
     await mouse.addPointer(location: Offset.zero);
     addTearDown(mouse.removePointer);
     for (final row in [0, 1, 0, 1]) {
-      await mouse.moveTo(
-        tester.getCenter(find.byKey(Key('refs-cell-$row'))),
-      );
+      await mouse.moveTo(tester.getCenter(find.byKey(Key('refs-cell-$row'))));
       await tester.pumpAndSettle();
     }
 

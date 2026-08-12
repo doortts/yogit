@@ -142,7 +142,9 @@ String? localStateChangeSummary(LocalStateChange change) {
   final parts = <String>[];
   if (change.headRefChanged) {
     parts.add(
-      change.currentBranch == null ? 'HEAD 분리됨' : '${change.currentBranch} 체크아웃',
+      change.currentBranch == null
+          ? 'HEAD 분리됨'
+          : '${change.currentBranch} 체크아웃',
     );
   } else if (change.headCommitMoved &&
       !change.moved.any((tip) => tip.branch == change.currentBranch)) {
@@ -227,7 +229,9 @@ String movedBranchLine(
   String? before,
   String? after,
 }) {
-  if (outgoing == null || incoming == null || (outgoing == 0 && incoming == 0)) {
+  if (outgoing == null ||
+      incoming == null ||
+      (outgoing == 0 && incoming == 0)) {
     return before == null || after == null
         ? '$branch 브랜치 갱신됨'
         : '$branch 갱신됨 · $before → $after';
@@ -237,9 +241,7 @@ String movedBranchLine(
       : incoming == 0
       ? '커밋 $outgoing개 물러남'
       : '커밋 $outgoing개 나가고 $incoming개 들어옴';
-  final named = operation == null || operation == 'commit'
-      ? null
-      : operation;
+  final named = operation == null || operation == 'commit' ? null : operation;
   return [branch, ?named, movement].join(' · ');
 }
 

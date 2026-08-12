@@ -7,11 +7,11 @@ import 'package:yogit/fuzzy_match.dart';
 void main() {
   test('a word found inside a word, anywhere in it', () {
     expect(wordMatchPositions('feat: name a branch', 'name'), [6, 7, 8, 9]);
-    expect(
-      wordMatchPositions('feat: name a branch', 'nam'),
-      [6, 7, 8],
-      reason: '낱말 안 어디든 좋다',
-    );
+    expect(wordMatchPositions('feat: name a branch', 'nam'), [
+      6,
+      7,
+      8,
+    ], reason: '낱말 안 어디든 좋다');
     expect(wordMatchPositions('feat: rename it', 'name'), [8, 9, 10, 11]);
   });
 
@@ -64,11 +64,10 @@ void main() {
 
   test('case is ignored, and Korean particles stay attached', () {
     expect(wordMatchPositions('feat: Name It', 'name'), [6, 7, 8, 9]);
-    expect(
-      wordMatchPositions('feat: 커밋을 찾는다', '커밋'),
-      [6, 7],
-      reason: '조사가 붙어도 낱말 안에서 찾힌다',
-    );
+    expect(wordMatchPositions('feat: 커밋을 찾는다', '커밋'), [
+      6,
+      7,
+    ], reason: '조사가 붙어도 낱말 안에서 찾힌다');
   });
 
   test('a query with nothing in it finds nothing', () {

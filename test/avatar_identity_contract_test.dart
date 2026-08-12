@@ -49,7 +49,8 @@ void main() {
     );
   }
 
-  Future<HttpResponse> answering(String body) async => (status: 200, body: body);
+  Future<HttpResponse> answering(String body) async =>
+      (status: 200, body: body);
 
   test('a second commit by the same author asks the network nothing', () async {
     final fake = serviceOn((_) => answering(bothAccounts));
@@ -66,15 +67,18 @@ void main() {
     expect(second.committer?.login, 'cam');
   });
 
-  test('a seen author already answers for a commit never asked about', () async {
-    final fake = serviceOn((_) => answering(bothAccounts));
-    await fake.service.resolve('aaa1111', author: ada, committer: cam);
+  test(
+    'a seen author already answers for a commit never asked about',
+    () async {
+      final fake = serviceOn((_) => answering(bothAccounts));
+      await fake.service.resolve('aaa1111', author: ada, committer: cam);
 
-    final known = fake.service.cachedFor(author: ada, committer: cam);
+      final known = fake.service.cachedFor(author: ada, committer: cam);
 
-    expect(known?.author?.login, 'ada', reason: '프레임을 기다리지 않고 답한다');
-    expect(known?.committer?.login, 'cam');
-  });
+      expect(known?.author?.login, 'ada', reason: '프레임을 기다리지 않고 답한다');
+      expect(known?.committer?.login, 'cam');
+    },
+  );
 
   test('two rows of one author scrolling in together ask once', () async {
     final gate = Completer<HttpResponse>();
@@ -99,7 +103,9 @@ void main() {
   });
 
   test('an author GitHub cannot match is not asked about twice', () async {
-    final fake = serviceOn((_) => answering('{"author":null,"committer":null}'));
+    final fake = serviceOn(
+      (_) => answering('{"author":null,"committer":null}'),
+    );
 
     await fake.service.resolve('aaa1111', author: ada, committer: cam);
     await fake.service.resolve('bbb2222', author: ada, committer: cam);

@@ -129,8 +129,14 @@ void main() {
       find.textContaining('feat: let a remote branch stand'),
       findsOneWidget,
     );
-    expect(find.textContaining('test: pin the origin/HEAD drop'), findsOneWidget);
-    expect(find.textContaining('fix: stop drawing origin/HEAD'), findsOneWidget);
+    expect(
+      find.textContaining('test: pin the origin/HEAD drop'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('fix: stop drawing origin/HEAD'),
+      findsOneWidget,
+    );
     expect(ask(), findsOneWidget);
   });
 
@@ -207,7 +213,10 @@ void main() {
     expect(tester.widget<Text>(headline()).data, 'main · pull · 커밋 3개 들어옴');
     expect(find.text('fresh 브랜치 추가됨'), findsOneWidget);
     // 커밋 목록은 접는다 — 어느 브랜치인지가 먼저다.
-    expect(find.textContaining('feat: let a remote branch stand'), findsNothing);
+    expect(
+      find.textContaining('feat: let a remote branch stand'),
+      findsNothing,
+    );
   });
 
   testWidgets('계약 5 — 알아내지 못해도 묻기를 그만두지 않는다', (tester) async {
@@ -267,10 +276,7 @@ void main() {
     expect(later.width + refresh.width, closeTo(YogitAlert.width - 32 - 7, 1));
     expect(later.width, closeTo(refresh.width, 1));
     // 답하는 자리는 물음 아래 가운데다. 한쪽으로 몰리면 상자가 기운 것처럼 읽힌다.
-    expect(
-      (later.left + refresh.right) / 2,
-      closeTo(title.center.dx, 1),
-    );
+    expect((later.left + refresh.right) / 2, closeTo(title.center.dx, 1));
   });
 
   // ── 묻지 않는 쪽 ────────────────────────────────────────────────

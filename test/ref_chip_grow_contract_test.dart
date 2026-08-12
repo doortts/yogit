@@ -39,7 +39,12 @@ void main() {
         home: TimelineScreen(
           repository: FakeGitRepository(
             (_, _) async => [
-              commit('a', 'tip', parents: ['b'], refs: [GitRef(name: name)]),
+              commit(
+                'a',
+                'tip',
+                parents: ['b'],
+                refs: [GitRef(name: name)],
+              ),
               commit('b', 'root'),
             ],
           ),
@@ -68,9 +73,11 @@ void main() {
     await pump(tester, name: long);
     // 칸이 좁아 앞이 잘려 있다.
     expect(
-      tester.widget<Text>(
-        find.descendant(of: chip(long), matching: find.byType(Text)),
-      ).data,
+      tester
+          .widget<Text>(
+            find.descendant(of: chip(long), matching: find.byType(Text)),
+          )
+          .data,
       isNot(long),
     );
     expect(whole(long), findsNothing, reason: '마우스가 오기 전에는 없다');
@@ -85,29 +92,31 @@ void main() {
     );
   });
 
-  testWidgets('it hides the cut name it grew out of, rather than lying over it', (
-    tester,
-  ) async {
-    await pump(tester, name: long);
-    await hover(tester, chip(long));
+  testWidgets(
+    'it hides the cut name it grew out of, rather than lying over it',
+    (tester) async {
+      await pump(tester, name: long);
+      await hover(tester, chip(long));
 
-    final cut = tester.getRect(chip(long));
-    final grown = tester.getRect(whole(long));
-    final decoration =
-        tester.widget<Container>(whole(long)).decoration! as BoxDecoration;
+      final cut = tester.getRect(chip(long));
+      final grown = tester.getRect(whole(long));
+      final decoration =
+          tester.widget<Container>(whole(long)).decoration! as BoxDecoration;
 
-    // 판이 비치면 밑에 깔린 잘린 이름이 겹쳐 읽힌다.
-    expect(decoration.color!.a, 1.0, reason: '자란 칩의 판은 불투명하다');
-    // 그리고 원래 칩을 남김없이 덮는다 — 위아래로 한 줄도 새어 나오면 안 된다.
-    expect(grown.top, cut.top);
-    expect(grown.bottom, cut.bottom);
-    expect(grown.left, cut.left);
-    expect(grown.right, greaterThanOrEqualTo(cut.right));
-  });
+      // 판이 비치면 밑에 깔린 잘린 이름이 겹쳐 읽힌다.
+      expect(decoration.color!.a, 1.0, reason: '자란 칩의 판은 불투명하다');
+      // 그리고 원래 칩을 남김없이 덮는다 — 위아래로 한 줄도 새어 나오면 안 된다.
+      expect(grown.top, cut.top);
+      expect(grown.bottom, cut.bottom);
+      expect(grown.left, cut.left);
+      expect(grown.right, greaterThanOrEqualTo(cut.right));
+    },
+  );
 
   testWidgets('it keeps the chip it grew out of', (tester) async {
     await pump(tester, name: long);
-    final cut = tester.widget<Container>(chip(long)).decoration! as BoxDecoration;
+    final cut =
+        tester.widget<Container>(chip(long)).decoration! as BoxDecoration;
 
     await hover(tester, chip(long));
     final grown =
@@ -149,11 +158,7 @@ void main() {
 
     await hover(tester, chip('main'));
 
-    expect(
-      whole('main'),
-      findsNothing,
-      reason: '이미 읽히는 것을 덮는 건 방해다',
-    );
+    expect(whole('main'), findsNothing, reason: '이미 읽히는 것을 덮는 건 방해다');
   });
 
   testWidgets('a row full of chips reads one name at a time', (tester) async {
@@ -174,7 +179,10 @@ void main() {
                 'a',
                 'tip',
                 parents: ['b'],
-                refs: const [GitRef(name: first), GitRef(name: second)],
+                refs: const [
+                  GitRef(name: first),
+                  GitRef(name: second),
+                ],
               ),
               commit('b', 'root'),
             ],

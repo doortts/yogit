@@ -6654,7 +6654,10 @@ void main() {
       find.byKey(const Key('branch-preview-option-rebase-merge')),
       findsNothing,
     );
-    expect(find.byKey(const Key('branch-preview-option-rebase')), findsOneWidget);
+    expect(
+      find.byKey(const Key('branch-preview-option-rebase')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('the merge preview keeps the rebase-then-merge option away', (
@@ -12068,15 +12071,16 @@ void main() {
     final before = WindowFrameController.frameRevivals.value;
     addTearDown(() => WindowFrameController.frameRevivals.value = before);
 
-    Future<void> reportVisible() =>
-        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-            .handlePlatformMessage(
-              channel.name,
-              channel.codec.encodeMethodCall(
-                const MethodCall('windowBecameVisible'),
-              ),
-              (_) {},
-            );
+    Future<void> reportVisible() => TestDefaultBinaryMessengerBinding
+        .instance
+        .defaultBinaryMessenger
+        .handlePlatformMessage(
+          channel.name,
+          channel.codec.encodeMethodCall(
+            const MethodCall('windowBecameVisible'),
+          ),
+          (_) {},
+        );
 
     // 프레임이 살아 있는 평범한 창은 건드리지 않는다. 진짜로 가려진 창의 절전과
     // 다투면 배터리만 태운다.
@@ -12822,16 +12826,8 @@ void main() {
         );
       });
 
-      final first = service.resolve(
-        'abc1234',
-        author: _ada,
-        committer: _cam,
-      );
-      final second = service.resolve(
-        'abc1234',
-        author: _ada,
-        committer: _cam,
-      );
+      final first = service.resolve('abc1234', author: _ada, committer: _cam);
+      final second = service.resolve('abc1234', author: _ada, committer: _cam);
       final avatars = await first;
 
       expect(identical(first, second), isTrue);

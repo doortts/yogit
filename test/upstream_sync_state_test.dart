@@ -313,6 +313,206 @@ void main() {
     );
   });
 
+  test(
+    "another branch's failure never revives this branch's verdict",
+    () async {
+      // main의 판정이 성립한 뒤 기준을 feature로 바꾸고, feature의 재연이
+      // 실패한다. main의 판정이 feature의 얼굴로 부활하면 사용자는 feature를
+      // 보며 main을 Push하게 된다.
+      var fail = false;
+      final controller = UpstreamSyncController(
+        measure: ({required remoteTip, required localTip}) async =>
+            fail ? failed : clean('ccc'),
+      );
+      addTearDown(controller.dispose);
+
+      controller.updateRefs(
+        refs(
+          aheadBehind: const {'main': BranchAheadBehind(ahead: 1, behind: 1)},
+        ),
+        'main',
+      );
+      await pumpEventQueue();
+      expect(controller.state.kind, UpstreamSyncKind.divergedClean);
+
+      fail = true;
+      controller.updateRefs(
+        refs(
+          local: const ['main', 'feature'],
+          upstreams: const {'feature': 'origin/feature'},
+          tips: const {'feature': 'fff', 'origin/feature': 'ggg'},
+          localTips: const {'feature': 'fff'},
+          aheadBehind: const {
+            'feature': BranchAheadBehind(ahead: 1, behind: 1),
+          },
+        ),
+        'feature',
+      );
+      await pumpEventQueue();
+
+      expect(
+        controller.state.kind,
+        UpstreamSyncKind.measuring,
+        reason: '다른 브랜치의 판정은 이 브랜치의 답이 아니다',
+      );
+      expect(controller.state.branch, 'feature');
+    },
+  );
+
+  test('a verdict names the branch it was measured for', () async {
+    // 두 브랜치가 우연히 같은 두 끝을 가져도, 판정은 잰 브랜치의 것이다.
+    final controller = UpstreamSyncController(
+      measure: ({required remoteTip, required localTip}) async => clean('ccc'),
+    );
+    addTearDown(controller.dispose);
+
+    final shared = refs(
+      local: const ['main', 'twin'],
+      upstreams: const {'main': 'origin/main', 'twin': 'origin/main'},
+      localTips: const {'main': 'aaa', 'twin': 'aaa'},
+      aheadBehind: const {
+        'main': BranchAheadBehind(ahead: 1, behind: 1),
+        'twin': BranchAheadBehind(ahead: 1, behind: 1),
+      },
+    );
+    controller.updateRefs(shared, 'main');
+    await pumpEventQueue();
+    expect(controller.state.branch, 'main');
+
+    controller.updateRefs(shared, 'twin');
+    await pumpEventQueue();
+    expect(
+      controller.state.branch,
+      'twin',
+      reason: '같은 두 끝이라도 남의 이름표를 달고 나오지 않는다',
+    );
+  });
+
+  test('a settled verdict keeps the whole story, not just the kind', () async {
+    final controller = UpstreamSyncController(
+      measure: ({required remoteTip, required localTip}) async => clean('ccc'),
+    );
+    addTearDown(controller.dispose);
+
+    controller.updateRefs(
+      refs(aheadBehind: const {'main': BranchAheadBehind(ahead: 3, behind: 2)}),
+      'main',
+    );
+    await pumpEventQueue();
+
+    final state = controller.state;
+    expect(state.kind, UpstreamSyncKind.divergedClean);
+    expect(state.branch, 'main');
+    expect(state.remote, 'origin');
+    expect(state.upstreamRef, 'origin/main');
+    expect(state.ahead, 3);
+    expect(state.behind, 2);
+    expect(state.checkedOut, isTrue);
+  });
+
+  test('a failed measure says so, for the status bar to repeat', () async {
+    final controller = UpstreamSyncController(
+      measure: ({required remoteTip, required localTip}) async => failed,
+    );
+    addTearDown(controller.dispose);
+
+    controller.updateRefs(
+      refs(aheadBehind: const {'main': BranchAheadBehind(ahead: 1, behind: 1)}),
+      'main',
+    );
+    await pumpEventQueue();
+
+    expect(controller.state.measureError, 'worktree add failed');
+
+    // 어긋남이 끝나면 오류도 끝이다.
+    controller.updateRefs(refs(), 'main');
+    expect(controller.state.measureError, isNull);
+  });
+
+  test('dispose kills the answer in flight', () async {
+    final gate = Completer<RebasePreviewResult>();
+    var notified = 0;
+    final controller = UpstreamSyncController(
+      measure: ({required remoteTip, required localTip}) => gate.future,
+    );
+    controller.addListener(() => notified++);
+
+    controller.updateRefs(
+      refs(aheadBehind: const {'main': BranchAheadBehind(ahead: 1, behind: 1)}),
+      'main',
+    );
+    final before = notified;
+    controller.dispose();
+
+    gate.complete(clean('ccc'));
+    await pumpEventQueue();
+    expect(notified, before, reason: '무덤 너머에서 알리지 않는다');
+  });
+
+  test('the sole remote of the repository names the first push', () async {
+    final controller = UpstreamSyncController(
+      measure: ({required remoteTip, required localTip}) async => clean('ccc'),
+    );
+    addTearDown(controller.dispose);
+
+    controller.updateRefs(
+      const RepoRefs(
+        local: ['main'],
+        remoteNames: ['company'],
+        current: 'main',
+        localTips: {'main': 'aaa'},
+      ),
+      'main',
+    );
+
+    expect(controller.state.kind, UpstreamSyncKind.firstPush);
+    expect(
+      controller.state.remote,
+      'company',
+      reason: "유일한 원격이 있는데 'origin'을 짐작하지 않는다",
+    );
+  });
+
+  test(
+    'the freshness the tooltip speaks is the fetch, not the judge',
+    () async {
+      final controller = UpstreamSyncController(
+        measure: ({required remoteTip, required localTip}) async =>
+            clean('ccc'),
+      );
+      addTearDown(controller.dispose);
+
+      final fetchedAt = DateTime(2026, 8, 12, 10, 0);
+      controller.updateRefs(refs(), 'main', refreshedAt: fetchedAt);
+      expect(controller.state.kind, UpstreamSyncKind.synced);
+      expect(controller.state.checkedAt, fetchedAt);
+
+      // refs가 로컬 작업으로 다시 로드돼도 fetch 시각은 남는다.
+      controller.updateRefs(refs(), 'main');
+      expect(controller.state.checkedAt, fetchedAt);
+    },
+  );
+
+  test('a cached verdict still reads the checkout of today', () async {
+    final controller = UpstreamSyncController(
+      measure: ({required remoteTip, required localTip}) async => clean('ccc'),
+    );
+    addTearDown(controller.dispose);
+
+    final diverged = {'main': const BranchAheadBehind(ahead: 1, behind: 1)};
+    controller.updateRefs(refs(aheadBehind: diverged), 'main');
+    await pumpEventQueue();
+    expect(controller.state.checkedOut, isTrue);
+
+    // 판정은 그대로 쓰되, 체크아웃이 옮겨 간 사실은 오늘 것을 말한다.
+    controller.updateRefs(
+      refs(current: 'elsewhere', aheadBehind: diverged),
+      'main',
+    );
+    expect(controller.state.kind, UpstreamSyncKind.divergedClean);
+    expect(controller.state.checkedOut, isFalse);
+  });
+
   test('the state carries what the actions will need', () async {
     final controller = UpstreamSyncController(
       measure: ({required remoteTip, required localTip}) async => clean('ccc'),
@@ -329,5 +529,19 @@ void main() {
     expect(controller.state.upstreamRef, 'origin/main');
     expect(controller.state.localTip, 'aaa');
     expect(controller.state.remoteTip, 'bbb');
+    expect(
+      controller.state.checkedOut,
+      isTrue,
+      reason: 'Pull의 두 경로는 체크아웃 여부가 가른다',
+    );
+
+    controller.updateRefs(
+      refs(
+        current: 'other',
+        aheadBehind: const {'main': BranchAheadBehind(ahead: 3, behind: 0)},
+      ),
+      'main',
+    );
+    expect(controller.state.checkedOut, isFalse);
   });
 }

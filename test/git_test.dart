@@ -5071,6 +5071,11 @@ void main() {
         'untouched\n',
         reason: '작업 트리는 손대지 않는다',
       );
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'main^'])).trim(),
+        fixture.remoteTip,
+        reason: '로컬 커밋이 원격 끝 위에 얹혀 있다 — 버려진 것이 아니라',
+      );
       // 얹힌 뒤에는 force 없이 push가 된다 — 로컬이 원격 끝을 품었으니까.
       await repository.pushBranch('origin', 'main');
       expect(
@@ -5079,6 +5084,32 @@ void main() {
       );
     },
   );
+
+  test("pushBranch sends the branch to the upstream's own name", () async {
+    final fixture = await _upstreamFixture();
+    // main이 origin/trunk를 추적한다 — 이름이 다른 upstream.
+    await _git(fixture.remote, ['branch', 'trunk', 'main']);
+    await _git(fixture.root, ['fetch', 'origin']);
+    await _git(fixture.root, ['branch', '-u', 'origin/trunk', 'main']);
+    await File('${fixture.root.path}/file.txt').writeAsString('local\n');
+    await _git(fixture.root, ['commit', '-am', 'local work']);
+    final localTip = (await _git(fixture.root, ['rev-parse', 'main'])).trim();
+    final mainTip = (await _git(fixture.remote, ['rev-parse', 'main'])).trim();
+
+    final repository = GitRepository(fixture.root.path);
+    await repository.pushBranch('origin', 'main', toBranch: 'trunk');
+
+    expect(
+      (await _git(fixture.remote, ['rev-parse', 'trunk'])).trim(),
+      localTip,
+      reason: '잰 그 브랜치로 올라간다',
+    );
+    expect(
+      (await _git(fixture.remote, ['rev-parse', 'main'])).trim(),
+      mainTip,
+      reason: '이름이 같다는 짐작으로 엉뚱한 브랜치를 만들지 않는다',
+    );
+  });
 
   test(
     'a realized rebase stops whole when the branch moved meanwhile',
@@ -5154,6 +5185,29 @@ void main() {
       );
     },
   );
+
+  test('measureUpstreamRebase answers clean or names the conflict', () async {
+    final fixture = await _divergedUpstreamFixture();
+    final repository = GitRepository(fixture.root.path);
+
+    final clean = await repository.measureUpstreamRebase(
+      remoteTip: fixture.remoteTip,
+      localTip: fixture.localTip,
+    );
+    expect(clean.status, RebasePreviewStatus.clean);
+    expect(clean.virtualTip, isNotNull);
+
+    // 같은 파일을 양쪽에서 고치면 재연이 충돌로 답한다.
+    await File('${fixture.root.path}/remote.txt').writeAsString('mine\n');
+    await _git(fixture.root, ['add', '.']);
+    await _git(fixture.root, ['commit', '-m', 'collides with remote work']);
+    final conflicted = await repository.measureUpstreamRebase(
+      remoteTip: fixture.remoteTip,
+      localTip: (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+    );
+    expect(conflicted.status, RebasePreviewStatus.conflict);
+    expect(conflicted.conflictFiles, ['remote.txt']);
+  });
 
   test('moved commits split into what comes in and what goes up', () async {
     final fixture = await _divergedUpstreamFixture();
