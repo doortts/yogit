@@ -150,12 +150,12 @@ class UpstreamSyncCapsule extends StatelessWidget {
 
   String get _freshness => switch (state.checkedAt) {
     null => '',
-    final at => ' · ${_ago(at)}에 확인',
+    final at => ' · ${_agoPhrase(at, '확인')}',
   };
 
   String get _measured => switch (state.measuredAt) {
     null => '',
-    final at => ' · ${_ago(at)}에 잰 판정',
+    final at => ' · ${_agoPhrase(at, '잰 판정')}',
   };
 
   Widget _dot(TimelineThemePalette palette) => Tooltip(
@@ -231,13 +231,13 @@ class UpstreamSyncCapsule extends StatelessWidget {
   }
 }
 
-/// '4분 전' — 잰 지 얼마 안 됐으면 '방금'.
-String _ago(DateTime at) {
+/// '4분 전에 확인' — 조사까지 문장으로 만든다. '방금'에는 '에'가 붙지 않는다.
+String _agoPhrase(DateTime at, String verb) {
   final minutes = DateTime.now().difference(at).inMinutes;
-  if (minutes < 1) return '방금';
-  if (minutes < 60) return '$minutes분 전';
+  if (minutes < 1) return '방금 $verb';
+  if (minutes < 60) return '$minutes분 전에 $verb';
   final exact = exactCommitTime(
     at.millisecondsSinceEpoch ~/ Duration.millisecondsPerSecond,
   );
-  return exact;
+  return '$exact에 $verb';
 }

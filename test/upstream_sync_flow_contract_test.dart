@@ -469,12 +469,18 @@ void main() {
     repository = FakeGitRepository(
       (_, _) async => [commit('aaa1111', 'local work')],
       refs: RepoRefs(
-        local: const ['main'],
+        // zeta가 목록 앞에 선다 — 복원이 '첫 번째 로컬'이 아니라 빌려 갈 때
+        // 적어 둔 그 브랜치를 고른다는 것을 이 순서가 증명한다.
+        local: const ['zeta', 'main'],
         remote: const ['origin/main'],
         remoteNames: const ['origin'],
         current: 'main',
-        tips: const {'main': 'aaa1111', 'origin/main': 'bbb2222'},
-        localTips: const {'main': 'aaa1111'},
+        tips: const {
+          'zeta': 'eee5555',
+          'main': 'aaa1111',
+          'origin/main': 'bbb2222',
+        },
+        localTips: const {'zeta': 'eee5555', 'main': 'aaa1111'},
         aheadBehind: const {'main': BranchAheadBehind(ahead: 1, behind: 1)},
         upstreams: const {'main': 'origin/main'},
         upstreamRemotes: const {'main': 'origin'},
@@ -523,6 +529,14 @@ void main() {
       find.byKey(const Key('upstream-sync-conflict')),
       findsOneWidget,
       reason: '로컬은 무변 — 판정도 그대로 충돌이다',
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('base-branch-selector')),
+        matching: find.text('main'),
+      ),
+      findsOneWidget,
+      reason: '돌아가는 곳은 빌려 갈 때의 그 브랜치다 — 목록의 첫째가 아니라',
     );
   });
 

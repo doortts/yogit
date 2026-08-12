@@ -187,21 +187,27 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
 
   /// 영수증에 설 커밋들. `<`가 들어올(pull) 쪽, `>`가 올라갈(push) 쪽이다 —
   /// incoming이라는 이름과 방향이 엇갈리므로 여기서 한 번만 갈라 담는다.
+  /// 기본 아홉 개는 양쪽 합계라 한쪽이 다른 쪽을 굶길 수 있다 — 창을 넓혀
+  /// 각 블록이 저마다 아홉 줄까지 서고, 넘친 것은 '외 N개'가 정직하게 센다.
   Future<({List<MovedCommit> incoming, List<MovedCommit> outgoing})?>
   _upstreamMovedCommits(UpstreamSyncState state) async {
     final remoteTip = state.remoteTip;
     final localTip = state.localTip;
     if (remoteTip == null || localTip == null) return null;
-    final moved = await widget.repository.loadMovedCommits(remoteTip, localTip);
+    final moved = await widget.repository.loadMovedCommits(
+      remoteTip,
+      localTip,
+      limit: 18,
+    );
     return (
       incoming: [
         for (final c in moved)
           if (!c.incoming) c,
-      ],
+      ].take(9).toList(),
       outgoing: [
         for (final c in moved)
           if (c.incoming) c,
-      ],
+      ].take(9).toList(),
     );
   }
 

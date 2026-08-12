@@ -42,7 +42,11 @@ class PushReceipt extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (incoming.isNotEmpty)
+        // 목록이 비어도 올 것이 있으면 블록은 선다 — 창이 한쪽으로 쏠려도
+        // 영수증에서 걸음 하나가 통째로 사라지지는 않는다.
+        // ponytail: 18-commit shared window; query the two sides separately
+        // if a receipt ever needs full rows on both under extreme skew.
+        if ((incomingTotal ?? incoming.length) > 0)
           _block(
             palette,
             key: const Key('push-receipt-pull-block'),
@@ -54,7 +58,7 @@ class PushReceipt extends StatelessWidget {
             mark: '+',
             markColor: mainAccent,
           ),
-        if (outgoing.isNotEmpty)
+        if ((outgoingTotal ?? outgoing.length) > 0)
           _block(
             palette,
             key: const Key('push-receipt-push-block'),
