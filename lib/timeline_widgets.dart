@@ -1163,6 +1163,7 @@ class _NoticeCommitRow extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: palette.text.withValues(alpha: faded),
+                fontFamily: 'monospace',
                 fontSize: 13,
               ),
             ),

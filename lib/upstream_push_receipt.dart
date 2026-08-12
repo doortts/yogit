@@ -260,7 +260,13 @@ class _ReceiptBlockState extends State<_ReceiptBlock> {
                     commit.subject,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: palette.text, fontSize: 13),
+                    // 제목도 해시와 같은 계열로 — 커밋 목록은 프롬프트에서
+                    // 읽는 그 글자로 선다.
+                    style: TextStyle(
+                      color: palette.text,
+                      fontFamily: 'monospace',
+                      fontSize: 13,
+                    ),
                   ),
                 ),
               ],
