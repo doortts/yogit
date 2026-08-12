@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>yogit — 커밋 모드 시안</title>
+<style>
+  :root{
+    --bg:#1C1C1E; --surface:#242426; --panel:#202022; --raised:#2C2C2E;
+    --border:#38383A; --text:#F2F2F7; --muted:#AEAEB2; --sel:#234D72;
+    --blue:#0A84FF; --linkblue:#7AB8FF; --green:#8AD6A1; --red:#EF6C63;
+    --pink:#F29AB2; --purple:#C69AFF; --orange:#F0A35E; --renamed:#B6A0EA;
+    --dcanvas:#0D1117; --dheader:#151B23; --ddiv:#3D444D; --daccent:#83C4FF;
+    --addbg:#12261E; --addgut:#1C4328; --delbg:#25171C; --delgut:#542426;
+    --dtext:#E6EDF3; --dmut:#8B949E;
+    --kw:#FF7B72; --str:#A5D6FF; --fn:#D2A8FF;
+    --mono: Menlo, 'D2Coding', Monaco, 'SF Mono', monospace;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:36px 28px 72px; background:#101014; color:var(--text);
+    font:14px/1.55 -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', sans-serif;
+  }
+  .wrap{max-width:1380px; margin:0 auto}
+  h1{font-size:19px; font-weight:700; margin:0 0 4px}
+  .sub{color:var(--muted); font-size:13px; margin:0 0 22px}
+
+  .frame{
+    background:var(--bg); border:1px solid var(--border); border-radius:10px;
+    overflow:hidden; box-shadow:0 18px 48px rgba(0,0,0,.5); min-width:1180px;
+  }
+  .toolbar{
+    height:44px; display:flex; align-items:center; gap:14px; padding:0 16px;
+    background:var(--bg); border-bottom:1px solid var(--border); font-size:12px;
+  }
+  .toolbar .repo{color:var(--text); font-weight:600}
+  .toolbar .dim{color:var(--muted)}
+  .toolbar .logo{
+    flex:1; text-align:center; font-family:'Dancing Script', cursive;
+    font-size:19px; color:var(--text); letter-spacing:.5px;
+  }
+  .toolbar .right{color:var(--muted); display:flex; gap:12px}
+
+  .filebar{
+    height:38px; display:flex; align-items:center; gap:10px; padding:0 12px;
+    background:var(--dheader); border-bottom:1px solid var(--ddiv);
+    font-family:var(--mono); font-size:12px;
+  }
+  .filebar .st{color:var(--green); font-weight:700}
+  .filebar .path{color:var(--dtext)}
+  .filebar .path .dir{color:var(--dmut)}
+  .filebar .spacer{flex:1}
+  .seg{display:flex; border:1px solid var(--ddiv); border-radius:6px; overflow:hidden; font-family:-apple-system,'Apple SD Gothic Neo',sans-serif; font-size:11.5px}
+  .seg span{padding:4px 11px; color:var(--dmut); background:transparent}
+  .seg span.on{background:#1F2733; color:var(--daccent); font-weight:600}
+  .fbtn{
+    padding:4px 11px; border:1px solid rgba(138,214,161,.45); border-radius:6px;
+    color:var(--green); font-size:11.5px; font-weight:600;
+    font-family:-apple-system,'Apple SD Gothic Neo',sans-serif; white-space:nowrap;
+  }
+  .fbtn.off{border-color:rgba(174,174,178,.35); color:var(--dmut)}
+  .fclose{color:var(--dmut); font-size:13px; padding:0 2px}
+
+  .main{display:flex; align-items:stretch; min-height:760px}
+  .diff{flex:1; background:var(--dcanvas); font-family:var(--mono); font-size:12px; line-height:20px; overflow:hidden}
+
+  .hunk{
+    display:flex; align-items:center; gap:8px; padding:5px 12px 5px 16px;
+    background:var(--dheader); border-top:1px solid var(--ddiv); border-bottom:1px solid var(--ddiv);
+    color:var(--daccent);
+  }
+  .hunk:first-child{border-top:none}
+  .hunk .fn-ctx{color:var(--dmut); overflow:hidden; white-space:nowrap; text-overflow:ellipsis}
+  .hunk .spacer{flex:1}
+  .hbtn{
+    padding:2.5px 10px; border-radius:5px; font-size:11px; font-weight:600;
+    font-family:-apple-system,'Apple SD Gothic Neo',sans-serif; white-space:nowrap;
+  }
+  .hbtn.stage{border:1px solid rgba(138,214,161,.45); color:var(--green)}
+  .hbtn.discard{border:1px solid rgba(242,154,178,.4); color:var(--pink)}
+
+  .dl{display:flex}
+  .dl .ln{
+    width:37px; flex:none; text-align:right; padding-right:8px;
+    color:var(--dmut); user-select:none; font-size:11px;
+  }
+  .dl .code{flex:1; white-space:pre; color:var(--dtext); padding-left:10px}
+  .dl.add{background:var(--addbg)} .dl.add .ln{background:var(--addgut); color:#9FCDAA}
+  .dl.del{background:var(--delbg)} .dl.del .ln{background:var(--delgut); color:#E5A0A5}
+  .dl.add .code::before{content:'+ '; color:var(--green)}
+  .dl.del .code::before{content:'− '; color:var(--red)}
+  .dl.ctx .code::before{content:'  '}
+  .kw{color:var(--kw)} .str{color:var(--str)} .fn{color:var(--fn)}
+  .dgap{height:14px}
+
+  .cpanel{
+    width:366px; flex:none; background:var(--panel); border-left:1px solid var(--border);
+    display:flex; flex-direction:column;
+  }
+  .chead{
+    padding:10px 14px 9px; border-bottom:1px solid var(--border);
+    font-size:11.5px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .chead b{color:var(--text); font-weight:600}
+  .chead .sha{font-family:var(--mono); color:var(--muted)}
+
+  .flist{flex:1; overflow:hidden; padding:6px 0 4px}
+  .sect{
+    display:flex; align-items:center; gap:7px; padding:8px 14px 5px;
+    font-size:11.5px; color:var(--muted); font-weight:600;
+  }
+  .sect .tri{font-size:9px}
+  .sect .cnt{
+    background:var(--raised); border-radius:8px; padding:0 7px; font-size:10.5px;
+    color:var(--muted); line-height:16px;
+  }
+  .sect .spacer{flex:1}
+  .sect .act{color:var(--linkblue); font-weight:600; font-size:11.5px}
+
+  .frow{
+    display:flex; align-items:center; gap:8px; height:26px; padding:0 14px;
+    font-family:var(--mono); font-size:11.5px;
+  }
+  .frow .letter{width:12px; flex:none; font-weight:700; color:var(--green)}
+  .frow .letter.d{color:var(--pink)} .frow .letter.r{color:var(--renamed)}
+  .frow .name{flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text)}
+  .frow .name .dir{color:var(--muted)}
+  .frow .plus{color:var(--green); font-size:10.5px}
+  .frow .minus{color:var(--red); font-size:10.5px}
+  .frow.selected{background:var(--sel)}
+  .frow.hovered{background:var(--raised)}
+  .ricon{
+    width:18px; height:18px; flex:none; border-radius:5px; background:#3A3A3D;
+    display:inline-flex; align-items:center; justify-content:center;
+    font-size:12px; line-height:1;
+  }
+  .ricon.plus2{color:var(--green)}
+  .ricon.minus2{color:var(--orange); font-size:13px}
+  .ricon.undo{color:var(--pink); font-size:11px}
+  .chip{
+    font-family:-apple-system,'Apple SD Gothic Neo',sans-serif; font-size:10px;
+    color:var(--muted); background:var(--raised); border-radius:7px; padding:1px 7px;
+  }
+  .sdiv{height:1px; background:var(--border); margin:6px 0 2px}
+
+  .cbox{border-top:1px solid var(--border); padding:12px 14px 14px; background:var(--panel)}
+  .cinput{
+    display:flex; align-items:center; gap:8px; background:var(--raised);
+    border:1px solid var(--border); border-radius:6px; padding:7px 10px; margin-bottom:8px;
+  }
+  .cinput .val{flex:1; font-size:12.5px; color:var(--text); font-family:var(--mono); white-space:nowrap; overflow:hidden}
+  .cinput .counter{font-size:10.5px; color:var(--muted); font-family:var(--mono)}
+  .cbody{
+    background:var(--raised); border:1px solid var(--border); border-radius:6px;
+    padding:8px 10px; min-height:54px; font-size:12px; color:#7A7A80; margin-bottom:10px;
+  }
+  .amend{display:flex; align-items:center; gap:7px; font-size:12px; color:var(--muted); margin-bottom:12px}
+  .amend .box{width:13px; height:13px; border:1.5px solid #5A5A5E; border-radius:3px}
+  .commitbtn{
+    height:34px; border-radius:7px; background:var(--green); color:#0F1A13;
+    font-size:13px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:8px;
+  }
+
+  .statusbar{
+    height:28px; display:flex; align-items:center; padding:0 14px; gap:16px;
+    background:var(--panel); border-top:1px solid var(--border);
+    font-size:11px; color:var(--muted);
+  }
+  .statusbar .spacer{flex:1}
+  .statusbar kbd{
+    font-family:var(--mono); font-size:10px; background:var(--raised);
+    border:1px solid var(--border); border-radius:4px; padding:0 5px;
+  }
+
+  .co{
+    display:inline-flex; width:16px; height:16px; border-radius:50%;
+    background:var(--purple); color:#17121F; font-size:10.5px; font-weight:800;
+    align-items:center; justify-content:center; margin-left:6px; flex:none;
+    font-family:-apple-system,sans-serif; vertical-align:1px;
+  }
+
+  .legend{margin-top:30px; display:grid; grid-template-columns:1.25fr 1fr; gap:32px}
+  .legend h2{font-size:14px; font-weight:700; margin:0 0 12px; color:var(--text)}
+  .litem{display:flex; gap:10px; margin-bottom:11px; font-size:12.5px; color:#C9C9CE}
+  .litem .co{margin:2px 0 0}
+  .litem b{color:var(--text)}
+  code.k{font-family:var(--mono); font-size:11.5px; color:var(--daccent)}
+  table{border-collapse:collapse; width:100%; font-size:12px}
+  th,td{text-align:left; padding:6px 10px; border-bottom:1px solid #2A2A2D; color:#C9C9CE}
+  th{color:var(--muted); font-weight:600; font-size:11.5px}
+  td code{font-family:var(--mono); font-size:11px; color:var(--daccent)}
+  .v2note{margin-top:16px; font-size:12px; color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>yogit — 커밋 모드 시안</h1>
+  <p class="sub">타임라인의 <b>Uncommitted changes</b> 행을 선택한 상태. 우측 미리보기 패널이 커밋 패널로 바뀌고, 파일을 클릭해 diff가 열려도 커밋 패널은 그대로 유지된다. git 동작 이름(Stage · Unstage · Hunk · Discard)은 영문 그대로 쓴다.</p>
+
+  <div class="frame">
+    <div class="toolbar">
+      <span class="dim">저장소</span><span class="repo">yona-hub</span>
+      <span class="dim">기준 브랜치</span><span class="repo">main</span>
+      <span class="logo">Yogit</span>
+      <span class="right"><span>미리보기</span><span>모니터링</span><span>⚙</span></span>
+    </div>
+
+    <div class="filebar">
+      <span class="st">M</span>
+      <span class="path"><span class="dir">apps/desktop/src/</span>NotesOutline.tsx</span>
+      <span class="spacer"></span>
+      <span class="seg"><span class="on">Unstaged</span><span>Staged</span></span><span class="co">1</span>
+      <span class="fbtn">Stage File</span><span class="co">2</span>
+      <span class="seg"><span class="on">Unified</span><span>Split</span></span>
+      <span class="fclose">✕</span>
+    </div>
+
+    <div class="main">
+      <div class="diff">
+        <div class="hunk">
+          <span>@@ -42,6 +42,14 @@</span>
+          <span class="fn-ctx">export function NotesOutline({ notes, onSelect }: Props) {</span>
+          <span class="spacer"></span>
+          <span class="hbtn stage">Stage Hunk</span>
+          <span class="hbtn discard">Discard Hunk</span>
+          <span class="co">3</span>
+        </div>
+        <div class="dl ctx"><span class="ln">42</span><span class="ln">42</span><span class="code">  <span class="kw">const</span> rows = <span class="fn">useOutlineRows</span>(notes);</span></div>
+        <div class="dl ctx"><span class="ln">43</span><span class="ln">43</span><span class="code">  <span class="kw">const</span> caret = <span class="fn">useCaretStation</span>(rows);</span></div>
+        <div class="dl ctx"><span class="ln">44</span><span class="ln">44</span><span class="code"></span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">45</span><span class="code">  <span class="kw">const</span> imageStops = <span class="fn">useMemo</span>(</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">46</span><span class="code">    () =&gt; rows.<span class="fn">filter</span>((row) =&gt; row.kind === <span class="str">'image'</span>),</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">47</span><span class="code">    [rows],</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">48</span><span class="code">  );</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">49</span><span class="code"></span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">50</span><span class="code">  <span class="kw">const</span> stationFor = (row: OutlineRow) =&gt;</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">51</span><span class="code">    row.kind === <span class="str">'image'</span> ? imageStops.<span class="fn">indexOf</span>(row) : -1;</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">52</span><span class="code"></span></div>
+        <div class="dl ctx"><span class="ln">45</span><span class="ln">53</span><span class="code">  <span class="fn">useEffect</span>(() =&gt; {</span></div>
+        <div class="dl ctx"><span class="ln">46</span><span class="ln">54</span><span class="code">    caret.<span class="fn">attach</span>(imageStops);</span></div>
+        <div class="dl ctx"><span class="ln">47</span><span class="ln">55</span><span class="code">  }, [caret, imageStops]);</span></div>
+
+        <div class="dgap"></div>
+
+        <div class="hunk">
+          <span>@@ -108,6 +116,6 @@</span>
+          <span class="fn-ctx">export function NotesOutline({ notes, onSelect }: Props) {</span>
+          <span class="spacer"></span>
+          <span class="hbtn stage">Stage Hunk</span>
+          <span class="hbtn discard">Discard Hunk</span>
+        </div>
+        <div class="dl ctx"><span class="ln">108</span><span class="ln">116</span><span class="code">    &lt;ul className=<span class="str">"outline"</span> role=<span class="str">"tree"</span>&gt;</span></div>
+        <div class="dl ctx"><span class="ln">109</span><span class="ln">117</span><span class="code">      {rows.<span class="fn">map</span>((row) =&gt; (</span></div>
+        <div class="dl del"><span class="ln">110</span><span class="ln"></span><span class="code">        &lt;<span class="fn">OutlineRow</span> key={row.id} row={row} onSelect={onSelect} /&gt;</span></div>
+        <div class="dl add"><span class="ln"></span><span class="ln">118</span><span class="code">        &lt;<span class="fn">OutlineRow</span> key={row.id} row={row} station={<span class="fn">stationFor</span>(row)} onSelect={onSelect} /&gt;</span></div>
+        <div class="dl ctx"><span class="ln">111</span><span class="ln">119</span><span class="code">      ))}</span></div>
+        <div class="dl ctx"><span class="ln">112</span><span class="ln">120</span><span class="code">    &lt;/ul&gt;</span></div>
+        <div class="dl ctx"><span class="ln">113</span><span class="ln">121</span><span class="code">  );</span></div>
+      </div>
+
+      <div class="cpanel">
+        <div class="chead">커밋 <b>WIP</b> · 부모 <span class="sha">5a178f2</span> Merge branch 'image-bullet-improvements'</div>
+
+        <div class="flist">
+          <div class="sect">
+            <span class="tri">▾</span> Unstaged <span class="cnt">8</span><span class="co">4</span>
+            <span class="spacer"></span><span class="act">Stage All</span>
+          </div>
+          <div class="frow"><span class="letter">M</span><span class="name"><span class="dir">.claude/</span>launch.json</span><span class="plus">+54</span><span class="minus">−7</span></div>
+          <div class="frow"><span class="letter">M</span><span class="name"><span class="dir">apps/desktop/src/</span>App.test.tsx</span><span class="plus">+4</span></div>
+          <div class="frow selected"><span class="letter">M</span><span class="name"><span class="dir">apps/desktop/src/</span>NotesOutline.tsx</span><span class="plus">+9</span><span class="minus">−1</span></div>
+          <div class="frow hovered"><span class="letter">M</span><span class="name"><span class="dir">apps/desktop/src/</span>imageCaretStation.ts</span><span class="ricon plus2">＋</span><span class="ricon undo">↺</span><span class="co">5</span></div>
+          <div class="frow"><span class="letter">M</span><span class="name"><span class="dir">apps/desktop/src/</span>outlineKeyboard.ts</span><span class="plus">+243</span><span class="minus">−1</span></div>
+          <div class="frow"><span class="letter">M</span><span class="name"><span class="dir">apps/desktop/src/</span>outlineSupport.ts</span><span class="plus">+19</span><span class="minus">−27</span></div>
+          <div class="frow"><span class="letter">M</span><span class="name"><span class="dir">apps/desktop/src/</span>useOutlineSelection.ts</span><span class="plus">+13</span><span class="minus">−2</span></div>
+          <div class="frow"><span class="letter">A</span><span class="name">.DS_Store</span><span class="chip">untracked</span></div>
+
+          <div class="sdiv"></div>
+
+          <div class="sect">
+            <span class="tri">▾</span> Staged <span class="cnt">3</span>
+            <span class="spacer"></span><span class="act">Unstage All</span>
+          </div>
+          <div class="frow"><span class="letter">M</span><span class="name"><span class="dir">apps/desktop/src/</span>OutlineRow.tsx</span><span class="plus">+3</span><span class="minus">−5</span></div>
+          <div class="frow hovered"><span class="letter">M</span><span class="name"><span class="dir">apps/desktop/src/</span>outlineClipboard.ts</span><span class="ricon minus2">−</span><span class="co">6</span></div>
+          <div class="frow"><span class="letter">A</span><span class="name"><span class="dir">apps/desktop/src/</span>outlineShiftSelect.test.ts</span><span class="plus">+48</span></div>
+        </div>
+
+        <div class="cbox">
+          <div class="cinput">
+            <span class="val">feat(desktop): stage hunks from the diff view</span>
+            <span class="counter">45/50</span><span class="co">7</span>
+          </div>
+          <div class="cbody">본문 (선택) — 무엇을, 왜 바꿨는지</div>
+          <div class="amend"><span class="box"></span> 이전 커밋에 합치기 <span style="font-family:var(--mono); font-size:11px">--amend</span></div>
+          <div class="commitbtn">Staged 3개 파일 커밋 <span class="co" style="background:#0F1A13; color:var(--green)">8</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="statusbar">
+      <span>yona-hub · main</span>
+      <span class="spacer"></span>
+      <span><kbd>Space</kbd> Stage / Unstage</span>
+      <span><kbd>⌘↵</kbd> 커밋</span>
+      <span><kbd>↑↓</kbd> 파일 이동</span>
+      <span><kbd>Esc</kbd> diff 닫기</span>
+      <span class="co">9</span>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div>
+      <h2>동작 정의</h2>
+      <div class="litem"><span class="co">1</span><div><b>diff 영역 전환.</b> <code class="k">Unstaged</code>는 작업 트리 ↔ 인덱스, <code class="k">Staged</code>는 인덱스 ↔ HEAD를 비교한다. 전환하면 헝크 버튼도 Stage ↔ Unstage로 바뀐다. 커밋 패널에서 파일을 클릭하면 그 파일이 속한 섹션으로 자동 전환된다.</div></div>
+      <div class="litem"><span class="co">2</span><div><b>파일 단위 Stage.</b> 지금 보는 파일을 통째로 인덱스에 올린다. Staged 영역을 보는 중이면 같은 자리에 <code class="k">Unstage File</code>이 온다.</div></div>
+      <div class="litem"><span class="co">3</span><div><b>Hunk 단위.</b> <code class="k">Stage Hunk</code>는 헝크 하나만 인덱스에 올리고, Staged 쪽에서는 <code class="k">Unstage Hunk</code>가 된다. <code class="k">Discard Hunk</code>는 작업 트리에서 되돌리며 확인창을 먼저 띄운다.</div></div>
+      <div class="litem"><span class="co">4</span><div><b>두 섹션.</b> Unstaged(위) / Staged(아래, 커밋 버튼 바로 위). ▾로 접히고, 우측 텍스트 버튼은 <code class="k">Stage All</code> · <code class="k">Unstage All</code>.</div></div>
+      <div class="litem"><span class="co">5</span><div><b>Unstaged 행 hover.</b> ＋ Stage File, ↺ Discard(확인창). 추적되지 않는 파일은 <code class="k">untracked</code> 칩이 붙고, Discard가 파일 삭제라는 점을 확인창에 명시한다.</div></div>
+      <div class="litem"><span class="co">6</span><div><b>Staged 행 hover.</b> − Unstage File 하나만. 인덱스만 되돌리므로 작업 트리 내용은 그대로 남는다.</div></div>
+      <div class="litem"><span class="co">7</span><div><b>제목 글자 수.</b> 50자 카운터, 넘으면 주황으로 바뀌지만 막지는 않는다. 본문은 별도 입력.</div></div>
+      <div class="litem"><span class="co">8</span><div><b>커밋 버튼.</b> Staged가 비었거나 제목이 비면 비활성. <code class="k">--amend</code> 체크 시 HEAD 메시지를 채워 넣고 라벨이 <b>커밋 수정</b>으로 바뀐다. 이미 푸시된 커밋이면 경고를 함께 보여준다.</div></div>
+      <div class="litem"><span class="co">9</span><div><b>키보드.</b> Space로 선택한 파일을 Stage ↔ Unstage 토글, ⌘↵ 커밋, ↑↓ 파일 이동, Esc로 diff 닫기.</div></div>
+    </div>
+    <div>
+      <h2>git 매핑</h2>
+      <table>
+        <tr><th>동작</th><th>명령</th></tr>
+        <tr><td>목록 (두 섹션)</td><td><code>git status --porcelain=v2 -z</code></td></tr>
+        <tr><td>Stage File</td><td><code>git add -- :(literal)path</code></td></tr>
+        <tr><td>Unstage File</td><td><code>git restore --staged -- path</code></td></tr>
+        <tr><td>Stage Hunk</td><td><code>git apply --cached</code> (헝크 패치 조립)</td></tr>
+        <tr><td>Unstage Hunk</td><td><code>git apply --cached -R</code></td></tr>
+        <tr><td>Discard</td><td><code>git apply -R</code> / <code>git restore</code> / 파일 삭제</td></tr>
+        <tr><td>커밋</td><td><code>git commit</code> [<code>--amend</code>]</td></tr>
+        <tr><td>diff (Unstaged)</td><td><code>git diff</code></td></tr>
+        <tr><td>diff (Staged)</td><td><code>git diff --cached</code></td></tr>
+      </table>
+      <p class="v2note"><b>v2로 미룸</b> — 라인 단위 스테이징 · 파일 트리 뷰 토글 · 스태시 · AI 커밋 메시지</p>
+    </div>
+  </div>
+</div>
+</body>
+</html>
