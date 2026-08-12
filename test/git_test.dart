@@ -116,11 +116,11 @@ void main() {
     // 줄 하나를 물을 때마다 커밋 전체를 훑는 대신 한 번에 색인을 만든다.
     final names = mergedBranchNamesByTip([
       _commit('merge', ['main', 'tip'], subject: "Merge branch 'feature/one'"),
-      _commit(
-        'octopus',
-        ['main', 'left', 'right'],
-        subject: "Merge branch 'feature/many'",
-      ),
+      _commit('octopus', [
+        'main',
+        'left',
+        'right',
+      ], subject: "Merge branch 'feature/many'"),
       _commit('plain', ['main'], subject: "Merge branch 'not/a/merge'"),
       _commit('noisy', ['main', 'other'], subject: 'Merge feature'),
     ]);
@@ -296,17 +296,20 @@ void main() {
     ]);
   });
 
-  test('a repository that cannot answer says nothing, and does not throw', () async {
-    final repository = GitRepository(
-      '/repo',
-      runner: (executable, args, {workingDirectory, environment}) async =>
-          throw const ProcessException('git', ['reflog']),
-    );
+  test(
+    'a repository that cannot answer says nothing, and does not throw',
+    () async {
+      final repository = GitRepository(
+        '/repo',
+        runner: (executable, args, {workingDirectory, environment}) async =>
+            throw const ProcessException('git', ['reflog']),
+      );
 
-    expect(await repository.loadBranchOperation('main'), isNull);
-    expect(await repository.countMovedCommits('old', 'new'), isNull);
-    expect(await repository.loadMovedCommits('old', 'new'), isEmpty);
-  });
+      expect(await repository.loadBranchOperation('main'), isNull);
+      expect(await repository.countMovedCommits('old', 'new'), isNull);
+      expect(await repository.loadMovedCommits('old', 'new'), isEmpty);
+    },
+  );
 
   test('resolves a saved local branch before current and first local', () {
     const refs = RepoRefs(local: ['main', 'release'], current: 'main');
@@ -1209,10 +1212,11 @@ void main() {
       // 함께 쓰기 때문이다 — 앱이 떠 있으면 재는 사이에 하나가 생겼다 사라져서
       // 이 시험이 제 잘못 없이 빨개진다.
       expect(
-        (await _git(root, ['worktree', 'list', '--porcelain']))
-            .split('\n')
-            .where((line) => line.startsWith('worktree '))
-            .length,
+        (await _git(root, [
+          'worktree',
+          'list',
+          '--porcelain',
+        ])).split('\n').where((line) => line.startsWith('worktree ')).length,
         1,
         reason: '저장소 자신 말고는 남지 않는다',
       );
@@ -1982,43 +1986,52 @@ void main() {
     expect(probe.existsSync(), isFalse);
   });
 
-  test('a preview directory git never registered is swept once it ages', () async {
-    final root = await Directory.systemTemp.createTemp('yogit_orphan_sweep_');
-    addTearDown(() => root.delete(recursive: true));
-    await _initRepository(root);
-    await File('${root.path}/base.txt').writeAsString('base\n');
-    await _git(root, ['add', 'base.txt']);
-    await _git(root, ['commit', '-m', 'base']);
+  test(
+    'a preview directory git never registered is swept once it ages',
+    () async {
+      final root = await Directory.systemTemp.createTemp('yogit_orphan_sweep_');
+      addTearDown(() => root.delete(recursive: true));
+      await _initRepository(root);
+      await File('${root.path}/base.txt').writeAsString('base\n');
+      await _git(root, ['add', 'base.txt']);
+      await _git(root, ['commit', '-m', 'base']);
 
-    // 앱이 미리보기 도중 죽으면 장부에 없는 빈 디렉터리만 남는다. 장부를 훑는
-    // 청소는 이런 것을 영영 못 본다.
-    final orphan = await Directory.systemTemp.createTemp(
-      'yogit_rebase_preview_',
-    );
-    final fresh = await Directory.systemTemp.createTemp(
-      'yogit_merge_preview_',
-    );
-    final stranger = await Directory.systemTemp.createTemp('yogit_unrelated_');
-    addTearDown(() async {
-      for (final directory in [orphan, fresh, stranger]) {
-        if (directory.existsSync()) await directory.delete(recursive: true);
-      }
-    });
-    expect(
-      (await Process.run('touch', ['-t', '202001010000', orphan.path])).exitCode,
-      0,
-    );
+      // 앱이 미리보기 도중 죽으면 장부에 없는 빈 디렉터리만 남는다. 장부를 훑는
+      // 청소는 이런 것을 영영 못 본다.
+      final orphan = await Directory.systemTemp.createTemp(
+        'yogit_rebase_preview_',
+      );
+      final fresh = await Directory.systemTemp.createTemp(
+        'yogit_merge_preview_',
+      );
+      final stranger = await Directory.systemTemp.createTemp(
+        'yogit_unrelated_',
+      );
+      addTearDown(() async {
+        for (final directory in [orphan, fresh, stranger]) {
+          if (directory.existsSync()) await directory.delete(recursive: true);
+        }
+      });
+      expect(
+        (await Process.run('touch', [
+          '-t',
+          '202001010000',
+          orphan.path,
+        ])).exitCode,
+        0,
+      );
 
-    await GitRepository(root.path).cleanupStalePreviewWorktrees();
+      await GitRepository(root.path).cleanupStalePreviewWorktrees();
 
-    expect(orphan.existsSync(), isFalse, reason: '오래된 고아는 쓸어낸다');
-    expect(
-      fresh.existsSync(),
-      isTrue,
-      reason: '방금 생긴 것은 지금 돌고 있는 미리보기일 수 있다',
-    );
-    expect(stranger.existsSync(), isTrue, reason: '우리 이름이 아닌 것은 남긴다');
-  });
+      expect(orphan.existsSync(), isFalse, reason: '오래된 고아는 쓸어낸다');
+      expect(
+        fresh.existsSync(),
+        isTrue,
+        reason: '방금 생긴 것은 지금 돌고 있는 미리보기일 수 있다',
+      );
+      expect(stranger.existsSync(), isTrue, reason: '우리 이름이 아닌 것은 남긴다');
+    },
+  );
 
   test('merge preview applies locally and restores both exact tips', () async {
     final fixture = await _branchPreviewFixture();
@@ -4948,6 +4961,220 @@ void main() {
     expect(recommendation!.verdict, BranchIntegrationVerdict.rebase);
     expect(recommendation.reasons.last, contains('알아서 빠집니다'));
   });
+
+  // ── upstream 동기화의 git 층 (docs/upstream-sync-design.md P1) ──────────
+
+  test('pushBranch advances the remote ref to the local tip', () async {
+    final fixture = await _upstreamFixture();
+    await File('${fixture.root.path}/file.txt').writeAsString('local\n');
+    await _git(fixture.root, ['commit', '-am', 'local work']);
+    final localTip = (await _git(fixture.root, ['rev-parse', 'main'])).trim();
+
+    final repository = GitRepository(fixture.root.path);
+    await repository.pushBranch('origin', 'main');
+
+    expect(
+      (await _git(fixture.remote, ['rev-parse', 'main'])).trim(),
+      localTip,
+      reason: '원격 main이 로컬 끝으로 움직인다',
+    );
+  });
+
+  test('pushBranch refuses when the remote moved first', () async {
+    final fixture = await _upstreamFixture();
+    // 다른 사람이 원격을 먼저 움직였다.
+    final other = await Directory.systemTemp.createTemp(
+      'yogit_upstream_other_',
+    );
+    addTearDown(() => other.delete(recursive: true));
+    await _git(other, ['clone', fixture.remote.path, '.']);
+    await _git(other, ['config', 'user.name', 'Other']);
+    await _git(other, ['config', 'user.email', 'other@example.com']);
+    await File('${other.path}/other.txt').writeAsString('other\n');
+    await _git(other, ['add', '.']);
+    await _git(other, ['commit', '-m', 'other work']);
+    await _git(other, ['push', 'origin', 'main']);
+    final remoteTip = (await _git(fixture.remote, [
+      'rev-parse',
+      'main',
+    ])).trim();
+
+    await File('${fixture.root.path}/file.txt').writeAsString('local\n');
+    await _git(fixture.root, ['commit', '-am', 'local work']);
+
+    final repository = GitRepository(fixture.root.path);
+    await expectLater(
+      repository.pushBranch('origin', 'main'),
+      throwsA(isA<ProcessException>()),
+      reason: 'force 없는 push라 원격이 앞서 있으면 거절된다',
+    );
+    expect(
+      (await _git(fixture.remote, ['rev-parse', 'main'])).trim(),
+      remoteTip,
+      reason: '거절된 push는 원격을 건드리지 않는다',
+    );
+  });
+
+  test('pushBranch can create the upstream it will track', () async {
+    final fixture = await _upstreamFixture();
+    await _git(fixture.root, ['switch', '-c', 'feature']);
+    await File('${fixture.root.path}/feature.txt').writeAsString('f\n');
+    await _git(fixture.root, ['add', '.']);
+    await _git(fixture.root, ['commit', '-m', 'feature work']);
+
+    final repository = GitRepository(fixture.root.path);
+    await repository.pushBranch('origin', 'feature', setUpstream: true);
+
+    expect(
+      (await _git(fixture.root, [
+        'rev-parse',
+        '--abbrev-ref',
+        'feature@{upstream}',
+      ])).trim(),
+      'origin/feature',
+      reason: 'push -u는 추적까지 연결한다',
+    );
+  });
+
+  test(
+    'a realized rebase moves the ref and leaves the checkout alone',
+    () async {
+      final fixture = await _divergedUpstreamFixture();
+      final repository = GitRepository(fixture.root.path);
+      // 기준 브랜치는 체크아웃 밖이다 — 작업 트리는 다른 브랜치의 것.
+      await _git(fixture.root, ['switch', '-c', 'elsewhere']);
+      await File('${fixture.root.path}/dirty.txt').writeAsString('untouched\n');
+
+      final session = RebasePreviewSession(
+        repository: repository,
+        baseTip: fixture.remoteTip,
+        compareTip: fixture.localTip,
+        originalCommits: const [],
+      );
+      final preview = await session.start();
+      await session.dispose();
+      expect(preview.status, RebasePreviewStatus.clean);
+
+      final updatedTree = await repository.applyUpstreamRebase(
+        branch: 'main',
+        expectedTip: fixture.localTip,
+        virtualTip: preview.virtualTip!,
+      );
+
+      expect(updatedTree, isFalse, reason: '체크아웃 밖 브랜치는 ref만 움직인다');
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+        preview.virtualTip,
+      );
+      expect(
+        await File('${fixture.root.path}/dirty.txt').readAsString(),
+        'untouched\n',
+        reason: '작업 트리는 손대지 않는다',
+      );
+      // 얹힌 뒤에는 force 없이 push가 된다 — 로컬이 원격 끝을 품었으니까.
+      await repository.pushBranch('origin', 'main');
+      expect(
+        (await _git(fixture.remote, ['rev-parse', 'main'])).trim(),
+        preview.virtualTip,
+      );
+    },
+  );
+
+  test(
+    'a realized rebase stops whole when the branch moved meanwhile',
+    () async {
+      final fixture = await _divergedUpstreamFixture();
+      final repository = GitRepository(fixture.root.path);
+      final session = RebasePreviewSession(
+        repository: repository,
+        baseTip: fixture.remoteTip,
+        compareTip: fixture.localTip,
+        originalCommits: const [],
+      );
+      final preview = await session.start();
+      await session.dispose();
+
+      // 판정과 실행 사이에 로컬이 또 움직였다.
+      await File('${fixture.root.path}/file.txt').writeAsString('newer\n');
+      await _git(fixture.root, ['commit', '-am', 'newer work']);
+      final movedTip = (await _git(fixture.root, ['rev-parse', 'main'])).trim();
+
+      await expectLater(
+        repository.applyUpstreamRebase(
+          branch: 'main',
+          expectedTip: fixture.localTip,
+          virtualTip: preview.virtualTip!,
+        ),
+        throwsA(isA<GitRepositoryException>()),
+      );
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+        movedTip,
+        reason: '아무것도 움직이지 않는다',
+      );
+    },
+  );
+
+  test(
+    'a dirty checked-out tree refuses the realized rebase, with its reason',
+    () async {
+      final fixture = await _divergedUpstreamFixture();
+      final repository = GitRepository(fixture.root.path);
+      final session = RebasePreviewSession(
+        repository: repository,
+        baseTip: fixture.remoteTip,
+        compareTip: fixture.localTip,
+        originalCommits: const [],
+      );
+      final preview = await session.start();
+      await session.dispose();
+
+      // main이 체크아웃되어 있고 트리는 더럽다.
+      await File(
+        '${fixture.root.path}/file.txt',
+      ).writeAsString('uncommitted\n');
+
+      await expectLater(
+        repository.applyUpstreamRebase(
+          branch: 'main',
+          expectedTip: fixture.localTip,
+          virtualTip: preview.virtualTip!,
+        ),
+        throwsA(
+          isA<GitRepositoryException>().having(
+            (error) => error.message,
+            'message',
+            contains('깨끗해야'),
+          ),
+        ),
+      );
+      expect(
+        (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+        fixture.localTip,
+      );
+    },
+  );
+
+  test('moved commits split into what comes in and what goes up', () async {
+    final fixture = await _divergedUpstreamFixture();
+    final repository = GitRepository(fixture.root.path);
+
+    final commits = await repository.loadMovedCommits(
+      fixture.remoteTip,
+      fixture.localTip,
+    );
+
+    expect(
+      commits.where((commit) => !commit.incoming).map((c) => c.subject),
+      ['remote work'],
+      reason: '< 쪽은 원격에만 있어 pull로 들어올 커밋',
+    );
+    expect(
+      commits.where((commit) => commit.incoming).map((c) => c.subject),
+      ['local work'],
+      reason: '> 쪽은 로컬에만 있어 push로 올라갈 커밋',
+    );
+  });
 }
 
 /// The layout invariants every fixture has to satisfy: a column index means the
@@ -5319,5 +5546,48 @@ _remoteBranchPreviewFixture() async {
     root: fixture.root,
     comparison: await repository.compareBranches('main', 'origin/feature'),
     remoteTip: remoteTip,
+  );
+}
+
+/// 로컬 하나와 그 upstream이 될 bare 원격 하나. main은 push -u까지 끝나 있다.
+Future<({Directory root, Directory remote})> _upstreamFixture() async {
+  final remote = await Directory.systemTemp.createTemp('yogit_sync_remote_');
+  addTearDown(() => remote.delete(recursive: true));
+  await _git(remote, ['init', '--bare', '-b', 'main']);
+  final root = await Directory.systemTemp.createTemp('yogit_sync_local_');
+  addTearDown(() => root.delete(recursive: true));
+  await _initRepository(root);
+  await File('${root.path}/file.txt').writeAsString('base\n');
+  await _git(root, ['add', '.']);
+  await _git(root, ['commit', '-m', 'base']);
+  await _git(root, ['remote', 'add', 'origin', remote.path]);
+  await _git(root, ['push', '-u', 'origin', 'main']);
+  return (root: root, remote: remote);
+}
+
+/// 어긋난 상태: 원격에 'remote work' 하나, 로컬에 'local work' 하나. 서로 다른
+/// 파일을 건드려 재연은 깨끗하다.
+Future<({Directory root, Directory remote, String localTip, String remoteTip})>
+_divergedUpstreamFixture() async {
+  final fixture = await _upstreamFixture();
+  final other = await Directory.systemTemp.createTemp('yogit_sync_other_');
+  addTearDown(() => other.delete(recursive: true));
+  await _git(other, ['clone', fixture.remote.path, '.']);
+  await _git(other, ['config', 'user.name', 'Other']);
+  await _git(other, ['config', 'user.email', 'other@example.com']);
+  await File('${other.path}/remote.txt').writeAsString('remote\n');
+  await _git(other, ['add', '.']);
+  await _git(other, ['commit', '-m', 'remote work']);
+  await _git(other, ['push', 'origin', 'main']);
+
+  await File('${fixture.root.path}/local.txt').writeAsString('local\n');
+  await _git(fixture.root, ['add', '.']);
+  await _git(fixture.root, ['commit', '-m', 'local work']);
+  await _git(fixture.root, ['fetch', 'origin']);
+  return (
+    root: fixture.root,
+    remote: fixture.remote,
+    localTip: (await _git(fixture.root, ['rev-parse', 'main'])).trim(),
+    remoteTip: (await _git(fixture.root, ['rev-parse', 'origin/main'])).trim(),
   );
 }

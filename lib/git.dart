@@ -2191,9 +2191,14 @@ class GitRepository implements FullDiffRepository {
   Future<String?> loadBranchOperation(String branch) async {
     try {
       return branchOperationFromReflog(
-        (await _run(['reflog', 'show', '--format=%gs', '-n', '1', branch]))
-            .split('\n')
-            .first,
+        (await _run([
+          'reflog',
+          'show',
+          '--format=%gs',
+          '-n',
+          '1',
+          branch,
+        ])).split('\n').first,
       );
     } on ProcessException {
       return null;
@@ -4658,6 +4663,35 @@ class GitRepository implements FullDiffRepository {
       '$branch:$branch',
     ],
   ]);
+
+  /// Sends [branch] up to [remote]. Never forced: if the remote moved since
+  /// the last look, git refuses and the refusal comes back as the answer —
+  /// the caller re-measures instead of overwriting someone else's work.
+  /// [setUpstream] is the first push of a branch the remote has never held.
+  Future<void> pushBranch(
+    String remote,
+    String branch, {
+    bool setUpstream = false,
+  }) => _runWithoutPrompts([
+    '-c',
+    'credential.interactive=never',
+    'push',
+    if (setUpstream) '-u',
+    remote,
+    '$branch:$branch',
+  ]);
+
+  /// Realizes a clean upstream rebase: moves [branch] from [expectedTip] to
+  /// [virtualTip], the tip a [RebasePreviewSession] replayed onto the remote.
+  /// The move follows [_moveLocalBranch]'s standing promise — a branch checked
+  /// out nowhere has only its ref moved, the checked-out branch needs a clean
+  /// tree, and a branch that moved since [expectedTip] stops the whole thing.
+  Future<bool> applyUpstreamRebase({
+    required String branch,
+    required String expectedTip,
+    required String virtualTip,
+  }) =>
+      _moveLocalBranch(branch: branch, expected: expectedTip, next: virtualTip);
 
   Future<void> checkoutRemoteBranch(
     String remote,
