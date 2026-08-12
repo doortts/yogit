@@ -117,10 +117,13 @@ class RepositoryBranchSelector extends StatelessWidget {
               onSelected: onBranchSelected,
             ),
           ),
-          // 좁아지면 캡슐이 줄어든다 — 행이 넘치는 일은 구조적으로 없다.
-          // (사이드바 액션 스트립과 같은 수법.)
+          // 캡슐은 제 크기로 서는 것이 먼저다 — 시안의 약속은 장식이 먼저
+          // 물러나는 것이지 캡슐이 먼저 쭈그러드는 것이 아니다. flex 몫을
+          // 넉넉히 받되 loose라 필요한 만큼만 쓰고, 정말 좁아지면 그때
+          // 줄어든다. 행이 넘치는 일은 구조적으로 없다.
           if (trailing case final capsule?)
             Flexible(
+              flex: 2,
               child: FittedBox(
                 fit: BoxFit.scaleDown,
                 alignment: Alignment.centerLeft,

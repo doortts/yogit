@@ -5085,6 +5085,25 @@ void main() {
     },
   );
 
+  test('pushBranch pinned to a tip sends that tip and nothing newer', () async {
+    final fixture = await _upstreamFixture();
+    await File('${fixture.root.path}/file.txt').writeAsString('shown\n');
+    await _git(fixture.root, ['commit', '-am', 'shown on the receipt']);
+    final shownTip = (await _git(fixture.root, ['rev-parse', 'main'])).trim();
+    // 확인창이 열린 사이에 커밋이 하나 더 붙었다.
+    await File('${fixture.root.path}/file.txt').writeAsString('later\n');
+    await _git(fixture.root, ['commit', '-am', 'landed mid-dialog']);
+
+    final repository = GitRepository(fixture.root.path);
+    await repository.pushBranch('origin', 'main', fromTip: shownTip);
+
+    expect(
+      (await _git(fixture.remote, ['rev-parse', 'main'])).trim(),
+      shownTip,
+      reason: '영수증이 보인 그 끝까지만 올라간다',
+    );
+  });
+
   test("pushBranch sends the branch to the upstream's own name", () async {
     final fixture = await _upstreamFixture();
     // main이 origin/trunk를 추적한다 — 이름이 다른 upstream.

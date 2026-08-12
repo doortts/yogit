@@ -18373,6 +18373,7 @@ class FakeGitRepository extends GitRepository {
     String remote,
     String branch, {
     String? toBranch,
+    String? fromTip,
     bool setUpstream,
   })?
   pushBranchCallback;
@@ -18545,55 +18546,87 @@ class FakeGitRepository extends GitRepository {
     String remote,
     String branch, {
     String? toBranch,
+    String? fromTip,
     bool setUpstream = false,
-  }) => pushBranchCallback != null
-      ? pushBranchCallback!(
-          remote,
-          branch,
-          toBranch: toBranch,
-          setUpstream: setUpstream,
-        )
-      : super.pushBranch(
-          remote,
-          branch,
-          toBranch: toBranch,
-          setUpstream: setUpstream,
-        );
+  }) {
+    if (pushBranchCallback != null) {
+      return pushBranchCallback!(
+        remote,
+        branch,
+        toBranch: toBranch,
+        fromTip: fromTip,
+        setUpstream: setUpstream,
+      );
+    }
+    _requireFakedMutation('pushBranch');
+    return super.pushBranch(
+      remote,
+      branch,
+      toBranch: toBranch,
+      fromTip: fromTip,
+      setUpstream: setUpstream,
+    );
+  }
+
+  /// 진짜 runner로 개발자의 체크아웃에 push가 나가는 사고를 시험이 아니라
+  /// 여기서 막는다 — 가짜 runner를 준 시험만 super로 내려갈 수 있다.
+  void _requireFakedMutation(String method) {
+    if (identical(runner, runProcess)) {
+      throw UnimplementedError(
+        '$method needs a callback or an injected runner in tests',
+      );
+    }
+  }
 
   @override
   Future<bool> applyUpstreamRebase({
     required String branch,
     required String expectedTip,
     required String virtualTip,
-  }) => applyUpstreamRebaseCallback != null
-      ? applyUpstreamRebaseCallback!(
-          branch: branch,
-          expectedTip: expectedTip,
-          virtualTip: virtualTip,
-        )
-      : super.applyUpstreamRebase(
-          branch: branch,
-          expectedTip: expectedTip,
-          virtualTip: virtualTip,
-        );
+  }) {
+    if (applyUpstreamRebaseCallback != null) {
+      return applyUpstreamRebaseCallback!(
+        branch: branch,
+        expectedTip: expectedTip,
+        virtualTip: virtualTip,
+      );
+    }
+    _requireFakedMutation('applyUpstreamRebase');
+    return super.applyUpstreamRebase(
+      branch: branch,
+      expectedTip: expectedTip,
+      virtualTip: virtualTip,
+    );
+  }
 
   @override
   Future<void> pullRemoteBranch(
     String remote,
     String branch, {
     required bool checkedOut,
-  }) => pullRemoteBranchCallback != null
-      ? pullRemoteBranchCallback!(remote, branch, checkedOut: checkedOut)
-      : super.pullRemoteBranch(remote, branch, checkedOut: checkedOut);
+  }) {
+    if (pullRemoteBranchCallback != null) {
+      return pullRemoteBranchCallback!(remote, branch, checkedOut: checkedOut);
+    }
+    _requireFakedMutation('pullRemoteBranch');
+    return super.pullRemoteBranch(remote, branch, checkedOut: checkedOut);
+  }
 
   @override
   Future<List<MovedCommit>> loadMovedCommits(
     String before,
     String after, {
     int limit = 9,
-  }) => movedCommitsCallback != null
-      ? movedCommitsCallback!(before, after)
-      : super.loadMovedCommits(before, after, limit: limit);
+  }) {
+    if (movedCommitsCallback != null) {
+      return movedCommitsCallback!(before, after);
+    }
+    // 읽기라도 진짜 프로세스는 fakeAsync 존에서 영영 안 돌아온다.
+    if (identical(runner, runProcess)) {
+      return Future.value(const <MovedCommit>[]);
+    }
+    return super.loadMovedCommits(before, after, limit: limit);
+  }
 
   @override
   Future<BranchComparisonResult> compareBranches(

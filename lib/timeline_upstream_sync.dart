@@ -33,8 +33,9 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
     ),
   );
 
-  /// Pull: 초록(빨리감기)은 확인 없이 즉시 — 로컬만 움직인다. 주황은 재연이
-  /// 만들어 둔 tip으로 ref만 옮기는 받아 얹기. 완료는 타임라인이 말한다.
+  /// Pull: 초록(빨리감기)은 확인 없이 즉시 — 로컬을 움직이되 역사는 그대로다.
+  /// 주황은 받아 얹기라 로컬 커밋의 해시가 달라지므로, 무엇이 들어오고 무엇이
+  /// 다시 쓰이는지 영수증을 보인 뒤에만 움직인다.
   Future<void> _upstreamPull() async {
     final state = _upstreamSync.state;
     switch (state.kind) {
@@ -47,6 +48,26 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
           );
         }, failure: 'Pull 실패');
       case UpstreamSyncKind.divergedClean:
+        final moved = await _upstreamMovedCommits(state);
+        if (moved == null || !mounted) return;
+        final approved = await showYogitAlert<bool>(
+          context,
+          YogitAlert(
+            title: '받아 얹을까요? (Pull --rebase)',
+            body: PushReceipt(
+              branch: state.branch!,
+              incoming: moved.incoming,
+              incomingTotal: state.behind,
+              outgoing: const [],
+              footnote:
+                  '충돌 없음은 방금 재연으로 확인했습니다. '
+                  '얹힌 커밋은 해시가 달라집니다.',
+            ),
+            confirmLabel: '받아 얹기',
+            confirmKey: const Key('upstream-rebase-pull-confirm'),
+          ),
+        );
+        if (approved != true) return;
         await _runUpstreamAction(() async {
           await widget.repository.applyUpstreamRebase(
             branch: state.branch!,
@@ -68,7 +89,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
         final approved = await showYogitAlert<bool>(
           context,
           YogitAlert(
-            title: '${state.branch}을(를) ${state.remote}에 처음 Push할까요?',
+            title: '${state.branch} 브랜치를 ${state.remote}에 처음 Push할까요?',
             message: '원격에 ${state.branch} 브랜치를 만들고 추적을 연결합니다.',
             confirmLabel: 'Push',
             confirmKey: const Key('upstream-first-push-confirm'),
@@ -88,14 +109,15 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
         final approved = await showYogitAlert<bool>(
           context,
           YogitAlert(
-            title: '${state.branch}을(를) ${state.remote}에 Push할까요?',
+            title: '${state.branch} 브랜치를 ${state.remote}에 Push할까요?',
             body: PushReceipt(
               branch: state.branch!,
               incoming: const [],
               outgoing: moved.outgoing,
+              outgoingTotal: state.ahead,
               footnote:
-                  '원격 ${state.branch}이(가) ${shortSha(state.remoteTip!)}에서 '
-                  '${shortSha(state.localTip!)}(으)로 움직입니다.',
+                  '원격 ${state.branch} 브랜치가 ${shortSha(state.remoteTip!)}에서 '
+                  '${shortSha(state.localTip!)}로 움직입니다.',
             ),
             confirmLabel: 'Push',
             confirmKey: const Key('upstream-push-confirm'),
@@ -103,10 +125,13 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
         );
         if (approved != true) return;
         await _runUpstreamAction(() async {
+          // 영수증이 보인 그 끝을 올린다 — 확인창이 열린 사이에 도착한 커밋이
+          // 소리 없이 딸려 올라가지 않는다.
           await widget.repository.pushBranch(
             state.remote!,
             state.branch!,
             toBranch: _upstreamBranchName(state),
+            fromTip: state.localTip,
           );
         }, failure: 'Push 실패');
       case UpstreamSyncKind.divergedClean:
@@ -119,7 +144,9 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
             body: PushReceipt(
               branch: state.branch!,
               incoming: moved.incoming,
+              incomingTotal: state.behind,
               outgoing: moved.outgoing,
+              outgoingTotal: state.ahead,
               footnote:
                   '충돌 없음은 방금 재연으로 확인했습니다. '
                   '얹힌 커밋은 해시가 달라집니다.',
@@ -142,6 +169,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
             state.remote!,
             state.branch!,
             toBranch: _upstreamBranchName(state),
+            fromTip: state.virtualTip,
           );
         }, failure: 'Push 실패');
       default:
@@ -185,20 +213,20 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
     _rebuild(() => _upstreamSyncBusy = true);
     try {
       await action();
-      if (!mounted) return;
-      await _reloadTimelineAfterCherryPick(null);
     } on ProcessException catch (error) {
       _upstreamActionFailed(failure, error.message);
     } on GitRepositoryException catch (error) {
       _upstreamActionFailed(failure, error.message);
     } finally {
+      // 성공이든 거절이든 새로 읽는다: 두 걸음 중 첫걸음만 성공했어도 ref는
+      // 이미 움직였고, 낡은 화면 위의 판정은 판정이 아니다. 새 refs가
+      // 실리면서 재판정도 함께 선다.
+      if (mounted) await _reloadTimelineAfterCherryPick(null);
       if (mounted) {
         _rebuild(() => _upstreamSyncBusy = false);
       } else {
         _upstreamSyncBusy = false;
       }
-      // 성공이든 거절이든 판정은 다시 선다 — 거절의 이유는 새 refs가 말한다.
-      if (mounted) _judgeUpstreamSync();
     }
   }
 
@@ -225,19 +253,27 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
         !_refs.remote.contains(upstreamRef)) {
       return;
     }
-    _upstreamConflictReturnBase = branch;
+    _upstreamConflictLoan = (borrowed: upstreamRef, returnTo: branch);
     if (_branchPreviewMode != BranchPreviewMode.rebase) {
       _setBranchPreviewMode(BranchPreviewMode.rebase);
     }
-    _selectBaseBranch(upstreamRef);
+    // 빌린 기준은 취향으로 저장하지 않는다 — 흐름 중에 앱이 꺼져도 다음
+    // 시작은 원래 브랜치에서다.
+    _selectBaseBranch(upstreamRef, persist: false);
     unawaited(_selectComparison(branch));
   }
 
   /// 브랜치 diff가 닫힐 때 한 번 — 충돌 흐름이 빌려 간 기준을 되돌린다.
+  /// 사용자가 흐름 중에 기준을 손수 옮겼으면 빌림은 이미 끝난 것: 그 선택을
+  /// 덮지 않고 표만 지운다. 되돌아온 뒤에는 refs를 새로 읽는다 — 해결을 마치고
+  /// 적용한 흐름이라면 어긋남은 이미 끝났고, 그 사실은 새 refs만이 안다.
   void _restoreUpstreamConflictBase() {
-    final returnBase = _upstreamConflictReturnBase;
-    if (returnBase == null) return;
-    _upstreamConflictReturnBase = null;
-    if (_refs.local.contains(returnBase)) _selectBaseBranch(returnBase);
+    final loan = _upstreamConflictLoan;
+    if (loan == null) return;
+    _upstreamConflictLoan = null;
+    if (_baseBranch != loan.borrowed) return;
+    if (!_refs.local.contains(loan.returnTo)) return;
+    _selectBaseBranch(loan.returnTo, persist: false);
+    unawaited(_loadRefs());
   }
 }

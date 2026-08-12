@@ -449,6 +449,28 @@ void main() {
     expect(notified, before, reason: '무덤 너머에서 알리지 않는다');
   });
 
+  test('a repository with no remote has no first push to offer', () async {
+    final controller = UpstreamSyncController(
+      measure: ({required remoteTip, required localTip}) async => clean('ccc'),
+    );
+    addTearDown(controller.dispose);
+
+    controller.updateRefs(
+      const RepoRefs(
+        local: ['main'],
+        current: 'main',
+        localTips: {'main': 'aaa'},
+      ),
+      'main',
+    );
+
+    expect(
+      controller.state.kind,
+      UpstreamSyncKind.hidden,
+      reason: '올릴 곳이 없는 약속은 서지 않는다',
+    );
+  });
+
   test('the sole remote of the repository names the first push', () async {
     final controller = UpstreamSyncController(
       measure: ({required remoteTip, required localTip}) async => clean('ccc'),

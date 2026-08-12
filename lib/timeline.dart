@@ -535,8 +535,9 @@ class _TimelineScreenState extends State<TimelineScreen>
   );
   var _upstreamSyncBusy = false;
 
-  /// 충돌 해결 흐름이 잠깐 빌린 기준 브랜치 — 흐름이 끝나면 여기로 돌아온다.
-  String? _upstreamConflictReturnBase;
+  /// 충돌 해결 흐름이 잠깐 빌린 기준: 빌려 간 원격 ref와 돌아갈 로컬 브랜치.
+  /// 사용자가 흐름 중에 기준을 손수 바꿨다면 빌림은 끝난 것이라 되돌리지 않는다.
+  ({String borrowed, String returnTo})? _upstreamConflictLoan;
 
   // 커밋 찾기 — 목록을 거르지 않고 찾은 자리에 불을 켠다.
   final _searchController = TextEditingController();
@@ -2001,7 +2002,7 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// 기준은 원격 브랜치도 될 수 있다. 로컬 브랜치를 원격 위로 재배치하는 방향은
   /// 그렇게 골라야만 나온다. 대신 기준이 원격이면 기준을 옮기는 적용(Merge, Rebase
   /// 후 Merge)은 받을 로컬 브랜치가 없어 막힌다.
-  void _selectBaseBranch(String branch) {
+  void _selectBaseBranch(String branch, {bool persist = true}) {
     if (_branchApplyBusy ||
         !(_refs.local.contains(branch) || _refs.remote.contains(branch)) ||
         branch == _baseBranch) {
@@ -2022,11 +2023,15 @@ class _TimelineScreenState extends State<TimelineScreen>
         unawaited(_selectComparison(compared));
       }
     }
-    if (widget.preferredBranchReady) {
-      widget.onPreferredBranchChanged?.call(branch);
-    } else {
-      _pendingBaseBranch = branch;
-      _pendingBaseBranchIsUserSelection = true;
+    // 충돌 해결 흐름이 잠깐 빌리는 기준은 취향이 아니다 — 저장해 두면 흐름
+    // 도중에 앱이 꺼졌을 때 원격 ref가 기준으로 되살아나 사용자가 좌초한다.
+    if (persist) {
+      if (widget.preferredBranchReady) {
+        widget.onPreferredBranchChanged?.call(branch);
+      } else {
+        _pendingBaseBranch = branch;
+        _pendingBaseBranchIsUserSelection = true;
+      }
     }
     unawaited(_refreshRemotes());
     _focusNode.requestFocus();

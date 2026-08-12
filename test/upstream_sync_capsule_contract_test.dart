@@ -81,7 +81,7 @@ void main() {
         matching: find.byType(Tooltip),
       ),
     );
-    expect(tooltip.message, contains('origin/main과 같습니다'));
+    expect(tooltip.message, contains('origin/main 브랜치와 같습니다'));
     expect(tooltip.message, contains('확인'), reason: '언제 확인했는지도 말한다');
   });
 
@@ -92,6 +92,7 @@ void main() {
     expect(find.byKey(const Key('upstream-sync-pull')), findsNothing);
     final push = textOf(tester, const Key('upstream-sync-push'));
     expect(push.textSpan!.toPlainText(), '↑ 3 Push');
+    expect(push.style?.color, const Color(0xFF8AD6A1), reason: '초록 — 그대로 됨');
 
     await pump(tester, state(UpstreamSyncKind.pullOnly, behind: 2));
     expect(find.byKey(const Key('upstream-sync-push')), findsNothing);
@@ -120,14 +121,12 @@ void main() {
       ),
     );
 
-    expect(
-      textOf(tester, const Key('upstream-sync-pull')).textSpan!.toPlainText(),
-      '↓ 2 Pull',
-    );
-    expect(
-      textOf(tester, const Key('upstream-sync-push')).textSpan!.toPlainText(),
-      '↑ 3 Push',
-    );
+    final pull = textOf(tester, const Key('upstream-sync-pull'));
+    final push = textOf(tester, const Key('upstream-sync-push'));
+    expect(pull.textSpan!.toPlainText(), '↓ 2 Pull');
+    expect(push.textSpan!.toPlainText(), '↑ 3 Push');
+    expect(pull.style?.color, push.style?.color, reason: '두 동사가 같은 판정을 입는다');
+    expect(push.style?.color, const Color(0xFFF0A35E), reason: '주황 — 얹으면 됨');
     final pushTip = tester.widget<Tooltip>(
       find.ancestor(
         of: find.byKey(const Key('upstream-sync-push')),

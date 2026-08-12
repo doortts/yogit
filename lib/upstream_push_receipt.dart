@@ -14,6 +14,8 @@ class PushReceipt extends StatelessWidget {
     required this.incoming,
     required this.outgoing,
     required this.footnote,
+    this.incomingTotal,
+    this.outgoingTotal,
     super.key,
   });
 
@@ -26,6 +28,11 @@ class PushReceipt extends StatelessWidget {
 
   /// 물음 직전의 한 줄: ref 이동 해시, 또는 재연 확인 문장.
   final String footnote;
+
+  /// 실제 오갈 개수 — 목록은 아홉 개에서 잘려도 요약과 '외 N개'는 이 수를
+  /// 말한다. 영수증이 실물보다 적게 말하는 일은 없어야 한다.
+  final int? incomingTotal;
+  final int? outgoingTotal;
 
   @override
   Widget build(BuildContext context) {
@@ -40,9 +47,10 @@ class PushReceipt extends StatelessWidget {
             palette,
             key: const Key('push-receipt-pull-block'),
             op: 'pull --rebase',
-            count: '커밋 ${incoming.length}개 들어옴',
+            count: '커밋 ${incomingTotal ?? incoming.length}개 들어옴',
             countColor: mainAccent,
             commits: incoming,
+            more: (incomingTotal ?? incoming.length) - incoming.length,
             mark: '+',
             markColor: mainAccent,
           ),
@@ -51,9 +59,10 @@ class PushReceipt extends StatelessWidget {
             palette,
             key: const Key('push-receipt-push-block'),
             op: 'push',
-            count: '커밋 ${outgoing.length}개 올라감',
+            count: '커밋 ${outgoingTotal ?? outgoing.length}개 올라감',
             countColor: previewControlBlue,
             commits: outgoing,
+            more: (outgoingTotal ?? outgoing.length) - outgoing.length,
             mark: '↑',
             markColor: previewControlBlue,
           ),
@@ -80,6 +89,7 @@ class PushReceipt extends StatelessWidget {
     required String count,
     required Color countColor,
     required List<MovedCommit> commits,
+    required int more,
     required String mark,
     required Color markColor,
   }) => Container(
@@ -166,6 +176,14 @@ class PushReceipt extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+          ),
+        if (more > 0)
+          Padding(
+            padding: const EdgeInsets.only(left: 17, top: 3),
+            child: Text(
+              '외 $more개',
+              style: TextStyle(color: palette.muted, fontSize: 12),
             ),
           ),
       ],

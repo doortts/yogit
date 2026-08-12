@@ -227,6 +227,24 @@ extension _TimelineChrome on _TimelineScreenState {
     ],
   );
 
+  /// 재연이 실패하면 캡슐은 무채색으로 판정을 보류한다 — 왜인지는 여기,
+  /// 상태바가 말한다. 다음 refs 로드가 다시 잰다.
+  Widget _upstreamMeasureNotice() => ListenableBuilder(
+    listenable: _upstreamSync,
+    builder: (context, _) {
+      final error = _upstreamSync.state.measureError;
+      if (error == null) return const SizedBox.shrink();
+      return Tooltip(
+        message: error,
+        child: Text(
+          key: const Key('upstream-measure-error'),
+          '동기화 판정 실패 · 다시 잽니다',
+          style: TextStyle(color: behindOrange, fontSize: 10),
+        ),
+      );
+    },
+  );
+
   Widget _statusBar() => _normalStatusBar();
 
   Widget _normalStatusBar() => LayoutBuilder(
@@ -255,6 +273,7 @@ extension _TimelineChrome on _TimelineScreenState {
                       _legend('merge', const LegendDot(filled: true)),
                       _legend('WIP', const LegendDot(dashed: true)),
                       _frameRevivalNotice(),
+                      _upstreamMeasureNotice(),
                     ],
                   )
                 : Row(

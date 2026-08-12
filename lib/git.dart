@@ -4676,10 +4676,13 @@ class GitRepository implements FullDiffRepository {
   /// [toBranch] is the upstream's own name when it differs from the local one
   /// — `main` tracking `origin/trunk` measures against trunk, so it pushes to
   /// trunk; assuming the same name would quietly create a second branch.
+  /// [fromTip] pins what goes up to the tip a receipt showed: a commit that
+  /// lands while the dialog is open is not quietly pushed along with it.
   Future<void> pushBranch(
     String remote,
     String branch, {
     String? toBranch,
+    String? fromTip,
     bool setUpstream = false,
   }) => _runWithoutPrompts([
     '-c',
@@ -4687,7 +4690,7 @@ class GitRepository implements FullDiffRepository {
     'push',
     if (setUpstream) '-u',
     remote,
-    'refs/heads/$branch:refs/heads/${toBranch ?? branch}',
+    '${fromTip ?? 'refs/heads/$branch'}:refs/heads/${toBranch ?? branch}',
   ]);
 
   /// One replay, measured and thrown away: can [localTip]'s own commits sit

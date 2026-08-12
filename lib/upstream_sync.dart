@@ -153,8 +153,12 @@ class UpstreamSyncController extends ChangeNotifier {
       return UpstreamSyncState.none;
     }
     final upstreamRef = refs.upstreams[branch];
-    // 처음 올릴 원격: 추적이 말해 주면 그것, 아니면 저장소에 원격이 하나뿐일
+    // 원격이 하나도 없으면 '처음 Push'는 성립하지 않는 약속이다 — 캡슐이 서지
+    // 않는다. 올릴 원격: 추적이 말해 주면 그것, 아니면 저장소에 원격이 하나뿐일
     // 때 그 하나. 'origin'은 짐작이 아니라 마지막 관례다.
+    if (upstreamRef == null && refs.remoteNames.isEmpty) {
+      return UpstreamSyncState.none;
+    }
     final remote =
         refs.upstreamRemotes[branch] ??
         (refs.remoteNames.length == 1 ? refs.remoteNames.single : 'origin');

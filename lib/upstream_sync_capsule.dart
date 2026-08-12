@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'commit_time.dart';
 import 'timeline_palette.dart';
 import 'timeline_theme.dart';
+import 'timeline_widgets.dart';
 import 'upstream_sync.dart';
 
 /// 기준 브랜치 선택기 곁의 동기화 캡슐. 동사는 '무엇을 하겠다'가 아니라 '하면
@@ -53,8 +54,8 @@ class UpstreamSyncCapsule extends StatelessWidget {
               color: palette.muted,
               text: '↑ 처음 Push',
               tooltip:
-                  '${state.remote}에 ${state.branch}을(를) 만들고 추적을 연결합니다'
-                  ' (push -u)',
+                  '${state.remote}에 ${state.branch} 브랜치를 만들고 추적을 '
+                  '연결합니다 (push -u)',
               onTap: onPush,
             ),
           ],
@@ -121,7 +122,7 @@ class UpstreamSyncCapsule extends StatelessWidget {
               color: remoteBehindRed,
               text: '↓ ${state.behind} 충돌 ${state.conflictFiles.length}파일',
               tooltip:
-                  '빨리감기는 불가, 받아 얹으면 ${_conflictSummary()}이(가) '
+                  '빨리감기는 불가, 받아 얹으면 ${_conflictSummary()}에서 '
                   '충돌합니다 — 눌러서 해결$_measured',
               onTap: onResolveConflict,
             ),
@@ -149,16 +150,16 @@ class UpstreamSyncCapsule extends StatelessWidget {
 
   String get _freshness => switch (state.checkedAt) {
     null => '',
-    final at => ' · ${_ago(at)} 확인',
+    final at => ' · ${_ago(at)}에 확인',
   };
 
   String get _measured => switch (state.measuredAt) {
     null => '',
-    final at => ' · ${_ago(at)} 잼',
+    final at => ' · ${_ago(at)}에 잰 판정',
   };
 
   Widget _dot(TimelineThemePalette palette) => Tooltip(
-    message: '${state.upstreamRef}과 같습니다$_freshness',
+    message: '${state.upstreamRef} 브랜치와 같습니다$_freshness',
     child: Container(
       key: const Key('upstream-sync-dot'),
       width: 6,
@@ -182,78 +183,52 @@ class UpstreamSyncCapsule extends StatelessWidget {
     final parts = text.split(' ');
     return Tooltip(
       message: tooltip,
-      child: _HoverSurface(
+      waitDuration: const Duration(milliseconds: 300),
+      child: HoverBuilder(
         enabled: enabled,
-        onTap: onTap,
-        child: Padding(
-          key: key,
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-          child: Text.rich(
-            TextSpan(
-              children: [
-                for (var index = 0; index < parts.length; index++) ...[
-                  if (index > 0) const TextSpan(text: ' '),
-                  TextSpan(
-                    text: parts[index],
-                    // 개수는 판정 색과 함께, 고정폭으로.
-                    style: int.tryParse(parts[index]) != null
-                        ? const TextStyle(fontFamily: 'monospace', fontSize: 11)
-                        : null,
-                  ),
-                ],
-              ],
+        builder: (hovered) => GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: enabled ? onTap : null,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: hovered && enabled
+                  ? palette.selectedRow
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(5),
             ),
-            style: TextStyle(
-              color: enabled ? color : color.withValues(alpha: 0.45),
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
+            child: Padding(
+              key: key,
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    for (var index = 0; index < parts.length; index++) ...[
+                      if (index > 0) const TextSpan(text: ' '),
+                      TextSpan(
+                        text: parts[index],
+                        // 개수는 판정 색과 함께, 고정폭으로.
+                        style: int.tryParse(parts[index]) != null
+                            ? const TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 11,
+                              )
+                            : null,
+                      ),
+                    ],
+                  ],
+                ),
+                style: TextStyle(
+                  color: enabled ? color : color.withValues(alpha: 0.45),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
           ),
         ),
       ),
     );
   }
-}
-
-class _HoverSurface extends StatefulWidget {
-  const _HoverSurface({
-    required this.enabled,
-    required this.onTap,
-    required this.child,
-  });
-
-  final bool enabled;
-  final VoidCallback onTap;
-  final Widget child;
-
-  @override
-  State<_HoverSurface> createState() => _HoverSurfaceState();
-}
-
-class _HoverSurfaceState extends State<_HoverSurface> {
-  var _hovered = false;
-
-  @override
-  Widget build(BuildContext context) => MouseRegion(
-    cursor: widget.enabled
-        ? SystemMouseCursors.click
-        : SystemMouseCursors.basic,
-    onEnter: (_) => setState(() => _hovered = true),
-    onExit: (_) => setState(() => _hovered = false),
-    child: GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: widget.enabled ? widget.onTap : null,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: _hovered && widget.enabled
-              ? const Color(0xFF3A3A3C)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(5),
-        ),
-        child: widget.child,
-      ),
-    ),
-  );
 }
 
 /// '4분 전' — 잰 지 얼마 안 됐으면 '방금'.
