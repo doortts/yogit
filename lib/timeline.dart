@@ -806,7 +806,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         YogitAlert(
           // Wider than an alert of prose: commit subjects have to be readable
           // or the list is decoration.
-          boxWidth: 520,
+          boxWidth: YogitAlert.listWidth,
           title: '저장소가 밖에서 바뀌었습니다',
           body: details == null
               ? null

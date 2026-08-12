@@ -53,6 +53,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
         final approved = await showYogitAlert<bool>(
           context,
           YogitAlert(
+            boxWidth: YogitAlert.listWidth,
             title: '받아 얹을까요? (Pull --rebase)',
             body: PushReceipt(
               branch: state.branch!,
@@ -109,6 +110,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
         final approved = await showYogitAlert<bool>(
           context,
           YogitAlert(
+            boxWidth: YogitAlert.listWidth,
             title: '${state.branch} 브랜치를 ${state.remote}에 Push할까요?',
             body: PushReceipt(
               branch: state.branch!,
@@ -140,6 +142,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
         final approved = await showYogitAlert<bool>(
           context,
           YogitAlert(
+            boxWidth: YogitAlert.listWidth,
             title: '받아 얹은 뒤 Push할까요? (Pull Rebase and Push)',
             body: PushReceipt(
               branch: state.branch!,
