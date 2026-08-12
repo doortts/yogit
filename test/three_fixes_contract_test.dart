@@ -48,7 +48,11 @@ void main() {
     tester,
   ) async {
     final service = serviceWithPhotos();
-    await service.resolve(photographed.sha);
+    await service.resolve(
+      photographed.sha,
+      author: photographed.author,
+      committer: photographed.committer,
+    );
     await tester.pump();
 
     await tester.pumpWidget(

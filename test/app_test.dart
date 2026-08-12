@@ -12822,8 +12822,16 @@ void main() {
         );
       });
 
-      final first = service.resolve('abc1234');
-      final second = service.resolve('abc1234');
+      final first = service.resolve(
+        'abc1234',
+        author: _ada,
+        committer: _cam,
+      );
+      final second = service.resolve(
+        'abc1234',
+        author: _ada,
+        committer: _cam,
+      );
       final avatars = await first;
 
       expect(identical(first, second), isTrue);
@@ -12950,7 +12958,11 @@ void main() {
         ),
       );
 
-      final avatars = await service.resolve(entry.key);
+      final avatars = await service.resolve(
+        entry.key,
+        author: GitIdentity(name: 'Ada', email: 'ada@${entry.key}'),
+        committer: GitIdentity(name: 'Cam', email: 'cam@${entry.key}'),
+      );
 
       expect(avatars.author, isNull, reason: entry.key);
       expect(avatars.committer?.login, 'cam', reason: entry.key);
@@ -12973,7 +12985,11 @@ void main() {
       token: 'secret-token',
     );
 
-    final avatars = await service.resolve('abc1234');
+    final avatars = await service.resolve(
+      'abc1234',
+      author: _ada,
+      committer: _cam,
+    );
 
     expect(avatars.author?.headers, isEmpty);
     expect(avatars.committer?.headers['Authorization'], 'Bearer secret-token');
@@ -12996,7 +13012,10 @@ void main() {
       return gate.future.whenComplete(() => active--);
     });
 
-    final futures = List.generate(5, (index) => service.resolve('$index'));
+    final futures = List.generate(
+      5,
+      (index) => service.resolve('$index', author: _person(index)),
+    );
     await Future<void>.delayed(Duration.zero);
     expect(started, 4);
     expect(peak, 4);
@@ -13020,7 +13039,10 @@ void main() {
             gates[started++].future,
       );
 
-      final futures = List.generate(400, (index) => service.resolve('$index'));
+      final futures = List.generate(
+        400,
+        (index) => service.resolve('$index', author: _person(index)),
+      );
       await Future<void>.delayed(Duration.zero);
 
       expect(started, 4);
@@ -13028,7 +13050,10 @@ void main() {
       expect(service.debugQueuedRequestCount, 32);
       expect(service.debugCachedRequestCount, lessThanOrEqualTo(256));
       expect(
-        identical(service.resolve('saturated'), service.resolve('saturated')),
+        identical(
+          service.resolve('saturated', author: _person(999)),
+          service.resolve('saturated', author: _person(999)),
+        ),
         isTrue,
       );
 
@@ -13052,11 +13077,17 @@ void main() {
         return (status: 500, body: 'offline');
       });
       for (var index = 0; index < 300; index++) {
-        await lru.resolve('$index');
+        await lru.resolve('$index', author: _person(index));
       }
       expect(sequentialStarts, 300);
       expect(lru.debugCachedRequestCount, 256);
-      expect(identical(lru.resolve('299'), lru.resolve('299')), isTrue);
+      expect(
+        identical(
+          lru.resolve('299', author: _person(299)),
+          lru.resolve('299', author: _person(299)),
+        ),
+        isTrue,
+      );
     },
   );
 
@@ -18251,6 +18282,14 @@ Widget app(
 
 /// An [AvatarService] whose REST calls answer from [send] instead of the
 /// network.
+const _ada = GitIdentity(name: 'Ada Author', email: 'ada@example.com');
+const _cam = GitIdentity(name: 'Cam Committer', email: 'cam@example.com');
+
+/// 저마다 다른 사람 — 한 사람이면 한 번만 물으니, 요청 수를 세는 시험은 사람을
+/// 행마다 갈라 두어야 실제로 여러 번 묻는다.
+GitIdentity _person(int index) =>
+    GitIdentity(name: 'User $index', email: 'user$index@example.com');
+
 AvatarService avatarServiceOn(
   HttpSend send, {
   RemoteRepository remote = const RemoteRepository(

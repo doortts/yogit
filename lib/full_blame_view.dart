@@ -577,7 +577,10 @@ class BlameSourceRow extends StatelessWidget {
         : null;
     if (service == null) return avatar(null);
     return FutureBuilder<CommitAvatars>(
-      future: service.resolve(blame.sha),
+      // Blame names who wrote the line and not who committed it, so only the
+      // author is asked for — and only the author is remembered from the answer.
+      future: service.resolve(blame.sha, author: identity),
+      initialData: service.cachedFor(author: identity),
       builder: (context, snapshot) => avatar(snapshot.data?.author),
     );
   }

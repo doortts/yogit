@@ -115,34 +115,117 @@ class AvatarService {
 
   final RemoteRepository remote;
   final GitHubApi api;
+
+  /// The answer already given for a sha, so a row that rebuilds hands
+  /// `FutureBuilder` the same object instead of a new one every frame.
   final _cache = <String, Future<CommitAvatars>>{};
 
-  /// What a finished lookup found, kept beside the future so a rebuild can
-  /// paint the photo in the same frame instead of flashing initials first.
-  final _resolved = <String, CommitAvatars>{};
+  /// What GitHub said about a person, which is what an avatar actually belongs
+  /// to. A repository whose whole history is one author asks once rather than
+  /// once per commit, and the next row that person wrote is answered without
+  /// waiting — or asking — at all.
+  ///
+  /// A key that is present with a null value is an answer too: GitHub has no
+  /// account for that identity. It is only ever written from an answer that
+  /// arrived, so a lookup that failed leaves nothing behind and can be asked
+  /// again.
+  // ponytail: unbounded identity map, add an LRU trim if a repository with
+  // ten thousand authors ever turns up.
+  final _known = <String, RemoteAvatar?>{};
+
+  /// The lookups on their way, so two rows by the same person scrolling in
+  /// together share one request rather than racing.
+  final _identities = <String, Future<RemoteAvatar?>>{};
   final _permits = _PermitPool(4, maxQueued: 32);
   final _saturated = Future.value(const CommitAvatars());
   Future<String?>? _account;
 
-  /// The answer for [sha] if one has already arrived, without waiting a frame.
-  CommitAvatars? cachedFor(String sha) => _resolved[sha];
+  /// An identity's key: the email, lowercased, because that is what GitHub
+  /// matches a commit to an account by. A commit written without one falls
+  /// back to the name, which is all it left to be known by.
+  static String _identityKey(GitIdentity identity) {
+    final email = identity.email.trim();
+    return (email.isEmpty ? identity.name.trim() : email).toLowerCase();
+  }
 
-  Future<CommitAvatars> resolve(String sha) {
+  /// What is already known about these people, without waiting a frame. Null
+  /// when neither of them has been heard about yet; otherwise as much as has
+  /// arrived, so a face already known is drawn while the other is still coming.
+  CommitAvatars? cachedFor({
+    required GitIdentity author,
+    GitIdentity? committer,
+  }) {
+    final authorKey = _identityKey(author);
+    final committerKey = committer == null ? null : _identityKey(committer);
+    if (!_known.containsKey(authorKey) &&
+        (committerKey == null || !_known.containsKey(committerKey))) {
+      return null;
+    }
+    return CommitAvatars(
+      author: _known[authorKey],
+      committer: committerKey == null ? null : _known[committerKey],
+    );
+  }
+
+  /// The avatars for the commit at [sha], written by [author] and committed by
+  /// [committer]. The sha is what GitHub is asked about; the identities are who
+  /// the answer is remembered under, and the reason the same answer serves
+  /// every other commit those people wrote.
+  Future<CommitAvatars> resolve(
+    String sha, {
+    required GitIdentity author,
+    GitIdentity? committer,
+  }) {
     final cached = _cache.remove(sha);
     if (cached != null) {
       _cache[sha] = cached;
       return cached;
     }
-    final pending = _permits.tryRun(
-      () => _load(sha).then((avatars) {
-        _resolved[sha] = avatars;
-        return avatars;
-      }),
-    );
+    final keys = {
+      _identityKey(author),
+      if (committer != null) _identityKey(committer),
+    };
+    // Everyone on this row is known, or is already being asked about: the row
+    // is answered from what the app has, and the queue never hears about it.
+    if (keys.every(
+      (key) => _known.containsKey(key) || _identities.containsKey(key),
+    )) {
+      return _remember(sha, _fromIdentities(author, committer));
+    }
+    final pending = _permits.tryRun(() => _load(sha, author, committer));
     if (pending == null) return _saturated;
-    _cache[sha] = pending;
+    for (final key in keys) {
+      // A lookup that threw is nobody's answer: the person goes back to being
+      // unknown so the next commit of theirs asks again. The error itself is
+      // the row's to show, and it is already on the future the row holds.
+      _identities[key] = pending.then<RemoteAvatar?>(
+        (_) => _known[key],
+        onError: (Object _, StackTrace _) {
+          _identities.remove(key);
+          return null;
+        },
+      );
+    }
+    return _remember(sha, pending);
+  }
+
+  Future<CommitAvatars> _remember(String sha, Future<CommitAvatars> answer) {
+    _cache[sha] = answer;
     if (_cache.length > 256) _cache.remove(_cache.keys.first);
-    return pending;
+    return answer;
+  }
+
+  Future<CommitAvatars> _fromIdentities(
+    GitIdentity author,
+    GitIdentity? committer,
+  ) async => CommitAvatars(
+    author: await _identityAvatar(author),
+    committer: committer == null ? null : await _identityAvatar(committer),
+  );
+
+  Future<RemoteAvatar?> _identityAvatar(GitIdentity identity) {
+    final key = _identityKey(identity);
+    return _identities[key] ?? Future.value(_known[key]);
   }
 
   @visibleForTesting
@@ -190,23 +273,52 @@ class AvatarService {
         : null;
   }
 
-  Future<CommitAvatars> _load(String sha) async {
+  /// Asks about one commit and files the answer under the people it names. A
+  /// lookup that failed is not an answer: nothing is remembered, so the next
+  /// commit by the same person asks again rather than wearing initials for the
+  /// rest of the session over one dropped request.
+  Future<CommitAvatars> _load(
+    String sha,
+    GitIdentity author,
+    GitIdentity? committer,
+  ) async {
     final json = await _getJsonOrNull(
       'repos/${remote.owner}/${remote.repository}/commits/$sha',
     );
-    if (json is! Map<String, dynamic>) return const CommitAvatars();
-    final author = _parseAvatar(json['author']);
-    final committer = _parseAvatar(json['committer']);
-    if (remote.host == 'github.com' ||
-        api.token.isEmpty ||
-        !_needsRemoteHeader(author, committer)) {
-      return CommitAvatars(author: author, committer: committer);
+    if (json is! Map<String, dynamic>) {
+      _forget(author, committer);
+      return const CommitAvatars();
     }
-    final headers = {'Authorization': 'Bearer ${api.token}'};
-    return CommitAvatars(
-      author: _withSafeHeaders(author, headers),
-      committer: _withSafeHeaders(committer, headers),
+    final avatars = CommitAvatars(
+      author: _headed(_parseAvatar(json['author'])),
+      committer: _headed(_parseAvatar(json['committer'])),
     );
+    _known[_identityKey(author)] = avatars.author;
+    // Blame knows who wrote a line but not who committed it. Without an
+    // identity to file it under, the committer's account is dropped rather
+    // than remembered as somebody.
+    if (committer != null) {
+      _known[_identityKey(committer)] = avatars.committer;
+    }
+    return CommitAvatars(
+      author: avatars.author,
+      committer: committer == null ? null : avatars.committer,
+    );
+  }
+
+  void _forget(GitIdentity author, GitIdentity? committer) {
+    _identities.remove(_identityKey(author));
+    if (committer != null) _identities.remove(_identityKey(committer));
+  }
+
+  /// An enterprise server wants the token before it hands over a face. The
+  /// header rides on the avatar itself, so it goes wherever that avatar is
+  /// reused — including onto a row whose own commit was never fetched.
+  RemoteAvatar? _headed(RemoteAvatar? avatar) {
+    if (avatar == null || remote.host == 'github.com' || api.token.isEmpty) {
+      return avatar;
+    }
+    return _withSafeHeaders(avatar, {'Authorization': 'Bearer ${api.token}'});
   }
 
   /// A failed avatar lookup stays quiet — the row keeps its initials — so every
@@ -233,11 +345,6 @@ class AvatarService {
     }
     return RemoteAvatar(login: login, url: uri.toString());
   }
-
-  bool _needsRemoteHeader(RemoteAvatar? author, RemoteAvatar? committer) =>
-      [author, committer].whereType<RemoteAvatar>().any(
-        (avatar) => Uri.parse(avatar.url).host.toLowerCase() == remote.host,
-      );
 
   RemoteAvatar? _withSafeHeaders(
     RemoteAvatar? avatar,
@@ -514,8 +621,15 @@ class CommitAvatarStack extends StatelessWidget {
     final service = showRemoteAvatars ? avatarService : null;
     if (service == null) return _stack(null);
     return FutureBuilder<CommitAvatars>(
-      future: service.resolve(commit.sha),
-      initialData: service.cachedFor(commit.sha),
+      future: service.resolve(
+        commit.sha,
+        author: commit.author,
+        committer: commit.committer,
+      ),
+      initialData: service.cachedFor(
+        author: commit.author,
+        committer: commit.committer,
+      ),
       builder: (context, snapshot) => _stack(snapshot.data),
     );
   }
