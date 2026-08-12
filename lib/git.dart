@@ -3661,6 +3661,38 @@ class GitRepository implements FullDiffRepository {
     }
   }
 
+  /// The files [area] is holding. `_revisionsFor` keeps meaning worktree
+  /// against HEAD for every other screen, so an area names its own side
+  /// instead: nothing for the worktree against the index, `--cached` for the
+  /// index against HEAD. Untracked files belong to the worktree side alone —
+  /// staging one is what puts it in the index, where it is an ordinary add.
+  Future<List<GitFileChange>> loadAreaFiles(WorkingTreeArea area) =>
+      _changedFiles(
+        area == WorkingTreeArea.staged ? const ['--cached'] : const [],
+        untracked: area == WorkingTreeArea.unstaged,
+      );
+
+  /// The patch [area] shows for [file].
+  Future<List<DiffLine>> loadAreaDiff(
+    WorkingTreeArea area,
+    GitFileChange file, {
+    DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
+    bool ignoreWhitespace = false,
+    DiffScope scope = DiffScope.hunks,
+  }) async {
+    if (_untrackedFiles[file] ?? false) return _syntheticUntrackedDiff(file);
+    return _diffLines(
+      area == WorkingTreeArea.staged ? const ['--cached'] : const [],
+      file,
+      algorithm: algorithm,
+      ignoreWhitespace: ignoreWhitespace,
+      scope: scope,
+    );
+  }
+
+  /// The index copy of [path] — stage 0, which is what a commit would take.
+  Future<Uint8List> loadIndexBytes(String path) => loadBlobBytes(':0', path);
+
   Future<String> _cherryPickPreflight(String sha) async {
     final current = (await _run(['branch', '--show-current'])).trim();
     if (current.isEmpty) {
@@ -3854,14 +3886,28 @@ class GitRepository implements FullDiffRepository {
     GitCommit commit, {
     String? parent,
   }) async {
-    final revisions = await _revisionsFor(commit, parent);
+    final files = await _changedFiles(
+      await _revisionsFor(commit, parent),
+      untracked: commit.isWorkingTree,
+    );
+    return _withFileSizes(commit, files, parent: parent);
+  }
+
+  /// The files one `git diff` reports. [range] is whatever sits between the
+  /// options and `--` — a revision pair, a single revision, `--cached`, or
+  /// nothing at all. [untracked] appends what git does not know about yet,
+  /// marked so that their diff comes out synthetic rather than empty.
+  Future<List<GitFileChange>> _changedFiles(
+    List<String> range, {
+    required bool untracked,
+  }) async {
     final statuses = _parseNameStatus(
       await _run([
         'diff',
         ...safeDiffArguments,
         '--name-status',
         '-z',
-        ...revisions,
+        ...range,
         '--',
       ]),
     );
@@ -3871,7 +3917,7 @@ class GitRepository implements FullDiffRepository {
         ...safeDiffArguments,
         '--numstat',
         '-z',
-        ...revisions,
+        ...range,
         '--',
       ]),
     );
@@ -3886,28 +3932,27 @@ class GitRepository implements FullDiffRepository {
           isBinary: stats[status.path]?.isBinary ?? false,
         ),
     ];
-    if (commit.isWorkingTree) {
-      final existing = {for (final file in files) file.path};
-      final untracked = (await _run([
-        'ls-files',
-        '--others',
-        '--exclude-standard',
-        '-z',
-      ])).split('\x00').where((path) => path.isNotEmpty);
-      for (final path in untracked) {
-        if (existing.add(path)) {
-          final file = GitFileChange(
-            path: path,
-            status: 'A',
-            additions: null,
-            deletions: null,
-          );
-          _untrackedFiles[file] = true;
-          files.add(file);
-        }
+    if (!untracked) return files;
+    final existing = {for (final file in files) file.path};
+    final others = (await _run([
+      'ls-files',
+      '--others',
+      '--exclude-standard',
+      '-z',
+    ])).split('\x00').where((path) => path.isNotEmpty);
+    for (final path in others) {
+      if (existing.add(path)) {
+        final file = GitFileChange(
+          path: path,
+          status: 'A',
+          additions: null,
+          deletions: null,
+        );
+        _untrackedFiles[file] = true;
+        files.add(file);
       }
     }
-    return _withFileSizes(commit, files, parent: parent);
+    return files;
   }
 
   Future<List<GitFileChange>> _loadFilesBetween(
@@ -4078,26 +4123,46 @@ class GitRepository implements FullDiffRepository {
     DiffScope scope = DiffScope.hunks,
   }) async {
     if (commit.isWorkingTree && (_untrackedFiles[file] ?? false)) {
-      final snapshot = await _readWorktreeSnapshot(file.path);
-      return snapshot.exceeded
-          ? const <DiffLine>[]
-          : _untrackedDiff(snapshot.bytes);
+      return _syntheticUntrackedDiff(file);
     }
+    return _diffLines(
+      await _revisionsFor(commit, parent),
+      file,
+      algorithm: algorithm,
+      ignoreWhitespace: ignoreWhitespace,
+      scope: scope,
+    );
+  }
+
+  /// The patch one `git diff` produces for [file]. [range] is what sits
+  /// between the options and `--`, as in [_changedFiles].
+  Future<List<DiffLine>> _diffLines(
+    List<String> range,
+    GitFileChange file, {
+    required DiffAlgorithm algorithm,
+    required bool ignoreWhitespace,
+    required DiffScope scope,
+  }) async {
     final args = [
       'diff',
       ...safeDiffArguments,
       '--unified=${scope == DiffScope.hunks ? 3 : fullDiffTextLineLimit}',
       if (ignoreWhitespace) '--ignore-all-space',
       ...algorithm.gitArguments,
-      ...await _revisionsFor(commit, parent),
+      ...range,
       '--',
       ...pathspecsFor(file),
     ];
-    if (scope == DiffScope.hunks) {
-      return parseUnifiedDiff(await _run(args));
-    }
-    final output = await _runDiff(args);
-    return parseUnifiedDiff(output);
+    return parseUnifiedDiff(
+      scope == DiffScope.hunks ? await _run(args) : await _runDiff(args),
+    );
+  }
+
+  Future<List<DiffLine>> _syntheticUntrackedDiff(GitFileChange file) async {
+    final snapshot = await _readWorktreeSnapshot(file.path);
+    return snapshot.exceeded
+        ? const <DiffLine>[]
+        : _untrackedDiff(snapshot.bytes);
   }
 
   Future<List<DiffLine>> loadDiffBetween(
@@ -5137,6 +5202,76 @@ class GitRepository implements FullDiffRepository {
     }
     return utf8.decode(bytes, allowMalformed: true);
   }
+}
+
+/// A [FullDiffRepository] pinned to one working tree area, so the full diff
+/// keeps loading files and patches the way it always has while the commit
+/// panel decides which of the two axes it is looking at. The commit it is
+/// handed is the working tree row either way, so nothing here reads it.
+class WorkingTreeAreaRepository implements FullDiffRepository {
+  WorkingTreeAreaRepository(this.repository, this.area);
+
+  final GitRepository repository;
+  final WorkingTreeArea area;
+
+  @override
+  String get root => repository.root;
+
+  @override
+  Future<GitDiffAlgorithmSetting> loadDiffAlgorithmSetting() =>
+      repository.loadDiffAlgorithmSetting();
+
+  @override
+  Future<String> loadCommitMessage(String sha) =>
+      repository.loadCommitMessage(sha);
+
+  @override
+  Future<List<GitFileChange>> loadFiles(GitCommit commit, {String? parent}) =>
+      repository.loadAreaFiles(area);
+
+  @override
+  Future<List<DiffLine>> loadDiff(
+    GitCommit commit,
+    GitFileChange file, {
+    String? parent,
+    DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
+    bool ignoreWhitespace = false,
+    DiffScope scope = DiffScope.hunks,
+  }) => repository.loadAreaDiff(
+    area,
+    file,
+    algorithm: algorithm,
+    ignoreWhitespace: ignoreWhitespace,
+    scope: scope,
+  );
+
+  @override
+  Future<Uint8List> loadFileBytes(
+    GitCommit commit,
+    GitFileChange file, {
+    String? parent,
+  }) => area == WorkingTreeArea.staged
+      ? repository.loadIndexBytes(file.path)
+      : repository.loadFileBytes(commit, file, parent: parent);
+
+  @override
+  Future<List<GitBlameLine>> loadBlame(
+    GitCommit commit,
+    GitFileChange file, {
+    String? parent,
+    Uint8List? workingTreeBytes,
+  }) => repository.loadBlame(
+    commit,
+    file,
+    parent: parent,
+    workingTreeBytes: workingTreeBytes,
+  );
+
+  @override
+  Future<List<GitFileHistoryRecord>> loadFileHistory(
+    GitCommit commit,
+    GitFileChange file,
+  ) => repository.loadFileHistory(commit, file);
 }
 
 typedef _StatusEntry = ({String status, String path, String? oldPath});

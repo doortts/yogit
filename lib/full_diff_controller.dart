@@ -473,6 +473,15 @@ class FullDiffSessionController extends ChangeNotifier {
     return _loadFiles();
   }
 
+  /// Reads the file list again after a stage or unstage moved something. The
+  /// selected path stays selected while it still has a change on this side,
+  /// and falls to the first file once it has none — a file whose last hunk
+  /// went to the other section is gone from this one.
+  Future<void> refreshWorkingTree() {
+    _wantedPath = state.selectedFile?.path;
+    return _loadFiles();
+  }
+
   Future<void> retryPatch() => _loadPatch();
 
   Future<void> retryFile() => _loadFile();

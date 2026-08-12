@@ -1698,6 +1698,39 @@ void main() {
       expect(controller.state.preferences, preferences);
     },
   );
+
+  test('refreshWorkingTree keeps the selected path and reloads files', () async {
+    const second = GitFileChange(
+      path: 'lib/second.dart',
+      status: 'M',
+      additions: 2,
+      deletions: 1,
+    );
+    var files = const <GitFileChange>[fileA, second];
+    final repository = FakeFullDiffRepository()
+      ..files = ((_, _) async => files)
+      ..scopedDiff = ((_, _, _, _, _, _) async => twoHunkLines)
+      ..content = ((_, _, _) async =>
+          Uint8List.fromList(utf8.encode('current\n')));
+    final controller = FullDiffSessionController(
+      repository: repository,
+      commits: const [_workingTreeCommit],
+      initialIndex: 0,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.selectFile(second);
+
+    await controller.refreshWorkingTree();
+
+    expect(repository.fileRequests, hasLength(2));
+    expect(controller.state.selectedFile?.path, second.path);
+
+    files = const [fileA];
+    await controller.refreshWorkingTree();
+
+    expect(controller.state.selectedFile?.path, fileA.path);
+  });
 }
 
 const historyCommitB = GitCommit(

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -5,6 +6,7 @@ import 'package:yogit/git.dart';
 import 'package:yogit/working_tree_status.dart';
 
 import 'full_diff_git_test.dart' show createGitFixture, runGit, writeAndCommit;
+import 'support/full_diff_fixtures.dart' show commitA, fileA;
 
 /// git derives an identity from the machine when the config has none, so the
 /// identity failure is only deterministic with the outer config files cut off.
@@ -46,6 +48,15 @@ String _numbered(
 /// The index copy of [path], byte for byte.
 Future<String> _indexBlob(Directory root, String path) =>
     runGit(root, ['show', ':$path']);
+
+/// The added and removed lines of a patch, in order and signed.
+List<String> _changes(List<DiffLine> lines) => [
+  for (final line in lines)
+    if (line.kind == DiffLineKind.add)
+      '+${line.text}'
+    else if (line.kind == DiffLineKind.delete)
+      '-${line.text}',
+];
 
 void main() {
   test('loadWorkingTreeStatus reads both sections from a real repository', () async {
@@ -579,5 +590,164 @@ void main() {
       await _indexBlob(root, 'a.txt'),
       _numbered(20, edits: {3: 'line 3 changed'}),
     );
+  });
+
+  test('loadAreaDiff(unstaged) compares worktree to index and (staged) index to HEAD', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'a.txt', 'one\ntwo\nthree\n', 'base');
+    await _write(root, 'a.txt', 'one\nstaged\nthree\n');
+    await runGit(root, ['add', '--', 'a.txt']);
+    await _write(root, 'a.txt', 'one\nstaged\nworktree\n');
+    final repository = GitRepository(root.path);
+    const file = GitFileChange(
+      path: 'a.txt',
+      status: 'M',
+      additions: null,
+      deletions: null,
+    );
+
+    expect(
+      _changes(await repository.loadAreaDiff(WorkingTreeArea.unstaged, file)),
+      ['-three', '+worktree'],
+    );
+    expect(
+      _changes(await repository.loadAreaDiff(WorkingTreeArea.staged, file)),
+      ['-two', '+staged'],
+    );
+  });
+
+  test('loadAreaFiles(unstaged) appends untracked files with a synthetic all-add diff', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'a.txt', 'one\n', 'base');
+    await _write(root, 'a.txt', 'one\ntwo\n');
+    await _write(root, 'nested/fresh.txt', 'fresh one\nfresh two\n');
+    final repository = GitRepository(root.path);
+
+    final files = await repository.loadAreaFiles(WorkingTreeArea.unstaged);
+
+    expect(files.map((file) => file.path), ['a.txt', 'nested/fresh.txt']);
+    expect(files.last.status, 'A');
+    expect(
+      _changes(
+        await repository.loadAreaDiff(WorkingTreeArea.unstaged, files.last),
+      ),
+      ['+fresh one', '+fresh two'],
+    );
+    expect(await repository.loadAreaFiles(WorkingTreeArea.staged), isEmpty);
+  });
+
+  test('loadAreaFiles(staged) lists a rename with both paths', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'old.txt', _numbered(20), 'base');
+    await runGit(root, ['mv', 'old.txt', 'new.txt']);
+
+    final files = await GitRepository(
+      root.path,
+    ).loadAreaFiles(WorkingTreeArea.staged);
+
+    expect(files, hasLength(1));
+    expect(files.single.path, 'new.txt');
+    expect(files.single.oldPath, 'old.txt');
+    expect(files.single.status, startsWith('R'));
+  });
+
+  test('loadIndexBytes reads the :0 blob', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'a.txt', 'committed\n', 'base');
+    await _write(root, 'a.txt', 'staged\n');
+    await runGit(root, ['add', '--', 'a.txt']);
+    await _write(root, 'a.txt', 'worktree\n');
+    final repository = GitRepository(root.path);
+    final wip = (await repository.loadWorkingTree())!;
+    const file = GitFileChange(
+      path: 'a.txt',
+      status: 'M',
+      additions: null,
+      deletions: null,
+    );
+
+    expect(utf8.decode(await repository.loadIndexBytes('a.txt')), 'staged\n');
+    expect(
+      utf8.decode(
+        await WorkingTreeAreaRepository(
+          repository,
+          WorkingTreeArea.staged,
+        ).loadFileBytes(wip, file),
+      ),
+      'staged\n',
+    );
+    expect(
+      utf8.decode(
+        await WorkingTreeAreaRepository(
+          repository,
+          WorkingTreeArea.unstaged,
+        ).loadFileBytes(wip, file),
+      ),
+      'worktree\n',
+    );
+  });
+
+  test('staged area diff works before the first commit', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await _write(root, 'a.txt', 'one\ntwo\n');
+    await runGit(root, ['add', '--', 'a.txt']);
+    final repository = GitRepository(root.path);
+
+    final files = await repository.loadAreaFiles(WorkingTreeArea.staged);
+
+    expect(files.single.path, 'a.txt');
+    expect(files.single.status, 'A');
+    expect(files.single.additions, 2);
+    expect(
+      _changes(
+        await repository.loadAreaDiff(WorkingTreeArea.staged, files.single),
+      ),
+      ['+one', '+two'],
+    );
+  });
+
+  test('WorkingTreeAreaRepository delegates the remaining members', () async {
+    final commands = <List<String>>[];
+    final repository = GitRepository(
+      '/repo',
+      runner: (executable, arguments, {workingDirectory, environment}) async {
+        commands.add(arguments);
+        return ProcessResult(0, 0, arguments.first == 'config' ? 'myers' : '', '');
+      },
+    );
+    final area = WorkingTreeAreaRepository(
+      repository,
+      WorkingTreeArea.staged,
+    );
+
+    expect(area.root, '/repo');
+    expect(
+      (await area.loadDiffAlgorithmSetting()).algorithm,
+      DiffAlgorithm.myers,
+    );
+    await area.loadCommitMessage(commitA.sha);
+    await area.loadBlame(commitA, fileA);
+    await area.loadFileHistory(commitA, fileA);
+
+    expect(commands.map((arguments) => arguments.first), [
+      'config',
+      'show',
+      'blame',
+      'log',
+    ]);
+    expect(commands[1], ['show', '-s', '--format=%B', commitA.sha]);
+    expect(commands[2], [
+      'blame',
+      '--line-porcelain',
+      commitA.sha,
+      '--',
+      fileA.path,
+    ]);
+    expect(commands[3], containsAllInOrder(['log', '--follow', commitA.sha]));
   });
 }
