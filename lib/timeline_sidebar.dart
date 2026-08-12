@@ -197,6 +197,43 @@ extension _TimelineSidebar on _TimelineScreenState {
     });
   }
 
+  /// The other direction: a chip clicked in the timeline's ref column puts the
+  /// sidebar cursor on the same name. The keyboard stays in the timeline, so
+  /// the cursor lands drained of colour like any resting selection. A name the
+  /// sidebar is not showing — a collapsed section or folder, a tag past the
+  /// short list — is opened up to first, or the cursor would point at a row
+  /// that is not there. A filtered-out name simply has nowhere to land.
+  void _selectSidebarRef(String name) {
+    final section = _refs.tags.contains(name)
+        ? _RefSection.tags
+        : _refs.remote.contains(name)
+        ? _RefSection.remote
+        : _refs.local.contains(name)
+        ? _RefSection.local
+        : null;
+    if (section == null) return;
+    _rebuild(() {
+      _collapsedRefSections.remove(section);
+      final segments = name.split('/');
+      for (var depth = 1; depth < segments.length; depth++) {
+        _collapsedRefFolders.remove(
+          '${section.name}:${segments.take(depth).join('/')}',
+        );
+      }
+      if (section == _RefSection.tags &&
+          !_visibleSectionNames(section, _refs.tags).contains(name)) {
+        _showAllTags = true;
+      }
+      _sidebarCursor = (section, name);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = _sidebarRowKeys['${section.name}:$name']?.currentContext;
+      if (context != null) {
+        unawaited(Scrollable.ensureVisible(context, alignment: 0.5));
+      }
+    });
+  }
+
   /// The first click jumps the timeline like any ref row; a second click on
   /// the same row within the double-click window runs the default pull action.
   void _tapRemoteRow(String name) {
@@ -1157,6 +1194,7 @@ extension _TimelineSidebarFlows on _TimelineScreenState {
     GitCommit commit,
     GitRef ref,
     Color color, {
+    required int rowIndex,
     Color? rowColor,
     int? paletteIndex,
     bool dim = false,
@@ -1217,14 +1255,23 @@ extension _TimelineSidebarFlows on _TimelineScreenState {
         ],
       ),
     );
-    return LayoutBuilder(
-      builder: (context, constraints) => GrowingChip(
-        grown: _refNameIsCut(ref, foreground, constraints.maxWidth, context),
-        whole: chip(whole: true),
-        wholeWidth: _wholeRefChipWidth(ref, foreground, context),
-        revealKey: Key('ref-chip-reveal-${commit.sha}-${ref.name}'),
-        height: _TimelineScreenState._rowChipHeight,
-        child: chip(whole: false),
+    // The chip takes the click off the row, so it does the row's own job as
+    // well: select the row, then put the sidebar cursor on the same name.
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        _select(rowIndex);
+        _selectSidebarRef(ref.name);
+      },
+      child: LayoutBuilder(
+        builder: (context, constraints) => GrowingChip(
+          grown: _refNameIsCut(ref, foreground, constraints.maxWidth, context),
+          whole: chip(whole: true),
+          wholeWidth: _wholeRefChipWidth(ref, foreground, context),
+          revealKey: Key('ref-chip-reveal-${commit.sha}-${ref.name}'),
+          height: _TimelineScreenState._rowChipHeight,
+          child: chip(whole: false),
+        ),
       ),
     );
   }

@@ -200,6 +200,7 @@ extension _TimelineRows on _TimelineScreenState {
         refs,
         rowAccentColor,
         row.branch,
+        entryIndex: index,
         rowColor: rowColor,
         showConnector: _comparison == null,
         deletedBranchName: lineTip == null
@@ -670,6 +671,7 @@ extension _TimelineRows on _TimelineScreenState {
     List<GitRef> refs,
     Color color,
     int branch, {
+    required int entryIndex,
     required Color rowColor,
     bool showConnector = true,
     String? deletedBranchName,
@@ -728,6 +730,7 @@ extension _TimelineRows on _TimelineScreenState {
                           commit,
                           shown[index],
                           color,
+                          rowIndex: entryIndex,
                           rowColor: rowColor,
                           paletteIndex: _comparison == null && index == 0
                               ? _branchPaletteIndexes[branch]
