@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'full_diff_limits.dart';
 import 'local_state_signature.dart';
+import 'working_tree_status.dart';
 
 typedef CommandRunner =
     Future<ProcessResult> Function(
@@ -3407,7 +3408,7 @@ class GitRepository implements FullDiffRepository {
   Future<CherryPickResult> cherryPick(String sha) async {
     final commitSha = await _cherryPickPreflight(sha);
     final arguments = ['cherry-pick', commitSha];
-    return _cherryPickResult(await _runCherryPickCommand(arguments), arguments);
+    return _cherryPickResult(await _runWithoutEditor(arguments), arguments);
   }
 
   Future<CherryPickState?> loadCherryPickState() async {
@@ -3452,7 +3453,7 @@ class GitRepository implements FullDiffRepository {
       throw GitRepositoryException(root, '충돌 파일을 모두 해결해야 계속할 수 있습니다.');
     }
     const arguments = ['-c', 'core.editor=true', 'cherry-pick', '--continue'];
-    return _cherryPickResult(await _runCherryPickCommand(arguments), arguments);
+    return _cherryPickResult(await _runWithoutEditor(arguments), arguments);
   }
 
   Future<void> abortCherryPick() async {
@@ -3484,6 +3485,92 @@ class GitRepository implements FullDiffRepository {
       );
     }
     await _run(['add', '--', pathspec]);
+  }
+
+  /// Both axes of the working tree, with the `--numstat` counts merged onto
+  /// the side that measured them.
+  Future<WorkingTreeStatus> loadWorkingTreeStatus() async {
+    final entries = parseStatusV2(
+      await _run(const [
+        'status',
+        '--porcelain=v2',
+        '--untracked-files=all',
+        '-z',
+      ]),
+    );
+    final numstat = ['diff', ...safeDiffArguments, '--numstat', '-z'];
+    return WorkingTreeStatus(
+      mergeNumstat(
+        entries,
+        unstaged: _parseNumstat(await _run(numstat)),
+        staged: _parseNumstat(await _run([...numstat, '--cached'])),
+      ),
+    );
+  }
+
+  /// Stages [paths], or the whole tree when the list is empty. One `git add`
+  /// records an untracked file, a modification and a worktree deletion alike.
+  Future<void> stageFiles(List<String> paths) => _run([
+    'add',
+    if (paths.isEmpty) '-A' else '--',
+    for (final path in paths) ':(literal)$path',
+  ]);
+
+  /// Takes [paths] out of the index and leaves the worktree alone, or empties
+  /// the whole index when the list is empty. A rename needs both of its paths,
+  /// so that the old one comes back as the new one drops out.
+  ///
+  /// [hasHead] is the working tree row's `parents.isNotEmpty`. Before the
+  /// first commit `restore` has no source to read the index entry back from.
+  Future<void> unstageFiles(List<String> paths, {required bool hasHead}) => _run(
+    [
+      if (hasHead)
+        ...['restore', '--staged']
+      else
+        ...['rm', '--cached', '-r', '--quiet'],
+      '--',
+      if (paths.isEmpty) ':/' else for (final path in paths) ':(literal)$path',
+    ],
+  );
+
+  /// Throws away the worktree change to [path]. A tracked path is restored
+  /// from the index, so a staged change survives and a worktree deletion comes
+  /// back. An [untracked] path has no index copy to restore, so discarding it
+  /// is deleting it — `resolveWorkingTreeFile` is what keeps that delete from
+  /// following a link out of the repository.
+  Future<void> discardWorktreeFile(
+    String path, {
+    bool untracked = false,
+  }) async {
+    if (!untracked) {
+      await _run(['restore', '--', ':(literal)$path']);
+      return;
+    }
+    await (await resolveWorkingTreeFile(root, path)).delete();
+  }
+
+  /// Commits the index and returns the new HEAD. [message] is passed as one
+  /// `-m` argument, so its newlines and `#` lines survive: the runner hands
+  /// argv over without a shell, and `-m` cleans up whitespace only.
+  Future<String> commitIndex({
+    required String message,
+    bool amend = false,
+  }) async {
+    final result = await _runWithoutEditor([
+      '-c',
+      'core.editor=true',
+      'commit',
+      if (amend) '--amend',
+      '-m',
+      message,
+    ]);
+    if (result.exitCode != 0) {
+      throw GitRepositoryException(
+        root,
+        _commitFailureMessage(result.stdout, result.stderr, result.exitCode),
+      );
+    }
+    return (await _run(const ['rev-parse', 'HEAD'])).trim();
   }
 
   Future<String> _cherryPickPreflight(String sha) async {
@@ -3560,7 +3647,7 @@ class GitRepository implements FullDiffRepository {
         Directory('$gitDirectory/rebase-apply').existsSync();
   }
 
-  Future<ProcessResult> _runCherryPickCommand(List<String> arguments) => runner(
+  Future<ProcessResult> _runWithoutEditor(List<String> arguments) => runner(
     gitExecutable,
     arguments,
     workingDirectory: root,
@@ -5068,6 +5155,40 @@ Map<String, _Stats> _parseNumstat(String output) {
     );
   }
   return stats;
+}
+
+/// Why a `git commit` failed, in the words the commit form shows. The signals
+/// are read from both streams because git reports an empty index on stdout,
+/// while the quoted tail comes from stderr alone.
+String _commitFailureMessage(Object? stdout, Object? stderr, int exitCode) {
+  final output = '$stdout\n$stderr';
+  final detail = stderr.toString();
+  if (output.contains('nothing to commit') ||
+      output.contains('nothing added to commit') ||
+      output.contains('no changes added')) {
+    return '커밋할 Staged 파일이 없습니다.';
+  }
+  if (output.contains('Please tell me who you are')) {
+    return 'git 사용자 정보가 없습니다. git config user.name / user.email을 설정해 주세요.';
+  }
+  if (output.contains('gpg failed') || output.contains('signing failed')) {
+    return '커밋 서명에 실패했습니다.${_lastLines(detail, 1)}';
+  }
+  if (exitCode == 1) {
+    return 'pre-commit 훅이 커밋을 거부했습니다.${_lastLines(detail, 3)}';
+  }
+  return '커밋 실패:${_lastLines(detail, 1)}';
+}
+
+/// The last [count] non-blank lines of [output], each on its own line under
+/// the message, or nothing when the command said nothing.
+String _lastLines(String output, int count) {
+  final lines = output
+      .split('\n')
+      .where((line) => line.trim().isNotEmpty)
+      .toList();
+  if (lines.isEmpty) return '';
+  return '\n${lines.sublist(max(0, lines.length - count)).join('\n')}';
 }
 
 Map<String, int> _parseLsTreeSizes(String output) {
