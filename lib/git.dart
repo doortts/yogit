@@ -2599,9 +2599,15 @@ class GitRepository implements FullDiffRepository {
   }
 
   /// Which way the measured git facts lean for this comparison, or null when
-  /// they conflict or say too little — a wrong recommendation is worse than
-  /// none. Pass [rebaseCheck] when a simulation already ran, so the engine does
-  /// not pay for a second one.
+  /// nothing finishes without conflict — a wrong recommendation is worse than
+  /// none, and ranking two conflicting paths by how much work each costs is a
+  /// recommendation nobody asked for. Pass [rebaseCheck] when a simulation
+  /// already ran, so the engine does not pay for a second one.
+  ///
+  /// 재배치가 기본값이다. PR을 올리려면 push가 전제라 "원격에 있음"만으로 재배치를
+  /// 막으면 PR 브랜치는 전부 Merge로 몰린다. 재배치가 실제로 다치게 하는 것은 남의
+  /// 커밋이지 push 자체가 아니다 — 그래서 [_foreignAuthorsIn]이 그 자리를 대신
+  /// 판정한다. 규칙 전체는 docs/merge-recommendation-mockup.html.
   Future<BranchRecommendation?> recommendBranchIntegration({
     required BranchComparisonResult comparison,
     RebaseCheckResult? rebaseCheck,
@@ -2620,74 +2626,12 @@ class GitRepository implements FullDiffRepository {
     if (baseAhead == 0 || compareAhead == 0) return null;
 
     final sharing = await _remoteSharingOf(comparison);
-    // 이름만 같은 남의 브랜치인지 원격에서 다시 쓴 공유 브랜치인지 못 가리면 공유
-    // 여부부터 틀릴 수 있으니 아무 추천도 하지 않는다.
+    // 같은 이름의 원격 tip이 이 브랜치와 무관하게 갈라져 있으면 남의 브랜치인지 내
+    // 재배치 흔적인지 가릴 수 없다. 소유권부터 모르니 아무 추천도 하지 않는다.
     if (sharing?.unrelated ?? false) return null;
-    if (sharing != null) {
-      final reasons = [
-        '브랜치가 원격 ${sharing.ref}에도 있어서 히스토리를 다시 쓰면 같이 쓰는 사람이 다칩니다',
-      ];
-      if (!sharing.tipMatches) {
-        final unpushed =
-            int.tryParse(
-              (await _run([
-                'rev-list',
-                '--count',
-                '${sharing.tip}..${comparison.compareTip}',
-              ])).trim(),
-            ) ??
-            0;
-        if (unpushed > 0) {
-          reasons.add(
-            '원격 ${sharing.ref}에 없는 커밋 $unpushed개가 로컬에 남아 있어도 '
-            '브랜치는 이미 원격에 올라가 있습니다',
-          );
-        }
-      }
-      return BranchRecommendation(
-        verdict: BranchIntegrationVerdict.merge,
-        summary: '원격에 공유된 브랜치',
-        reasons: reasons,
-      );
-    }
 
-    final check =
-        rebaseCheck ??
-        await simulateRebase(
-          baseRef: comparison.baseRef,
-          compareRef: comparison.compareRef,
-        );
-    // 어느 한쪽을 재보지 못했으면 멈춘 횟수를 말할 수 없다.
-    if (check.status == RebaseCheckStatus.failed ||
-        comparison.merge.status == MergeConflictStatus.failed) {
-      return null;
-    }
-    final mergeClean = comparison.merge.status == MergeConflictStatus.clean;
-    final rebaseClean = check.status == RebaseCheckStatus.clean;
-    if (!mergeClean && !rebaseClean) return null;
-    const localOnly = '브랜치가 로컬 전용이라 히스토리를 다시 써도 아무도 안 다칩니다';
-    if (!rebaseClean) {
-      return BranchRecommendation(
-        verdict: BranchIntegrationVerdict.merge,
-        summary: '재배치는 충돌에서 멈춤',
-        reasons: [
-          'Rebase 시뮬레이션은 충돌 파일 ${check.files.length}개에서 멈추지만 '
-              'Merge는 충돌이 없습니다',
-        ],
-      );
-    }
-    if (!mergeClean) {
-      return BranchRecommendation(
-        verdict: BranchIntegrationVerdict.rebase,
-        summary: '근거 2',
-        reasons: [
-          'Merge는 충돌 파일 ${comparison.merge.files.length}개에서 멈추지만 '
-              'Rebase 미리보기는 커밋 $compareAhead개를 전부 재생했습니다',
-          localOnly,
-        ],
-      );
-    }
-
+    // ── 재배치가 지워도 되는 히스토리인가 ─────────────────────────
+    final foreign = await _foreignAuthorsIn(comparison);
     final mergeBase = comparison.mergeBases.first;
     final internalMerges =
         int.tryParse(
@@ -2699,52 +2643,95 @@ class GitRepository implements FullDiffRepository {
           ])).trim(),
         ) ??
         0;
-    // 재배치가 브랜치 안의 머지 커밋을 펴 버리니 어느 쪽도 자신 있게 못 고른다.
-    if (internalMerges > 0) return null;
-    final duplicates = (await duplicateCompareCommits(
-      baseTip: comparison.baseTip,
-      compareTip: comparison.compareTip,
-    )).length;
-    final share = await _mergeCommitShare(comparison.baseTip);
-    // 커밋 몇 개짜리 히스토리로는 관례를 말할 수 없고, 남은 신호만으로는 어느 쪽도
-    // 못 고른다.
-    if (share.total < conventionSampleFloor) return null;
-    final ratio = share.merges / share.total;
-    final duplicateReason = duplicates > 0
-        ? '이미 ${comparison.baseRef}에 들어간 커밋 $duplicates개는 재배치하면 알아서 빠집니다'
-        : null;
-    if (ratio >= 0.4) {
-      // 관례 근거가 이 판정을 그냥 Rebase와 갈라놓는 유일한 사실이라 세 개로 자를 때
-      // 밀려나면 안 된다. 밀려도 되는 쪽은 중복 커밋 이야기다.
+    final check =
+        rebaseCheck ??
+        await simulateRebase(
+          baseRef: comparison.baseRef,
+          compareRef: comparison.compareRef,
+        );
+    final rebaseBlocked = switch (foreign) {
+      null => 'user.email을 읽지 못해 옮길 커밋이 내 것인지 가릴 수 없습니다',
+      final count when count > 0 =>
+        '옮길 커밋 $compareAhead개 중 $count개는 다른 사람이 쓴 커밋이라 '
+            '재배치하면 남의 작업을 다시 씁니다',
+      _ when internalMerges > 0 =>
+        '브랜치 안의 머지 커밋 $internalMerges개를 재배치가 펴 버립니다',
+      _ when check.status == RebaseCheckStatus.failed =>
+        '재배치 시뮬레이션이 끝나지 못해 어느 쪽인지 재볼 수 없었습니다',
+      _ when check.status == RebaseCheckStatus.conflicts =>
+        'Rebase 시뮬레이션은 충돌 파일 ${check.files.length}개에서 멈추지만 '
+            'Merge는 충돌이 없습니다',
+      _ => null,
+    };
+
+    // ── 재배치가 열려 있으면 그쪽이 1순위 ─────────────────────────
+    if (rebaseBlocked == null) {
+      final share = await _mergeCommitShare(comparison.baseTip);
+      // 표본이 얕은 히스토리로는 관례를 말할 수 없다. 그때는 기본값에 맡긴다.
+      final linear =
+          share.total >= conventionSampleFloor &&
+          share.merges / share.total < 0.15;
+      final duplicates = (await duplicateCompareCommits(
+        baseTip: comparison.baseTip,
+        compareTip: comparison.compareTip,
+      )).length;
       final reasons = [
-        localOnly,
+        sharing == null
+            ? '브랜치가 로컬 전용이라 히스토리를 다시 써도 아무도 안 다칩니다'
+            : '옮길 커밋 $compareAhead개가 전부 내 커밋이라 재배치해도 남의 작업을 지우지 않습니다',
         'Rebase 미리보기 $compareAhead개 커밋 전부 충돌 없이 재생됐습니다',
-        '최근 ${comparison.baseRef} 커밋 ${share.total}개 중 ${share.merges}개가 머지 커밋 — 이 저장소의 관례입니다',
-        ?duplicateReason,
+        // 관례 근거는 이 판정을 Rebase 후 Merge와 갈라놓는 유일한 사실이라 세 개로
+        // 자를 때 밀려나면 안 된다. 밀려도 되는 쪽은 force-push와 중복 커밋이다.
+        if (linear)
+          '최근 ${comparison.baseRef} 커밋 ${share.total}개 중 머지 커밋은 ${share.merges}개뿐이라 선형 히스토리가 관례입니다',
+        if (sharing != null)
+          '원격 ${sharing.ref}이 이미 있어 push는 force-with-lease로 — merge는 PR이 합니다',
+        if (duplicates > 0)
+          '이미 ${comparison.baseRef}에 들어간 커밋 $duplicates개는 재배치하면 알아서 빠집니다',
       ].take(3).toList();
       return BranchRecommendation(
-        verdict: BranchIntegrationVerdict.rebaseThenMerge,
-        summary: '근거 ${reasons.length}',
+        verdict: linear
+            ? BranchIntegrationVerdict.rebase
+            : BranchIntegrationVerdict.rebaseThenMerge,
+        summary: linear
+            ? '커밋 $compareAhead개 · 선형 유지'
+            : sharing != null
+            ? 'PR 표준 흐름'
+            : '커밋 $compareAhead개 · 재배치 후 병합',
         reasons: reasons,
       );
     }
-    // 관례가 선형이거나, 관례가 어느 쪽도 아니어도 재배치가 떨궈 줄 중복 커밋이
-    // 있으면 Rebase로 기운다. 중복 근거가 있으면 세 개로 자를 때 관례 쪽이 밀린다 —
-    // 이 판정에서 관례는 갈림길이 아니다.
-    if (ratio < 0.15 || duplicates > 0) {
-      return BranchRecommendation(
-        verdict: BranchIntegrationVerdict.rebase,
-        summary: '커밋 $compareAhead개 · 선형 유지',
-        reasons: [
-          localOnly,
-          'Rebase 미리보기 $compareAhead개 커밋 전부 충돌 없이 재생됐습니다',
-          ?duplicateReason,
-          '최근 ${comparison.baseRef} 커밋 ${share.total}개 중 머지 커밋은 ${share.merges}개뿐이라 선형 히스토리가 관례입니다',
-        ].take(3).toList(),
-      );
-    }
-    // 관례가 어느 쪽도 아니라 남은 신호로는 고를 수 없다.
-    return null;
+
+    // ── 재배치가 막혔으면 Merge, 그것도 깨끗할 때만 ────────────────
+    if (comparison.merge.status != MergeConflictStatus.clean) return null;
+    return BranchRecommendation(
+      verdict: BranchIntegrationVerdict.merge,
+      summary: switch (foreign) {
+        null => '커밋 주인을 못 가림',
+        final count when count > 0 => '다른 사람의 커밋 포함',
+        _ when internalMerges > 0 => '브랜치 안에 머지 커밋',
+        _ when check.status == RebaseCheckStatus.failed => '재배치를 재보지 못함',
+        _ => '재배치는 충돌에서 멈춤',
+      },
+      reasons: [rebaseBlocked],
+    );
+  }
+
+  /// How many of the commits this comparison would move were written by someone
+  /// other than whoever this repository commits as, or null when the identity
+  /// itself is missing — the caller treats that as "cannot tell" and keeps to
+  /// the path that rewrites nothing.
+  Future<int?> _foreignAuthorsIn(BranchComparisonResult comparison) async {
+    final mine = (await loadCommitIdentity()).email.trim().toLowerCase();
+    if (mine.isEmpty) return null;
+    return (await _run([
+      'log',
+      '--format=%ae',
+      '${comparison.baseTip}..${comparison.compareTip}',
+    ])).split('\n').where((line) {
+      final author = line.trim().toLowerCase();
+      return author.isNotEmpty && author != mine;
+    }).length;
   }
 
   /// The remote-tracking ref carrying the compared branch, or null when the

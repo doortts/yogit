@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>통합 방법 추천 — 판정 규칙과 칩 시안</title>
+<style>
+  :root {
+    --page: #141416;
+    --bg: #1c1c1e;
+    --surface: #242426;
+    --raised: #2c2c2e;
+    --menu: #202022;
+    --border: #38383a;
+    --text: #f2f2f7;
+    --muted: #aeaeb2;
+    --dim: #75757b;
+    --purple: #c69aff;
+    --purple-edge: #695786;
+    --green: #34c759;
+    --orange: #f0a35e;
+    --conflict: #ff7a84;
+    --duplicate: #7ce0a0;
+    --blue: #6ea8fe;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 28px 80px; background: var(--page); color: var(--text);
+    font: 13px/1.55 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  }
+  h1 { font-size: 19px; margin: 0 0 4px; font-weight: 650; }
+  .lede { color: var(--muted); margin: 0 0 30px; max-width: 88ch; }
+  h2 {
+    font-size: 14px; margin: 40px 0 8px; font-weight: 650;
+    display: flex; align-items: baseline; gap: 9px;
+  }
+  h2 .tag {
+    font-size: 10px; font-weight: 600; letter-spacing: .04em;
+    padding: 2px 7px; border-radius: 999px;
+    background: rgba(110,168,254,.16); color: var(--blue);
+  }
+  h2 .tag.new { background: rgba(198,154,255,.16); color: var(--purple); }
+  h3 { font-size: 12px; margin: 24px 0 8px; font-weight: 650; color: var(--muted); }
+  .note { color: var(--muted); margin: 0 0 14px; max-width: 88ch; }
+  .note b { color: var(--text); font-weight: 600; }
+  .caption { color: var(--dim); font-size: 11px; margin: 8px 0 24px; max-width: 88ch; }
+  code { font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+         background: var(--surface); padding: 1px 5px; border-radius: 4px; }
+
+  table { border-collapse: collapse; margin: 0 0 20px; font-size: 12px; max-width: 100%; }
+  th, td { text-align: left; padding: 6px 12px 6px 0; vertical-align: top; border-bottom: 1px solid var(--border); }
+  th { color: var(--dim); font-weight: 600; font-size: 11px; }
+  td.verdict { color: var(--purple); font-weight: 650; white-space: nowrap; }
+  td.none { color: var(--dim); }
+
+  /* ── 요약 바 — 지금 앱이 그리는 그대로 ───────────────── */
+  .bar {
+    height: 52px; background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 14px; width: 940px; max-width: 100%; overflow: hidden;
+  }
+  .bar .title { font-size: 13px; font-weight: 700; }
+  .bar .title.fail { color: var(--conflict); }
+  .bar .pill {
+    padding: 5px 8px; border-radius: 7px; font-size: 10px; font-weight: 600;
+    background: var(--raised); color: var(--muted); white-space: nowrap;
+  }
+  .bar .pill.purple { background: rgba(198,154,255,.12); color: var(--purple); }
+  .bar .pill.green  { background: rgba(52,199,89,.12);  color: var(--green); }
+  .bar .pill.red    { background: rgba(255,122,132,.12); color: var(--conflict); }
+  .bar .refs { color: var(--muted); font-size: 10px; margin-left: 4px; white-space: nowrap; }
+  .bar .check { color: var(--green); font-size: 13px; }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 9px; border-radius: 20px;
+    background: rgba(198,154,255,.10); border: 1px solid var(--purple-edge);
+    white-space: nowrap;
+  }
+  .chip .label { color: var(--purple); font-size: 11px; font-weight: 700; }
+  .chip .summary { color: var(--muted); font-size: 10px; font-weight: 500; }
+
+  /* ── 근거 패널 — 칩에 마우스를 올리면 열린다 ─────────── */
+  .reasons {
+    width: 430px; background: var(--menu);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px; margin: 10px 0 0 22px;
+  }
+  .reasons .head { color: var(--purple); font-size: 11px; font-weight: 700; margin-bottom: 6px; }
+  .reasons .line { display: flex; gap: 7px; margin-bottom: 4px; font-size: 11px; }
+  .reasons .line .dot { color: var(--muted); }
+  .reasons .line .body { color: var(--text); }
+
+  .state { margin: 0 0 30px; }
+  .state .head {
+    font-size: 11px; color: var(--dim); margin-bottom: 7px;
+    display: flex; gap: 8px; align-items: baseline;
+  }
+  .state .head b { color: var(--text); font-weight: 650; font-size: 12px; }
+
+</style>
+</head>
+<body>
+
+<h1>통합 방법 추천 — 판정 규칙과 칩 시안</h1>
+<p class="lede">
+  브랜치 diff 요약 바 오른쪽 끝의 추천 칩은 지금도 있다. 바뀌는 것은 <b>무엇을 근거로 무엇을 고르는가</b>뿐이고,
+  칩과 근거 패널의 생김새는 그대로 쓴다. 추천은 충돌 없이 끝나는 방법이 있을 때만 낸다 —
+  전부 충돌이면 아무것도 밀지 않는다.
+</p>
+
+<h2>1. 판정 규칙 <span class="tag">개정 2</span></h2>
+<p class="note">
+  위에서부터 걸리는 첫 줄이 답이다. 어느 쪽도 못 고르면 칩을 아예 그리지 않는다 —
+  틀린 추천은 없는 추천보다 나쁘다.
+</p>
+
+<h3>공유의 재정의 — push 여부가 아니라 남의 흔적</h3>
+<p class="note">
+  지금 엔진은 <b>push된 적 있음 = 공유 = 재배치 금지</b>로 읽는다. PR 흐름에서는 과하다 —
+  PR을 올리려면 push가 전제라서, 이 규칙대로면 PR 브랜치는 전부 Merge로 몰린다.
+  재배치가 실제로 다치게 하는 것은 <b>남의 커밋</b>뿐이다.
+</p>
+<table>
+  <tr><th>신호</th><th>읽기</th><th>재배치</th></tr>
+  <tr><td>옮길 커밋(base..compare)에 남이 쓴 커밋이 섞임</td><td>진짜 공유 브랜치 — dev·main처럼 여럿이 쌓는 곳</td><td class="none">제외</td></tr>
+  <tr><td>원격 tip이 내 tip도 그 조상도 아님</td><td>남의 브랜치인지 내 재배치 흔적인지 알 수 없음</td><td class="none">추천 자체 없음</td></tr>
+  <tr><td>push됐지만 옮길 커밋이 전부 내 것</td><td>PR용 개인 브랜치</td><td class="verdict">허용 — force-push 필요를 근거에 명시</td></tr>
+  <tr><td>push된 적 없음</td><td>로컬 전용</td><td class="verdict">허용</td></tr>
+</table>
+<p class="caption">
+  "내 것"은 옮길 커밋의 author 이메일이 전부 <code>user.email</code>과 같다는 뜻이다.
+  <code>git log --format=%ae base..compare</code> 호출 1회로 안다. 웹 UI로 만든 커밋처럼
+  주소가 섞여 보이면 안전한 쪽(Merge)으로 넘어간다.
+</p>
+
+<h3>후보에서 빼는 조건</h3>
+<table>
+  <tr><th>사실</th><th>빠지는 방법</th><th>이유</th></tr>
+  <tr><td>옮길 커밋에 남이 쓴 커밋이 섞임</td><td>Rebase 계열</td><td>재배치가 남의 작업을 다시 쓴다</td></tr>
+  <tr><td>브랜치 안에 머지 커밋 있음</td><td>Rebase 계열</td><td>재배치가 펴 버린다</td></tr>
+  <tr><td>rebase 시뮬레이션 실패</td><td>Rebase 계열</td><td>상태를 모른다</td></tr>
+  <tr><td>merge 검사 실패</td><td>Merge</td><td>상태를 모른다</td></tr>
+</table>
+
+<h3>판정</h3>
+<table>
+  <tr><th>#</th><th>조건</th><th>판정</th></tr>
+  <tr><td>1</td><td>merge base 없음 · fast-forward로 끝남 · 가져올 커밋 없음 · 원격 tip 관계 불명</td><td class="none">추천 없음</td></tr>
+  <tr><td>2</td><td>rebase가 깨끗하고 재배치가 허용됨 — <b>기본값, PR 표준 흐름</b></td><td class="verdict">Rebase 후 Merge</td></tr>
+  <tr><td>3</td><td>위와 같으나 기준 브랜치 관례가 선형 (머지 커밋 비율 &lt; 0.15)</td><td class="verdict">Rebase</td></tr>
+  <tr><td>4</td><td>merge만 깨끗</td><td class="verdict">Merge</td></tr>
+  <tr><td>5</td><td>그 밖 — 전부 충돌 포함</td><td class="none">추천 없음</td></tr>
+</table>
+<p class="caption">
+  이전 엔진의 관례 문턱(머지 커밋 비율 ≥ 0.4)과 표본 문턱(50개 중 10개)은 2번에서 뺐다 —
+  재배치 후 merge가 기본이고, 관례는 3번(선형 예외)에서만 본다. 기준이 원격 브랜치(origin/dev)면
+  yogit 몫은 재배치까지고 merge는 PR이 한다 — 판정은 같고 근거 문구가 그걸 말한다.
+  충돌 없이 끝나는 방법이 하나도 없으면 어느 쪽도 추천하지 않는다 — 충돌 규모 비교로
+  순위를 매기는 것은 억지 추천이다.
+</p>
+
+<h2>2. 칩 — 상태별</h2>
+
+<div class="state">
+  <div class="head"><b>Rebase 후 Merge</b><span>PR 흐름 — 기준은 원격 dev, 작업 브랜치는 push된 내 브랜치</span></div>
+  <div class="bar">
+    <span class="title">Rebase 미리보기</span>
+    <span class="check">✓</span>
+    <span class="pill purple">가상 커밋 6개</span>
+    <span class="pill">점선 이동 경로</span>
+    <span class="pill">실제 브랜치 변경 없음</span>
+    <span class="chip"><span class="label">추천: Rebase 후 Merge</span><span class="summary">PR 표준 흐름</span></span>
+    <span class="refs">feat/#31 → origin/dev</span>
+  </div>
+  <div class="reasons">
+    <div class="head">왜 Rebase 후 Merge인가</div>
+    <div class="line"><span class="dot">·</span><span class="body">옮길 커밋 6개가 전부 내 커밋이라 재배치해도 남의 작업을 지우지 않습니다</span></div>
+    <div class="line"><span class="dot">·</span><span class="body">Rebase 미리보기 6개 커밋 전부 충돌 없이 재생됐습니다</span></div>
+    <div class="line"><span class="dot">·</span><span class="body">원격 feat/#31이 이미 있어 push는 force-with-lease로 — merge는 PR이 합니다</span></div>
+  </div>
+  <p class="caption">
+    기준이 로컬 브랜치면 같은 판정에 merge 적용까지 yogit이 한다. push된 적 없는 브랜치면
+    첫 줄이 "로컬 전용이라 히스토리를 다시 써도 아무도 안 다칩니다"로, 셋째 줄은 빠진다.
+  </p>
+</div>
+
+<div class="state">
+  <div class="head"><b>Merge</b><span>rebase는 충돌, merge는 깨끗</span></div>
+  <div class="bar">
+    <span class="title">Merge 미리보기</span>
+    <span class="check">✓</span>
+    <span class="pill purple">가상 커밋 1</span>
+    <span class="pill green">충돌 없음</span>
+    <span class="chip"><span class="label">추천: Merge</span><span class="summary">재배치는 충돌에서 멈춤</span></span>
+    <span class="refs">main ← feature/pull-menu</span>
+  </div>
+  <div class="reasons">
+    <div class="head">왜 Merge인가</div>
+    <div class="line"><span class="dot">·</span><span class="body">Rebase 시뮬레이션은 충돌 파일 3개에서 멈추지만 Merge는 충돌이 없습니다</span></div>
+  </div>
+</div>
+
+<div class="state">
+  <div class="head"><b>Rebase</b><span>관례가 선형인 저장소</span></div>
+  <div class="bar">
+    <span class="title">Rebase 미리보기</span>
+    <span class="check">✓</span>
+    <span class="pill purple">가상 커밋 4개</span>
+    <span class="pill">점선 이동 경로</span>
+    <span class="pill">실제 브랜치 변경 없음</span>
+    <span class="chip"><span class="label">추천: Rebase</span><span class="summary">커밋 4개 · 선형 유지</span></span>
+    <span class="refs">feature/row-chip → main</span>
+  </div>
+  <div class="reasons">
+    <div class="head">왜 Rebase인가</div>
+    <div class="line"><span class="dot">·</span><span class="body">브랜치가 로컬 전용이라 히스토리를 다시 써도 아무도 안 다칩니다</span></div>
+    <div class="line"><span class="dot">·</span><span class="body">Rebase 미리보기 4개 커밋 전부 충돌 없이 재생됐습니다</span></div>
+    <div class="line"><span class="dot">·</span><span class="body">최근 main 커밋 50개 중 머지 커밋은 3개뿐이라 선형 히스토리가 관례입니다</span></div>
+  </div>
+</div>
+
+<div class="state">
+  <div class="head"><b>추천 없음</b><span>칩 자리를 비워 둔다</span></div>
+  <div class="bar">
+    <span class="title fail">Merge 충돌</span>
+    <span class="pill red">충돌 7개</span>
+    <span class="pill">임시 공간 사용 중</span>
+    <span class="refs">main ← feat/old-work</span>
+  </div>
+  <p class="caption">
+    전부 충돌인 비교가 이 자리다 — 원격 tip이 내 tip과 무관하게 갈라진 브랜치(공유 판정 불명)도
+    같은 자리로 온다. 자리를 비워 두지, "판단 보류" 같은 문구를 넣지 않는다.
+    말할 게 없다는 것 자체가 화면에서 조용해야 한다.
+  </p>
+</div>
+
+</body>
+</html>

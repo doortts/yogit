@@ -4345,7 +4345,9 @@ void main() {
     ));
   });
 
-  test('a shared branch is recommended for a merge commit', () async {
+  test('a pushed branch of my own commits still leans Rebase', () async {
+    // PR을 올리려면 push가 전제다. 원격에 있다는 사실만으로 재배치를 막으면 PR
+    // 브랜치는 전부 Merge로 몰린다 — 갈림길은 커밋의 주인이다.
     final fixture = await _remoteBranchPreviewFixture();
     addTearDown(() => fixture.root.delete(recursive: true));
     final repository = GitRepository(fixture.root.path);
@@ -4359,10 +4361,63 @@ void main() {
       rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
     );
 
+    expect(recommendation!.verdict, BranchIntegrationVerdict.rebaseThenMerge);
+    expect(recommendation.label, 'Rebase 후 Merge');
+    expect(recommendation.summary, 'PR 표준 흐름');
+    expect(recommendation.reasons.first, contains('전부 내 커밋'));
+    expect(recommendation.reasons.last, contains('force-with-lease'));
+  });
+
+  test('someone else\'s commits on the branch rule the rebase out', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    // 브랜치에 남이 쓴 커밋이 하나라도 있으면 재배치가 그 커밋을 다시 쓴다.
+    await _git(fixture.root, ['switch', 'feature']);
+    await File('${fixture.root.path}/theirs.txt').writeAsString('theirs\n');
+    await _git(fixture.root, ['add', 'theirs.txt']);
+    await _git(fixture.root, [
+      '-c',
+      'user.name=Other User',
+      '-c',
+      'user.email=other@example.com',
+      'commit',
+      '-m',
+      'their work',
+    ]);
+    await _git(fixture.root, ['switch', 'main']);
+
+    final recommendation = await repository.recommendBranchIntegration(
+      comparison: await repository.compareBranches('main', 'feature'),
+      rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
+    );
+
     expect(recommendation!.verdict, BranchIntegrationVerdict.merge);
-    expect(recommendation.label, 'Merge');
-    expect(recommendation.summary, '원격에 공유된 브랜치');
-    expect(recommendation.reasons.first, contains('origin/feature'));
+    expect(recommendation.summary, '다른 사람의 커밋 포함');
+    expect(recommendation.reasons.single, contains('옮길 커밋 2개 중 1개'));
+  });
+
+  test('a branch carrying a merge commit is left to Merge', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    // 브랜치가 제 안에서 한 번 병합했으면 재배치가 그 구조를 펴 버린다.
+    await _git(fixture.root, ['switch', '-c', 'side', 'feature']);
+    await File('${fixture.root.path}/side.txt').writeAsString('side\n');
+    await _git(fixture.root, ['add', 'side.txt']);
+    await _git(fixture.root, ['commit', '-m', 'side']);
+    await _git(fixture.root, ['switch', 'feature']);
+    await _git(fixture.root, ['merge', '--no-ff', '-m', 'Merge side', 'side']);
+    await _git(fixture.root, ['switch', 'main']);
+
+    final recommendation = await repository.recommendBranchIntegration(
+      comparison: await repository.compareBranches('main', 'feature'),
+      rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
+    );
+
+    expect(recommendation!.verdict, BranchIntegrationVerdict.merge);
+    expect(recommendation.summary, '브랜치 안에 머지 커밋');
+    expect(recommendation.reasons.single, contains('머지 커밋 1개'));
   });
 
   test('a local branch over linear history leans Rebase', () async {
@@ -4382,18 +4437,21 @@ void main() {
     expect(recommendation.reasons.last, contains('선형 히스토리가 관례입니다'));
   });
 
-  test('a history too short to hold a convention gets no chip', () async {
-    // main의 first-parent 커밋은 둘뿐이다 — 이 표본으로 '관례'를 말할 수는 없다.
+  test('a history too short to hold a convention takes the default', () async {
+    // main의 first-parent 커밋은 둘뿐이다 — 이 표본으로 '관례'를 말할 수는 없으니
+    // 선형 예외로 내려가지 않고 기본값에 머문다.
     final fixture = await _branchPreviewFixture();
     addTearDown(() => fixture.root.delete(recursive: true));
 
-    expect(
-      await GitRepository(fixture.root.path).recommendBranchIntegration(
-        comparison: fixture.comparison,
-        rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
-      ),
-      isNull,
-    );
+    final recommendation = await GitRepository(fixture.root.path)
+        .recommendBranchIntegration(
+          comparison: fixture.comparison,
+          rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
+        );
+
+    expect(recommendation!.verdict, BranchIntegrationVerdict.rebaseThenMerge);
+    expect(recommendation.summary, '커밋 1개 · 재배치 후 병합');
+    expect(recommendation.reasons.first, contains('로컬 전용'));
   });
 
   test('a same-named but unrelated remote branch gets no chip', () async {
@@ -4418,28 +4476,26 @@ void main() {
     );
   });
 
-  test(
-    'a remote tip the local branch grew from still reads as shared',
-    () async {
-      final fixture = await _branchPreviewFixture();
-      addTearDown(() => fixture.root.delete(recursive: true));
-      final repository = GitRepository(fixture.root.path);
-      await _git(fixture.root, ['remote', 'add', 'origin', '.']);
-      await _git(fixture.root, [
-        'update-ref',
-        'refs/remotes/origin/feature',
-        fixture.comparison.compareParent!,
-      ]);
+  test('a remote tip the local branch grew from is my own branch', () async {
+    final fixture = await _branchPreviewFixture();
+    addTearDown(() => fixture.root.delete(recursive: true));
+    final repository = GitRepository(fixture.root.path);
+    await _git(fixture.root, ['remote', 'add', 'origin', '.']);
+    await _git(fixture.root, [
+      'update-ref',
+      'refs/remotes/origin/feature',
+      fixture.comparison.compareParent!,
+    ]);
 
-      final recommendation = await repository.recommendBranchIntegration(
-        comparison: fixture.comparison,
-        rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
-      );
+    final recommendation = await repository.recommendBranchIntegration(
+      comparison: fixture.comparison,
+      rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
+    );
 
-      expect(recommendation!.verdict, BranchIntegrationVerdict.merge);
-      expect(recommendation.reasons.last, contains('커밋 1개가 로컬에 남아 있어도'));
-    },
-  );
+    expect(recommendation!.verdict, BranchIntegrationVerdict.rebaseThenMerge);
+    expect(recommendation.summary, 'PR 표준 흐름');
+    expect(recommendation.reasons.last, contains('원격 origin/feature'));
+  });
 
   test('a branch tracking a local branch is not shared with anyone', () async {
     final fixture = await _branchPreviewFixture();
@@ -4458,45 +4514,15 @@ void main() {
     expect(recommendation.reasons.first, contains('로컬 전용'));
   });
 
-  test(
-    'a branch tracking a remote ref of another name reads as shared',
-    () async {
-      final fixture = await _branchPreviewFixture();
-      addTearDown(() => fixture.root.delete(recursive: true));
-      final repository = GitRepository(fixture.root.path);
-      await _git(fixture.root, ['remote', 'add', 'origin', '.']);
-      await _git(fixture.root, [
-        'update-ref',
-        'refs/remotes/origin/other',
-        fixture.comparison.compareTip,
-      ]);
-      await _git(fixture.root, [
-        'branch',
-        '--set-upstream-to=origin/other',
-        'feature',
-      ]);
-
-      final recommendation = await repository.recommendBranchIntegration(
-        comparison: fixture.comparison,
-        rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
-      );
-
-      expect(recommendation!.verdict, BranchIntegrationVerdict.merge);
-      expect(recommendation.summary, '원격에 공유된 브랜치');
-      expect(recommendation.reasons.first, contains('origin/other'));
-    },
-  );
-
-  test('an upstream of another name is measured, not assumed', () async {
+  test('an upstream of another name is the branch being pushed', () async {
     final fixture = await _branchPreviewFixture();
     addTearDown(() => fixture.root.delete(recursive: true));
     final repository = GitRepository(fixture.root.path);
     await _git(fixture.root, ['remote', 'add', 'origin', '.']);
-    // 이름이 다른 upstream도 tip을 직접 재야 안 올라간 커밋을 셀 수 있다.
     await _git(fixture.root, [
       'update-ref',
       'refs/remotes/origin/other',
-      fixture.comparison.compareParent!,
+      fixture.comparison.compareTip,
     ]);
     await _git(fixture.root, [
       'branch',
@@ -4509,8 +4535,9 @@ void main() {
       rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
     );
 
-    expect(recommendation!.verdict, BranchIntegrationVerdict.merge);
-    expect(recommendation.reasons.last, contains('커밋 1개가 로컬에 남아 있어도'));
+    expect(recommendation!.verdict, BranchIntegrationVerdict.rebaseThenMerge);
+    expect(recommendation.summary, 'PR 표준 흐름');
+    expect(recommendation.reasons.last, contains('원격 origin/other'));
   });
 
   test('a merge-bubble repository leans Rebase 후 Merge', () async {
@@ -4526,8 +4553,8 @@ void main() {
 
     expect(recommendation!.verdict, BranchIntegrationVerdict.rebaseThenMerge);
     expect(recommendation.label, 'Rebase 후 Merge');
-    expect(recommendation.summary, '근거 3');
-    expect(recommendation.reasons.last, contains('이 저장소의 관례입니다'));
+    expect(recommendation.summary, '커밋 1개 · 재배치 후 병합');
+    expect(recommendation.reasons.first, contains('로컬 전용'));
   });
 
   test('a base branch that never moved gets no recommendation', () async {
@@ -4574,22 +4601,37 @@ void main() {
     );
   });
 
-  test('a failed check on either side leaves no recommendation', () async {
+  test('a failed check takes its own side out of the running', () async {
     final fixture = await _branchPreviewFixture();
     addTearDown(() => fixture.root.delete(recursive: true));
     final repository = GitRepository(fixture.root.path);
 
-    expect(
-      await repository.recommendBranchIntegration(
-        comparison: fixture.comparison,
-        rebaseCheck: const RebaseCheckResult(
-          status: RebaseCheckStatus.failed,
+    // 재배치를 재보지 못했으면 재배치는 후보에서 빠지고, 깨끗한 Merge가 남는다.
+    final rebaseFailed = await repository.recommendBranchIntegration(
+      comparison: fixture.comparison,
+      rebaseCheck: const RebaseCheckResult(
+        status: RebaseCheckStatus.failed,
+        error: 'boom',
+      ),
+    );
+    expect(rebaseFailed!.verdict, BranchIntegrationVerdict.merge);
+    expect(rebaseFailed.summary, '재배치를 재보지 못함');
+
+    // 반대로 머지 검사가 실패해도 재배치가 깨끗하면 그쪽이 답이다 — 재배치 뒤의
+    // 병합은 fast-forward라 이 검사와 상관이 없다.
+    final mergeFailed = await repository.recommendBranchIntegration(
+      comparison: _withMerge(
+        fixture.comparison,
+        const MergeConflictCheck(
+          status: MergeConflictStatus.failed,
           error: 'boom',
         ),
       ),
-      isNull,
+      rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
     );
-    // 머지 검사가 실패했으면 멈춘 파일 수를 말할 수 없으니 추천도 없다.
+    expect(mergeFailed!.verdict, BranchIntegrationVerdict.rebaseThenMerge);
+
+    // 양쪽 다 재보지 못하면 말할 게 없다.
     expect(
       await repository.recommendBranchIntegration(
         comparison: _withMerge(
@@ -4599,7 +4641,10 @@ void main() {
             error: 'boom',
           ),
         ),
-        rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
+        rebaseCheck: const RebaseCheckResult(
+          status: RebaseCheckStatus.failed,
+          error: 'boom',
+        ),
       ),
       isNull,
     );
@@ -4915,8 +4960,8 @@ void main() {
     );
   });
 
-  test('the convention reason outlives a duplicate commit note', () async {
-    final fixture = await _mergeBubbleFixture();
+  test('the linear convention reason outlives a duplicate note', () async {
+    final fixture = await _mergeBubbleFixture(merges: 0, linear: 12);
     addTearDown(() => fixture.delete(recursive: true));
     final repository = GitRepository(fixture.path);
     // feature의 커밋을 main에 cherry-pick해 두면 중복 근거가 하나 더 붙는다.
@@ -4927,39 +4972,37 @@ void main() {
       rebaseCheck: const RebaseCheckResult(status: RebaseCheckStatus.clean),
     );
 
-    expect(recommendation!.verdict, BranchIntegrationVerdict.rebaseThenMerge);
-    // 판정을 그냥 Rebase와 갈라놓는 근거가 세 개 안에 남는다.
+    // 판정을 Rebase 후 Merge와 갈라놓는 근거가 세 개 안에 남는다.
+    expect(recommendation!.verdict, BranchIntegrationVerdict.rebase);
     expect(recommendation.reasons, hasLength(3));
-    expect(recommendation.reasons.last, contains('이 저장소의 관례입니다'));
+    expect(recommendation.reasons.last, contains('선형 히스토리가 관례입니다'));
     expect(
       recommendation.reasons.where((reason) => reason.contains('알아서 빠집니다')),
       isEmpty,
     );
   });
 
-  test('a duplicate commit tips a history with no clear convention', () async {
+  test('a history with no clear convention keeps the default', () async {
     final fixture = await _mergeBubbleFixture(merges: 2, linear: 8);
     addTearDown(() => fixture.delete(recursive: true));
     final repository = GitRepository(fixture.path);
     const clean = RebaseCheckResult(status: RebaseCheckStatus.clean);
-    // 머지 커밋 비율이 어느 쪽 관례도 아니라 이대로는 고를 수 없다.
-    expect(
-      await repository.recommendBranchIntegration(
-        comparison: await repository.compareBranches('main', 'feature'),
-        rebaseCheck: clean,
-      ),
-      isNull,
-    );
 
-    await _git(fixture, ['cherry-pick', 'feature']);
+    // 머지 커밋 비율이 선형이라 말할 만큼 낮지 않으면 기본값에 머문다.
     final recommendation = await repository.recommendBranchIntegration(
       comparison: await repository.compareBranches('main', 'feature'),
       rebaseCheck: clean,
     );
+    expect(recommendation!.verdict, BranchIntegrationVerdict.rebaseThenMerge);
 
-    // 재배치가 알아서 떨궈 주는 중복 커밋이 판정을 가른다.
-    expect(recommendation!.verdict, BranchIntegrationVerdict.rebase);
-    expect(recommendation.reasons.last, contains('알아서 빠집니다'));
+    // 중복 커밋은 근거 한 줄일 뿐, 판정을 가르지 않는다.
+    await _git(fixture, ['cherry-pick', 'feature']);
+    final withDuplicate = await repository.recommendBranchIntegration(
+      comparison: await repository.compareBranches('main', 'feature'),
+      rebaseCheck: clean,
+    );
+    expect(withDuplicate!.verdict, BranchIntegrationVerdict.rebaseThenMerge);
+    expect(withDuplicate.reasons.last, contains('알아서 빠집니다'));
   });
 
   // ── upstream 동기화의 git 층 (docs/upstream-sync-design.md P1) ──────────
