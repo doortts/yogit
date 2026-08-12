@@ -4,6 +4,7 @@ import 'local_state_signature.dart';
 import 'timeline_palette.dart';
 import 'timeline_theme.dart';
 import 'yogit_alert.dart';
+import 'typography.dart';
 
 /// Push 확인창의 제목 아래 한 줄: 'origin'이 실제로 어디인지. 올리기 전에
 /// 회사 저장소인지 포크인지 눈으로 확인할 마지막 자리다. 주소가 길면 앞을
@@ -19,7 +20,8 @@ class PushTarget extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = context.timelineTheme;
     const urlStyle = TextStyle(
-      fontFamily: 'monospace',
+      fontFamily: technicalFontFamily,
+      fontFamilyFallback: technicalFontFallback,
       fontSize: 11,
       height: 1.5,
     );
@@ -250,7 +252,8 @@ class _ReceiptBlockState extends State<_ReceiptBlock> {
                   commit.shortSha,
                   style: const TextStyle(
                     color: hashRed,
-                    fontFamily: 'monospace',
+                    fontFamily: technicalFontFamily,
+                    fontFamilyFallback: technicalFontFallback,
                     fontSize: 12,
                   ),
                 ),
@@ -264,7 +267,8 @@ class _ReceiptBlockState extends State<_ReceiptBlock> {
                     // 읽는 그 글자로 선다.
                     style: TextStyle(
                       color: palette.text,
-                      fontFamily: 'monospace',
+                      fontFamily: technicalFontFamily,
+                      fontFamilyFallback: technicalFontFallback,
                       fontSize: 13,
                     ),
                   ),
@@ -311,7 +315,8 @@ class _ReceiptBlockState extends State<_ReceiptBlock> {
                     text: widget.op,
                     style: TextStyle(
                       color: previewControlBlue,
-                      fontFamily: 'monospace',
+                      fontFamily: technicalFontFamily,
+                      fontFamilyFallback: technicalFontFallback,
                       fontSize: 11.5,
                     ),
                   ),

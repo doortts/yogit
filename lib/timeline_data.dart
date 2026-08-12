@@ -442,7 +442,8 @@ extension _TimelineDataFlows on _TimelineScreenState {
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           textStyle: const TextStyle(
             fontSize: 11,
-            fontFamily: 'monospace',
+            fontFamily: technicalFontFamily,
+            fontFamilyFallback: technicalFontFallback,
             fontWeight: FontWeight.w600,
           ),
         ),

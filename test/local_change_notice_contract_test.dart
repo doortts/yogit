@@ -9,6 +9,7 @@ import 'package:yogit/window_frame.dart';
 import 'package:yogit/yogit_alert.dart';
 
 import 'app_test.dart' show FakeGitRepository, commit;
+import 'package:yogit/typography.dart';
 
 /// docs/local-change-summary-mockup.html — 밖에서 저장소가 바뀌면, 무엇이
 /// 바뀌었는지를 먼저 보이고 그다음에 새로 읽을지 묻는다. 근거 없이 답하게 하지
@@ -251,7 +252,7 @@ void main() {
     expect(tester.widget<Text>(find.text('−')).style!.color, deletedPink);
     final sha = tester.widget<Text>(find.text('bbb2222'));
     expect(sha.style!.color, hashRed);
-    expect(sha.style!.fontFamily, 'monospace');
+    expect(sha.style!.fontFamily, technicalFontFamily);
     // 나간 커밋은 한 겹 물러나 보인다.
     expect(
       tester.widget<Text>(find.text('refactor: the old one')).style!.color!.a,

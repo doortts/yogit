@@ -13,6 +13,7 @@ import 'settings.dart';
 import 'timeline.dart';
 import 'timeline_theme.dart';
 import 'window_frame.dart';
+import 'typography.dart';
 
 void main(List<String> args) {
   WidgetsFlutterBinding.ensureInitialized();
@@ -699,7 +700,8 @@ class _RepositoryError extends StatelessWidget {
                     style: const TextStyle(
                       color: Color(0xFF8D94A8),
                       fontSize: 11,
-                      fontFamily: 'monospace',
+                      fontFamily: technicalFontFamily,
+                      fontFamilyFallback: technicalFontFallback,
                     ),
                   ),
                 ],

@@ -641,10 +641,10 @@ void main() {
       expect(find.byKey(Key('$column-resizer')), findsOneWidget);
     }
     final header = tester.widget<Text>(find.text('GRAPH'));
-    expect(header.style?.fontFamily, 'monospace');
+    expect(header.style?.fontFamily, technicalFontFamily);
     expect(header.style?.fontSize, 12);
     final commitHeader = tester.widget<Text>(find.text('COMMIT MESSAGE'));
-    expect(commitHeader.style?.fontFamily, 'monospace');
+    expect(commitHeader.style?.fontFamily, technicalFontFamily);
     expect(commitHeader.style?.fontSize, 12);
     expect(find.text('DATE'), findsOneWidget);
     expect(find.text('AUTHOR'), findsOneWidget);
@@ -15166,7 +15166,7 @@ void main() {
           )
           .style
           ?.fontFamily,
-      'monospace',
+      technicalFontFamily,
     );
 
     // The working tree row has no commit, so its preview shows no timestamp.

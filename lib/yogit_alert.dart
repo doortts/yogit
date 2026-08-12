@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'timeline_theme.dart';
+import 'typography.dart';
 
 /// Splits prose into sentences, each keeping its closing mark. A trailing
 /// fragment with no mark of its own counts as a sentence, so nothing is lost.
@@ -337,7 +338,8 @@ class YogitAlertBlock extends StatelessWidget {
                 color: palette.muted,
                 fontSize: 11,
                 height: 1.5,
-                fontFamily: 'monospace',
+                fontFamily: technicalFontFamily,
+                fontFamilyFallback: technicalFontFallback,
               ),
             ),
         ],

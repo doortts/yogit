@@ -79,7 +79,11 @@ const _tooltipDelay = Duration(milliseconds: 400);
 
 /// The status bar's commit stamp: a fixed-width format in a monospace face, so
 /// its width can be measured from a sample rather than the live value.
-const _statusStampStyle = TextStyle(fontSize: 11, fontFamily: 'monospace');
+const _statusStampStyle = TextStyle(
+  fontSize: 11,
+  fontFamily: technicalFontFamily,
+  fontFamilyFallback: technicalFontFallback,
+);
 
 /// How many rows of road the selection keeps ahead of it before the list moves.
 const _selectionScrollMargin = 2;
@@ -2603,7 +2607,8 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// what these two actually draw.
   static const _headerLabelStyle = TextStyle(
     fontSize: 12,
-    fontFamily: 'monospace',
+    fontFamily: technicalFontFamily,
+    fontFamilyFallback: technicalFontFallback,
     fontWeight: FontWeight.w500,
     letterSpacing: 0.66,
   );

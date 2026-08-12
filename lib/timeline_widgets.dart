@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'timeline_graph_painters.dart';
 import 'timeline_palette.dart';
 import 'timeline_theme.dart';
+import 'typography.dart';
 
 /// The small pieces the timeline builds itself from: its wordmark, the hover
 /// and keycap wrappers, the copy button, the row-state scope, the legend dot
@@ -407,7 +408,8 @@ class CommitMessageDialogState extends State<CommitMessageDialog> {
                     color: palette.text,
                     fontSize: 11.5,
                     height: 1.55,
-                    fontFamily: 'monospace',
+                    fontFamily: technicalFontFamily,
+                    fontFamilyFallback: technicalFontFallback,
                   ),
                   decoration: InputDecoration(
                     isDense: true,
@@ -1151,7 +1153,8 @@ class _NoticeCommitRow extends StatelessWidget {
             commit.shortSha,
             style: TextStyle(
               color: hashRed.withValues(alpha: faded),
-              fontFamily: 'monospace',
+              fontFamily: technicalFontFamily,
+              fontFamilyFallback: technicalFontFallback,
               fontSize: 12,
             ),
           ),
@@ -1163,7 +1166,8 @@ class _NoticeCommitRow extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: palette.text.withValues(alpha: faded),
-                fontFamily: 'monospace',
+                fontFamily: technicalFontFamily,
+                fontFamilyFallback: technicalFontFallback,
                 fontSize: 13,
               ),
             ),
@@ -1201,7 +1205,8 @@ class _EscHint extends StatelessWidget {
               'esc',
               style: TextStyle(
                 color: palette.muted,
-                fontFamily: 'monospace',
+                fontFamily: technicalFontFamily,
+                fontFamilyFallback: technicalFontFallback,
                 fontSize: 10.5,
               ),
             ),

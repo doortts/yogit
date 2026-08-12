@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/git.dart';
+import 'package:yogit/typography.dart';
 import 'package:yogit/window_frame.dart';
 
 import 'app_test.dart'
@@ -354,6 +355,43 @@ void main() {
       reason: '요약은 목록이 아니라 실제 개수를 센다',
     );
     expect(find.text('외 3개'), findsOneWidget);
+  });
+
+  testWidgets('a receipt line stands in a fixed-width face, hash and all', (
+    tester,
+  ) async {
+    final repository = FakeGitRepository(
+      (_, _) async => [commit('aaa1111', 'local work')],
+      refs: refs(ahead: 2),
+      movedCommitsCallback: (before, after) async => const [
+        (incoming: true, shortSha: 'aaa1111', subject: 'local work'),
+        (incoming: true, shortSha: 'ccc3333', subject: 'more local work'),
+      ],
+      pushBranchCallback:
+          (remote, branch, {toBranch, fromTip, setUpstream = false}) async {},
+    );
+    await pumpApp(tester, repository);
+
+    await tester.tap(find.byKey(const Key('upstream-sync-push')));
+    await tester.pumpAndSettle();
+
+    // 'monospace'는 macOS에 없는 이름이라 조용히 가변폭으로 떨어진다 — 해시
+    // 열이 어긋난 이유가 그것이었다. 실제로 있는 고정폭 계열만 쓴다.
+    for (final label in ['aaa1111', 'more local work']) {
+      expect(
+        tester
+            .widget<Text>(
+              find.descendant(
+                of: find.byKey(const Key('push-receipt-push-block')),
+                matching: find.text(label),
+              ),
+            )
+            .style
+            ?.fontFamily,
+        technicalFontFamily,
+        reason: '$label이 고정폭이 아니면 해시 열이 다시 어긋난다',
+      );
+    }
   });
 
   testWidgets('the push receipt says which address origin is', (tester) async {

@@ -15,6 +15,7 @@ import 'github_oauth.dart';
 import 'timeline_theme.dart';
 import 'window_frame.dart';
 import 'yogit_alert.dart';
+import 'typography.dart';
 
 enum BranchPreviewMode {
   merge,
@@ -1104,7 +1105,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   static const _colorFieldStyle = TextStyle(
     color: Color(0xFFE8EAF2),
     fontSize: 11,
-    fontFamily: 'monospace',
+    fontFamily: technicalFontFamily,
+    fontFamilyFallback: technicalFontFallback,
   );
   static const _colorFieldDecoration = InputDecoration(
     isDense: true,
@@ -1140,7 +1142,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     color: Color(0xFFE5E5EA),
     fontSize: 12,
     height: 1.55,
-    fontFamily: 'monospace',
+    fontFamily: technicalFontFamily,
+    fontFamilyFallback: technicalFontFallback,
   );
   static const _templateDecoration = InputDecoration(
     isDense: true,
@@ -2177,7 +2180,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   style: const TextStyle(
                     color: Color(0xFF8D94A8),
                     fontSize: 10.5,
-                    fontFamily: 'monospace',
+                    fontFamily: technicalFontFamily,
+                    fontFamilyFallback: technicalFontFallback,
                   ),
                 ),
               ),

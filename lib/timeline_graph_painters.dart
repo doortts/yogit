@@ -7,6 +7,7 @@ import 'avatars.dart';
 import 'git.dart';
 import 'timeline.dart';
 import 'timeline_palette.dart';
+import 'typography.dart';
 
 class RebaseMergeResultPainter extends CustomPainter {
   const RebaseMergeResultPainter({
@@ -35,7 +36,11 @@ class RebaseMergeResultPainter extends CustomPainter {
       final painter = TextPainter(
         text: TextSpan(
           text: text,
-          style: TextStyle(color: color, fontSize: 10, fontFamily: 'monospace'),
+          style: const TextStyle(
+            fontSize: 10,
+            fontFamily: technicalFontFamily,
+            fontFamilyFallback: technicalFontFallback,
+          ).copyWith(color: color),
         ),
         textDirection: TextDirection.ltr,
         // 좁은 pane에서도 한 줄로 남아야 선과 점 위로 겹치지 않는다.

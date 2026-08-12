@@ -5,6 +5,7 @@ import 'timeline_palette.dart';
 import 'timeline_theme.dart';
 import 'timeline_widgets.dart';
 import 'upstream_sync.dart';
+import 'typography.dart';
 
 /// 기준 브랜치 선택기 곁의 동기화 캡슐. 동사는 '무엇을 하겠다'가 아니라 '하면
 /// 어떻게 되는지'를 입는다 — 초록: 그대로 됨, 주황: 받아 얹기를 거치면 됨,
@@ -209,7 +210,8 @@ class UpstreamSyncCapsule extends StatelessWidget {
                         // 개수는 판정 색과 함께, 고정폭으로.
                         style: int.tryParse(parts[index]) != null
                             ? const TextStyle(
-                                fontFamily: 'monospace',
+                                fontFamily: technicalFontFamily,
+                                fontFamilyFallback: technicalFontFallback,
                                 fontSize: 11,
                               )
                             : null,

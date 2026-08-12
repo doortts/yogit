@@ -687,7 +687,8 @@ extension _TimelineBranchPreview on _TimelineScreenState {
               style: TextStyle(
                 color: _palette.muted,
                 fontSize: 10,
-                fontFamily: 'monospace',
+                fontFamily: technicalFontFamily,
+                fontFamilyFallback: technicalFontFallback,
               ),
             ),
           ],

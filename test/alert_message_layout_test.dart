@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/timeline_theme.dart';
 import 'package:yogit/yogit_alert.dart';
+import 'package:yogit/typography.dart';
 
 void main() {
   const style = TextStyle(fontSize: 11, height: 1.45);
@@ -227,7 +228,12 @@ void main() {
     tester,
   ) async {
     const url = 'git@github.example.com:some-long-team-name/yogit.git';
-    const mono = TextStyle(fontFamily: 'monospace', fontSize: 11, height: 1.5);
+    const mono = TextStyle(
+      fontFamily: technicalFontFamily,
+      fontFamilyFallback: technicalFontFallback,
+      fontSize: 11,
+      height: 1.5,
+    );
     String fitted(double width) =>
         truncateHead(url, style: mono, maxWidth: width);
 

@@ -383,7 +383,8 @@ extension _TimelinePreviewPane on _TimelineScreenState {
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                 fontSize: 12,
-                                fontFamily: 'monospace',
+                                fontFamily: technicalFontFamily,
+                                fontFamilyFallback: technicalFontFallback,
                               ),
                             ),
                             trailing: Text(
@@ -880,7 +881,8 @@ extension _TimelinePreviewPane on _TimelineScreenState {
                   style: TextStyle(
                     color: _palette.muted,
                     fontSize: 13,
-                    fontFamily: 'monospace',
+                    fontFamily: technicalFontFamily,
+                    fontFamilyFallback: technicalFontFallback,
                   ),
                 ),
             ],
@@ -1011,7 +1013,8 @@ extension _TimelinePreviewPane on _TimelineScreenState {
                   style: const TextStyle(
                     color: Color(0xFFFF9AA2),
                     fontSize: 10,
-                    fontFamily: 'monospace',
+                    fontFamily: technicalFontFamily,
+                    fontFamilyFallback: technicalFontFallback,
                   ),
                 ),
               ),
