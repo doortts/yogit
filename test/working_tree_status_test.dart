@@ -5,8 +5,52 @@ import 'package:yogit/working_tree_status.dart';
 /// NUL-terminated, and a rename record's original path is a record of its own.
 String status(List<String> records) => records.map((r) => '$r\x00').join();
 
+/// A git patch: every line ends in a newline, as git writes it.
+String patch(List<String> lines) => lines.map((line) => '$line\n').join();
+
 const _modified = '1 MM N... 100644 100644 100644 aaaaaaa bbbbbbb';
 const _binaryCounts = (additions: null, deletions: null, isBinary: true);
+
+const _fileHeader = [
+  'diff --git a/lib/git.dart b/lib/git.dart',
+  'index 1111111..2222222 100644',
+  '--- a/lib/git.dart',
+  '+++ b/lib/git.dart',
+];
+
+const _firstHunk = [
+  '@@ -1,5 +1,5 @@',
+  ' one',
+  ' two',
+  '-three',
+  '+THREE',
+  ' four',
+  ' five',
+];
+
+const _middleHunk = [
+  '@@ -20,6 +20,7 @@ class Foo {',
+  ' alpha',
+  ' beta',
+  '+gamma',
+  ' delta',
+  ' epsilon',
+  ' zeta',
+  ' eta',
+];
+
+const _lastHunk = [
+  '@@ -40,4 +41,4 @@',
+  ' last one',
+  '-last two',
+  '+LAST TWO',
+  ' last three',
+  ' last four',
+];
+
+const _firstRange = (oldStart: 1, oldCount: 5, newStart: 1, newCount: 5);
+const _middleRange = (oldStart: 20, oldCount: 6, newStart: 20, newCount: 7);
+const _lastRange = (oldStart: 40, oldCount: 4, newStart: 41, newCount: 4);
 
 void main() {
   group('parseStatusV2', () {
@@ -175,6 +219,138 @@ void main() {
       expect(
         areaFileChange(entries.single, WorkingTreeArea.unstaged)!.status,
         'U',
+      );
+    });
+  });
+
+  group('extractHunkPatch', () {
+    test('extracts the middle hunk with the file header block intact', () {
+      expect(
+        extractHunkPatch(
+          patch([..._fileHeader, ..._firstHunk, ..._middleHunk, ..._lastHunk]),
+          1,
+          expected: _middleRange,
+        ),
+        patch([..._fileHeader, ..._middleHunk]),
+      );
+    });
+
+    test('keeps a trailing no-newline marker inside its hunk', () {
+      const marker = r'\ No newline at end of file';
+      final source = patch([
+        ..._fileHeader,
+        ..._firstHunk,
+        ..._lastHunk,
+        marker,
+      ]);
+
+      expect(
+        extractHunkPatch(source, 1, expected: _lastRange),
+        patch([..._fileHeader, ..._lastHunk, marker]),
+      );
+      expect(
+        extractHunkPatch(source, 0, expected: _firstRange),
+        patch([..._fileHeader, ..._firstHunk]),
+      );
+    });
+
+    test('keeps new-file and deleted-file headers verbatim', () {
+      final created = patch([
+        'diff --git a/new.txt b/new.txt',
+        'new file mode 100644',
+        'index 0000000..3333333',
+        '--- /dev/null',
+        '+++ b/new.txt',
+        '@@ -0,0 +1,2 @@',
+        '+alpha',
+        '+beta',
+      ]);
+      final deleted = patch([
+        'diff --git a/gone.txt b/gone.txt',
+        'deleted file mode 100644',
+        'index 3333333..0000000',
+        '--- a/gone.txt',
+        '+++ /dev/null',
+        '@@ -1,2 +0,0 @@',
+        '-alpha',
+        '-beta',
+      ]);
+
+      expect(
+        extractHunkPatch(
+          created,
+          0,
+          expected: (oldStart: 0, oldCount: 0, newStart: 1, newCount: 2),
+        ),
+        created,
+      );
+      expect(
+        extractHunkPatch(
+          deleted,
+          0,
+          expected: (oldStart: 1, oldCount: 2, newStart: 0, newCount: 0),
+        ),
+        deleted,
+      );
+    });
+
+    test('throws HunkMovedException when the expected header numbers '
+        'differ', () {
+      final source = patch([..._fileHeader, ..._firstHunk, ..._middleHunk]);
+
+      expect(
+        () => extractHunkPatch(
+          source,
+          1,
+          expected: (oldStart: 21, oldCount: 6, newStart: 20, newCount: 7),
+        ),
+        throwsA(isA<HunkMovedException>()),
+      );
+      expect(
+        () => extractHunkPatch(
+          source,
+          1,
+          expected: (oldStart: 20, oldCount: 6, newStart: 20, newCount: 6),
+        ),
+        throwsA(isA<HunkMovedException>()),
+      );
+      expect(
+        () => extractHunkPatch(source, 2, expected: _lastRange),
+        throwsA(isA<HunkMovedException>()),
+      );
+    });
+
+    test('accepts a header that omits ,1 counts', () {
+      final source = patch([
+        'diff --git a/one.txt b/one.txt',
+        'index 1111111..2222222 100644',
+        '--- a/one.txt',
+        '+++ b/one.txt',
+        '@@ -3 +3 @@',
+        '-old',
+        '+new',
+      ]);
+
+      expect(
+        extractHunkPatch(
+          source,
+          0,
+          expected: (oldStart: 3, oldCount: 1, newStart: 3, newCount: 1),
+        ),
+        source,
+      );
+    });
+
+    test('returns a patch ending with a newline', () {
+      final source = [
+        ..._fileHeader,
+        ..._firstHunk,
+        ..._middleHunk,
+      ].join('\n');
+
+      expect(
+        extractHunkPatch(source, 1, expected: _middleRange),
+        patch([..._fileHeader, ..._middleHunk]),
       );
     });
   });

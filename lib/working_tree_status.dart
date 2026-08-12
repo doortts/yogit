@@ -180,6 +180,62 @@ List<WorkingTreeEntry> mergeNumstat(
       entry._withCounts(unstaged[entry.path], staged[entry.path]),
 ];
 
+/// The four numbers of a `@@ -a,b +c,d @@` header. A count git omitted is 1,
+/// so the caller compares numbers rather than header text.
+typedef HunkRange = ({int oldStart, int oldCount, int newStart, int newCount});
+
+/// The hunk the screen drew is no longer the hunk at that index — the file
+/// moved under the open diff. Nothing was applied.
+class HunkMovedException implements Exception {
+  const HunkMovedException();
+
+  @override
+  String toString() => '파일이 그 사이에 바뀌어 이 Hunk를 적용하지 않았습니다.';
+}
+
+final _hunkHeader = RegExp(r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@');
+
+/// The applicable patch that keeps only hunk [hunkIndex] of [patch], a git diff
+/// of one file. Throws [HunkMovedException] when that hunk's header no longer
+/// matches [expected].
+///
+/// The result is sliced out of [patch] verbatim: `parseUnifiedDiff` reads
+/// `\ No newline at end of file` as a header line, so a patch rebuilt from its
+/// output would lose that marker and the original spacing.
+String extractHunkPatch(
+  String patch,
+  int hunkIndex, {
+  required HunkRange expected,
+}) {
+  final lines = patch.split('\n');
+  final starts = [
+    for (var line = 0; line < lines.length; line++)
+      if (lines[line].startsWith('@@')) line,
+  ];
+  if (hunkIndex < 0 || hunkIndex >= starts.length) {
+    throw const HunkMovedException();
+  }
+  final start = starts[hunkIndex];
+  final match = _hunkHeader.firstMatch(lines[start]);
+  if (match == null) throw const HunkMovedException();
+  final found = (
+    oldStart: int.parse(match.group(1)!),
+    oldCount: int.parse(match.group(2) ?? '1'),
+    newStart: int.parse(match.group(3)!),
+    newCount: int.parse(match.group(4) ?? '1'),
+  );
+  if (found != expected) throw const HunkMovedException();
+
+  final end = hunkIndex + 1 < starts.length
+      ? starts[hunkIndex + 1]
+      : lines.length;
+  final result = [
+    ...lines.take(starts.first),
+    ...lines.getRange(start, end),
+  ].join('\n');
+  return result.endsWith('\n') ? result : '$result\n';
+}
+
 /// The `GitFileChange` [entry] shows as in [area], or null when that area does
 /// not hold it. The letter is the area's own axis — Unstaged reads Y, Staged
 /// reads X.
