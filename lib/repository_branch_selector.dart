@@ -22,10 +22,12 @@ String repositoryNameOf(String path) {
 }
 
 class RepositoryBranchSelector extends StatelessWidget {
+  // (동기화 캡슐이 기준 브랜치 곁에 서는 이유는 docs/upstream-sync-mockup.html.)
   const RepositoryBranchSelector({
     required this.repositoryName,
     required this.repositoryPath,
     required this.localBranches,
+    this.trailing,
     this.branchTimes = const {},
     this.remoteBranches = const [],
     this.tags = const [],
@@ -43,6 +45,10 @@ class RepositoryBranchSelector extends StatelessWidget {
     this.onComparisonCleared,
     super.key,
   });
+
+  /// 기준 브랜치 선택기 바로 오른쪽 자리 — 동기화 캡슐이 선다. 이 상태는
+  /// 기준 브랜치의 속성이라 그 이름 곁에서 말해야 한다.
+  final Widget? trailing;
 
   final String repositoryName;
   final String repositoryPath;
@@ -111,6 +117,16 @@ class RepositoryBranchSelector extends StatelessWidget {
               onSelected: onBranchSelected,
             ),
           ),
+          // 좁아지면 캡슐이 줄어든다 — 행이 넘치는 일은 구조적으로 없다.
+          // (사이드바 액션 스트립과 같은 수법.)
+          if (trailing case final capsule?)
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: capsule,
+              ),
+            ),
           Expanded(
             child: _ComparisonSelector(
               localBranches: localBranches,

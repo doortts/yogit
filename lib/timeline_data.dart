@@ -63,14 +63,21 @@ extension _TimelineDataFlows on _TimelineScreenState {
         }
       }
       if (!mounted) return;
-      if (updated) await _loadRefs();
-      if (mounted) _fetchError.value = fetchError;
+      final fetchedAt = DateTime.now();
+      if (updated) await _loadRefs(refreshedAt: fetchedAt);
+      if (mounted) {
+        _fetchError.value = fetchError;
+        // 갱신이 없어도 확인은 확인이다 — '4분 전에 확인'의 그 시각.
+        if (!updated && fetchError == null) {
+          _judgeUpstreamSync(refreshedAt: fetchedAt);
+        }
+      }
     } finally {
       if (mounted) _fetchingRemotes.value = false;
     }
   }
 
-  Future<void> _loadRefs() async {
+  Future<void> _loadRefs({DateTime? refreshedAt}) async {
     try {
       final refs = await widget.repository.loadRefs();
       if (!mounted) return;
@@ -120,6 +127,7 @@ extension _TimelineDataFlows on _TimelineScreenState {
         }
         _rebuildGraph();
       });
+      _judgeUpstreamSync(refreshedAt: refreshedAt);
       _scheduleRatchetUpdate();
       // Refs land beside the first page, so a ref hidden from a previous
       // session had no tip to resolve when that page went out. Now it does.

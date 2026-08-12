@@ -40,6 +40,9 @@ import 'settings.dart';
 import 'shortcut_modifier.dart';
 import 'timeline_theme.dart';
 import 'typography.dart';
+import 'upstream_push_receipt.dart';
+import 'upstream_sync.dart';
+import 'upstream_sync_capsule.dart';
 import 'vim_navigation.dart';
 import 'window_frame.dart';
 
@@ -57,6 +60,7 @@ part 'timeline_diff_mode.dart';
 part 'timeline_preview_pane.dart';
 part 'timeline_rows.dart';
 part 'timeline_search.dart';
+part 'timeline_upstream_sync.dart';
 part 'timeline_sidebar.dart';
 
 /// The date group heading's box and label.
@@ -525,6 +529,12 @@ class _TimelineScreenState extends State<TimelineScreen>
   bool? _arrivedGoingDown;
   final _filterController = TextEditingController();
   var _filter = '';
+  // upstream 동기화 — 판정은 컨트롤러가, 실행은 이 화면이.
+  late final _upstreamSync = UpstreamSyncController(
+    measure: widget.repository.measureUpstreamRebase,
+  );
+  var _upstreamSyncBusy = false;
+
   // 커밋 찾기 — 목록을 거르지 않고 찾은 자리에 불을 켠다.
   final _searchController = TextEditingController();
   final _searchFocusNode = FocusNode(debugLabel: 'timeline search');
@@ -1023,6 +1033,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           _baseBranch = branch;
           _rebuildGraph();
         });
+        _judgeUpstreamSync();
         _scheduleRatchetUpdate();
         unawaited(_refreshRemotes());
       }
@@ -1072,6 +1083,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       node.dispose();
     }
     _filterController.dispose();
+    _upstreamSync.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
     _focusNode.dispose();
@@ -1998,6 +2010,7 @@ class _TimelineScreenState extends State<TimelineScreen>
       _resetBranchApply();
       _rebuildGraph();
     });
+    _judgeUpstreamSync();
     _scheduleRatchetUpdate();
     if (compared != null) {
       if (compared == branch) {

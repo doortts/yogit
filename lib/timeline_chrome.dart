@@ -57,6 +57,7 @@ extension _TimelineChrome on _TimelineScreenState {
                     child: RepositoryBranchSelector(
                       repositoryName: _repositoryName,
                       repositoryPath: widget.repository.root,
+                      trailing: _upstreamSyncCapsule(),
                       localBranches: _recentLocalBranches,
                       branchTimes: _refs.branchActivityTimes,
                       remoteBranches: sortRefsNewestFirst(

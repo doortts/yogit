@@ -20,6 +20,7 @@ import 'package:yogit/full_diff_unified_view.dart';
 import 'package:yogit/full_diff_workspace.dart';
 import 'package:yogit/commit_time.dart';
 import 'package:yogit/git.dart';
+import 'package:yogit/local_state_signature.dart';
 import 'package:yogit/github_api.dart';
 import 'package:yogit/main.dart';
 import 'package:yogit/monitor_screen.dart';
@@ -18346,6 +18347,11 @@ class FakeGitRepository extends GitRepository {
     this.stageResolvedFileCallback,
     this.commitMessage,
     this.deletedBranchNameCallback,
+    this.measureUpstreamRebaseCallback,
+    this.pushBranchCallback,
+    this.applyUpstreamRebaseCallback,
+    this.pullRemoteBranchCallback,
+    this.movedCommitsCallback,
     this.onLoadHistory,
     String root = '.',
     CommandRunner runner = runProcess,
@@ -18358,6 +18364,28 @@ class FakeGitRepository extends GitRepository {
   final GitDiffAlgorithmSetting gitDiffAlgorithmSetting;
   final Future<RepoRefs> Function()? refsLoader;
   final Future<FetchOriginResult> Function(String remote)? fetchRemoteCallback;
+  final Future<RebasePreviewResult> Function({
+    required String remoteTip,
+    required String localTip,
+  })?
+  measureUpstreamRebaseCallback;
+  final Future<void> Function(
+    String remote,
+    String branch, {
+    String? toBranch,
+    bool setUpstream,
+  })?
+  pushBranchCallback;
+  final Future<bool> Function({
+    required String branch,
+    required String expectedTip,
+    required String virtualTip,
+  })?
+  applyUpstreamRebaseCallback;
+  final Future<void> Function(String remote, String branch, {bool checkedOut})?
+  pullRemoteBranchCallback;
+  final Future<List<MovedCommit>> Function(String before, String after)?
+  movedCommitsCallback;
   final Future<String?> Function()? originUrlCallback;
   final Future<BranchComparisonResult> Function(String base, String compare)?
   compareBranchesCallback;
@@ -18491,6 +18519,81 @@ class FakeGitRepository extends GitRepository {
   Future<FetchOriginResult> fetchRemote(String remote) =>
       fetchRemoteCallback?.call(remote) ??
       Future.value(FetchOriginResult.noOrigin);
+
+  @override
+  Future<RebasePreviewResult> measureUpstreamRebase({
+    required String remoteTip,
+    required String localTip,
+  }) =>
+      // 진짜 git이 없는 곳에서 기본은 '실패' — 판정이 보류될 뿐 아무것도
+      // 실행되지 않는다. 어긋남을 다루는 테스트만 콜백으로 답을 준다.
+      measureUpstreamRebaseCallback?.call(
+        remoteTip: remoteTip,
+        localTip: localTip,
+      ) ??
+      Future.value(
+        RebasePreviewResult(
+          status: RebasePreviewStatus.failed,
+          baseTip: remoteTip,
+          compareTip: localTip,
+          error: 'no measure faked',
+        ),
+      );
+
+  @override
+  Future<void> pushBranch(
+    String remote,
+    String branch, {
+    String? toBranch,
+    bool setUpstream = false,
+  }) => pushBranchCallback != null
+      ? pushBranchCallback!(
+          remote,
+          branch,
+          toBranch: toBranch,
+          setUpstream: setUpstream,
+        )
+      : super.pushBranch(
+          remote,
+          branch,
+          toBranch: toBranch,
+          setUpstream: setUpstream,
+        );
+
+  @override
+  Future<bool> applyUpstreamRebase({
+    required String branch,
+    required String expectedTip,
+    required String virtualTip,
+  }) => applyUpstreamRebaseCallback != null
+      ? applyUpstreamRebaseCallback!(
+          branch: branch,
+          expectedTip: expectedTip,
+          virtualTip: virtualTip,
+        )
+      : super.applyUpstreamRebase(
+          branch: branch,
+          expectedTip: expectedTip,
+          virtualTip: virtualTip,
+        );
+
+  @override
+  Future<void> pullRemoteBranch(
+    String remote,
+    String branch, {
+    required bool checkedOut,
+  }) => pullRemoteBranchCallback != null
+      ? pullRemoteBranchCallback!(remote, branch, checkedOut: checkedOut)
+      : super.pullRemoteBranch(remote, branch, checkedOut: checkedOut);
+
+  @override
+  Future<List<MovedCommit>> loadMovedCommits(
+    String before,
+    String after, {
+    int limit = 9,
+  }) => movedCommitsCallback != null
+      ? movedCommitsCallback!(before, after)
+      : super.loadMovedCommits(before, after, limit: limit);
 
   @override
   Future<BranchComparisonResult> compareBranches(
