@@ -1024,11 +1024,14 @@ extension _TimelineCommitPanel on _TimelineScreenState {
         context,
       ).showSnackBar(SnackBar(content: Text(failure)));
     }
-    _rebuild(() {
-      _commitModeBusy = false;
-      if (inlineError) _commitError = failure;
-    });
-    await _reloadCommitMode(timelineToo: reloadTimeline && failure == null);
+    if (inlineError) _rebuild(() => _commitError = failure);
+    // 되읽기까지가 한 조작이다. 그 전에 busy를 풀면 조작 이전 목록 위에서 버튼이
+    // 되살아나 사라진 행에 대고 두 번째 조작이 나간다.
+    try {
+      await _reloadCommitMode(timelineToo: reloadTimeline && failure == null);
+    } finally {
+      if (mounted) _rebuild(() => _commitModeBusy = false);
+    }
     return failure == null;
   }
 

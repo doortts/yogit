@@ -737,13 +737,19 @@ void main() {
     tester,
   ) async {
     final gate = Completer<void>();
+    // 조작이 끝난 뒤의 되읽기를 붙들 자리. 그 구간에 그려지는 목록은 조작 이전
+    // 것이라 버튼이 살아 있으면 사라진 행에 대고 두 번째 조작이 나간다.
+    Completer<void>? reload;
     final staged = <List<String>>[];
     await pumpPanel(
       tester,
       FakeGitRepository(
         (_, _) async => [commit('1', 'first commit')],
         workingTree: () async => workingTreeCommit('1'),
-        workingTreeStatus: () async => bothSections(),
+        workingTreeStatus: () async {
+          if (reload case final held?) await held.future;
+          return bothSections();
+        },
         stageFilesCallback: (paths) async {
           staged.add(paths);
           await gate.future;
@@ -766,9 +772,21 @@ void main() {
     await tester.pump();
     expect(staged, [<String>[]]);
 
+    reload = Completer<void>();
     gate.complete();
+    await tester.pump();
+    expect(
+      enabled(tester, const Key('commit-stage-all')),
+      isFalse,
+      reason: '되읽기가 끝나기 전에는 목록이 조작 이전 것이다',
+    );
+    expect(enabled(tester, const Key('commit-unstage-all')), isFalse);
+    expect(enabled(tester, const Key('commit-submit')), isFalse);
+
+    reload.complete();
     await tester.pumpAndSettle();
     expect(enabled(tester, const Key('commit-stage-all')), isTrue);
+    expect(enabled(tester, const Key('commit-unstage-all')), isTrue);
     expect(enabled(tester, const Key('commit-submit')), isTrue);
   });
 }
