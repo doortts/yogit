@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
 import 'git.dart';
@@ -302,10 +303,31 @@ class CommandLog extends ChangeNotifier {
     super.dispose();
   }
 
+  var _notifyPending = false;
+
   /// A command outliving the window it was started from still comes back and
   /// settles its line; there is just nobody left to tell.
+  ///
+  /// Some commands start *while a frame is being built*: a pane drawing itself
+  /// asks for a commit message, and git runs before that build finishes. Saying
+  /// so right then would be telling the console to rebuild in the middle of the
+  /// build it is already part of, which the framework refuses. Such a line
+  /// waits for the end of the frame instead — and however many pile up in one
+  /// frame, the wait is announced once.
   void _notify() {
-    if (!_disposed) notifyListeners();
+    if (_disposed) return;
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase != SchedulerPhase.persistentCallbacks &&
+        phase != SchedulerPhase.midFrameMicrotasks) {
+      notifyListeners();
+      return;
+    }
+    if (_notifyPending) return;
+    _notifyPending = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _notifyPending = false;
+      if (!_disposed) notifyListeners();
+    });
   }
 
   /// Commands whose output is a secret. The keychain hands back the token

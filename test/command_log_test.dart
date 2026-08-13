@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/command_log.dart';
 
@@ -338,5 +339,44 @@ void main() {
     await run('git', ['status']);
 
     expect(beats, 2, reason: '시작할 때 한 번, 끝날 때 한 번');
+  });
+
+  /// 미리보기 판이 그려지다가 커밋 메시지를 부르는 식으로, 프레임을 그리는 중에
+  /// 시작되는 명령이 있다. 그 자리에서 콘솔에게 알리면 지금 그리는 중에 다시
+  /// 그리라는 말이 되어 프레임워크가 막는다.
+  testWidgets('a command started during a build tells the console after it', (
+    tester,
+  ) async {
+    final log = CommandLog();
+    final run = log.wrap(
+      (executable, arguments, {workingDirectory, environment}) async => ok(),
+    );
+    var beats = 0;
+    log.addListener(() => beats++);
+    var started = false;
+
+    await tester.pumpWidget(
+      ListenableBuilder(
+        listenable: log,
+        builder: (context, _) {
+          // 빌드 도중 명령을 시작한다 — 진짜 판이 하는 일 그대로다.
+          if (!started) {
+            started = true;
+            unawaited(run('git', ['log', '-1', '--format=%B']));
+          }
+          return const SizedBox.shrink();
+        },
+      ),
+    );
+
+    expect(
+      tester.takeException(),
+      isNull,
+      reason: '빌드 중에 뜬 줄이 그 프레임 안에서 콘솔을 다시 그리라고 하지 않는다',
+    );
+    expect(log.entries.single.commandLine, 'git log -1 --format=%B');
+
+    await tester.pump();
+    expect(beats, greaterThan(0), reason: '알림은 프레임이 끝난 뒤에 온다');
   });
 }
