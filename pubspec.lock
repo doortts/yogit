@@ -114,10 +114,10 @@ packages:
     dependency: "direct main"
     description:
       name: flutter_monaco
-      sha256: c7df483935df15fd413d9b3e5eb327ec784728672add8f624c5e95ca33cfaf2c
+      sha256: "37cb6084dc28656bef57a4206e823cef273772c733085dc0918f4ef766295b45"
       url: "https://pub.dev"
     source: hosted
-    version: "3.4.2"
+    version: "3.4.3"
   flutter_test:
     dependency: "direct dev"
     description: flutter
@@ -159,10 +159,10 @@ packages:
     dependency: transitive
     description:
       name: jni
-      sha256: "5bc9a9daac5ccfbd6a758377600b9f7fdce13d93f26e8012a8941014a5d978d1"
+      sha256: f038e58b4dc2c9037f50e233175086337e0b305e356d28211bf55f21c504cbd3
       url: "https://pub.dev"
     source: hosted
-    version: "1.0.2"
+    version: "1.0.3"
   jni_flutter:
     dependency: transitive
     description:
@@ -476,10 +476,10 @@ packages:
     dependency: transitive
     description:
       name: webview_flutter_android
-      sha256: a97db7a44f8e71af2f3971c45550a08cce1fb60059c1b8e534251e6cfb753490
+      sha256: b98656fa4461f8cc05c48a778b4d4883e60ec63e1778348f363f9bb9a477745d
       url: "https://pub.dev"
     source: hosted
-    version: "4.13.0"
+    version: "4.14.0"
   webview_flutter_platform_interface:
     dependency: transitive
     description:
