@@ -3615,6 +3615,48 @@ void main() {
     );
   });
 
+  testWidgets('a cursor folded away carries on from its own section', (
+    tester,
+  ) async {
+    bool cursorOn(String name) {
+      final background = find.byKey(Key('sidebar-ref-hover-background-$name'));
+      if (background.evaluate().isEmpty) return false;
+      final decoration =
+          tester.widget<DecoratedBox>(background).decoration as BoxDecoration;
+      return (decoration.border! as Border).left.width == 2;
+    }
+
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(
+            local: ['main'],
+            remote: ['origin/main', 'fork/main'],
+            remoteNames: ['fork', 'origin'],
+            current: 'main',
+          ),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('sidebar-ref-origin/main')));
+    await tester.pumpAndSettle();
+    expect(cursorOn('origin/main'), isTrue);
+
+    await tester.tap(find.byKey(const Key('sidebar-remote-group-origin')));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+
+    // 커서가 있던 줄이 접혀 사라졌다. 사이드바 맨 위로 튀지 않고 그 섹션에서
+    // 이어 간다.
+    expect(cursorOn('fork/main'), isTrue);
+    expect(cursorOn('main'), isFalse);
+  });
+
   testWidgets('a disabled refresh swallows the tap meant for it', (
     tester,
   ) async {

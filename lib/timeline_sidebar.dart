@@ -200,9 +200,17 @@ extension _TimelineSidebar on _TimelineScreenState {
     if (rows.isEmpty) return;
     final cursor = _sidebarCursor;
     final index = cursor == null ? -1 : rows.indexOf(cursor);
-    final next = index < 0
-        ? (step > 0 ? 0 : rows.length - 1)
-        : (index + step).clamp(0, rows.length - 1);
+    // The row the cursor was on can be folded away under it — a collapsed
+    // folder or remote heading takes its names off the screen. Carrying on
+    // from that section beats jumping to the far end of the sidebar.
+    final stranded = cursor == null || index >= 0
+        ? -1
+        : rows.indexWhere((row) => row.$1 == cursor.$1);
+    final next = index >= 0
+        ? (index + step).clamp(0, rows.length - 1)
+        : stranded >= 0
+        ? stranded
+        : (step > 0 ? 0 : rows.length - 1);
     final (section, name) = rows[next];
     _rebuild(() => _sidebarCursor = rows[next]);
     _selectRef(
