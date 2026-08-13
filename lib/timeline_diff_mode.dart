@@ -88,6 +88,9 @@ extension _TimelineDiffMode on _TimelineScreenState {
       _leavePreview();
       return KeyEventResult.handled;
     }
+    // 제목·본문을 치는 중이면 h·j·k·l은 글자고 화살표는 캐럿의 것이다. 루트
+    // 핸들러가 쓰는 가드를 그대로 써서 탐색 키를 TextField에 흘려보낸다.
+    if (_editableDescendantHasFocus) return KeyEventResult.ignored;
     final key = normalizeNavigationKey(
       event.logicalKey,
       hasModifier: keyboard.isShiftPressed || keyboard.isControlPressed,

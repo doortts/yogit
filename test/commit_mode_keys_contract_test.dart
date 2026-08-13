@@ -170,6 +170,18 @@ void main() {
           .color !=
       null;
 
+  /// 입력칸이 키보드를 들고 있는지. TextField에는 FocusNode가 없으니 그 안의
+  /// EditableText에게 묻는다.
+  bool fieldHasFocus(WidgetTester tester, String key) => tester
+      .widget<EditableText>(
+        find.descendant(
+          of: find.byKey(Key(key)),
+          matching: find.byType(EditableText),
+        ),
+      )
+      .focusNode
+      .hasFocus;
+
   Future<void> metaKey(WidgetTester tester, LogicalKeyboardKey key) async {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(key);
@@ -267,6 +279,163 @@ void main() {
           ?.text,
       'fix the',
     );
+  });
+
+  testWidgets('vim letters typed into the title field stay letters', (
+    tester,
+  ) async {
+    await pumpPanel(
+      tester,
+      FakeGitRepository(
+        (_, _) async => [commit('1', 'first commit')],
+        workingTree: () async => workingTreeCommit('1'),
+        workingTreeStatus: () async => bothSections(),
+      ),
+    );
+
+    await metaKey(tester, LogicalKeyboardKey.arrowDown);
+    expect(cursorOn(tester, WorkingTreeArea.unstaged, 'lib/a.dart'), isTrue);
+
+    await tester.enterText(find.byKey(const Key('commit-title')), 'fix the');
+    await tester.pumpAndSettle();
+    for (final key in [
+      LogicalKeyboardKey.keyH,
+      LogicalKeyboardKey.keyJ,
+      LogicalKeyboardKey.keyK,
+      LogicalKeyboardKey.keyL,
+    ]) {
+      await tester.sendKeyEvent(key);
+      await tester.pumpAndSettle();
+    }
+
+    expect(
+      fieldHasFocus(tester, 'commit-title'),
+      isTrue,
+      reason: '제목을 치는 중의 h·l이 미리보기를 떠나서는 안 된다',
+    );
+    expect(
+      cursorOn(tester, WorkingTreeArea.unstaged, 'lib/a.dart'),
+      isTrue,
+      reason: '제목을 치는 중의 j·k가 커밋 커서를 옮겨서는 안 된다',
+    );
+  });
+
+  testWidgets('arrows in the title field move the caret instead of leaving '
+      'the preview', (tester) async {
+    await pumpPanel(
+      tester,
+      FakeGitRepository(
+        (_, _) async => [commit('1', 'first commit')],
+        workingTree: () async => workingTreeCommit('1'),
+        workingTreeStatus: () async => bothSections(),
+      ),
+    );
+
+    await metaKey(tester, LogicalKeyboardKey.arrowDown);
+    expect(cursorOn(tester, WorkingTreeArea.unstaged, 'lib/a.dart'), isTrue);
+
+    await tester.enterText(find.byKey(const Key('commit-title')), 'fix the');
+    await tester.pumpAndSettle();
+    final caret = tester
+        .widget<TextField>(find.byKey(const Key('commit-title')))
+        .controller!;
+    expect(caret.selection.baseOffset, 7);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pumpAndSettle();
+    expect(caret.selection.baseOffset, 6, reason: '←는 캐럿을 한 글자 왼쪽으로 옮긴다');
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(caret.selection.baseOffset, 7);
+
+    for (final key in [
+      LogicalKeyboardKey.arrowUp,
+      LogicalKeyboardKey.arrowDown,
+    ]) {
+      await tester.sendKeyEvent(key);
+      await tester.pumpAndSettle();
+    }
+
+    expect(
+      fieldHasFocus(tester, 'commit-title'),
+      isTrue,
+      reason: '캐럿을 옮기는 화살표가 미리보기를 떠나서는 안 된다',
+    );
+    expect(
+      cursorOn(tester, WorkingTreeArea.unstaged, 'lib/a.dart'),
+      isTrue,
+      reason: '제목칸의 ↑↓은 커밋 커서가 아니라 캐럿의 것이다',
+    );
+    expect(
+      find.byKey(const Key('commit-panel')),
+      findsOneWidget,
+      reason: '화살표가 타임라인 선택까지 새어 WIP 행을 떠나서는 안 된다',
+    );
+  });
+
+  testWidgets('escape still leaves the preview from inside the title field', (
+    tester,
+  ) async {
+    await pumpPanel(
+      tester,
+      FakeGitRepository(
+        (_, _) async => [commit('1', 'first commit')],
+        workingTree: () async => workingTreeCommit('1'),
+        workingTreeStatus: () async => bothSections(),
+      ),
+    );
+
+    await tester.enterText(find.byKey(const Key('commit-title')), 'fix the');
+    await tester.pumpAndSettle();
+    expect(fieldHasFocus(tester, 'commit-title'), isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    expect(
+      fieldHasFocus(tester, 'commit-title'),
+      isFalse,
+      reason: 'Esc는 편집 중에도 키보드를 타임라인에 돌려준다',
+    );
+    expect(find.byKey(const Key('commit-panel')), findsOneWidget);
+  });
+
+  testWidgets('the file list still answers arrows and vim keys when no field '
+      'has focus', (tester) async {
+    await pumpPanel(
+      tester,
+      FakeGitRepository(
+        (_, _) async => [commit('1', 'first commit')],
+        workingTree: () async => workingTreeCommit('1'),
+        workingTreeStatus: () async => bothSections(),
+        areaFiles: (area) async => [
+          for (final path
+              in area == WorkingTreeArea.unstaged
+                  ? ['lib/a.dart', 'lib/b.dart']
+                  : ['lib/a.dart', 'lib/c.dart'])
+            change(path),
+        ],
+        areaDiff: (_, _) async => oneHunk,
+      ),
+    );
+
+    await metaKey(tester, LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(cursorOn(tester, WorkingTreeArea.unstaged, 'lib/a.dart'), isTrue);
+
+    // 목록이 키보드를 들면 맨 화살표도 vim 글자도 예전대로 커서를 걷는다.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(cursorOn(tester, WorkingTreeArea.unstaged, 'lib/b.dart'), isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyJ);
+    await tester.pumpAndSettle();
+    expect(cursorOn(tester, WorkingTreeArea.staged, 'lib/a.dart'), isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
+    await tester.pumpAndSettle();
+    expect(cursorOn(tester, WorkingTreeArea.unstaged, 'lib/b.dart'), isTrue);
   });
 
   testWidgets('Cmd+Enter commits from the list and from the title field, '

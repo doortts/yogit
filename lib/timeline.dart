@@ -1373,6 +1373,7 @@ class _TimelineScreenState extends State<TimelineScreen>
         }
         return KeyEventResult.handled;
       }
+      final editing = _editableDescendantHasFocus;
       final key = normalizeNavigationKey(
         event.logicalKey,
         hasModifier:
@@ -1380,7 +1381,7 @@ class _TimelineScreenState extends State<TimelineScreen>
             keyboard.isAltPressed ||
             keyboard.isShiftPressed ||
             keyboard.isControlPressed ||
-            _editableDescendantHasFocus,
+            editing,
       );
       final step = switch (key) {
         LogicalKeyboardKey.arrowDown => 1,
@@ -1401,22 +1402,27 @@ class _TimelineScreenState extends State<TimelineScreen>
         }
         return KeyEventResult.handled;
       }
+      // 타자 중에는 맨 화살표가 캐럿의 것이다 — 위의 ⌘↑↓만 앱의 파일 걷기로
+      // 남고, 아래 ⌘↵·Space·Esc는 각자의 가드를 그대로 쓴다.
       // Autorepeat jumps instead of animating: queued animations would lag
       // behind a held key and never catch up.
-      if (step != 0) {
+      if (step != 0 && !editing) {
         _moveSelection(step, animate: event is KeyDownEvent);
         return KeyEventResult.handled;
       }
       // ← (or h) walks over to the sidebar while the pane is open.
       if (key == LogicalKeyboardKey.arrowLeft &&
           event is KeyDownEvent &&
+          !editing &&
           !_sidebarCollapsed) {
         _sidebarFocusNode.requestFocus();
         if (_sidebarCursor == null) _moveSidebarCursor(1);
         return KeyEventResult.handled;
       }
       // → (or l) walks the other way, into the preview and its diff.
-      if (key == LogicalKeyboardKey.arrowRight && event is KeyDownEvent) {
+      if (key == LogicalKeyboardKey.arrowRight &&
+          event is KeyDownEvent &&
+          !editing) {
         _enterPreview();
         return KeyEventResult.handled;
       }
