@@ -432,6 +432,9 @@ extension _TimelineCommitPanel on _TimelineScreenState {
         ? (delta > 0 ? 0 : rows.length - 1)
         : (here + delta).clamp(0, rows.length - 1);
     _rebuild(() => _commitCursor = rows[next]);
+    // 열린 diff는 강조된 행을 따라간다 — 행 클릭이 지나는 자리와 같다. 판이
+    // 닫혀 있으면 화살표는 커서만 걷는다.
+    if (_fullDiffOpen) _openCommitAreaDiff(rows[next].area, rows[next].path);
   }
 
   /// Space: 커서 행을 그 축의 반대편으로 넘긴다.

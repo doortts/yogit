@@ -135,6 +135,13 @@ void main() {
   bool enabled(WidgetTester tester, Key key) =>
       tester.widget<InkWell>(find.byKey(key)).onTap != null;
 
+  WorkingTreeArea segmentSelected(WidgetTester tester) =>
+      tester
+          .widget<FullDiffSegmentedControl<WorkingTreeArea>>(
+            find.byKey(const Key('commit-area-segment')),
+          )
+          .selected;
+
   FullDiffView view(WidgetTester tester) => tester
       .widget<FullDiffWorkspace>(find.byType(FullDiffWorkspace))
       .controller
@@ -412,6 +419,44 @@ void main() {
     expect(statusReads, greaterThan(readsBefore), reason: '패널 목록을 다시 읽는다');
     expect(diffReads, greaterThan(diffsBefore), reason: '열린 diff도 다시 뜬다');
     expect(row(WorkingTreeArea.staged, 'lib/a.dart'), findsOneWidget);
+  });
+
+  testWidgets('arrows move the open diff to the file the cursor lands on', (
+    tester,
+  ) async {
+    await pumpPanel(
+      tester,
+      FakeGitRepository(
+        (_, _) async => [commit('1', 'first commit')],
+        workingTree: () async => workingTreeCommit('1'),
+        workingTreeStatus: () async => bothSections(),
+        areaFiles: (area) async => areaFilesOf(area),
+        areaDiff: (_, _) async => twoHunks,
+      ),
+    );
+
+    // 판이 닫혀 있으면 커서만 걷는다 — 화살표가 diff를 여는 키는 아니다.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(find.byType(FullDiffWorkspace), findsNothing);
+
+    await tester.tap(row(WorkingTreeArea.unstaged, 'lib/a.dart'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(openPath(tester), 'lib/a.dart');
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(openPath(tester), 'lib/b.dart');
+
+    // 섹션 경계를 넘으면 축까지 따라간다.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(segmentSelected(tester), WorkingTreeArea.staged);
+    expect(openPath(tester), 'lib/a.dart');
   });
 
   testWidgets('the blame view is disabled on the staged axis', (tester) async {
