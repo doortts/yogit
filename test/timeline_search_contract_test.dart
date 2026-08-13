@@ -63,6 +63,16 @@ void main() {
             if (lit.style?.backgroundColor != null) lit.text ?? '',
   ];
 
+  /// 행이 뒤로 물러났는지. 질의가 찾지 못한 행만 흐려진 층 아래에 놓인다.
+  bool dimmed(WidgetTester tester, Finder inRow) {
+    expect(inRow, findsOneWidget);
+    return tester
+        .widgetList<Opacity>(
+          find.ancestor(of: inRow, matching: find.byType(Opacity)),
+        )
+        .any((layer) => layer.opacity < 1);
+  }
+
   String countLabel(WidgetTester tester) =>
       tester.widget<Text>(find.byKey(const Key('timeline-search-count'))).data!;
 
@@ -249,6 +259,39 @@ void main() {
       find.byKey(const Key('selected-row-a1b2c3d')),
       findsOneWidget,
       reason: '찾은 것이 없으면 선택은 있던 자리에 남는다',
+    );
+  });
+
+  testWidgets('a running search dims the commits it did not find', (
+    tester,
+  ) async {
+    await pumpTimeline(tester);
+    await openSearch(tester);
+    await search(tester, 'name');
+
+    expect(
+      dimmed(tester, find.text('d9a8b7c')),
+      isFalse,
+      reason: '찾은 행은 흐려지지 않는다',
+    );
+    expect(dimmed(tester, find.text('b7e0f19')), isTrue);
+    expect(dimmed(tester, find.text('a1b2c3d')), isTrue);
+
+    // 아무것도 찾지 못한 질의에서도 선택된 행은 남는다.
+    await search(tester, 'zzzz');
+    expect(dimmed(tester, find.text('b7e0f19')), isTrue);
+    expect(
+      dimmed(tester, find.text('d9a8b7c')),
+      isFalse,
+      reason: '선택이 서 있는 행은 흐려지지 않는다',
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(
+      dimmed(tester, find.text('b7e0f19')),
+      isFalse,
+      reason: '검색을 닫으면 모든 행이 돌아온다',
     );
   });
 

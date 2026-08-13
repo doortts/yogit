@@ -165,6 +165,18 @@ extension _TimelineSearch on _TimelineScreenState {
     return [for (var unit = 0; unit < drawn.length; unit++) unit];
   }
 
+  /// 검색이 도는 동안 질의가 찾지 못한 행은 뒤로 물러난다. 걸러내는 것이
+  /// 아니라 흐려지는 것이라, 찾은 자리의 앞뒤 역사는 그대로 읽힌다. 선택된
+  /// 행만은 흐려지지 않는다 — 아무것도 찾지 못한 질의에서도 읽는 이가 서 있는
+  /// 자리는 남아야 한다.
+  Widget _searchDimmed(
+    GitCommit commit,
+    Widget row, {
+    required bool selected,
+  }) => _searchTerms.isEmpty || selected || _found(commit)
+      ? row
+      : Opacity(opacity: 0.34, child: row);
+
   Widget _searchableSubject(GitCommit commit, {required TextStyle style}) =>
       _litText(commit.subject, _subjectPositions(commit), style: style);
 

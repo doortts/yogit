@@ -507,11 +507,12 @@ extension _TimelineRows on _TimelineScreenState {
         ),
       ),
     );
+    final searched = _searchDimmed(commit, content, selected: selected);
     final focusableContent = rebaseConflict
-        ? KeyedSubtree(key: _rebaseConflictRowContextKey, child: content)
+        ? KeyedSubtree(key: _rebaseConflictRowContextKey, child: searched)
         : rebaseApplying
-        ? KeyedSubtree(key: _rebaseApplyRowContextKey, child: content)
-        : content;
+        ? KeyedSubtree(key: _rebaseApplyRowContextKey, child: searched)
+        : searched;
     if (!_canCherryPick(commit)) return focusableContent;
     return Draggable<GitCommit>(
       data: commit,
