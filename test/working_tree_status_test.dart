@@ -307,11 +307,7 @@ void main() {
     });
 
     test('returns a patch ending with a newline', () {
-      final source = [
-        ..._fileHeader,
-        ..._firstHunk,
-        ..._middleHunk,
-      ].join('\n');
+      final source = [..._fileHeader, ..._firstHunk, ..._middleHunk].join('\n');
 
       expect(
         extractHunkPatch(source, 1, expected: _middleRange),

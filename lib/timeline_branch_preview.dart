@@ -1012,6 +1012,11 @@ extension _TimelineBranchPreview on _TimelineScreenState {
             fontWeight: FontWeight.w600,
           ),
         ),
+        // 충돌을 지나온 재배치도 착지는 두 가지다. 이 카드가 적용 카드를
+        // 대신하는 자리라, 여기에 없으면 고를 데가 어디에도 없어 'Rebase만'으로
+        // 굳는다.
+        if (_branchPreviewMode == BranchPreviewMode.rebase)
+          ..._branchPreviewApplyOptions(),
         const SizedBox(height: 8),
         Row(
           children: [

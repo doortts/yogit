@@ -50,11 +50,7 @@ void main() {
             parents: ['b'],
             refs: const [GitRef(name: 'feature')],
           ),
-          commit(
-            'b',
-            'root',
-            refs: const [GitRef(name: 'main', isHead: true)],
-          ),
+          commit('b', 'root', refs: const [GitRef(name: 'main', isHead: true)]),
         ],
         refs: const RepoRefs(
           local: ['main', 'feature'],
@@ -90,11 +86,7 @@ void main() {
             parents: ['b'],
             refs: [GitRef(name: tags.first, isTag: true)],
           ),
-          commit(
-            'b',
-            'root',
-            refs: const [GitRef(name: 'main', isHead: true)],
-          ),
+          commit('b', 'root', refs: const [GitRef(name: 'main', isHead: true)]),
         ],
         refs: RepoRefs(
           local: const ['main'],

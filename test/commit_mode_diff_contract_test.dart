@@ -137,12 +137,11 @@ void main() {
   bool enabled(WidgetTester tester, Key key) =>
       tester.widget<InkWell>(find.byKey(key)).onTap != null;
 
-  WorkingTreeArea segmentSelected(WidgetTester tester) =>
-      tester
-          .widget<FullDiffSegmentedControl<WorkingTreeArea>>(
-            find.byKey(const Key('commit-area-segment')),
-          )
-          .selected;
+  WorkingTreeArea segmentSelected(WidgetTester tester) => tester
+      .widget<FullDiffSegmentedControl<WorkingTreeArea>>(
+        find.byKey(const Key('commit-area-segment')),
+      )
+      .selected;
 
   FullDiffView view(WidgetTester tester) => tester
       .widget<FullDiffWorkspace>(find.byType(FullDiffWorkspace))

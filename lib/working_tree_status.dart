@@ -220,7 +220,10 @@ String extractHunkPatch(
   // <old>..<new>` names the blobs the screen measured, and the second hash
   // moves the moment the worktree file does.
   if (expectedIndexLine != null &&
-      lines.take(starts.first).where((line) => line.startsWith('index ')).firstOrNull !=
+      lines
+              .take(starts.first)
+              .where((line) => line.startsWith('index '))
+              .firstOrNull !=
           expectedIndexLine) {
     throw const HunkMovedException();
   }

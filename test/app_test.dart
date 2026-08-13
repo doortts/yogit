@@ -7462,6 +7462,7 @@ void main() {
     );
     late FakeGitRepository repository;
     late FakeRebasePreviewSession session;
+    BranchApplyMode? landing;
     repository = FakeGitRepository(
       (_, _) async => [commit('normal', 'normal history')],
       refs: const RepoRefs(
@@ -7470,6 +7471,35 @@ void main() {
         tips: {'main': 'main-tip', 'feature': 'feature-two'},
       ),
       compareBranchesCallback: (_, _) async => comparison,
+      applyRebasePreviewCallback: ({required comparison, required virtualTip}) {
+        landing = BranchApplyMode.rebase;
+        return Future.value(
+          BranchApplyResult(
+            mode: BranchApplyMode.rebase,
+            baseBranch: 'main',
+            compareBranch: 'feature',
+            baseBefore: comparison.baseTip,
+            baseAfter: comparison.baseTip,
+            compareBefore: comparison.compareTip,
+            compareAfter: virtualTip,
+          ),
+        );
+      },
+      applyRebaseThenMergeCallback:
+          ({required comparison, required virtualTip}) {
+            landing = BranchApplyMode.rebaseMerge;
+            return Future.value(
+              BranchApplyResult(
+                mode: BranchApplyMode.rebaseMerge,
+                baseBranch: 'main',
+                compareBranch: 'feature',
+                baseBefore: comparison.baseTip,
+                baseAfter: 'merge-commit',
+                compareBefore: comparison.compareTip,
+                compareAfter: virtualTip,
+              ),
+            );
+          },
       openRebasePreviewCallback:
           ({required baseRef, required compareRef}) async {
             session = FakeRebasePreviewSession(
@@ -7587,6 +7617,33 @@ void main() {
     expect(find.byKey(const Key('branch-preview-apply-card')), findsNothing);
     expect(find.byKey(const Key('branch-preview-apply')), findsOneWidget);
     expect(find.byKey(const Key('branch-preview-drop')), findsOneWidget);
+    // 충돌을 지나왔다고 착지가 하나로 줄어들 이유는 없다. 이 카드가 적용 카드를
+    // 대신하므로 두 갈래도 여기 있어야 한다.
+    expect(
+      find.byKey(const Key('branch-preview-option-rebase')),
+      findsOneWidget,
+    );
+    final mergeLanding = find.byKey(
+      const Key('branch-preview-option-rebase-merge'),
+    );
+    expect(mergeLanding, findsOneWidget);
+
+    await tester.ensureVisible(mergeLanding);
+    await tester.tap(mergeLanding);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('branch-preview-apply')));
+    await tester.tap(find.byKey(const Key('branch-preview-apply')));
+    await tester.pumpAndSettle();
+    // 머지 커밋을 쓰는 적용은 확인창 대신 메시지를 묻는다.
+    expect(find.byKey(const Key('branch-apply-message')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('branch-apply-confirm')));
+    await tester.pump();
+    // 재배치된 커밋을 하나씩 훑고 지나가는 시간 — 두 개니까 두 번.
+    await tester.pump(const Duration(milliseconds: 220));
+    await tester.pump(const Duration(milliseconds: 220));
+    await tester.pumpAndSettle();
+
+    expect(landing, BranchApplyMode.rebaseMerge, reason: '고른 대로 착지해야 한다');
   });
 
   testWidgets('commit rows wear only the badges their git facts earned', (

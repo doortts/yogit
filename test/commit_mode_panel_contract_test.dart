@@ -110,15 +110,19 @@ void main() {
   bool enabled(WidgetTester tester, Key key) =>
       tester.widget<InkWell>(find.byKey(key)).onTap != null;
 
-  TimelineThemePalette palette(WidgetTester tester) =>
-      TimelineThemePalette.of(tester.element(find.byKey(const Key('commit-panel'))));
+  TimelineThemePalette palette(WidgetTester tester) => TimelineThemePalette.of(
+    tester.element(find.byKey(const Key('commit-panel'))),
+  );
 
   /// 행 배경을 칠하는 Container — 시안의 `.frow`.
   Color? rowColor(WidgetTester tester, WorkingTreeArea area, String path) =>
       tester
           .widget<Container>(
             find
-                .descendant(of: row(area, path), matching: find.byType(Container))
+                .descendant(
+                  of: row(area, path),
+                  matching: find.byType(Container),
+                )
                 .first,
           )
           .color;
@@ -512,52 +516,53 @@ void main() {
     expect(staged, [<String>[]]);
   });
 
-  testWidgets('the cursor lands on the next row when Discard removes the one it sat on', (
-    tester,
-  ) async {
-    var status = WorkingTreeStatus([
-      entry('lib/a.dart'),
-      entry('lib/b.dart'),
-      entry('lib/c.dart'),
-    ]);
-    await pumpPanel(
-      tester,
-      FakeGitRepository(
-        (_, _) async => [commit('1', 'first commit')],
-        workingTree: () async => workingTreeCommit('1'),
-        workingTreeStatus: () async => status,
-        discardWorktreeFileCallback: (path, _) async => status =
-            WorkingTreeStatus([entry('lib/a.dart'), entry('lib/c.dart')]),
-      ),
-    );
+  testWidgets(
+    'the cursor lands on the next row when Discard removes the one it sat on',
+    (tester) async {
+      var status = WorkingTreeStatus([
+        entry('lib/a.dart'),
+        entry('lib/b.dart'),
+        entry('lib/c.dart'),
+      ]);
+      await pumpPanel(
+        tester,
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          workingTree: () async => workingTreeCommit('1'),
+          workingTreeStatus: () async => status,
+          discardWorktreeFileCallback: (path, _) async => status =
+              WorkingTreeStatus([entry('lib/a.dart'), entry('lib/c.dart')]),
+        ),
+      );
 
-    // 가운데 행에 커서를 앉힌다.
-    await metaKey(tester, LogicalKeyboardKey.arrowDown);
-    await metaKey(tester, LogicalKeyboardKey.arrowDown);
-    expect(cursorOn(tester, WorkingTreeArea.unstaged, 'lib/b.dart'), isTrue);
+      // 가운데 행에 커서를 앉힌다.
+      await metaKey(tester, LogicalKeyboardKey.arrowDown);
+      await metaKey(tester, LogicalKeyboardKey.arrowDown);
+      expect(cursorOn(tester, WorkingTreeArea.unstaged, 'lib/b.dart'), isTrue);
 
-    await hoverOver(tester, row(WorkingTreeArea.unstaged, 'lib/b.dart'));
-    await tester.tap(find.byKey(const Key('commit-discard-lib/b.dart')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('commit-discard-confirm')));
-    await tester.pumpAndSettle();
+      await hoverOver(tester, row(WorkingTreeArea.unstaged, 'lib/b.dart'));
+      await tester.tap(find.byKey(const Key('commit-discard-lib/b.dart')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('commit-discard-confirm')));
+      await tester.pumpAndSettle();
 
-    expect(row(WorkingTreeArea.unstaged, 'lib/b.dart'), findsNothing);
-    expect(
-      cursorOn(tester, WorkingTreeArea.unstaged, 'lib/c.dart'),
-      isTrue,
-      reason: '버린 행이 있던 자리를 다음 파일이 잇는다',
-    );
+      expect(row(WorkingTreeArea.unstaged, 'lib/b.dart'), findsNothing);
+      expect(
+        cursorOn(tester, WorkingTreeArea.unstaged, 'lib/c.dart'),
+        isTrue,
+        reason: '버린 행이 있던 자리를 다음 파일이 잇는다',
+      );
 
-    // 커서가 사라진 경로에 남아 있으면 여기서 목록 맨 처음으로 튄다.
-    await metaKey(tester, LogicalKeyboardKey.arrowDown);
-    expect(cursorOn(tester, WorkingTreeArea.unstaged, 'lib/a.dart'), isFalse);
-    expect(
-      cursorOn(tester, WorkingTreeArea.unstaged, 'lib/c.dart'),
-      isTrue,
-      reason: '마지막 행에서 ↓은 제자리다',
-    );
-  });
+      // 커서가 사라진 경로에 남아 있으면 여기서 목록 맨 처음으로 튄다.
+      await metaKey(tester, LogicalKeyboardKey.arrowDown);
+      expect(cursorOn(tester, WorkingTreeArea.unstaged, 'lib/a.dart'), isFalse);
+      expect(
+        cursorOn(tester, WorkingTreeArea.unstaged, 'lib/c.dart'),
+        isTrue,
+        reason: '마지막 행에서 ↓은 제자리다',
+      );
+    },
+  );
 
   testWidgets('Unstage All is disabled while a conflict is unresolved', (
     tester,
@@ -803,46 +808,47 @@ void main() {
     expect(find.text('Staged 2개 파일 커밋'), findsOneWidget);
   });
 
-  testWidgets('unchecking amend before the HEAD message lands leaves the form empty', (
-    tester,
-  ) async {
-    final gate = Completer<String>();
-    await pumpPanel(
-      tester,
-      FakeGitRepository(
-        (_, _) async => [commit('1', 'first commit')],
-        workingTree: () async => workingTreeCommit('1'),
-        workingTreeStatus: () async => bothSections(),
-        commitMessage: (sha) => gate.future,
-      ),
-    );
+  testWidgets(
+    'unchecking amend before the HEAD message lands leaves the form empty',
+    (tester) async {
+      final gate = Completer<String>();
+      await pumpPanel(
+        tester,
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          workingTree: () async => workingTreeCommit('1'),
+          workingTreeStatus: () async => bothSections(),
+          commitMessage: (sha) => gate.future,
+        ),
+      );
 
-    // 체크박스는 busy를 세우지 않는 경로라 연타가 그대로 들어간다.
-    await tester.tap(find.byKey(const Key('commit-amend')));
-    await tester.pump();
-    await tester.tap(find.byKey(const Key('commit-amend')));
-    await tester.pump();
+      // 체크박스는 busy를 세우지 않는 경로라 연타가 그대로 들어간다.
+      await tester.tap(find.byKey(const Key('commit-amend')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('commit-amend')));
+      await tester.pump();
 
-    gate.complete('feat(app): 앞선 커밋\n\n무엇을 왜 바꿨는지');
-    await tester.pumpAndSettle();
+      gate.complete('feat(app): 앞선 커밋\n\n무엇을 왜 바꿨는지');
+      await tester.pumpAndSettle();
 
-    expect(
-      tester
-          .widget<TextField>(find.byKey(const Key('commit-title')))
-          .controller!
-          .text,
-      isEmpty,
-      reason: '체크가 풀린 폼에 HEAD 메시지가 들어오면 amend 아닌 같은 메시지의 새 커밋이 생긴다',
-    );
-    expect(
-      tester
-          .widget<TextField>(find.byKey(const Key('commit-body')))
-          .controller!
-          .text,
-      isEmpty,
-    );
-    expect(find.text('커밋 수정'), findsNothing);
-  });
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('commit-title')))
+            .controller!
+            .text,
+        isEmpty,
+        reason: '체크가 풀린 폼에 HEAD 메시지가 들어오면 amend 아닌 같은 메시지의 새 커밋이 생긴다',
+      );
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('commit-body')))
+            .controller!
+            .text,
+        isEmpty,
+      );
+      expect(find.text('커밋 수정'), findsNothing);
+    },
+  );
 
   testWidgets('commit failure shows the inline message and keeps the form', (
     tester,
