@@ -3,6 +3,8 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -76,11 +78,17 @@ class RemoteAvatar {
     required this.login,
     required this.url,
     this.headers = const {},
+    this.tone,
   });
 
   final String login;
   final String url;
   final Map<String, String> headers;
+
+  /// The average colour of the photo itself, once somebody has decoded it. The
+  /// graph reads it to keep a lane colour off an avatar it would melt into, and
+  /// it is a cache rather than a fact: null means nobody has looked yet.
+  final Color? tone;
 }
 
 class CommitAvatars {
@@ -135,7 +143,11 @@ class AvatarStore {
     final json = await _read();
     json[host] = {
       for (final entry in known.entries)
-        entry.key: {'login': entry.value.login, 'url': entry.value.url},
+        entry.key: {
+          'login': entry.value.login,
+          'url': entry.value.url,
+          'tone': ?_hexOf(entry.value.tone),
+        },
     };
     await file.parent.create(recursive: true);
     await file.writeAsString(jsonEncode(json), flush: true);
@@ -156,9 +168,36 @@ class AvatarStore {
     if (value is! Map<String, dynamic>) return null;
     final login = value['login'];
     final url = value['url'];
+    final tone = value['tone'];
     return login is String && url is String
-        ? RemoteAvatar(login: login, url: url)
+        ? RemoteAvatar(
+            login: login,
+            url: url,
+            // A tone that will not parse is a tone nobody has, not a face
+            // nobody has: the photo is still worth drawing.
+            tone: tone is String ? _toneFrom(tone) : null,
+          )
         : null;
+  }
+
+  /// `#RRGGBB`, so a person opening the file sees a colour rather than an int.
+  static String? _hexOf(Color? tone) {
+    if (tone == null) return null;
+    final rgb = tone.toARGB32() & 0xFFFFFF;
+    return '#${rgb.toRadixString(16).toUpperCase().padLeft(6, '0')}';
+  }
+
+  /// The same string back to a colour. `settings.dart` has this regular
+  /// expression too, and reusing that one was the first thing tried: it makes
+  /// this file — a leaf that talks to git and GitHub and nothing else — import
+  /// the settings module, which drags the settings UI and everything behind it
+  /// in, and points an import back at a file that already imports this one. A
+  /// cycle is a steep price for four lines, so the four lines live here.
+  static Color? _toneFrom(String value) {
+    final match = RegExp(r'^#?([0-9a-fA-F]{6})$').firstMatch(value.trim());
+    return match == null
+        ? null
+        : Color(0xFF000000 | int.parse(match.group(1)!, radix: 16));
   }
 }
 
@@ -413,7 +452,141 @@ class AvatarService {
   @visibleForTesting
   Future<void> get debugWritten => _writing;
 
+  /// The pixel arithmetic on its own, so a test can hand it an image it built
+  /// rather than one it had to talk a network out of.
+  @visibleForTesting
+  static Future<Color?> debugToneOf(ui.Image image) => _averageColor(image);
+
   Future<String?> accountLogin() => _account ??= _loadAccount();
+
+  /// The average colour of the face this repository commits under, which the
+  /// graph keeps its lane colours away from. [sha] is a commit [identity]
+  /// themselves wrote, and it is what the face is looked up by: a tone is only
+  /// ever wanted while that person's photo is on the graph, which means a row
+  /// of theirs is loaded, which means [resolve] is the path — the same cache,
+  /// the same file on disk, the same memory of an address GitHub has no account
+  /// for. A lookup filtered by the address instead was written first and taken
+  /// back out: it bought nothing the drawn row does not already buy, and cost a
+  /// request on every identity load, a request repeated for the rest of the
+  /// session whenever the address matched nothing, and the user's own email
+  /// address in a URL query string, which nothing else here puts there.
+  ///
+  /// Null where there is nothing to avoid — no identity, no account, no photo
+  /// that would decode — and in that case the graph is assigned exactly as it
+  /// always was.
+  ///
+  /// A tone read off disk comes back immediately, because the first graph is
+  /// drawn long before an image arrives, and the live photo is decoded behind
+  /// it: a GitHub avatar URL does not change when the picture behind it does,
+  /// so the stored value is a fast first frame and the decode is the truth. A
+  /// live tone that turns out different is written down for the next run.
+  Future<Color?> toneFor(String sha, {required GitIdentity identity}) async {
+    if (_identityKey(identity).isEmpty) return null;
+    final avatar = (await resolve(sha, author: identity)).author;
+    if (avatar == null) return null;
+    final stored = avatar.tone;
+    if (stored == null) return _learnTone(identity, avatar);
+    unawaited(_learnTone(identity, avatar));
+    return stored;
+  }
+
+  /// Decodes the photo, writes the tone down beside the face, and answers with
+  /// it. Null wherever the photo does not arrive or does not decode: a tone is
+  /// a nicety, and nothing about it is worth an error reaching a row.
+  Future<Color?> _learnTone(GitIdentity identity, RemoteAvatar avatar) async {
+    final tone = await _decodeTone(avatar);
+    if (tone == null || tone == avatar.tone) return tone;
+    _known[_identityKey(identity)] = RemoteAvatar(
+      login: avatar.login,
+      url: avatar.url,
+      headers: avatar.headers,
+      tone: tone,
+    );
+    _persist();
+    return tone;
+  }
+
+  /// The photo's average colour. [NetworkImage] is what the rows draw with, so
+  /// this reads the same Flutter image cache rather than fetching anything of
+  /// its own — and the enterprise token rides along on the avatar's headers the
+  /// same way it does there.
+  Future<Color?> _decodeTone(RemoteAvatar avatar) {
+    final tone = Completer<Color?>();
+    final stream = NetworkImage(
+      avatar.url,
+      headers: avatar.headers.isEmpty ? null : avatar.headers,
+    ).resolve(ImageConfiguration.empty);
+    late final ImageStreamListener listener;
+    void answer(Color? color) {
+      stream.removeListener(listener);
+      if (!tone.isCompleted) tone.complete(color);
+    }
+
+    listener = ImageStreamListener((image, _) async {
+      try {
+        answer(await _averageColor(image.image));
+      } catch (_) {
+        // Nothing in here may leave the completer standing: [toneFor] awaits
+        // it, so a throw on the way to the pixels would stall the tone for the
+        // rest of the session instead of costing one avatar its ring. The read
+        // that can actually fail is answered inside [_averageColor], where a
+        // test can reach it; this is the net under everything else.
+        answer(null);
+      } finally {
+        image.dispose();
+      }
+    }, onError: (Object _, StackTrace? _) => answer(null));
+    stream.addListener(listener);
+    return tone.future;
+  }
+
+  /// The mean of the pixels that are actually there. An arithmetic mean rather
+  /// than a dominant-colour cluster: what the ring has to stand out against is
+  /// the whole face at a glance, not its largest patch.
+  static Future<Color?> _averageColor(ui.Image image) async {
+    ByteData? data;
+    try {
+      // The straight variant rather than `rawRgba`, which hands back
+      // premultiplied bytes: a pixel drawn at 78% alpha comes out of that one
+      // multiplied down towards black, so a photo with a soft edge or a
+      // translucent logo would read as a darker face than it is. Straight RGBA
+      // is the colour the pixel was drawn in, which is what the ring is
+      // actually seen against.
+      data = await image.toByteData(format: ui.ImageByteFormat.rawStraightRgba);
+    } catch (_) {
+      // A texture the engine will not read back — one already disposed, one
+      // whose bytes never made it to the GPU — is a face with no tone, not an
+      // error worth having: the caller is a completer's listener, and throwing
+      // past it would leave the tone pending forever.
+      return null;
+    }
+    final pixels = (data?.lengthInBytes ?? 0) ~/ 4;
+    if (data == null || pixels == 0) return null;
+    // A 460px GitHub avatar is a fifth of a megapixel, and every fourth or
+    // fortieth pixel of a face is the same answer to within a shade.
+    final step = math.max(1, pixels ~/ 4096);
+    var red = 0;
+    var green = 0;
+    var blue = 0;
+    var counted = 0;
+    for (var pixel = 0; pixel < pixels; pixel += step) {
+      final at = pixel * 4;
+      // A transparent corner is whatever sits behind the photo, not the photo.
+      if (data.getUint8(at + 3) < 128) continue;
+      red += data.getUint8(at);
+      green += data.getUint8(at + 1);
+      blue += data.getUint8(at + 2);
+      counted++;
+    }
+    return counted == 0
+        ? null
+        : Color.fromARGB(
+            255,
+            red ~/ counted,
+            green ~/ counted,
+            blue ~/ counted,
+          );
+  }
 
   Future<String?> resolveMergedBranchName(String tipSha) async {
     final json = await _getJsonOrNull(
@@ -482,17 +655,43 @@ class AvatarService {
       author: _headed(_parseAvatar(json['author'])),
       committer: _headed(_parseAvatar(json['committer'])),
     );
-    _known[_identityKey(author)] = avatars.author;
+    final authorKey = _identityKey(author);
     // Blame knows who wrote a line but not who committed it. Without an
     // identity to file it under, the committer's account is dropped rather
     // than remembered as somebody.
-    if (committer != null) {
-      _known[_identityKey(committer)] = avatars.committer;
+    final committerKey = committer == null ? null : _identityKey(committer);
+    _known[authorKey] = _keepingTone(authorKey, avatars.author);
+    if (committerKey != null) {
+      _known[committerKey] = _keepingTone(committerKey, avatars.committer);
     }
     if (avatars.author != null || avatars.committer != null) _persist();
     return CommitAvatars(
-      author: avatars.author,
-      committer: committer == null ? null : avatars.committer,
+      author: _known[authorKey],
+      committer: committerKey == null ? null : _known[committerKey],
+    );
+  }
+
+  /// [fresh] wearing the tone already known for [key]. The server never
+  /// mentions a tone, so every parsed avatar arrives without one — and a row
+  /// with a known author and an unheard-of committer still reaches the lookup,
+  /// which every squash merge through the GitHub UI is (`noreply@github.com`
+  /// committed it). Without this the answer would put a
+  /// tone-less face back over the one restored from disk, and [_persist] would
+  /// then write the loss down. Only for the same photo: a tone read off another
+  /// URL is not this one's, and is dropped so the next decode reads it again.
+  RemoteAvatar? _keepingTone(String key, RemoteAvatar? fresh) {
+    final tone = _known[key]?.tone;
+    if (fresh == null ||
+        fresh.tone != null ||
+        tone == null ||
+        _known[key]?.url != fresh.url) {
+      return fresh;
+    }
+    return RemoteAvatar(
+      login: fresh.login,
+      url: fresh.url,
+      headers: fresh.headers,
+      tone: tone,
     );
   }
 
@@ -558,7 +757,12 @@ class AvatarService {
         Uri.parse(avatar.url).host.toLowerCase() != remote.host) {
       return avatar;
     }
-    return RemoteAvatar(login: avatar.login, url: avatar.url, headers: headers);
+    return RemoteAvatar(
+      login: avatar.login,
+      url: avatar.url,
+      headers: headers,
+      tone: avatar.tone,
+    );
   }
 
   static String initials(GitIdentity identity) {

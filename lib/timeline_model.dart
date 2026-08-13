@@ -717,13 +717,35 @@ List<GitRef> timelineRefsForCommit(GitCommit commit, RepoRefs refs) {
   return result;
 }
 
+/// Branch id → palette index. [avoidTone] is the tone of the avatar that
+/// repeats down the graph: a lane colour too close to it draws a ring nobody
+/// can see, so it leaves the random pool. What the user said stays said —
+/// branch 0 keeps palette 0 and a pinned branch keeps its pin, both of them
+/// decided before the pool is consulted at all.
+///
+/// [refPalette] is the palette the ring is drawn out of, and the rail colours
+/// the tone is compared against are read from it here rather than by the
+/// caller. [refPaletteColorsAt] already decides whether a palette can be read
+/// at all and falls back to the default where it cannot, so a caller that
+/// extracted the colours itself was making that same call twice over — and the
+/// length check this used to repeat could never fail, because that caller had
+/// just built its list to length. Without a tone nothing is filtered, palette
+/// or no palette.
 Map<int, int> assignBranchPaletteIndexes(
   List<GraphRow> rows,
   int seed, {
   List<int> refPaletteAssignments = AppSettings.defaultRefPaletteAssignments,
+  List<RefPaletteEntry>? refPalette,
+  Color? avoidTone,
 }) {
   final indexes = <int, int>{};
-  final candidates = randomRefPaletteIndexes(refPaletteAssignments);
+  var candidates = randomRefPaletteIndexes(refPaletteAssignments);
+  if (avoidTone != null && refPalette != null) {
+    candidates = paletteIndexesAvoiding(candidates, [
+      for (var index = 0; index < AppSettings.defaultRefPalette.length; index++)
+        refPaletteColorsAt(index, refPalette).text,
+    ], avoidTone);
+  }
   for (final row in rows) {
     final ids = {
       row.branch,

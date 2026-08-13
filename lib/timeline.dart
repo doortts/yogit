@@ -1258,10 +1258,16 @@ class _TimelineScreenState extends State<TimelineScreen>
   void _rebuildGraph() {
     _normalRows = layoutGraph(_normalCommits, preferredTip: _preferredTip);
     _normalEntries = timelineEntries(_normalRows, DateTime.now());
+    // The palette goes over as it is: the rail colour a ring is drawn in — and
+    // so what the avatar's tone has to be compared against — is read out of it
+    // there, by the one function that already knows which palettes are
+    // readable.
     _branchPaletteIndexes = assignBranchPaletteIndexes(
       _normalRows,
       widget.repository.root.hashCode,
       refPaletteAssignments: widget.refPaletteAssignments,
+      refPalette: widget.refPalette,
+      avoidTone: _avatarTone,
     );
     _branchLineNames = branchLineNames(_normalRows);
     _branchLineTips = branchLineTips(_normalRows, _refs);
@@ -1286,6 +1292,11 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// The repository's commit identity, re-read rather than remembered: the
   /// CLI, an includeIf rule, or another GUI can change it behind the app.
   var _commitIdentity = const CommitIdentityState.unknown();
+
+  /// The average colour of that identity's avatar, which the lane assignment
+  /// steers clear of so the branch ring around a photo stays visible. Null
+  /// until it arrives, and null forever where there is no face to read.
+  Color? _avatarTone;
 
   /// Who a commit message template's `{profile}` names: the profile this
   /// repository commits as, or the bare `user.name` behind it. Null where Git

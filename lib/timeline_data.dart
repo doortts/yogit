@@ -299,6 +299,13 @@ extension _TimelineDataFlows on _TimelineScreenState {
       });
       WidgetsBinding.instance.addPostFrameCallback((_) => _updateRatchet());
       unawaited(_resolveSelectedDeletedBranchName());
+      // The tone is looked up by one of this person's own commits, and the
+      // identity is often settled before the page carrying the first of them
+      // arrives. Only while there is no tone yet: once one is in hand nothing
+      // another page brings can change it this session.
+      if (_avatarTone == null) {
+        unawaited(_loadAvatarTone(_commitIdentity.identity));
+      }
       if (keepEndVisible) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (_scrollController.hasClients) {
@@ -327,9 +334,66 @@ extension _TimelineDataFlows on _TimelineScreenState {
           widget.commitProfiles,
         ),
       );
+      // Nothing waits on the face: the graph is already drawn, and the lane
+      // colours change under it if the tone turns out to clash. Not awaited
+      // either, so applying a profile does not sit on a photo download.
+      unawaited(_loadAvatarTone(identity));
     } catch (_) {
       // A repository that cannot answer keeps the chip on its last reading.
     }
+  }
+
+  /// The tone of the avatar this repository commits under. The identity load
+  /// triggers it — that already re-runs on startup, on a repository change, and
+  /// after a profile is applied — and so does a page of history, because the
+  /// face is looked up by one of this person's own commits and the identity
+  /// often lands before the log it has to be found in.
+  Future<void> _loadAvatarTone(GitIdentity identity) async {
+    // A window drawing initials has no photo for a lane colour to hide behind,
+    // so there is nothing to steer around and nobody to ask about it.
+    if (!widget.showRemoteAvatars) return;
+    final service = widget.avatarService;
+    if (service == null) return;
+    final repository = widget.repository;
+    final sha = _shaWrittenBy(identity);
+    // No row of theirs is loaded, so no face of theirs is drawn and no ring is
+    // at risk. Null rather than a return, so a repository whose history holds
+    // none of the previous one's commits drops the tone it was steering by.
+    final tone = sha == null
+        ? null
+        : await service.toneFor(sha, identity: identity);
+    // A lookup outlives the window that asked: flipping repositories mid-flight
+    // would otherwise paint this graph around the last one's face.
+    if (!mounted ||
+        !identical(widget.repository, repository) ||
+        !identical(widget.avatarService, service) ||
+        tone == _avatarTone) {
+      return;
+    }
+    _rebuild(() {
+      _avatarTone = tone;
+      _rebuildGraph();
+    });
+  }
+
+  /// The newest loaded commit [identity] wrote, which is the sha their face is
+  /// asked about. Matched on the address alone, lowercased, because that is what
+  /// GitHub matches an account by and the name beside it can differ row to row.
+  ///
+  /// A row they only committed is not offered instead: [AvatarService.resolve]
+  /// files the commit's *author* under the identity it is handed, so a
+  /// committer-matched sha would remember somebody else's face as theirs unless
+  /// that row's real author went over too — and a person who has committed here
+  /// has all but always authored here as well.
+  String? _shaWrittenBy(GitIdentity identity) {
+    final email = identity.email.trim().toLowerCase();
+    if (email.isEmpty) return null;
+    for (final commit in _normalCommits) {
+      // The working tree row is nobody's commit yet, and its sha is empty.
+      if (commit.isWorkingTree) continue;
+      if (commit.author.email.trim().toLowerCase() == email) return commit.sha;
+    }
+    return null;
   }
 
   String? _deletedBranchTipSha(int branch) => _branchLineTips[branch];
