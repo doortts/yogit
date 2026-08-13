@@ -49,6 +49,7 @@ class _ConsolePanelState extends State<ConsolePanel> {
   final _turned = <int>{};
 
   var _failedOnly = false;
+  var _searchOpen = false;
   var _query = '';
   var _follow = true;
 
@@ -226,10 +227,21 @@ class _ConsolePanelState extends State<ConsolePanel> {
               const Spacer(),
               _filterChip(palette, '전체', selected: !_failedOnly),
               _filterChip(palette, '실패만', selected: _failedOnly),
-              Flexible(
-                flex: 2,
-                child: SizedBox(width: 120, child: _search(palette)),
-              ),
+              // Shut, the search is one icon; the header has three controls
+              // and a row of counts to fit beside it.
+              if (_searchOpen)
+                Flexible(
+                  flex: 2,
+                  child: SizedBox(width: 120, child: _search(palette)),
+                )
+              else
+                _iconButton(
+                  key: const Key('console-search-open'),
+                  icon: Icons.search,
+                  tooltip: '검색',
+                  color: palette.muted,
+                  onPressed: () => setState(() => _searchOpen = true),
+                ),
               _iconButton(
                 key: const Key('console-follow'),
                 icon: Icons.vertical_align_bottom,
@@ -296,10 +308,15 @@ class _ConsolePanelState extends State<ConsolePanel> {
     ),
   );
 
+  /// Open, it takes the keyboard; empty and dismissed, it folds back into
+  /// its icon rather than sitting there holding width nobody is using.
   Widget _search(TimelineThemePalette palette) => TextField(
     key: const Key('console-search'),
     controller: _searchController,
+    autofocus: true,
     onChanged: (value) => setState(() => _query = value.trim().toLowerCase()),
+    onTapOutside: (_) => _closeSearchIfEmpty(),
+    onSubmitted: (_) => _closeSearchIfEmpty(),
     style: TextStyle(fontSize: 11, color: palette.text),
     cursorColor: palette.interactive,
     decoration: InputDecoration(
@@ -309,9 +326,23 @@ class _ConsolePanelState extends State<ConsolePanel> {
       hintStyle: TextStyle(fontSize: 11, color: palette.muted),
       prefixIcon: Icon(Icons.search, size: 14, color: palette.muted),
       prefixIconConstraints: const BoxConstraints(minWidth: 20),
+      suffixIcon: GestureDetector(
+        key: const Key('console-search-close'),
+        onTap: () => setState(() {
+          _searchController.clear();
+          _query = '';
+          _searchOpen = false;
+        }),
+        child: Icon(Icons.close, size: 13, color: palette.muted),
+      ),
+      suffixIconConstraints: const BoxConstraints(minWidth: 18),
       contentPadding: EdgeInsets.zero,
     ),
   );
+
+  void _closeSearchIfEmpty() {
+    if (_query.isEmpty && _searchOpen) setState(() => _searchOpen = false);
+  }
 
   Widget _iconButton({
     required Key key,

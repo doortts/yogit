@@ -3443,6 +3443,132 @@ void main() {
     });
   });
 
+  testWidgets('a remote nobody tracks is refreshed too', (tester) async {
+    final remotes = <String>[];
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(
+            local: ['feature'],
+            // 사이드바가 이 이름들을 보여 준다. 아무도 따라가지 않는다고 해서
+            // 창이 열려 있는 내내 낡은 채로 둘 수는 없다.
+            remote: ['origin/main', 'origin/dev'],
+            remoteNames: ['origin'],
+            current: 'feature',
+          ),
+          fetchRemoteCallback: (remote) async {
+            remotes.add(remote);
+            return FetchOriginResult.unchanged;
+          },
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(remotes, ['origin']);
+  });
+
+  testWidgets('a dead extra remote does not raise the failure banner', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(
+            local: ['main'],
+            // fork에는 로컬과 이름이 겹치는 브랜치가 없다 — 아무도 이 원격으로
+            // 자기 행의 숫자를 재지 않는다.
+            remote: ['origin/main', 'fork/experiment'],
+            remoteNames: ['origin', 'fork'],
+            current: 'main',
+            upstreams: {'main': 'origin/main'},
+            upstreamRemotes: {'main': 'origin'},
+          ),
+          fetchRemoteCallback: (remote) async {
+            // 오래전에 사라진 fork. origin은 멀쩡하다.
+            if (remote == 'fork') throw Exception('could not resolve host');
+            return FetchOriginResult.unchanged;
+          },
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('원격 갱신 실패'), findsNothing, reason: '아무도 재지 않는 원격이다');
+  });
+
+  testWidgets('an upstream that fails does raise it', (tester) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(
+            local: ['main'],
+            remote: ['origin/main'],
+            remoteNames: ['origin'],
+            current: 'main',
+            upstreams: {'main': 'origin/main'},
+            upstreamRemotes: {'main': 'origin'},
+          ),
+          fetchRemoteCallback: (_) async =>
+              throw Exception('could not resolve host'),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('원격 갱신 실패'), findsOneWidget);
+  });
+
+  testWidgets(
+    'a window coming back to the front makes up the fetch it missed',
+    (tester) async {
+      final remotes = <String>[];
+      await tester.pumpWidget(
+        app(
+          FakeGitRepository(
+            (_, _) async => [commit('1', 'first commit')],
+            refs: const RepoRefs(
+              local: ['main'],
+              remote: ['origin/main'],
+              remoteNames: ['origin'],
+              current: 'main',
+            ),
+            fetchRemoteCallback: (remote) async {
+              remotes.add(remote);
+              return FetchOriginResult.unchanged;
+            },
+          ),
+          controller,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(remotes, ['origin']);
+
+      // 창이 뒤로 물러난 동안의 예정된 갱신은 전부 건너뛴다.
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump(const Duration(minutes: 4));
+      await tester.pump();
+      expect(remotes, ['origin']);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+
+      expect(remotes, ['origin', 'origin'], reason: '돌아온 자리에서 한 번 따라잡는다');
+
+      // 창을 오가는 것마다 fetch가 붙지는 않는다.
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(remotes, ['origin', 'origin']);
+    },
+  );
+
   testWidgets(
     'matching remotes refresh once every three minutes while active',
     (tester) async {
@@ -3584,9 +3710,13 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    // 물러나 있는 동안 지나간 갱신을 돌아오자마자 한 번 따라잡는다.
+    expect(remotes, ['origin', 'origin']);
+
     await tester.pump(const Duration(minutes: 3));
     await tester.pump();
-    expect(remotes, ['origin', 'origin']);
+    expect(remotes, ['origin', 'origin', 'origin'], reason: '그 뒤는 다시 3분 간격');
   });
 
   testWidgets('every branch\'s upstream remote refreshes, base or not', (

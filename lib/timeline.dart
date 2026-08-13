@@ -505,6 +505,11 @@ class _TimelineScreenState extends State<TimelineScreen>
   var _refsLoadFailed = false;
   var _refsLoaded = false;
   Timer? _fetchTimer;
+
+  /// Whether a refresh came due while the window was behind another app and
+  /// was skipped. One bit rather than a clock: it says exactly what the window
+  /// coming back has to make up.
+  var _missedRemoteRefresh = false;
   Timer? _localWatchTimer;
   Timer? _localWatchDebounceTimer;
   final _refWatchers = <StreamSubscription<FileSystemEvent>>[];
@@ -727,17 +732,28 @@ class _TimelineScreenState extends State<TimelineScreen>
     _deletedBranchRevision.value++;
   }
 
-  List<String> get _remotesToRefresh {
-    // Every local branch's badge has to stay current, so every remote some
-    // branch tracks gets fetched — including an upstream under another name,
-    // which the same-name sweep below would never reach.
+  /// The remotes a local branch is measured against: every upstream, and every
+  /// remote holding a branch of the same name. A count on a row is only as
+  /// true as the last fetch of these, so their failures are the ones worth
+  /// telling the reader about.
+  Set<String> get _measuredRemotes {
     final remotes = <String>{..._refs.upstreamRemotes.values};
     for (final remoteBranch in _refs.remote) {
       final split = splitRemoteBranchName(remoteBranch, _refs.remoteNames);
-      if (split == null || !_refs.local.contains(split.branch)) {
-        continue;
-      }
+      if (split == null || !_refs.local.contains(split.branch)) continue;
       remotes.add(split.remote);
+    }
+    return remotes;
+  }
+
+  /// Every remote the screen shows anything of. The list under REMOTE is a
+  /// claim about a server, and a remote nobody happens to track locally would
+  /// otherwise sit there unrefreshed for the life of the window.
+  List<String> get _remotesToRefresh {
+    final remotes = {..._measuredRemotes};
+    for (final remoteBranch in _refs.remote) {
+      final split = splitRemoteBranchName(remoteBranch, _refs.remoteNames);
+      if (split != null) remotes.add(split.remote);
     }
     return remotes.toList()..sort();
   }
@@ -973,9 +989,15 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      unawaited(_reloadCherryPickState());
-    }
+    if (state != AppLifecycleState.resumed) return;
+    unawaited(_reloadCherryPickState());
+    // A refresh only runs while the app is in front, so any that came due
+    // behind another window was dropped — including the one a window opened
+    // unfocused makes on the way up. Coming back is where it is made up;
+    // flipping between two windows without missing one costs nothing.
+    if (!_missedRemoteRefresh) return;
+    _missedRemoteRefresh = false;
+    unawaited(_refreshRemotes());
   }
 
   @override

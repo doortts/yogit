@@ -191,10 +191,21 @@ void main() {
     await run('git', ['status']);
     await pump(tester, log);
 
+    // 닫혀 있을 때는 아이콘 하나다 — 헤더 폭을 늘 쥐고 있지 않는다.
+    expect(find.byKey(const Key('console-search')), findsNothing);
+    await tester.tap(find.byKey(const Key('console-search-open')));
+    await tester.pump();
+
     await tester.enterText(find.byKey(const Key('console-search')), 'rebase');
     await tester.pump();
 
     expect(find.text('이 조건에 맞는 줄이 없습니다'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('console-search-close')));
+    await tester.pump();
+
+    expect(find.byKey(const Key('console-search')), findsNothing);
+    expect(find.text('git status'), findsOneWidget, reason: '닫으면 조건도 풀린다');
   });
 
   testWidgets('clearing empties the console', (tester) async {

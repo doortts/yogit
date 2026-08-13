@@ -42,24 +42,30 @@ extension _TimelineData on _TimelineScreenState {
 extension _TimelineDataFlows on _TimelineScreenState {
   Future<void> _refreshRemotes() async {
     final remotes = _remotesToRefresh;
+    // 가져올 것이 없거나 이미 가져오는 중이면 놓친 것도 없다.
+    if (remotes.isEmpty || _fetchingRemotes.value || _cherryPickState != null) {
+      return;
+    }
     final lifecycleState = WidgetsBinding.instance.lifecycleState;
-    if ((lifecycleState != null &&
-            lifecycleState != AppLifecycleState.resumed) ||
-        remotes.isEmpty ||
-        _fetchingRemotes.value ||
-        _cherryPickState != null) {
+    if (lifecycleState != null && lifecycleState != AppLifecycleState.resumed) {
+      // 물러나 있는 창은 네트워크를 쓰지 않는다. 대신 건너뛴 것이 있다는 사실을
+      // 남겨, 돌아왔을 때 한 번 따라잡게 한다.
+      _missedRemoteRefresh = true;
       return;
     }
     _fetchingRemotes.value = true;
     try {
       var updated = false;
       Object? fetchError;
+      // 실패를 화면에 올리는 것은 로컬 행의 숫자가 걸린 원격뿐이다. 목록의
+      // 신선도를 위해 딸려 온 원격 하나가 죽었다고 상태 표시줄을 뺏을 수는 없다.
+      final measured = _measuredRemotes;
       for (final remote in remotes) {
         try {
           final result = await widget.repository.fetchRemote(remote);
           updated |= result == FetchOriginResult.updated;
         } catch (error) {
-          fetchError ??= error;
+          if (measured.contains(remote)) fetchError ??= error;
         }
       }
       if (!mounted) return;
