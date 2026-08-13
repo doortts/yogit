@@ -7,28 +7,38 @@ void main() {
   /// 이름은 고르라고 있는 것이 아니라 지금 어디에 서 있는지 말하려고 있다.
   /// docs/toolbar-selectors-mockup.html의 몫: 저장소 4, 기준 브랜치 4,
   /// 브랜치 diff 3 — 대개 '선택' 두 글자인 칸이 이름의 자리를 가져가지 않는다.
-  testWidgets('the names take the width, the comparison gives it up', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: SizedBox(
-            width: 620,
-            child: RepositoryBranchSelector(
-              repositoryName: 'yogit-desktop-workspace',
-              repositoryPath: '/repos/yogit',
-              localBranches: const ['feature/search-pill'],
-              branchTimes: const {},
-              selectedBranch: 'feature/search-pill',
-              refsLoading: false,
-              refsLoadFailed: false,
-              onRepositoryPressed: () {},
-              onBranchSelected: (_) {},
-            ),
+  Future<void> pumpNames(
+    WidgetTester tester, {
+    required String repositoryName,
+    required String branch,
+  }) => tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        body: SizedBox(
+          width: 620,
+          child: RepositoryBranchSelector(
+            repositoryName: repositoryName,
+            repositoryPath: '/repos/yogit',
+            localBranches: [branch],
+            branchTimes: const {},
+            selectedBranch: branch,
+            refsLoading: false,
+            refsLoadFailed: false,
+            onRepositoryPressed: () {},
+            onBranchSelected: (_) {},
           ),
         ),
       ),
+    ),
+  );
+
+  testWidgets('the names take the width, the comparison gives it up', (
+    tester,
+  ) async {
+    await pumpNames(
+      tester,
+      repositoryName: 'yogit-desktop-workspace',
+      branch: 'feature/search-pill',
     );
 
     double widthOf(String key) => tester.getSize(find.byKey(Key(key))).width;
@@ -44,6 +54,25 @@ void main() {
       tester.getSize(find.text('yogit-desktop-workspace')).width,
       lessThan(widthOf('repository-selector')),
     );
+  });
+
+  /// 몫은 상한이지 배당이 아니다: 'yonalist'와 'main'은 그 상한을 다 쓰지 않고
+  /// 남은 자리를 옆 칸에 넘겨, 이름들이 끊기지 않고 이어서 선다.
+  testWidgets('short names sit next to each other instead of spreading', (
+    tester,
+  ) async {
+    await pumpNames(tester, repositoryName: 'yonalist', branch: 'main');
+
+    Rect rectOf(String key) => tester.getRect(find.byKey(Key(key)));
+    final repository = rectOf('repository-selector');
+    final base = rectOf('base-branch-selector');
+    final diff = rectOf('branch-diff-selector');
+
+    expect(base.left, closeTo(repository.right, 0.5));
+    expect(diff.left, closeTo(base.right, 0.5));
+    // 긴 이름이 받던 몫(620의 4/11 ≈ 225)을 짧은 이름은 다 쓰지 않는다.
+    expect(repository.width, lessThan(200));
+    expect(diff.right, lessThan(620));
   });
 
   testWidgets('shows repository and only supplied local branches', (

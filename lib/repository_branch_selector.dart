@@ -98,8 +98,9 @@ class RepositoryBranchSelector extends StatelessWidget {
         children: [
           // 이름은 고르라고 있는 것이 아니라 지금 어디에 서 있는지 말하려고
           // 있다. 저장소와 브랜치가 몫을 더 받고, 대개 '선택' 두 글자인 브랜치
-          // diff가 덜 받는다.
-          Expanded(
+          // diff가 덜 받는다. 몫은 상한일 뿐이라 loose로 둔다 — 'yonalist'는
+          // 'yonalist'만큼만 차지하고 다음 이름이 바로 옆에 붙어 선다.
+          Flexible(
             flex: 4,
             child: _RepositorySelector(
               repositoryName: repositoryName,
@@ -110,7 +111,7 @@ class RepositoryBranchSelector extends StatelessWidget {
               onRemoved: onRecentRepositoryRemoved,
             ),
           ),
-          Expanded(
+          Flexible(
             flex: 4,
             child: _BaseBranchSelector(
               localBranches: localBranches,
@@ -135,7 +136,7 @@ class RepositoryBranchSelector extends StatelessWidget {
                 child: capsule,
               ),
             ),
-          Expanded(
+          Flexible(
             flex: 3,
             child: _ComparisonSelector(
               localBranches: localBranches,
