@@ -66,23 +66,25 @@ class WorkingTreeEntry {
 
   bool get inStaged => !untracked && !conflicted && indexStatus != '.';
 
-  WorkingTreeEntry _withCounts(NumstatCounts? unstaged, NumstatCounts? staged) =>
-      WorkingTreeEntry(
-        path: path,
-        origPath: origPath,
-        indexStatus: indexStatus,
-        worktreeStatus: worktreeStatus,
-        untracked: untracked,
-        conflicted: conflicted,
-        submodule: submodule,
-        symlink: symlink,
-        unstagedAdditions: unstaged?.additions,
-        unstagedDeletions: unstaged?.deletions,
-        stagedAdditions: staged?.additions,
-        stagedDeletions: staged?.deletions,
-        unstagedBinary: unstaged?.isBinary ?? false,
-        stagedBinary: staged?.isBinary ?? false,
-      );
+  WorkingTreeEntry _withCounts(
+    NumstatCounts? unstaged,
+    NumstatCounts? staged,
+  ) => WorkingTreeEntry(
+    path: path,
+    origPath: origPath,
+    indexStatus: indexStatus,
+    worktreeStatus: worktreeStatus,
+    untracked: untracked,
+    conflicted: conflicted,
+    submodule: submodule,
+    symlink: symlink,
+    unstagedAdditions: unstaged?.additions,
+    unstagedDeletions: unstaged?.deletions,
+    stagedAdditions: staged?.additions,
+    stagedDeletions: staged?.deletions,
+    unstagedBinary: unstaged?.isBinary ?? false,
+    stagedBinary: staged?.isBinary ?? false,
+  );
 }
 
 class WorkingTreeStatus {
@@ -141,9 +143,7 @@ List<WorkingTreeEntry> parseStatusV2(String output) {
         worktreeStatus: xy[1],
         conflicted: type == 'u',
         submodule: fields[2].startsWith('S'),
-        symlink: fields
-            .sublist(3, type == 'u' ? 7 : 6)
-            .contains('120000'),
+        symlink: fields.sublist(3, type == 'u' ? 7 : 6).contains('120000'),
       ),
     );
   }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'command_log.dart';
 import 'timeline_palette.dart';
 import 'timeline_theme.dart';
 
@@ -69,9 +70,15 @@ class _RefRowMenuState extends State<RefRowMenu> {
 
   static const _menuWidth = 240.0;
 
-  void _run(VoidCallback action) {
+  /// Closes the menu and runs the item under its own name, so the console
+  /// says what was asked for before it says what git was asked to do.
+  void _run(RefMenuAction action) {
     _controller.close();
-    action();
+    CommandLogScope.run(
+      context,
+      '${action.title} — ${widget.name}',
+      action.onPressed!,
+    );
   }
 
   /// The first action the ref can actually take. A destructive action never
@@ -110,9 +117,7 @@ class _RefRowMenuState extends State<RefRowMenu> {
         child: MenuItemButton(
           key: action.key,
           autofocus: isDefault,
-          onPressed: action.onPressed == null
-              ? null
-              : () => _run(action.onPressed!),
+          onPressed: action.onPressed == null ? null : () => _run(action),
           style: MenuItemButton.styleFrom(
             backgroundColor: isDefault
                 ? palette.interactive

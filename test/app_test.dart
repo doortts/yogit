@@ -19,6 +19,7 @@ import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/full_diff_unified_view.dart';
 import 'package:yogit/full_diff_workspace.dart';
 import 'package:yogit/commit_time.dart';
+import 'package:yogit/command_log.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/local_state_signature.dart';
 import 'package:yogit/github_api.dart';
@@ -18271,11 +18272,13 @@ Widget app(
   String mergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
   String rebaseMergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
   bool precisePush = false,
+  CommandLog? commandLog,
   FullDiffPreferences fullDiffPreferences = const FullDiffPreferences(),
 }) => MaterialApp(
   home: TimelineScreen(
     precisePush: precisePush,
     repository: repository,
+    commandLog: commandLog,
     controller: controller,
     fullDiffPreferences: fullDiffPreferences,
     branchPreviewMode: branchPreviewMode,

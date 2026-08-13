@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 import 'git.dart';
 
@@ -15,6 +15,9 @@ enum CommandLogState { running, ok, failed }
 /// One line of the console. Mutable in one direction only — a command starts
 /// [CommandLogState.running] and is settled once, when the process returns.
 class CommandLogEntry {
+  /// A heading, not a job: it holds no exit code and never runs or fails on
+  /// its own. It appears when the first command under it does, so a menu item
+  /// the user backed out of at the confirmation leaves nothing behind.
   CommandLogEntry.action({required this.id, required this.label})
     : kind = CommandLogKind.action,
       actionId = null,
@@ -22,7 +25,8 @@ class CommandLogEntry {
       arguments = const [],
       workingDirectory = null,
       redacted = false,
-      startedAt = DateTime.now();
+      startedAt = DateTime.now(),
+      duration = Duration.zero;
 
   CommandLogEntry.command({
     required this.id,
@@ -72,8 +76,8 @@ class CommandLogEntry {
   /// What the process threw instead of answering — no exit code, no output.
   String? failure;
 
-  /// An action has no exit code of its own — it is done when its work is done,
-  /// and failed only if that work threw.
+  /// A heading is never running and never failed: it is a name, and the lines
+  /// under it are what succeeded or did not.
   CommandLogState get state => duration == null
       ? CommandLogState.running
       : failure == null && (exitCode == null || exitCode == 0)
@@ -128,22 +132,25 @@ class CommandLog extends ChangeNotifier {
     _notify();
   }
 
-  /// Runs [body] as the named action: the name goes into the console first,
-  /// and every command [body] reaches is filed under it. The line settles when
-  /// [body] does — an action left running would be counted as running forever.
-  Future<T> action<T>(String label, Future<T> Function() body) async {
-    final entry = _add(CommandLogEntry.action(id: _nextId++, label: label));
-    final started = DateTime.now();
-    try {
-      return await runZoned(body, zoneValues: {_actionKey: entry.id});
-    } catch (error) {
-      entry.failure = '$error';
-      rethrow;
-    } finally {
-      entry.duration = DateTime.now().difference(started);
-      _notify();
-    }
-  }
+  /// Runs [body] under [label]: every command it reaches is filed under that
+  /// name, and the name appears in the console just above the first of them.
+  ///
+  /// Nothing is written for a body that runs no command. Half of what the user
+  /// presses ends at a confirmation they decline, or at a guard that says
+  /// something else is already running, and a console that announced those
+  /// would be describing work that never happened.
+  Future<T> action<T>(String label, Future<T> Function() body) => runZoned(
+    body,
+    zoneValues: {_actionKey: _PendingAction(_nextId++, label)},
+  );
+
+  /// [action] for a callback that is not itself asynchronous — a button whose
+  /// handler starts the work and returns. Kept synchronous so an error thrown
+  /// straight out of the handler still reaches the caller as one.
+  void runNamed(String label, VoidCallback body) => runZoned(
+    body,
+    zoneValues: {_actionKey: _PendingAction(_nextId++, label)},
+  );
 
   /// The same runner, with every call written down.
   CommandRunner wrap(CommandRunner runner) =>
@@ -184,7 +191,7 @@ class CommandLog extends ChangeNotifier {
     final entry = _add(
       CommandLogEntry.command(
         id: _nextId++,
-        actionId: Zone.current[_actionKey] as int?,
+        actionId: _headingFor(Zone.current[_actionKey] as _PendingAction?),
         executable: executable,
         arguments: redactArguments(executable, arguments),
         workingDirectory: workingDirectory,
@@ -218,6 +225,17 @@ class CommandLog extends ChangeNotifier {
     return error is ProcessException && error.message.isNotEmpty
         ? error.message
         : '실행하지 못했습니다';
+  }
+
+  /// The id a command should be filed under, writing the action's heading
+  /// first if this is the first command to need it.
+  int? _headingFor(_PendingAction? pending) {
+    if (pending == null) return null;
+    if (!pending.written) {
+      pending.written = true;
+      _add(CommandLogEntry.action(id: pending.id, label: pending.label));
+    }
+    return pending.id;
   }
 
   void _fill(CommandLogEntry entry, ProcessResult result) {
@@ -316,4 +334,59 @@ class CommandLog extends ChangeNotifier {
   }
 
   static String _basename(String path) => path.split('/').last;
+}
+
+/// A name waiting for something to happen under it. Carried by the zone from
+/// the button that was pressed down to whatever runs git, and turned into a
+/// line in the console the first time that happens.
+class _PendingAction {
+  _PendingAction(this.id, this.label);
+
+  final int id;
+  final String label;
+  var written = false;
+}
+
+/// Hands the log down to the widgets that know what the user just pressed.
+///
+/// A menu item knows its own name and a button knows its tooltip; the code
+/// that runs git a dozen frames later does not, and should not have to carry
+/// it. This is how the name reaches [CommandLog.action] without becoming an
+/// argument on everything in between.
+class CommandLogScope extends InheritedWidget {
+  const CommandLogScope({required this.log, required super.child, super.key});
+
+  final CommandLog log;
+
+  static CommandLog? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<CommandLogScope>()?.log;
+
+  /// Runs [body] as a named action when there is a console listening, and
+  /// plainly when there is not.
+  static void run(BuildContext context, String label, VoidCallback body) {
+    final log = maybeOf(context);
+    return log == null ? body() : log.runNamed(label, body);
+  }
+
+  @override
+  bool updateShouldNotify(CommandLogScope oldWidget) =>
+      !identical(oldWidget.log, log);
+}
+
+extension CommandLogRepository on CommandLog {
+  /// A repository that runs its git through this log. Every place the app
+  /// opens one goes through here, so none of them has to remember to wrap
+  /// both runners — and the one that forgot would be a repository whose work
+  /// never reaches the console.
+  GitRepository repositoryAt(
+    String root, {
+    required String gitExecutable,
+    CommandRunner? runner,
+    RawCommandRunner? rawRunner,
+  }) => GitRepository(
+    root,
+    gitExecutable: gitExecutable,
+    runner: wrap(runner ?? runProcess),
+    rawRunner: wrapRaw(rawRunner ?? runRawProcess),
+  );
 }

@@ -150,6 +150,27 @@ extension _TimelineChrome on _TimelineScreenState {
         ),
         const SizedBox(width: 8),
       ],
+      if (widget.commandLog case final log?)
+        ListenableBuilder(
+          listenable: log,
+          builder: (context, _) => IconButton(
+            key: const Key('toolbar-console'),
+            tooltip: '콘솔 (⌘`)',
+            visualDensity: VisualDensity.compact,
+            onPressed: _toggleConsole,
+            icon: Icon(
+              Icons.terminal,
+              size: 20,
+              // The dot is the only sign a command is out there while the
+              // console is shut.
+              color: _consoleOpen
+                  ? _palette.text
+                  : log.runningCount > 0
+                  ? behindOrange
+                  : _palette.muted,
+            ),
+          ),
+        ),
       HoverBuilder(
         enabled: widget.onOpenSettings != null,
         builder: (hovered) => Container(

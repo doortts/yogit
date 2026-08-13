@@ -9,6 +9,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'avatars.dart';
+import 'command_log.dart';
+import 'console_panel.dart';
 import 'commit_time.dart';
 import 'commit_profile_chip.dart';
 import 'external_editor.dart';
@@ -147,6 +149,7 @@ class TimelineScreen extends StatefulWidget {
     this.preferredBranchReady = true,
     this.onPreferredBranchChanged,
     this.avatarService,
+    this.commandLog,
     this.deletedBranchNames = const {},
     this.deletedBranchNamesReady = true,
     this.onDeletedBranchNamesChanged,
@@ -209,6 +212,11 @@ class TimelineScreen extends StatefulWidget {
   final bool preferredBranchReady;
   final ValueChanged<String>? onPreferredBranchChanged;
   final AvatarService? avatarService;
+
+  /// Every process the app runs, for the console dock. Null in a window with
+  /// no console to open.
+  final CommandLog? commandLog;
+
   final Map<String, String> deletedBranchNames;
   final bool deletedBranchNamesReady;
   final ValueChanged<Map<String, String>>? onDeletedBranchNamesChanged;
@@ -587,6 +595,11 @@ class _TimelineScreenState extends State<TimelineScreen>
   final _collapsedRefFolders = <String>{};
   var _showAllTags = false;
   var _sidebarCollapsed = false;
+
+  /// The console dock. Shut on launch — it is for the moment something looks
+  /// wrong, not for every moment.
+  var _consoleOpen = false;
+  var _consoleHeight = 200.0;
 
   late final Map<String, double> _widths = _widthMap(widget.columnWidths);
   late double? _graphWidth = widget.columnWidths.graph;
@@ -1457,6 +1470,12 @@ class _TimelineScreenState extends State<TimelineScreen>
       _openSearch();
       return KeyEventResult.handled;
     }
+    // ⌘` 콘솔. 편집 중에도 열려야 한다 — 방금 무엇이 나갔는지 보려는 것이다.
+    if (event.logicalKey == LogicalKeyboardKey.backquote &&
+        shortcutModifierHeld) {
+      _toggleConsole();
+      return KeyEventResult.handled;
+    }
     // ⌘↵ 커밋. 제목칸에 포커스가 있어도 동작한다 — 치고 바로 커밋하는 흐름이다.
     // 게이트는 커밋 버튼의 것과 같고, 막히면 아래 Enter로 새지 않는다.
     if (event.logicalKey == LogicalKeyboardKey.enter && shortcutModifierHeld) {
@@ -1856,32 +1875,84 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: _palette.background,
-    body: Focus(
-      autofocus: true,
-      focusNode: _focusNode,
-      onKeyEvent: _onKeyEvent,
-      child: Column(
-        children: [
-          _toolbar(),
-          Divider(height: 1, color: _palette.border),
-          Expanded(
-            child: Row(
-              children: [
-                if (!_fullDiffOpen) _sidebar(),
-                Expanded(child: _workspace()),
-              ],
+  Widget build(BuildContext context) => _withCommandLog(
+    Scaffold(
+      backgroundColor: _palette.background,
+      body: Focus(
+        autofocus: true,
+        focusNode: _focusNode,
+        onKeyEvent: _onKeyEvent,
+        child: Column(
+          children: [
+            _toolbar(),
+            Divider(height: 1, color: _palette.border),
+            Expanded(
+              child: Row(
+                children: [
+                  if (!_fullDiffOpen) _sidebar(),
+                  Expanded(child: _workspace()),
+                ],
+              ),
             ),
-          ),
-          // 알림은 오버레이로 뜬다. 화면 구조에 Stack을 얹으면 미리보기 판이
-          // 겹쳐 놓인 것이 되어, 그것이 나란한 형제라는 약속이 깨진다.
-          _localChangeNoticeHost(),
-          _statusBar(),
-        ],
+            _console(),
+            // 알림은 오버레이로 뜬다. 화면 구조에 Stack을 얹으면 미리보기 판이
+            // 겹쳐 놓인 것이 되어, 그것이 나란한 형제라는 약속이 깨진다.
+            _localChangeNoticeHost(),
+            _statusBar(),
+          ],
+        ),
       ),
     ),
   );
+
+  /// Puts the log where a menu item or a button can reach it: they know the
+  /// name of what the user pressed, and the console needs that name.
+  Widget _withCommandLog(Widget child) {
+    final log = widget.commandLog;
+    return log == null ? child : CommandLogScope(log: log, child: child);
+  }
+
+  /// The console, docked under everything and across the whole window: the
+  /// commands it shows belong to the repository, not to the timeline column.
+  /// Closed it takes no room at all.
+  Widget _console() {
+    final log = widget.commandLog;
+    if (log == null || !_consoleOpen) return const SizedBox.shrink();
+    // The window's height is read in here rather than in the screen's own
+    // build, so a resize rebuilds this box and not the timeline behind it.
+    return Builder(
+      builder: (context) {
+        final most = math.max(
+          _consoleMinHeight,
+          MediaQuery.sizeOf(context).height / 2,
+        );
+        return SizedBox(
+          key: const Key('console-dock'),
+          height: _consoleHeight.clamp(_consoleMinHeight, most),
+          child: ConsolePanel(
+            log: log,
+            repositoryRoot: widget.repository.root,
+            onClose: () => _rebuild(() => _consoleOpen = false),
+            onResize: (delta) => _rebuild(
+              () => _consoleHeight = (_consoleHeight + delta).clamp(
+                _consoleMinHeight,
+                most,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _toggleConsole() {
+    if (widget.commandLog == null) return;
+    _rebuild(() => _consoleOpen = !_consoleOpen);
+  }
+
+  /// Never smaller than this; never more than half the window, which the box
+  /// above works out from the window it is being laid out in.
+  static const _consoleMinHeight = 80.0;
 
   /// Opening or closing the panel re-lays out this subtree only, never the whole
   /// screen.

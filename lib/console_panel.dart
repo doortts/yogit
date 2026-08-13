@@ -344,13 +344,7 @@ class _ConsolePanelState extends State<ConsolePanel> {
         child: Row(
           children: [
             _time(palette, entry),
-            Icon(
-              Icons.play_arrow,
-              size: 12,
-              color: entry.state == CommandLogState.failed
-                  ? remoteBehindRed
-                  : palette.interactive,
-            ),
+            Icon(Icons.play_arrow, size: 12, color: palette.interactive),
             const SizedBox(width: 4),
             Expanded(
               child: Text(
@@ -358,17 +352,9 @@ class _ConsolePanelState extends State<ConsolePanel> {
                 key: Key('console-action-${entry.id}'),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 11.5,
-                  fontFamily: technicalFontFamily,
-                  fontFamilyFallback: technicalFontFallback,
-                  color: entry.state == CommandLogState.failed
-                      ? remoteBehindRed
-                      : palette.interactive,
-                ),
+                style: _mono(palette.interactive),
               ),
             ),
-            _elapsed(palette, entry),
             const SizedBox(width: 10),
           ],
         ),

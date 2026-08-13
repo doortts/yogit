@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import 'avatars.dart';
+import 'command_log.dart';
 import 'git.dart';
 import 'github_api.dart';
 import 'github_auth.dart';
@@ -296,6 +297,10 @@ class YogitBootstrap extends StatefulWidget {
 class _YogitBootstrapState extends State<YogitBootstrap> {
   late final WindowFrameController _windowFrameController =
       widget.windowFrameController ?? WindowFrameController();
+
+  /// The console's log outlives the repository shown in it: switching folders
+  /// keeps what was already run on screen.
+  final _commandLog = CommandLog();
   late String _requestedPath = widget.requestedPath;
   late Future<String> _root = _resolve(_requestedPath);
 
@@ -319,6 +324,7 @@ class _YogitBootstrapState extends State<YogitBootstrap> {
     if (widget.windowFrameController == null) {
       _windowFrameController.dispose();
     }
+    _commandLog.dispose();
     super.dispose();
   }
 
@@ -335,12 +341,13 @@ class _YogitBootstrapState extends State<YogitBootstrap> {
       }
       if (snapshot.data case final root?) {
         return YogitApp(
-          repository: GitRepository(
+          repository: _commandLog.repositoryAt(
             root,
             gitExecutable: widget.gitExecutable,
             runner: widget.runner,
             rawRunner: widget.rawRunner,
           ),
+          commandLog: _commandLog,
           windowFrameController: _windowFrameController,
         );
       }
@@ -363,6 +370,7 @@ class _YogitBootstrapState extends State<YogitBootstrap> {
 class YogitApp extends StatefulWidget {
   const YogitApp({
     required this.repository,
+    this.commandLog,
     this.settingsStore,
     this.avatarService,
     this.discoverAvatars = true,
@@ -372,6 +380,10 @@ class YogitApp extends StatefulWidget {
   });
 
   final GitRepository repository;
+
+  /// Every process the app runs, for the console to show. A window built
+  /// without one still runs — it just has nothing to show.
+  final CommandLog? commandLog;
 
   /// Builds the repository the folder picker switched to. Defaults to a real
   /// [GitRepository] on the same git executable.
@@ -387,6 +399,10 @@ class YogitApp extends StatefulWidget {
 
 class _YogitAppState extends State<YogitApp> {
   late final SettingsStore _store = widget.settingsStore ?? SettingsStore();
+
+  /// The log the console reads. Owned here only when nobody handed one down,
+  /// which is what the disposal below turns on.
+  late final CommandLog _commandLog = widget.commandLog ?? CommandLog();
   late GitRepository _repository = widget.repository;
   late AvatarService? _avatarService = widget.avatarService;
   var _settings = const AppSettings();
@@ -429,7 +445,10 @@ class _YogitAppState extends State<YogitApp> {
     setState(() {
       _repository =
           widget.repositoryFactory?.call(root) ??
-          GitRepository(root, gitExecutable: widget.repository.gitExecutable);
+          _commandLog.repositoryAt(
+            root,
+            gitExecutable: widget.repository.gitExecutable,
+          );
       _avatarService = widget.avatarService;
     });
     if (widget.avatarService == null && widget.discoverAvatars) {
@@ -467,6 +486,12 @@ class _YogitAppState extends State<YogitApp> {
         ),
       );
     }
+  }
+
+  @override
+  void dispose() {
+    if (widget.commandLog == null) _commandLog.dispose();
+    super.dispose();
   }
 
   void _changeSettings(AppSettings settings) {
@@ -516,6 +541,7 @@ class _YogitAppState extends State<YogitApp> {
         child: TimelineScreen(
           key: Key('timeline-screen-${_repository.root}'),
           repository: _repository,
+          commandLog: _commandLog,
           controller: widget.windowFrameController,
           onOpenRepository: _openRepository,
           onOpenMonitor: _openMonitor,

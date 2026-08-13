@@ -61,7 +61,15 @@ extension _TimelineSidebar on _TimelineScreenState {
       key: key,
       icon: Icon(icon, size: 15),
       tooltip: tooltip,
-      onPressed: onPressed,
+      // The tooltip is the only name this button has, and it is the name the
+      // console should show above whatever git it turns into.
+      onPressed: onPressed == null
+          ? null
+          : () => CommandLogScope.run(
+              context,
+              name == null ? tooltip : '$tooltip — $name',
+              onPressed,
+            ),
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints.tightFor(width: 26, height: 26),
       style: IconButton.styleFrom(

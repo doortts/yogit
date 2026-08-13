@@ -229,26 +229,68 @@ void main() {
     expect(entry.failure, 'No such file or directory');
   });
 
-  test('an action is done when its work is done', () async {
+  test('an action that runs nothing leaves nothing behind', () async {
     final log = CommandLog();
 
-    await log.action('Pull', () async {});
+    await log.action('브랜치 삭제 — lane', () async {
+      // 확인창에서 취소한 것과 같다: 아무것도 돌지 않았다.
+    });
 
-    final entry = log.entries.single;
-    expect(entry.state, CommandLogState.ok);
-    expect(log.runningCount, 0, reason: '끝난 액션이 실행 중으로 남으면 개수가 계속 는다');
+    expect(log.entries, isEmpty, reason: '하지 않은 일을 한 것처럼 적지 않는다');
   });
 
-  test('an action that threw is a failed line, and still throws', () async {
-    final log = CommandLog();
+  test(
+    'an action that threw before running git still writes nothing',
+    () async {
+      final log = CommandLog();
 
-    await expectLater(
-      log.action('Push', () async => throw Exception('rejected')),
-      throwsException,
+      await expectLater(
+        log.action('Push', () async => throw Exception('아직 준비되지 않음')),
+        throwsException,
+      );
+
+      expect(log.entries, isEmpty);
+    },
+  );
+
+  test('a heading is a name, not a job', () async {
+    final log = CommandLog();
+    final run = log.wrap(
+      (executable, arguments, {workingDirectory, environment}) async => ok(),
     );
 
-    expect(log.entries.single.state, CommandLogState.failed);
-    expect(log.entries.single.failure, contains('rejected'));
+    await log.action('Pull', () => run('git', ['pull']));
+
+    final heading = log.entries.first;
+    expect(heading.kind, CommandLogKind.action);
+    expect(heading.state, CommandLogState.ok, reason: '이름은 실행 중일 수 없다');
+    expect(log.runningCount, 0);
+  });
+
+  test('a synchronous handler names what it starts', () async {
+    final log = CommandLog();
+    final run = log.wrap(
+      (executable, arguments, {workingDirectory, environment}) async => ok(),
+    );
+    Future<void>? started;
+
+    // 버튼 핸들러는 일을 걸어 두고 바로 돌아온다 — 이름은 그 일을 따라가야 한다.
+    log.runNamed('체크아웃 — lane', () {
+      started = run('git', ['checkout', 'lane']);
+    });
+    await started;
+
+    expect(log.entries.first.label, '체크아웃 — lane');
+    expect(log.entries.last.actionId, log.entries.first.id);
+  });
+
+  test('a synchronous handler that throws throws where it was called', () {
+    final log = CommandLog();
+
+    expect(
+      () => log.runNamed('Push', () => throw StateError('바로 던진다')),
+      throwsStateError,
+    );
   });
 
   test('a command outliving its action name is set loose', () async {

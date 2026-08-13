@@ -131,8 +131,7 @@ extension _TimelineCommitPanel on _TimelineScreenState {
                   // `git add -A`는 마커가 남은 충돌 파일도 그대로 인덱스에
                   // 올려 커밋 게이트까지 풀어 준다. 파일 단위 Stage가 지나는
                   // 마커 검사를 여기만 건너뛸 수는 없다.
-                  blocked:
-                      unstaged && entries.any((entry) => entry.conflicted),
+                  blocked: unstaged && entries.any((entry) => entry.conflicted),
                 ),
               ],
             ),
@@ -160,6 +159,7 @@ extension _TimelineCommitPanel on _TimelineScreenState {
           ? null
           : () => unawaited(
               _runCommitAction(
+                unstaged ? '전체 스테이지' : '전체 스테이지 해제',
                 unstaged
                     ? () => widget.repository.stageFiles(const [])
                     : () => widget.repository.unstageFiles(
@@ -312,6 +312,7 @@ extension _TimelineCommitPanel on _TimelineScreenState {
           // rename은 두 경로를 함께 넘긴다 — 옛 경로가 인덱스로 돌아오고 새
           // 경로가 빠진다.
           onTap: () => _runCommitAction(
+            '스테이지 해제 — ${entry.path}',
             () => widget.repository.unstageFiles([
               entry.path,
               ?entry.origPath,
@@ -327,6 +328,7 @@ extension _TimelineCommitPanel on _TimelineScreenState {
         glyph: '＋',
         color: mainAccent,
         onTap: () => _runCommitAction(
+          '스테이지 — ${entry.path}',
           entry.conflicted
               ? () => widget.repository.stageResolvedFile(entry.path)
               : () => widget.repository.stageFiles([entry.path]),
@@ -491,6 +493,7 @@ extension _TimelineCommitPanel on _TimelineScreenState {
       (row) => row.area == area && row.path == path,
     );
     final done = await _runCommitAction(
+      area == WorkingTreeArea.staged ? '스테이지 해제 — $path' : '스테이지 — $path',
       area == WorkingTreeArea.staged
           ? () => widget.repository.unstageFiles([
               path,
@@ -568,6 +571,7 @@ extension _TimelineCommitPanel on _TimelineScreenState {
         color: mainAccent,
         blocked: blocked,
         onTap: () => _runCommitAction(
+          unstaged ? '헝크 스테이지 — $path' : '헝크 스테이지 해제 — $path',
           unstaged
               ? () => widget.repository.stageHunk(
                   path,
@@ -652,6 +656,7 @@ extension _TimelineCommitPanel on _TimelineScreenState {
     );
     if (approved != true || !mounted) return;
     await _runCommitAction(
+      '헝크 버리기 — $path',
       () => widget.repository.discardHunk(
         path,
         hunkIndex,
@@ -691,6 +696,7 @@ extension _TimelineCommitPanel on _TimelineScreenState {
     );
     if (approved != true || !mounted) return;
     await _runCommitAction(
+      '${entry.untracked ? '파일 삭제' : '변경 버리기'} — ${entry.path}',
       () => widget.repository.discardWorktreeFile(
         entry.path,
         untracked: entry.untracked,
@@ -949,6 +955,7 @@ extension _TimelineCommitPanel on _TimelineScreenState {
 
   Future<void> _commitIndex() async {
     final done = await _runCommitAction(
+      _commitAmend ? '커밋 수정 (amend)' : '커밋',
       () => widget.repository.commitIndex(
         message: _commitMessageText(),
         amend: _commitAmend,
@@ -973,6 +980,23 @@ extension _TimelineCommitPanel on _TimelineScreenState {
   /// 물러나 있으며, 끝나면 목록을 다시 읽는다. [inlineError]는 커밋처럼 실패
   /// 문구가 폼 자리에 남아야 하는 조작만 준다 — 나머지는 SnackBar다.
   Future<bool> _runCommitAction(
+    String label,
+    Future<void> Function() action, {
+    bool reloadTimeline = false,
+    bool inlineError = false,
+  }) {
+    Future<bool> run() => _commitAction(
+      action,
+      reloadTimeline: reloadTimeline,
+      inlineError: inlineError,
+    );
+    final log = widget.commandLog;
+    return log == null ? run() : log.action(label, run);
+  }
+
+  /// The work itself: one at a time, the watcher held off, the list reread
+  /// afterwards. [_runCommitAction] is the same thing under a name.
+  Future<bool> _commitAction(
     Future<void> Function() action, {
     bool reloadTimeline = false,
     bool inlineError = false,

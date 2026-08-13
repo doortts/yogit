@@ -2655,8 +2655,7 @@ class GitRepository implements FullDiffRepository {
       final count when count > 0 =>
         '옮길 커밋 $compareAhead개 중 $count개는 다른 사람이 쓴 커밋이라 '
             '재배치하면 남의 작업을 다시 씁니다',
-      _ when internalMerges > 0 =>
-        '브랜치 안의 머지 커밋 $internalMerges개를 재배치가 펴 버립니다',
+      _ when internalMerges > 0 => '브랜치 안의 머지 커밋 $internalMerges개를 재배치가 펴 버립니다',
       _ when check.status == RebaseCheckStatus.failed =>
         '재배치 시뮬레이션이 끝나지 못해 어느 쪽인지 재볼 수 없었습니다',
       _ when check.status == RebaseCheckStatus.conflicts =>
@@ -3522,16 +3521,23 @@ class GitRepository implements FullDiffRepository {
   ///
   /// [hasHead] is the working tree row's `parents.isNotEmpty`. Before the
   /// first commit `restore` has no source to read the index entry back from.
-  Future<void> unstageFiles(List<String> paths, {required bool hasHead}) => _run(
-    [
-      if (hasHead)
-        ...['restore', '--staged']
-      else
-        ...['rm', '--cached', '-r', '--quiet'],
-      '--',
-      if (paths.isEmpty) ':/' else for (final path in paths) ':(literal)$path',
-    ],
-  );
+  Future<void> unstageFiles(List<String> paths, {required bool hasHead}) =>
+      _run([
+        if (hasHead) ...[
+          'restore',
+          '--staged',
+        ] else ...[
+          'rm',
+          '--cached',
+          '-r',
+          '--quiet',
+        ],
+        '--',
+        if (paths.isEmpty)
+          ':/'
+        else
+          for (final path in paths) ':(literal)$path',
+      ]);
 
   /// Throws away the worktree change to [path]. A tracked path is restored
   /// from the index, so a staged change survives and a worktree deletion comes
