@@ -89,6 +89,7 @@
   .red { color: var(--red); }
   .greyverb { color: var(--muted); }
   .door { color: #4388ee; }
+  .cap2 .verb .n.red { color: var(--red); }
   .dot { width: 6px; height: 6px; border-radius: 3px; background: rgba(138,214,161,.55);
          margin: 7px 6px; }
 
@@ -203,7 +204,7 @@
     <div class="name">갈라짐 · 충돌</div>
     <div class="row"><div class="cap2" style="margin:0">
       <div class="verb red"><span class="n">↓ 12</span><span class="w">충돌 3</span></div>
-      <div class="verb door"><span class="n">↑ 46</span><span class="w">해결하기</span></div>
+      <div class="verb door"><span class="n red">↑ 46</span><span class="w">해결하기</span></div>
     </div></div>
   </div>
   <div class="state">
@@ -216,7 +217,8 @@
   바뀌는 것은 <b>한 줄이 두 줄이 되는 것뿐</b>이고, 충돌 쪽 두 번째 칸만 <code>↑ 46</code> 아래에
   무엇을 누르는지(<b>해결하기</b>)를 적어 넣었다 — 지금은 숫자만 있어 눌러도 되는지 모른다.
   충돌 쪽 두 번째 칸은 판정이 아니라 <b>나가는 길</b>이라, 판정 색이 아닌 컨트롤의 파랑을 입는다 —
-  '막혔다' 옆에 '이리로 나간다'가 서고, 눌러도 실행되는 것은 없다.
+  '막혔다' 옆에 '이리로 나간다'가 서고, 눌러도 실행되는 것은 없다. 윗줄의 개수는 판정에 딸린
+  사실이라 문 위에서도 빨강으로 남는다 — 색이 옮겨 가는 것은 <b>동사 한 낱말</b>뿐이다.
   재는 동안에는 동사 자리가 비어 있다: 무엇을 하게 될지가 아직 답이 아니라서, 그 자리에
   <b>도는 것 하나</b>를 놓아 기다리는 중이라는 말을 글자 없이 한다. 커밋하거나 fetch로 tip이
   움직인 직후 한 번, 대개 몇 초를 스치는 상태다.</p>

@@ -186,6 +186,13 @@ void main() {
       const Color(0xFF4388EE),
       reason: '판정은 빨강이지만 나가는 길은 컨트롤의 파랑이다',
     );
+    expect(
+      ((resolve.textSpan! as TextSpan).children!.first as TextSpan)
+          .style
+          ?.color,
+      const Color(0xFFFF453A),
+      reason: '개수는 판정에 딸린 사실이라 문을 따라 파래지지 않는다',
+    );
     expect(pull.style?.color, const Color(0xFFFF453A), reason: '판정은 빨강 그대로');
     final tooltip = tester.widget<Tooltip>(
       find.ancestor(

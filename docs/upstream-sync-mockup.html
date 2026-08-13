@@ -94,6 +94,7 @@
   .act.rebase    { color: var(--amber); }
   .act.conflict  { color: var(--red); }
   .act.door      { color: #4388ee; }
+  .conflictnum   { color: var(--red); }
   .act.idle      { color: var(--dim); }
   .dot-synced {
     width: 6px; height: 6px; border-radius: 3px; background: var(--green);
@@ -180,6 +181,7 @@
 <p class="caption">동기화 캡슐. 두 동사가 각자의 판정 색을 입는다 — 초록: 그대로 됨 · 주황: 받아 얹기(--rebase)를 거치면 됨 · 빨강: 충돌.
   <b>한 자리만 예외다</b>: 충돌 상태의 두 번째 칸은 판정이 아니라 해결 화면으로 나가는 문이라, 판정 색 대신 컨트롤의 파랑을 입고
   <b>해결하기</b>라고 적는다 — 막힌 사실은 빨강이 말하고, 나가는 길은 파랑이 말한다.
+  개수는 판정에 딸린 사실이라 문 위에서도 빨강으로 남는다.
   캡슐이 두 줄로 서는 배치는 <span class="mono">docs/toolbar-selectors-mockup.html</span>이 잇는다.</p>
 
 <h2>상태 여섯 <span class="tag">한 사실, 두 문</span></h2>
@@ -218,7 +220,7 @@
   <span class="label"><b>어긋남, 충돌</b> · 3↕2, 재연 실패</span>
   <span class="capsule">
     <span class="act conflict">↓ <span class="n">2</span> 충돌 2</span>
-    <span class="act door">↑ <span class="n">3</span> 해결하기</span>
+    <span class="act door"><span class="conflictnum">↑ <span class="n">3</span></span> 해결하기</span>
   </span>
   <span class="tip"><span class="dim">tooltip:</span> 빨리감기는 불가, 받아 얹으면 lib/a.dart 외 1개가 충돌합니다 — 눌러서 해결</span>
 </div>

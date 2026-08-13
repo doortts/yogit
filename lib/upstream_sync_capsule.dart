@@ -159,6 +159,8 @@ class UpstreamSyncCapsule extends StatelessWidget {
               key: const Key('upstream-sync-conflict-push'),
               palette: palette,
               color: previewControlBlue,
+              // 46개가 막혀 있다는 사실은 여전히 판정의 것이다.
+              countColor: remoteBehindRed,
               count: '↑ ${state.ahead}',
               word: '해결하기',
               tooltip:
@@ -207,21 +209,30 @@ class UpstreamSyncCapsule extends StatelessWidget {
   /// 숫자가 위, 동사가 아래. 옆의 저장소·브랜치 칸이 '설명 줄 · 값 줄'로 서
   /// 있는 것과 같은 격자라, 굵은 동사가 브랜치 이름과 같은 높이에서 읽힌다.
   /// 접힌 만큼 캡슐은 한 줄로 늘어서던 때의 절반 폭으로 선다.
+  /// [countColor]는 윗줄만 따로 입힌다: 개수는 언제나 판정에 딸린 사실이라,
+  /// 아랫줄이 판정을 벗어나도(충돌의 '해결하기') 숫자까지 함께 옮겨 가지는
+  /// 않는다.
   Widget _twoLines({
     required String count,
     required String word,
     required Color color,
+    Color? countColor,
   }) => Text.rich(
     TextSpan(
       children: [
         TextSpan(
           // 개수는 고정폭으로 — 자릿수가 늘어도 동사가 흔들리지 않는다.
           text: count,
-          style: const TextStyle(
+          style: TextStyle(
             fontFamily: technicalFontFamily,
             fontFamilyFallback: technicalFontFallback,
             fontSize: 11,
             height: 1.25,
+            color: countColor == null
+                ? null
+                : enabled
+                ? countColor
+                : countColor.withValues(alpha: 0.45),
           ),
         ),
         const TextSpan(text: '\n'),
@@ -250,6 +261,7 @@ class UpstreamSyncCapsule extends StatelessWidget {
     required String word,
     required String tooltip,
     required VoidCallback onTap,
+    Color? countColor,
   }) {
     return Tooltip(
       message: tooltip,
@@ -269,7 +281,12 @@ class UpstreamSyncCapsule extends StatelessWidget {
             child: Padding(
               key: key,
               padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-              child: _twoLines(count: count, word: word, color: color),
+              child: _twoLines(
+                count: count,
+                word: word,
+                color: color,
+                countColor: countColor,
+              ),
             ),
           ),
         ),
