@@ -135,6 +135,56 @@ void main() {
     expect(second.author?.login, 'ada');
   });
 
+  Future<HttpResponse> noSuchCommit() async =>
+      (status: 422, body: '{"message":"No commit found for SHA"}');
+
+  test(
+    'an unpushed commit does not answer for the people who wrote it',
+    () async {
+      final fake = serviceOn(
+        (uri) => uri.path.endsWith('local11')
+            ? noSuchCommit()
+            : answering(bothAccounts),
+      );
+
+      // 한 프레임에 들어온 두 행: 맨 위는 아직 푸시하지 않은 커밋, 그 아래는 서버에
+      // 있는 커밋이다. 아래 행은 위 행의 요청에 얹혀 기다린다.
+      final top = fake.service.resolve('local11', author: ada, committer: cam);
+      final below = fake.service.resolve(
+        'bbb2222',
+        author: ada,
+        committer: cam,
+      );
+
+      expect((await top).author, isNull, reason: '서버에 없는 커밋은 답이 없다');
+      expect(
+        (await below).author?.login,
+        'ada',
+        reason: '푸시 안 한 sha 하나가 사람을 지우지 않는다',
+      );
+    },
+  );
+
+  test('the unpushed row takes the face the next row found', () async {
+    final fake = serviceOn(
+      (uri) => uri.path.endsWith('local11')
+          ? noSuchCommit()
+          : answering(bothAccounts),
+    );
+    final top = fake.service.resolve('local11', author: ada, committer: cam);
+    await fake.service.resolve('bbb2222', author: ada, committer: cam);
+    await top;
+
+    final again = await fake.service.resolve(
+      'local11',
+      author: ada,
+      committer: cam,
+    );
+
+    expect(again.author?.login, 'ada', reason: '얼굴은 커밋이 아니라 사람의 것이다');
+    expect(fake.requests, hasLength(2), reason: '없는 커밋을 다시 묻지는 않는다');
+  });
+
   test('a known author with a new committer still fetches the commit', () async {
     final fake = serviceOn(
       (_) => answering(

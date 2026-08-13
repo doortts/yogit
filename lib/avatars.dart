@@ -136,6 +136,12 @@ class AvatarService {
   /// The lookups on their way, so two rows by the same person scrolling in
   /// together share one request rather than racing.
   final _identities = <String, Future<RemoteAvatar?>>{};
+
+  /// Commits GitHub has never heard of. A sha that has not been pushed yet is
+  /// no commit at all to the server, and asking a second time only earns the
+  /// same 404: the row is answered from what its people are already known by
+  /// instead, so the face still arrives once another row of theirs finds it.
+  final _missing = <String>{};
   final _permits = _PermitPool(4, maxQueued: 32);
   final _saturated = Future.value(const CommitAvatars());
   Future<String?>? _account;
@@ -176,6 +182,10 @@ class AvatarService {
     required GitIdentity author,
     GitIdentity? committer,
   }) {
+    // A commit the server does not have is answered from its people, and the
+    // answer is not kept: the next rebuild reads the map again, so a face that
+    // landed meanwhile reaches a row whose own sha will never find one.
+    if (_missing.contains(sha)) return _knownFor(author, committer);
     final cached = _cache.remove(sha);
     if (cached != null) {
       _cache[sha] = cached;
@@ -190,10 +200,29 @@ class AvatarService {
     if (keys.every(
       (key) => _known.containsKey(key) || _identities.containsKey(key),
     )) {
-      return _remember(sha, _fromIdentities(author, committer));
+      return _remember(sha, _shared(sha, author, committer, keys));
     }
-    final pending = _permits.tryRun(() => _load(sha, author, committer));
+    final pending = _ask(sha, author, committer, keys);
     if (pending == null) return _saturated;
+    return _remember(sha, pending);
+  }
+
+  /// Asks about [sha] and files the answer under everyone it names. Null when
+  /// the queue is full. While it is in flight every other row by these people
+  /// waits on it rather than asking again.
+  Future<CommitAvatars>? _ask(
+    String sha,
+    GitIdentity author,
+    GitIdentity? committer,
+    Set<String> keys,
+  ) {
+    final pending = _permits.tryRun(() {
+      // A lookup that landed while this one sat in the queue has already
+      // answered for these people, so the turn is spent on nothing.
+      if (keys.every(_known.containsKey)) return _knownFor(author, committer);
+      return _load(sha, author, committer);
+    });
+    if (pending == null) return null;
     for (final key in keys) {
       // A lookup that threw is nobody's answer: the person goes back to being
       // unknown so the next commit of theirs asks again. The error itself is
@@ -206,8 +235,35 @@ class AvatarService {
         },
       );
     }
-    return _remember(sha, pending);
+    return pending;
   }
+
+  /// The answer a lookup already on its way is about to give. That lookup
+  /// asked about somebody else's commit, and a commit that has not been pushed
+  /// yet is one GitHub answers nothing about — nothing about the sha, and so
+  /// nothing about the person who wrote it. A person still unknown when it
+  /// lands is asked about again, with this row's own commit, rather than
+  /// wearing initials for the rest of the session over a sha that never left
+  /// the machine.
+  Future<CommitAvatars> _shared(
+    String sha,
+    GitIdentity author,
+    GitIdentity? committer,
+    Set<String> keys,
+  ) async {
+    final answer = await _fromIdentities(author, committer);
+    if (keys.every(_known.containsKey)) return answer;
+    return await _ask(sha, author, committer, keys) ?? answer;
+  }
+
+  /// What the map holds for these two right now, without asking anybody.
+  Future<CommitAvatars> _knownFor(GitIdentity author, GitIdentity? committer) =>
+      Future.value(
+        CommitAvatars(
+          author: _known[_identityKey(author)],
+          committer: committer == null ? null : _known[_identityKey(committer)],
+        ),
+      );
 
   Future<CommitAvatars> _remember(String sha, Future<CommitAvatars> answer) {
     _cache[sha] = answer;
@@ -274,17 +330,30 @@ class AvatarService {
   }
 
   /// Asks about one commit and files the answer under the people it names. A
-  /// lookup that failed is not an answer: nothing is remembered, so the next
+  /// lookup that failed is not an answer: nobody is remembered, so the next
   /// commit by the same person asks again rather than wearing initials for the
-  /// rest of the session over one dropped request.
+  /// rest of the session over one dropped request. The sha itself is retired
+  /// only when the server says it has no such commit.
   Future<CommitAvatars> _load(
     String sha,
     GitIdentity author,
     GitIdentity? committer,
   ) async {
-    final json = await _getJsonOrNull(
-      'repos/${remote.owner}/${remote.repository}/commits/$sha',
-    );
+    Object? json;
+    try {
+      json = await api.getJson(
+        'repos/${remote.owner}/${remote.repository}/commits/$sha',
+      );
+    } on GitHubApiException catch (error) {
+      // 404 for a repository the server has, 422 for a sha it does not: either
+      // way this commit is local-only and will answer nothing until it is
+      // pushed. Every other failure — a rate limit, a dropped connection — is
+      // worth asking about again, so only these two retire the sha.
+      if (error.status == 404 || error.status == 422) {
+        _missing.add(sha);
+        _cache.remove(sha);
+      }
+    }
     if (json is! Map<String, dynamic>) {
       _forget(author, committer);
       return const CommitAvatars();
