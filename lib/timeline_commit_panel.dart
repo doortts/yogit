@@ -569,6 +569,11 @@ extension _TimelineCommitPanel on _TimelineScreenState {
       newStart: hunk.newStart,
       newCount: hunk.newCount,
     );
+    // 화면이 그린 diff가 잰 blob. 작업 트리 파일이 바뀌면 두 번째 해시가 움직여
+    // 숫자 넷이 그대로인 재편집도 걸린다.
+    final expectedIndexLine = state.patch.data?.headers
+        .where((line) => line.startsWith('index '))
+        .firstOrNull;
     final algorithm = state.appliedAlgorithm;
     return [
       _commitHunkButton(
@@ -583,12 +588,14 @@ extension _TimelineCommitPanel on _TimelineScreenState {
                   path,
                   hunk.index,
                   expected: expected,
+                  expectedIndexLine: expectedIndexLine,
                   algorithm: algorithm,
                 )
               : () => widget.repository.unstageHunk(
                   path,
                   hunk.index,
                   expected: expected,
+                  expectedIndexLine: expectedIndexLine,
                   algorithm: algorithm,
                 ),
         ),
@@ -599,8 +606,13 @@ extension _TimelineCommitPanel on _TimelineScreenState {
           label: 'Discard Hunk',
           color: deletedPink,
           blocked: blocked,
-          onTap: () =>
-              _confirmCommitDiscardHunk(path, hunk.index, expected, algorithm),
+          onTap: () => _confirmCommitDiscardHunk(
+            path,
+            hunk.index,
+            expected,
+            expectedIndexLine,
+            algorithm,
+          ),
         ),
     ];
   }
@@ -647,6 +659,7 @@ extension _TimelineCommitPanel on _TimelineScreenState {
     String path,
     int hunkIndex,
     HunkRange expected,
+    String? expectedIndexLine,
     DiffAlgorithm algorithm,
   ) async {
     final approved = await showYogitAlert<bool>(
@@ -667,6 +680,7 @@ extension _TimelineCommitPanel on _TimelineScreenState {
         path,
         hunkIndex,
         expected: expected,
+        expectedIndexLine: expectedIndexLine,
         algorithm: algorithm,
       ),
     );

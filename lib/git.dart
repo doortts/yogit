@@ -3611,11 +3611,13 @@ class GitRepository implements FullDiffRepository {
     String path,
     int hunkIndex, {
     required HunkRange expected,
+    String? expectedIndexLine,
     DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
   }) => _applyHunk(
     path,
     hunkIndex,
     expected: expected,
+    expectedIndexLine: expectedIndexLine,
     algorithm: algorithm,
     source: const [],
     apply: const ['--cached'],
@@ -3626,11 +3628,13 @@ class GitRepository implements FullDiffRepository {
     String path,
     int hunkIndex, {
     required HunkRange expected,
+    String? expectedIndexLine,
     DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
   }) => _applyHunk(
     path,
     hunkIndex,
     expected: expected,
+    expectedIndexLine: expectedIndexLine,
     algorithm: algorithm,
     source: const ['--cached'],
     apply: const ['--cached', '-R'],
@@ -3641,11 +3645,13 @@ class GitRepository implements FullDiffRepository {
     String path,
     int hunkIndex, {
     required HunkRange expected,
+    String? expectedIndexLine,
     DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
   }) => _applyHunk(
     path,
     hunkIndex,
     expected: expected,
+    expectedIndexLine: expectedIndexLine,
     algorithm: algorithm,
     source: const [],
     apply: const ['-R'],
@@ -3663,6 +3669,7 @@ class GitRepository implements FullDiffRepository {
     String path,
     int hunkIndex, {
     required HunkRange expected,
+    required String? expectedIndexLine,
     required DiffAlgorithm algorithm,
     required List<String> source,
     required List<String> apply,
@@ -3679,6 +3686,7 @@ class GitRepository implements FullDiffRepository {
       ]),
       hunkIndex,
       expected: expected,
+      expectedIndexLine: expectedIndexLine,
     );
     // 패치는 파일로 준다 — runner에 stdin이 없다. 작업 트리에 두면 그 자체가
     // untracked 변경이라 plumbing 디렉터리에 쓴다.

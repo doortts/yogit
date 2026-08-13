@@ -19118,6 +19118,7 @@ class FakeGitRepository extends GitRepository {
     String path,
     int hunkIndex, {
     required HunkRange expected,
+    String? expectedIndexLine,
     DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
   }) => _hunkAction('stage', path, hunkIndex, expected);
 
@@ -19126,6 +19127,7 @@ class FakeGitRepository extends GitRepository {
     String path,
     int hunkIndex, {
     required HunkRange expected,
+    String? expectedIndexLine,
     DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
   }) => _hunkAction('unstage', path, hunkIndex, expected);
 
@@ -19134,6 +19136,7 @@ class FakeGitRepository extends GitRepository {
     String path,
     int hunkIndex, {
     required HunkRange expected,
+    String? expectedIndexLine,
     DiffAlgorithm algorithm = DiffAlgorithm.gitSetting,
   }) => _hunkAction('discard', path, hunkIndex, expected);
 

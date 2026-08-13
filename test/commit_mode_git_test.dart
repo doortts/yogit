@@ -422,6 +422,41 @@ void main() {
     expect(await runGit(root, ['diff', '--cached']), isEmpty);
   });
 
+  test('discardHunk refuses a hunk the file rewrote at the same line count', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'a.txt', _numbered(20), 'base');
+    await _write(root, 'a.txt', _numbered(20, edits: {3: 'line 3 first'}));
+    // 화면이 그린 diff — 헝크 범위와 그 위의 index 줄.
+    const expected = (oldStart: 1, oldCount: 6, newStart: 1, newCount: 6);
+    final drawn = await runGit(root, ['diff', '--', 'a.txt']);
+    final indexLine = drawn
+        .split('\n')
+        .firstWhere((line) => line.startsWith('index '));
+
+    // 같은 줄을 같은 줄 수로 다시 고친다. 가장 흔한 재편집이고, @@ 숫자 넷은
+    // 하나도 움직이지 않아 그것만 보는 검사는 이것을 통과시킨다.
+    final second = _numbered(20, edits: {3: 'line 3 second'});
+    await _write(root, 'a.txt', second);
+    expect(await runGit(root, ['diff', '--', 'a.txt']), contains('@@ -1,6 +1,6 @@'));
+
+    await expectLater(
+      GitRepository(root.path).discardHunk(
+        'a.txt',
+        0,
+        expected: expected,
+        expectedIndexLine: indexLine,
+      ),
+      throwsA(isA<HunkMovedException>()),
+    );
+
+    expect(
+      await File('${root.path}/a.txt').readAsString(),
+      second,
+      reason: '사용자가 본 적 없는 두 번째 편집을 되돌리지 않는다',
+    );
+  });
+
   test('unstageHunk returns one hunk to the worktree-only side', () async {
     final root = await createGitFixture();
     addTearDown(() => root.delete(recursive: true));

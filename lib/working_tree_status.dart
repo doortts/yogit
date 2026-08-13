@@ -205,6 +205,7 @@ String extractHunkPatch(
   String patch,
   int hunkIndex, {
   required HunkRange expected,
+  String? expectedIndexLine,
 }) {
   final lines = patch.split('\n');
   final starts = [
@@ -212,6 +213,15 @@ String extractHunkPatch(
       if (lines[line].startsWith('@@')) line,
   ];
   if (hunkIndex < 0 || hunkIndex >= starts.length) {
+    throw const HunkMovedException();
+  }
+  // The four numbers survive the commonest re-edit of all — one line changed,
+  // then changed again — so they are not enough on their own. `index
+  // <old>..<new>` names the blobs the screen measured, and the second hash
+  // moves the moment the worktree file does.
+  if (expectedIndexLine != null &&
+      lines.take(starts.first).where((line) => line.startsWith('index ')).firstOrNull !=
+          expectedIndexLine) {
     throw const HunkMovedException();
   }
   final start = starts[hunkIndex];
