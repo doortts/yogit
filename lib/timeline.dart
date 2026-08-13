@@ -688,7 +688,8 @@ class _TimelineScreenState extends State<TimelineScreen>
     _focusNode.addListener(_onPaneFocusChanged);
     HardwareKeyboard.instance.addHandler(_handleModifierKeyEvent);
     // Refs load beside the first page, and neither blocks the first paint. The
-    // detail pane stays hidden until Enter or Space asks for it.
+    // detail pane follows the controller: the window opens it at startup, and
+    // Enter or the toolbar's button moves it from there.
     _loadNextPage();
     unawaited(_loadCommitIdentity());
     unawaited(_restoreCherryPickThenRefresh());
@@ -2174,12 +2175,16 @@ class _TimelineScreenState extends State<TimelineScreen>
   });
 
   /// The drag stretch and wordmark share whatever the functional clusters
-  /// leave. The wordmark steps down to 20px and then goes rather than squeeze
-  /// the drag target.
+  /// leave. The wordmark rides *inside* the stretch rather than beside it: the
+  /// glyphs ignore the pointer, so the bar still drags from under them, and the
+  /// drag target is already protected upstream — [_minDragWidth] is reserved
+  /// before the branch selector takes its width. So the only question left here
+  /// is whether the glyphs fit; asking for the drag width *on top of* them hid
+  /// the wordmark on every window the toolbar's own clusters fit in.
   Widget _dragAndWordmark() => LayoutBuilder(
     builder: (context, constraints) {
       final size = [26.0, 20.0].firstWhere(
-        (size) => constraints.maxWidth - (size * 5 + 24) >= _minDragWidth,
+        (size) => constraints.maxWidth >= size * 5 + 24,
         orElse: () => 0.0,
       );
       return GestureDetector(

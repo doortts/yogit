@@ -145,56 +145,19 @@ class HoverBuilderState extends State<HoverBuilder> {
   );
 }
 
-/// A keycap that also works as a button — the Enter chip runs the same toggle the
-/// Enter key does.
-class KeyCap extends StatefulWidget {
-  const KeyCap({required this.label, required this.onTap, super.key});
-
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  State<KeyCap> createState() => KeyCapState();
-}
-
-class KeyCapState extends State<KeyCap> {
-  var _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = context.timelineTheme;
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        key: Key('keycap-${widget.label}'),
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-          decoration: BoxDecoration(
-            color: _hovered ? palette.selectedRow : palette.raised,
-            border: Border.all(
-              color: _hovered ? palette.muted : palette.border,
-            ),
-            borderRadius: BorderRadius.circular(5),
-          ),
-          child: Text(
-            widget.label,
-            style: TextStyle(color: palette.text, fontSize: 13),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class PaneToggleIconPainter extends CustomPainter {
-  const PaneToggleIconPainter({required this.opens, required this.color});
+  const PaneToggleIconPainter({
+    required this.opens,
+    required this.color,
+    this.mirrored = false,
+  });
 
   final bool opens;
   final Color color;
+
+  /// 오른쪽에 달린 판의 버튼은 같은 그림을 좌우로 뒤집어 쓴다 — 문이 어느 쪽에
+  /// 달렸는지가 두 버튼의 유일한 차이다.
+  final bool mirrored;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -210,7 +173,8 @@ class PaneToggleIconPainter extends CustomPainter {
       ),
       paint,
     );
-    final dividerX = size.width * (opens ? 0.36 : 0.25);
+    final fraction = opens ? 0.36 : 0.25;
+    final dividerX = size.width * (mirrored ? 1 - fraction : fraction);
     canvas.drawLine(
       Offset(dividerX, 3.5),
       Offset(dividerX, size.height - 3.5),
@@ -220,7 +184,9 @@ class PaneToggleIconPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant PaneToggleIconPainter oldDelegate) =>
-      oldDelegate.opens != opens || oldDelegate.color != color;
+      oldDelegate.opens != opens ||
+      oldDelegate.color != color ||
+      oldDelegate.mirrored != mirrored;
 }
 
 /// Copies a ref name and answers with a check for a moment, so the click has

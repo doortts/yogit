@@ -11,23 +11,18 @@ extension _TimelineChrome on _TimelineScreenState {
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14),
       // Decoration goes before anything functional when the window narrows:
-      // the wordmark first, then the caption, then the shortcut keycaps.
+      // the wordmark first, then the caption.
       child: LayoutBuilder(
-        builder: (context, constraints) => _toolbarRow(
-          showPreviewLabel: constraints.maxWidth >= 900,
-          showShortcuts: constraints.maxWidth >= 880,
-        ),
+        builder: (context, constraints) =>
+            _toolbarRow(showPreviewLabel: constraints.maxWidth >= 900),
       ),
     ),
   );
 
-  Widget _toolbarRow({
-    required bool showPreviewLabel,
-    required bool showShortcuts,
-  }) => Row(
+  Widget _toolbarRow({required bool showPreviewLabel}) => Row(
     children: [
       Expanded(child: _toolbarLeft()),
-      _toolbarRight(showPreviewLabel, showShortcuts),
+      _toolbarRight(showPreviewLabel),
     ],
   );
 
@@ -101,10 +96,9 @@ extension _TimelineChrome on _TimelineScreenState {
     ],
   );
 
-  Widget _toolbarRight(bool showPreviewLabel, bool showShortcuts) => Row(
+  Widget _toolbarRight(bool showPreviewLabel) => Row(
     mainAxisAlignment: MainAxisAlignment.end,
     children: [
-      if (showShortcuts) ...[_shortcutHint(), const SizedBox(width: 12)],
       // The caption sits beside the box, not inside it.
       if (showPreviewLabel)
         Padding(
@@ -130,6 +124,8 @@ extension _TimelineChrome on _TimelineScreenState {
           ],
         ),
       ),
+      const SizedBox(width: 4),
+      _previewToggleButton(),
       const SizedBox(width: 12),
       if (widget.onOpenMonitor != null) ...[
         TextButton(
@@ -234,20 +230,41 @@ extension _TimelineChrome on _TimelineScreenState {
     );
   }
 
-  Widget _shortcutHint() => Row(
-    key: const Key('shortcut-hint'),
-    children: [
-      Text('상세', style: TextStyle(color: _palette.muted, fontSize: 14)),
-      const SizedBox(width: 6),
-      KeyCap(
-        label: 'Enter',
-        onTap: () {
-          if (_commits.isEmpty) return;
-          _togglePreview();
-          _focusNode.requestFocus();
-        },
-      ),
-    ],
+  /// 미리보기를 여닫는 버튼. 왼쪽 패널의 버튼과 같은 그림을 좌우로 뒤집어 쓴다.
+  Widget _previewToggleButton() => ListenableBuilder(
+    listenable: _previewController,
+    builder: (context, _) {
+      final open =
+          _previewController.previewPlacement != PreviewPlacement.closed;
+      return Tooltip(
+        message: open ? '미리보기 닫기 (Enter)' : '미리보기 열기 (Enter)',
+        waitDuration: Duration.zero,
+        child: SizedBox(
+          width: 28,
+          height: 28,
+          child: IconButton(
+            key: const Key('preview-toggle'),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+            onPressed: () {
+              _togglePreview();
+              _focusNode.requestFocus();
+            },
+            icon: CustomPaint(
+              key: Key(
+                open ? 'preview-collapse-icon' : 'preview-expand-icon',
+              ),
+              size: const Size(14.4, 14.4),
+              painter: PaneToggleIconPainter(
+                opens: !open,
+                color: open ? _palette.text : _palette.muted,
+                mirrored: true,
+              ),
+            ),
+          ),
+        ),
+      );
+    },
   );
 
   /// 재연이 실패하면 캡슐은 무채색으로 판정을 보류한다 — 왜인지는 여기,

@@ -73,8 +73,6 @@ void main() {
 
       expect(scaffoldColor(), TimelineThemePalette.systemGraphite.background);
       expect(toolbarColor(), TimelineThemePalette.systemGraphite.surface);
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
       expect(
         (tester
                     .widget<Container>(find.byKey(const Key('preview-surface')))
@@ -111,8 +109,6 @@ void main() {
 
       expect(scaffoldColor(), TimelineThemePalette.carbon.background);
       expect(toolbarColor(), TimelineThemePalette.carbon.surface);
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
       expect(
         (tester
                     .widget<Container>(find.byKey(const Key('preview-surface')))
@@ -148,6 +144,35 @@ void main() {
       );
     },
   );
+
+  testWidgets('the window opens the preview where it was last left', (
+    tester,
+  ) async {
+    final store = MemorySettingsStore()
+      ..current = const AppSettings(previewPlacement: PreviewPlacement.bottom);
+    expect(controller.previewPlacement, PreviewPlacement.closed);
+    await tester.pumpWidget(
+      YogitApp(
+        repository: FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+        ),
+        settingsStore: store,
+        discoverAvatars: false,
+        windowFrameController: controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 자리는 설정이 도착한 뒤에 정해진다 — 기본값 우측으로 먼저 열고 마는 일이
+    // 없어야 지난번에 두고 간 자리가 산다.
+    expect(controller.previewPlacement, PreviewPlacement.bottom);
+    expect(find.byKey(const Key('preview-surface')), findsOneWidget);
+
+    // 세우는 것은 창의 몫이고, 닫는 것은 사용자의 몫이다.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('preview-surface')), findsNothing);
+  });
 
   testWidgets(
     'checked-out branch uses a HEAD badge without a selected row fill',
@@ -227,19 +252,6 @@ void main() {
             return (bar.decoration! as BoxDecoration).color!;
           },
           expected: (palette) => palette.surface,
-        ),
-        (
-          label: 'idle keycap',
-          actual: (tester) {
-            final keycap = tester.widget<Container>(
-              find.descendant(
-                of: find.byKey(const Key('keycap-Enter')),
-                matching: find.byType(Container),
-              ),
-            );
-            return (keycap.decoration! as BoxDecoration).color!;
-          },
-          expected: (palette) => palette.raised,
         ),
       ];
 
@@ -12751,8 +12763,6 @@ void main() {
       '/Users/ada/next',
       '/Users/ada/first',
     ]);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
     // Timeline row plus the preview title, and the old history is gone.
     expect(find.text('next repo commit'), findsNWidgets(2));
     expect(find.text('first commit'), findsNothing);
@@ -13683,8 +13693,6 @@ void main() {
     for (var index = 0; index < target; index++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     }
-    await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     final preview = find.byKey(const Key('preview-surface'));
     final previewSubject = find.descendant(
@@ -14948,44 +14956,18 @@ void main() {
       lessThanOrEqualTo(box.left),
     );
     expect(sizeOf('하단'), 14);
-    expect(sizeOf('Enter'), 13);
     expect(find.text('↑'), findsNothing);
     expect(find.text('↓'), findsNothing);
     expect(find.text(' 이동 · '), findsNothing);
-    // The keycap group carries no box of its own — only the chips do.
-    expect(
-      tester
-          .widgetList<Container>(
-            find.ancestor(
-              of: find.text('상세'),
-              matching: find.byType(Container),
-            ),
-          )
-          .whereType<Container>()
-          .any((box) => (box.decoration as BoxDecoration?)?.border != null),
-      isFalse,
-    );
-    expect(
-      tester
-          .widgetList<Container>(
-            find.ancestor(
-              of: find.text('Enter'),
-              matching: find.byType(Container),
-            ),
-          )
-          .any((box) => (box.decoration as BoxDecoration?)?.border != null),
-      isTrue,
-    );
-    // Label first, then the chip.
-    expect(
-      tester.getRect(find.text('상세')).left,
-      lessThan(tester.getRect(find.byKey(const Key('keycap-Enter'))).left),
-    );
-    // Right cluster order: keycaps, caption, placement box, gear.
+    // The Enter hint is gone: the key still works, but the toolbar no longer
+    // spends room saying so.
+    expect(find.text('상세'), findsNothing);
+    expect(find.byKey(const Key('keycap-Enter')), findsNothing);
+    // Right cluster order: caption, placement box, the pane's own button, gear.
     final lefts = [
-      tester.getRect(find.byKey(const Key('shortcut-hint'))).left,
       tester.getRect(find.text('미리보기')).left,
       box.left,
+      tester.getRect(find.byKey(const Key('preview-toggle'))).left,
       tester.getRect(find.byIcon(Icons.settings_outlined)).left,
     ];
     expect(lefts, orderedEquals(([...lefts]..sort())));
@@ -14996,11 +14978,21 @@ void main() {
       tester.getRect(find.byIcon(Icons.settings_outlined)).right,
       lessThanOrEqualTo(960),
     );
-    // The Enter chip is the same toggle the key runs, by mouse.
-    await tester.tap(find.byKey(const Key('keycap-Enter')));
+    // The pane's button is the same toggle the key runs, by mouse, and its icon
+    // is the sidebar's own turned around — the door is on the other side.
+    expect(find.byKey(const Key('preview-expand-icon')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('preview-toggle')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('preview-surface')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('keycap-Enter')));
+    final icon =
+        tester
+                .widget<CustomPaint>(
+                  find.byKey(const Key('preview-collapse-icon')),
+                )
+                .painter!
+            as PaneToggleIconPainter;
+    expect(icon.mirrored, isTrue);
+    await tester.tap(find.byKey(const Key('preview-toggle')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('preview-surface')), findsNothing);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -18711,16 +18703,21 @@ void main() {
     expect(
       narrow.right + 8,
       lessThanOrEqualTo(
-        tester.getRect(find.byKey(const Key('shortcut-hint'))).left,
+        tester.getRect(find.byKey(const Key('preview-placement'))).left,
       ),
     );
 
-    // Too narrow for even the small size: the wordmark goes, the path stays, and
-    // rendering at all is the no-overflow assertion.
+    // The narrowest window the app opens at still shows it: the drag stretch is
+    // reserved before the selector takes its width, and the glyphs ride inside
+    // that stretch rather than asking for room beside it. Rendering at all is
+    // the no-overflow assertion.
     tester.view.physicalSize = const Size(960, 800);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('wordmark')), findsNothing);
-    expect(find.byKey(const Key('toolbar-drag')), findsOneWidget);
+    expect(find.byKey(const Key('wordmark')), findsOneWidget);
+    expect(
+      tester.getRect(find.byKey(const Key('toolbar-drag'))).width,
+      greaterThanOrEqualTo(200),
+    );
   });
 }
 

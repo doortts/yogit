@@ -435,6 +435,16 @@ class _YogitAppState extends State<YogitApp> {
     if (settings != loaded) {
       _save = _save.then((_) => _store.save(settings)).catchError((_) {});
     }
+    _openPreviewAtStart(settings.previewPlacement);
+  }
+
+  /// 창을 열면 미리보기는 서 있는 채로 시작한다 — 고른 커밋을 보여 주는 것이
+  /// 이 앱의 기본 화면이다. 자리는 지난번에 두고 간 곳이라 설정을 읽은 뒤에야
+  /// 안다. 판을 세우는 것은 창의 몫이고, 타임라인은 컨트롤러가 말하는 자리를
+  /// 따를 뿐이다.
+  void _openPreviewAtStart(PreviewPlacement placement) {
+    final frame = widget.windowFrameController;
+    if (frame != null) unawaited(frame.setPreview(placement));
   }
 
   /// The timeline subtree is keyed by root, so switching repositories remounts
