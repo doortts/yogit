@@ -572,6 +572,33 @@ void main() {
     },
   );
 
+  testWidgets('a failed amend prefill unchecks the box and says so', (
+    tester,
+  ) async {
+    await pumpPanel(
+      tester,
+      FakeGitRepository(
+        (_, _) async => [commit('1', 'first commit')],
+        workingTree: () async => workingTreeCommit('1'),
+        workingTreeStatus: () async => bothSections(),
+        commitMessage: (sha) async =>
+            throw const GitRepositoryException('.', 'HEAD 메시지를 읽지 못했습니다'),
+      ),
+    );
+
+    await tester.tap(find.byKey(const Key('commit-amend')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('commit-error')), findsOneWidget);
+    expect(find.text('HEAD 메시지를 읽지 못했습니다'), findsOneWidget);
+    expect(
+      find.text('커밋 수정'),
+      findsNothing,
+      reason: '읽지 못한 메시지로 amend 체크만 켜진 빈 폼을 남기지 않는다',
+    );
+    expect(find.text('Staged 2개 파일 커밋'), findsOneWidget);
+  });
+
   testWidgets('commit failure shows the inline message and keeps the form', (
     tester,
   ) async {

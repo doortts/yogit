@@ -922,7 +922,18 @@ extension _TimelineCommitPanel on _TimelineScreenState {
       return;
     }
     if (_commitTitle.text.isNotEmpty || _commitBody.text.isNotEmpty) return;
-    final message = await widget.repository.loadCommitMessage('HEAD');
+    final String message;
+    try {
+      message = await widget.repository.loadCommitMessage('HEAD');
+    } catch (error) {
+      // 읽어 오지 못한 메시지로 체크만 켜진 빈 폼을 남기지 않는다.
+      if (!mounted) return;
+      _rebuild(() {
+        _commitAmend = false;
+        _commitError = _commitFailureText(error);
+      });
+      return;
+    }
     if (!mounted) return;
     final newline = message.indexOf('\n');
     _commitTitle.text = newline < 0 ? message : message.substring(0, newline);
@@ -954,6 +965,10 @@ extension _TimelineCommitPanel on _TimelineScreenState {
     });
   }
 
+  /// 폼 아래 인라인 문구가 될 실패. git 층이 던지는 것은 이미 사람이 읽을 문구다.
+  String _commitFailureText(Object error) =>
+      error is GitRepositoryException ? error.message : '$error';
+
   /// 패널의 git 조작은 전부 여기를 지난다. 한 번에 하나만 돌고, 감시자는 그동안
   /// 물러나 있으며, 끝나면 목록을 다시 읽는다. [inlineError]는 커밋처럼 실패
   /// 문구가 폼 자리에 남아야 하는 조작만 준다 — 나머지는 SnackBar다.
@@ -971,7 +986,7 @@ extension _TimelineCommitPanel on _TimelineScreenState {
     try {
       await _changingRepository(action);
     } catch (error) {
-      failure = error is GitRepositoryException ? error.message : '$error';
+      failure = _commitFailureText(error);
     }
     if (!mounted) return failure == null;
     if (failure != null && !inlineError) {
@@ -997,7 +1012,15 @@ extension _TimelineCommitPanel on _TimelineScreenState {
       _previewFileLists.remove('');
       _previewDiffs.removeWhere((key, _) => key.sha.isEmpty);
     });
-    final status = await _commitStatusRequest;
+    final WorkingTreeStatus? status;
+    try {
+      status = await _commitStatusRequest;
+    } catch (error) {
+      // 아무도 받지 않으면 조작이 통한 것처럼 보이는 낡은 목록만 남는다. 커밋
+      // 실패가 쓰는 자리에 같이 적는다.
+      if (mounted) _rebuild(() => _commitError = _commitFailureText(error));
+      return;
+    }
     if (!mounted) return;
     if (_fullDiffSession case final session?
         when session.repository is WorkingTreeAreaRepository) {

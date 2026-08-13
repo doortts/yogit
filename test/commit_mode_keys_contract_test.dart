@@ -478,6 +478,37 @@ void main() {
     );
   });
 
+  testWidgets(
+    'a failed status reload surfaces instead of leaving a stale list',
+    (tester) async {
+      var reads = 0;
+      final log = <String>[];
+      await pumpPanel(
+        tester,
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          workingTree: () async => workingTreeCommit('1'),
+          // 조작은 통하고 그 뒤의 목록 읽기만 실패한다.
+          workingTreeStatus: () async {
+            if (++reads > 1) {
+              throw const GitRepositoryException('.', 'git status가 실패했습니다');
+            }
+            return WorkingTreeStatus([entry('lib/a.dart')]);
+          },
+          stageFilesCallback: (paths) async => log.add('stage ${paths.single}'),
+        ),
+      );
+
+      await metaKey(tester, LogicalKeyboardKey.arrowDown);
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.pumpAndSettle();
+
+      expect(log, ['stage lib/a.dart']);
+      expect(find.byKey(const Key('commit-error')), findsOneWidget);
+      expect(find.text('git status가 실패했습니다'), findsOneWidget);
+    },
+  );
+
   testWidgets('reselecting the working tree row reads the status again', (
     tester,
   ) async {
