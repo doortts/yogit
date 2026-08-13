@@ -952,15 +952,18 @@ extension _TimelineCommitPanel on _TimelineScreenState {
     try {
       message = await widget.repository.loadCommitMessage('HEAD');
     } catch (error) {
-      // 읽어 오지 못한 메시지로 체크만 켜진 빈 폼을 남기지 않는다.
-      if (!mounted) return;
+      // 읽어 오지 못한 메시지로 체크만 켜진 빈 폼을 남기지 않는다. 기다리는
+      // 동안 사용자가 이미 체크를 풀었으면 끌 것도 알릴 것도 없다.
+      if (!mounted || !_commitAmend) return;
       _rebuild(() {
         _commitAmend = false;
         _commitError = _commitFailureText(error);
       });
       return;
     }
-    if (!mounted) return;
+    // 이 경로는 busy를 세우지 않아 연타가 그대로 들어간다. 뒤늦게 도착한 HEAD
+    // 메시지가 체크 풀린 폼에 앉으면 amend 아닌 같은 메시지의 새 커밋이 된다.
+    if (!mounted || !_commitAmend) return;
     final newline = message.indexOf('\n');
     _commitTitle.text = newline < 0 ? message : message.substring(0, newline);
     _commitBody.text = _commitMessageBody(message);

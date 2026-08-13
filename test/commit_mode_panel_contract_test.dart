@@ -770,6 +770,47 @@ void main() {
     expect(find.text('Staged 2개 파일 커밋'), findsOneWidget);
   });
 
+  testWidgets('unchecking amend before the HEAD message lands leaves the form empty', (
+    tester,
+  ) async {
+    final gate = Completer<String>();
+    await pumpPanel(
+      tester,
+      FakeGitRepository(
+        (_, _) async => [commit('1', 'first commit')],
+        workingTree: () async => workingTreeCommit('1'),
+        workingTreeStatus: () async => bothSections(),
+        commitMessage: (sha) => gate.future,
+      ),
+    );
+
+    // 체크박스는 busy를 세우지 않는 경로라 연타가 그대로 들어간다.
+    await tester.tap(find.byKey(const Key('commit-amend')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('commit-amend')));
+    await tester.pump();
+
+    gate.complete('feat(app): 앞선 커밋\n\n무엇을 왜 바꿨는지');
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('commit-title')))
+          .controller!
+          .text,
+      isEmpty,
+      reason: '체크가 풀린 폼에 HEAD 메시지가 들어오면 amend 아닌 같은 메시지의 새 커밋이 생긴다',
+    );
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('commit-body')))
+          .controller!
+          .text,
+      isEmpty,
+    );
+    expect(find.text('커밋 수정'), findsNothing);
+  });
+
   testWidgets('commit failure shows the inline message and keeps the form', (
     tester,
   ) async {
