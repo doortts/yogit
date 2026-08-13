@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'avatars.dart';
+import 'branch_glyph.dart';
 import 'command_log.dart';
 import 'console_panel.dart';
 import 'commit_time.dart';
@@ -1536,8 +1537,13 @@ class _TimelineScreenState extends State<TimelineScreen>
         _closeFullDiff();
       } else if (_previewDiffOpen) {
         _closePreviewDiff();
-      } else {
+      } else if (_previewController.previewPlacement !=
+          PreviewPlacement.closed) {
         unawaited(_previewController.setPreview(PreviewPlacement.closed));
+      } else if (_searchLive) {
+        // 접혀서 살아 있는 찾기는 배경이다. 방금 열린 판이 먼저 닫히고, 닫을
+        // 것이 다 닫힌 뒤에야 흐림이 걷힌다.
+        _closeSearch();
       }
       return KeyEventResult.handled;
     }
@@ -2797,7 +2803,10 @@ class _TimelineScreenState extends State<TimelineScreen>
                       ),
                     ),
                   ),
-                  if (_searchOpen) _searchBar(),
+                  if (_searchOpen)
+                    _searchBar()
+                  else if (_searchLive)
+                    _searchPill(),
                 ],
               ),
             ),
@@ -2899,6 +2908,12 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// Every box a row draws inside itself — a ref chip, a date heading — is this
   /// tall, which is [TimelineScreen.rowHeight] less the hairline of background
   /// the row keeps above and below so stacked chips never touch.
+  /// One step of the sidebar's ref tree, and the disclosure arrow's column.
+  /// Small on purpose: three levels of `origin/codex/spike` used to push a
+  /// name past half the pane before its first letter.
+  static const _refIndentStep = 10.0;
+  static const _refDisclosureWidth = 14.0;
+
   static const _rowChipHeight = TimelineScreen.rowHeight - 2;
 
   /// The strip along the bottom. What floats above the timeline has to clear

@@ -201,7 +201,7 @@ void main() {
     expect(litText(tester).join(' '), 'b7e0 커밋');
   });
 
-  testWidgets('Enter walks the matches and comes round the end', (
+  testWidgets('⇧Enter walks the matches and comes round the end', (
     tester,
   ) async {
     await pumpTimeline(tester);
@@ -212,24 +212,120 @@ void main() {
     expect(countLabel(tester), '1/3');
     expect(find.byKey(const Key('selected-row-b7e0f19')), findsOneWidget);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
+    Future<void> stepBack() async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pumpAndSettle();
+    }
+
+    // 처음에서 뒤로 가면 끝으로 돈다.
+    await stepBack();
+    expect(countLabel(tester), '3/3');
+    expect(find.byKey(const Key('selected-row-d9a8b7c')), findsOneWidget);
+
+    await stepBack();
     expect(countLabel(tester), '2/3');
     expect(find.byKey(const Key('selected-row-c3d4e5f')), findsOneWidget);
+  });
 
-    // 끝에서 한 번 더 가면 처음으로 돈다.
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
-    expect(countLabel(tester), '3/3');
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pumpAndSettle();
+  testWidgets('Enter folds the field away and leaves the results standing', (
+    tester,
+  ) async {
+    await pumpTimeline(tester);
+    await openSearch(tester);
+    await search(tester, 'feat');
     expect(countLabel(tester), '1/3');
 
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.pumpAndSettle();
-    expect(countLabel(tester), '3/3', reason: '⇧Enter는 반대로 걷는다');
+
+    expect(find.byKey(const Key('timeline-search')), findsNothing);
+    expect(
+      find.byKey(const Key('timeline-search-pill')),
+      findsOneWidget,
+      reason: '찾기가 접힌 채 살아 있다고 알약이 말한다',
+    );
+    expect(countLabel(tester), '1/3', reason: '결과 목록은 그대로다');
+    expect(litText(tester), isNotEmpty, reason: '불도 그대로다');
+    expect(dimmed(tester, find.text('a1b2c3d')), isTrue, reason: '흐림도 그대로다');
+    expect(
+      find.byKey(const Key('selected-row-b7e0f19')),
+      findsOneWidget,
+      reason: 'Enter는 걷지 않고 지금 결과를 확정한다',
+    );
+
+    // 키보드는 목록으로 돌아왔다: ↓는 글자가 아니라 선택을 움직인다.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-c3d4e5f')), findsOneWidget);
+    expect(
+      dimmed(tester, find.text('a1b2c3d')),
+      isTrue,
+      reason: '결과 밖으로 걸어가도 찾기는 끝나지 않는다',
+    );
+  });
+
+  testWidgets('Enter on a query nothing answers keeps the field open', (
+    tester,
+  ) async {
+    await pumpTimeline(tester);
+    await openSearch(tester);
+    await search(tester, 'zzzz');
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('timeline-search')), findsOneWidget);
+    expect(countLabel(tester), '없음');
+  });
+
+  testWidgets('⌘F unfolds the collapsed search with its query', (tester) async {
+    await pumpTimeline(tester);
+    await openSearch(tester);
+    await search(tester, 'feat');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    await openSearch(tester);
+    expect(find.byKey(const Key('timeline-search')), findsOneWidget);
+    expect(find.byKey(const Key('timeline-search-pill')), findsNothing);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('timeline-search-field')))
+          .controller!
+          .text,
+      'feat',
+      reason: '질의를 그대로 데리고 다시 펼친다',
+    );
+    expect(countLabel(tester), '1/3');
+  });
+
+  testWidgets('the collapsed search ends on Escape and on the pill ✕', (
+    tester,
+  ) async {
+    await pumpTimeline(tester);
+    await openSearch(tester);
+    await search(tester, 'feat');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    // 목록에서의 Escape: 닫을 판이 없으니 접힌 찾기가 끝난다.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('timeline-search-pill')), findsNothing);
+    expect(litText(tester), isEmpty);
+    expect(dimmed(tester, find.text('a1b2c3d')), isFalse);
+
+    // 알약의 ✕도 같은 일을 한다.
+    await openSearch(tester);
+    await search(tester, 'feat');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('timeline-search-pill-close')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('timeline-search-pill')), findsNothing);
+    expect(dimmed(tester, find.text('a1b2c3d')), isFalse);
   });
 
   testWidgets('the buttons walk the same matches as the keys', (tester) async {

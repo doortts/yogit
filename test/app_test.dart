@@ -19,6 +19,7 @@ import 'package:yogit/full_diff_theme.dart';
 import 'package:yogit/full_diff_unified_view.dart';
 import 'package:yogit/full_diff_workspace.dart';
 import 'package:yogit/commit_time.dart';
+import 'package:yogit/branch_glyph.dart';
 import 'package:yogit/command_log.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/local_state_signature.dart';
@@ -2981,6 +2982,7 @@ void main() {
             refs: const RepoRefs(
               local: ['main', 'feature/login', 'feature/payments/api'],
               remote: ['origin/main', 'origin/hotfix/urgent'],
+              remoteNames: ['origin'],
               tags: ['release/v1.0.0'],
               current: 'main',
             ),
@@ -3017,8 +3019,13 @@ void main() {
         find.byKey(const Key('sidebar-folder-local-feature/payments')),
         findsOneWidget,
       );
+      // 원격 이름은 폴더가 아니라 그 아래 목록의 머리줄이다.
       expect(
         find.byKey(const Key('sidebar-folder-remote-origin')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('sidebar-remote-group-origin')),
         findsOneWidget,
       );
       final sectionIcon = tester.getRect(
@@ -3027,9 +3034,9 @@ void main() {
       final folderChevron = tester.getRect(
         find.byKey(const Key('sidebar-folder-local-feature')),
       );
-      // The tree sits one gutter in from the section icon: every row reserves
-      // that column for its hide-from-graph eye.
-      expect(folderChevron.left - sectionIcon.left, 18);
+      // The tree starts under the section icon: every row reserves that column
+      // for its hide-from-graph eye, and nothing else is spent before a name.
+      expect(folderChevron.left - sectionIcon.left, 0);
 
       final topLevelBranchName = tester.getRect(
         find.descendant(
@@ -3044,8 +3051,9 @@ void main() {
           matching: find.text('login'),
         ),
       );
-      expect(folderName.left - topLevelBranchName.left, 18);
-      expect(childBranchName.left - folderName.left, 16);
+      // 폴더는 최상위 브랜치의 형제다 — 한 단계는 그 아래에서만 붙는다.
+      expect(folderName.left - topLevelBranchName.left, 0);
+      expect(childBranchName.left - folderName.left, 10);
 
       expect(
         find.byKey(const Key('sidebar-ref-feature/payments/api')),
@@ -3539,6 +3547,72 @@ void main() {
     final refresh = find.byKey(const Key('sidebar-remote-refresh'));
     await tester.ensureVisible(refresh);
     expect(tester.widget<IconButton>(refresh).onPressed, isNull);
+  });
+
+  testWidgets('remote branches sit under the remote they came from', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(
+            local: ['main'],
+            remote: [
+              'origin/main',
+              'origin/codex/spike',
+              'fork/main',
+              'team/site/main',
+            ],
+            // origin이 먼저, 나머지는 이름순. 여러 마디짜리 원격도 한 덩어리다.
+            remoteNames: ['fork', 'origin', 'team/site'],
+            current: 'main',
+          ),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    for (final remote in ['origin', 'fork', 'team/site']) {
+      expect(
+        find.byKey(Key('sidebar-remote-group-$remote')),
+        findsOneWidget,
+        reason: remote,
+      );
+    }
+    final origin = tester.getTopLeft(
+      find.byKey(const Key('sidebar-remote-group-origin')),
+    );
+    expect(
+      origin.dy,
+      lessThan(
+        tester
+            .getTopLeft(find.byKey(const Key('sidebar-remote-group-fork')))
+            .dy,
+      ),
+      reason: 'origin이 먼저다',
+    );
+
+    // 원격 이름은 더 이상 트리 한 단계를 먹지 않는다: 그 아래 이름이 곧 브랜치다.
+    expect(find.byKey(const Key('sidebar-ref-origin/main')), findsOneWidget);
+    expect(find.byKey(const Key('sidebar-folder-remote-origin')), findsNothing);
+    expect(
+      find.byKey(const Key('sidebar-folder-remote-origin/codex')),
+      findsOneWidget,
+    );
+
+    // 접으면 그 원격의 브랜치만 사라지고 다른 원격은 그대로다.
+    await tester.tap(find.byKey(const Key('sidebar-remote-group-origin')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('sidebar-ref-origin/main')), findsNothing);
+    expect(find.byKey(const Key('sidebar-ref-fork/main')), findsOneWidget);
+    expect(
+      find.byKey(const Key('sidebar-remote-group-origin')),
+      findsOneWidget,
+      reason: '머리줄은 남아야 다시 편다',
+    );
   });
 
   testWidgets('a disabled refresh swallows the tap meant for it', (
@@ -15122,12 +15196,9 @@ void main() {
       final row = find.byKey(Key('sidebar-row-$name'));
       final hover = find.byKey(Key('sidebar-ref-hover-$name'));
       final content = find.byKey(Key('sidebar-ref-$name'));
-      final icon = find.descendant(
-        of: row,
-        matching: find.byIcon(
-          name == 'v1.0' ? Icons.sell_outlined : Icons.call_split,
-        ),
-      );
+      final icon = name == 'v1.0'
+          ? find.descendant(of: row, matching: find.byIcon(Icons.sell_outlined))
+          : find.descendant(of: row, matching: find.byType(BranchGlyph));
       final iconBefore = tester.getRect(icon);
       final contentBefore = tester.getRect(content);
       final hoverBefore = tester.getRect(hover);

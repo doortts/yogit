@@ -31,11 +31,24 @@ extension _TimelineSearch on _TimelineScreenState {
     );
   }
 
+  /// 찾기가 살아 있는지. 접혀서 줄이 보이지 않아도 질의가 남아 있으면 여전히
+  /// 찾는 중이다 — 불도 흐림도 그 질의가 그리는 것이다.
+  bool get _searchLive => _searchQuery.trim().isNotEmpty;
+
+  /// Enter는 결과를 확정한다: 줄만 접히고 질의는 목록에 그대로 남아, 찾은 자리
+  /// 앞뒤의 역사를 그 상태로 읽는다. 접을 결과가 없으면 접지 않는다 — 흐림만
+  /// 남고 근거는 화면에서 사라질 것이다.
+  void _collapseSearch() {
+    if (_searchMatches.isEmpty) return;
+    _rebuild(() => _searchOpen = false);
+    _focusNode.requestFocus();
+  }
+
   /// 찾은 것이 없는 검색은 읽던 자리를 빼앗지 않는다. 질의를 좁히다 결과를
   /// 놓쳤다면 선택은 마지막으로 찾았던 남의 줄에 서 있으니, 검색을 열 때 서
   /// 있던 줄로 돌려보낸다. 그 줄이 그새 사라졌다면 맨 처음 줄로 간다.
   void _closeSearch() {
-    if (!_searchOpen) return;
+    if (!_searchOpen && !_searchLive) return;
     final strayed = _searchQuery.trim().isNotEmpty && _searchMatches.isEmpty;
     final origin = _searchOrigin;
     _searchController.clear();
@@ -65,13 +78,12 @@ extension _TimelineSearch on _TimelineScreenState {
   }
 
   /// The words the query is made of. Spaces and punctuation both only ever
-  /// separate one from the next, so `fix(merge)` asks for two.
-  List<String> get _searchTerms => _searchOpen
-      ? [
-          for (final word in _searchWord.allMatches(_searchQuery.toLowerCase()))
-            word.group(0)!,
-        ]
-      : const [];
+  /// separate one from the next, so `fix(merge)` asks for two. 질의가 곧 찾기라,
+  /// 줄이 접혀 있어도 낱말은 그대로 산다.
+  List<String> get _searchTerms => [
+    for (final word in _searchWord.allMatches(_searchQuery.toLowerCase()))
+      word.group(0)!,
+  ];
 
   /// The rows the query finds, in the order they are drawn. Every word of the
   /// query has to be answered — by the subject or by the hash, in any order
@@ -286,7 +298,7 @@ extension _TimelineSearch on _TimelineScreenState {
                     controller: _searchController,
                     focusNode: _searchFocusNode,
                     onChanged: _searchFor,
-                    onSubmitted: (_) => _stepSearchMatch(1),
+                    onSubmitted: (_) => _collapseSearch(),
                     style: TextStyle(color: _palette.text, fontSize: 13),
                     decoration: InputDecoration(
                       isDense: true,
@@ -333,6 +345,74 @@ extension _TimelineSearch on _TimelineScreenState {
               ),
             ),
           ],
+        ),
+      ),
+    ),
+  );
+
+  /// 접힌 찾기가 남기는 자리표. 찾기 줄이 앉아 있던 곳에 그대로 앉아, 흐려진
+  /// 목록이 왜 흐린지 답한다. 누르면 질의를 그대로 데리고 다시 펼치고, ✕는
+  /// 찾기를 끝낸다.
+  Widget _searchPill() => Positioned(
+    top: _TimelineScreenState._timelineHeaderHeight + 6,
+    right: 14,
+    child: Material(
+      color: Colors.transparent,
+      child: HoverBuilder(
+        builder: (hovered) => GestureDetector(
+          key: const Key('timeline-search-pill'),
+          behavior: HitTestBehavior.opaque,
+          onTap: _openSearch,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(9, 4, 4, 4),
+            decoration: BoxDecoration(
+              color: _palette.raised,
+              border: Border.all(
+                color: hovered ? _palette.muted : _palette.border,
+              ),
+              borderRadius: BorderRadius.circular(999),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x66000000),
+                  blurRadius: 14,
+                  offset: Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                SearchIcon(color: _palette.muted, size: 12),
+                const SizedBox(width: 6),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 140),
+                  child: Text(
+                    _searchQuery.trim(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: _palette.text, fontSize: 11),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                _searchCount(),
+                const SizedBox(width: 2),
+                HoverBuilder(
+                  builder: (closeHovered) => GestureDetector(
+                    key: const Key('timeline-search-pill-close'),
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _closeSearch,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 3),
+                      child: Icon(
+                        Icons.close,
+                        size: 12,
+                        color: closeHovered ? _palette.text : _palette.muted,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     ),
@@ -387,7 +467,13 @@ extension _TimelineSearch on _TimelineScreenState {
     }
     if (event.logicalKey == LogicalKeyboardKey.enter ||
         event.logicalKey == LogicalKeyboardKey.numpadEnter) {
-      _stepSearchMatch(HardwareKeyboard.instance.isShiftPressed ? -1 : 1);
+      // Enter는 이 결과로 하겠다는 뜻이라 걷지 않는다. 결과를 훑는 손은
+      // ⇧Enter와 ⌃⌄ 버튼이다.
+      if (HardwareKeyboard.instance.isShiftPressed) {
+        _stepSearchMatch(-1);
+      } else {
+        _collapseSearch();
+      }
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;

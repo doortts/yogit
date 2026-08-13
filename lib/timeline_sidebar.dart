@@ -703,7 +703,7 @@ extension _TimelineSidebar on _TimelineScreenState {
     _RefSection section,
     RefTreeNode node,
     String path,
-    int depth,
+    double indent,
   ) {
     final name = node.fullName;
     final hasChildren = node.children.isNotEmpty;
@@ -723,14 +723,16 @@ extension _TimelineSidebar on _TimelineScreenState {
           };
     final current =
         section == _RefSection.local && name != null && name == _refs.current;
-    final icon = name == null
-        ? Icons.folder_outlined
-        : section == _RefSection.tags
-        ? Icons.sell_outlined
-        : Icons.call_split;
     final iconColor = name != null && section != _RefSection.tags
         ? _refTipColor(name)
         : _palette.muted;
+    // A folder is a folder and a tag is a tag; a branch gets the mark git's
+    // own tools draw, which Material has no icon for.
+    final Widget glyph = name == null
+        ? Icon(Icons.folder_outlined, size: 13, color: iconColor)
+        : section == _RefSection.tags
+        ? Icon(Icons.sell_outlined, size: 13, color: iconColor)
+        : BranchGlyph(color: iconColor);
     // Both maps hold the difference from their own ref's point of view — the
     // remote side is flipped when it is loaded — so one badge reads either.
     final difference = name == null
@@ -745,7 +747,6 @@ extension _TimelineSidebar on _TimelineScreenState {
     final pullState = section == _RefSection.remote && name != null
         ? remotePullState(_refs, name)
         : null;
-    final inFolderTree = name == null || depth > 0;
     // Tags name no branch line, and the checked-out branch is a starting point
     // through HEAD whatever the eye says — neither offers one.
     final governed = section == _RefSection.tags || current
@@ -904,10 +905,7 @@ extension _TimelineSidebar on _TimelineScreenState {
             ),
             Expanded(
               child: Padding(
-                padding: EdgeInsets.only(
-                  left: (inFolderTree ? 18 : 0) + depth * 16.0,
-                  right: 4,
-                ),
+                padding: EdgeInsets.only(left: indent, right: 4),
                 child: Row(
                   children: [
                     if (hasChildren)
@@ -916,22 +914,24 @@ extension _TimelineSidebar on _TimelineScreenState {
                         behavior: HitTestBehavior.opaque,
                         onTap: toggleFolder,
                         child: SizedBox(
-                          width: 18,
+                          width: _TimelineScreenState._refDisclosureWidth,
                           height: double.infinity,
                           child: Icon(
                             folderCollapsed
                                 ? Icons.chevron_right
                                 : Icons.expand_more,
-                            size: 16,
+                            size: 15,
                             color: _palette.muted,
                           ),
                         ),
                       )
                     else
-                      const SizedBox(width: 18),
+                      const SizedBox(
+                        width: _TimelineScreenState._refDisclosureWidth,
+                      ),
                     if (name == null) ...[
-                      Icon(icon, size: 13, color: iconColor),
-                      const SizedBox(width: 7),
+                      glyph,
+                      const SizedBox(width: 5),
                       Expanded(
                         child: GestureDetector(
                           behavior: HitTestBehavior.opaque,
@@ -1027,8 +1027,8 @@ extension _TimelineSidebar on _TimelineScreenState {
                                   ),
                                   Row(
                                     children: [
-                                      Icon(icon, size: 13, color: iconColor),
-                                      const SizedBox(width: 7),
+                                      glyph,
+                                      const SizedBox(width: 5),
                                       Expanded(
                                         child: Opacity(
                                           opacity: allHidden ? 0.5 : 1,
@@ -1178,7 +1178,27 @@ extension _TimelineSidebarFlows on _TimelineScreenState {
       (_RefSection.tags, _refs.tags),
     ]) {
       if (!filtering && _collapsedRefSections.contains(section)) continue;
-      walk(section, buildRefTree(_visibleSectionNames(section, names)), '');
+      final visible = _visibleSectionNames(section, names);
+      if (section != _RefSection.remote) {
+        walk(section, buildRefTree(visible), '');
+        continue;
+      }
+      for (final group in _remoteGroups(visible)) {
+        final remote = group.remote;
+        if (remote == null) {
+          walk(section, buildRefTree(group.names), '');
+          continue;
+        }
+        if (_remoteGroupCollapsed(remote)) continue;
+        walk(
+          section,
+          buildRefTree(
+            group.names,
+            pathOf: (name) => name.substring(remote.length + 1),
+          ),
+          remote,
+        );
+      }
     }
     return rows;
   }
@@ -1287,10 +1307,7 @@ extension _TimelineSidebarFlows on _TimelineScreenState {
     final hiddenTagCount = section == _RefSection.tags
         ? math.max(0, names.length - _TimelineScreenState._collapsedTagLimit)
         : 0;
-    yield* _refTreeRows(
-      section,
-      buildRefTree(_visibleSectionNames(section, names)),
-    );
+    yield* _refSectionTree(section, _visibleSectionNames(section, names));
     if (section == _RefSection.tags && !filtering && hiddenTagCount > 0) {
       yield _tagOverflowRow(hiddenTagCount);
     }
@@ -1392,10 +1409,143 @@ extension _TimelineSidebarFlows on _TimelineScreenState {
     ),
   );
 
+  /// The remote section, one group per remote. `origin` leads when it is
+  /// there — it is what every repository means by "the remote" — and the rest
+  /// follow by name. A name no remote claims keeps its place at the end
+  /// rather than being filed under a heading that would be a guess.
+  List<({String? remote, List<String> names})> _remoteGroups(
+    List<String> names,
+  ) {
+    final grouped = <String, List<String>>{};
+    final ungrouped = <String>[];
+    for (final name in names) {
+      final split = splitRemoteBranchName(name, _refs.remoteNames);
+      if (split == null) {
+        ungrouped.add(name);
+        continue;
+      }
+      (grouped[split.remote] ??= []).add(name);
+    }
+    final order = grouped.keys.toList()
+      ..sort(
+        (left, right) => left == 'origin'
+            ? -1
+            : right == 'origin'
+            ? 1
+            : left.compareTo(right),
+      );
+    return [
+      for (final remote in order) (remote: remote, names: grouped[remote]!),
+      if (ungrouped.isNotEmpty) (remote: null, names: ungrouped),
+    ];
+  }
+
+  /// A remote's own heading: its name, a rule out to the count, and nothing
+  /// else. Lighter than the section band above it and unlike the folder rows
+  /// below it, so three levels read apart at a glance.
+  Widget _remoteGroupRow(String remote, int count) {
+    final collapsed = _remoteGroupCollapsed(remote);
+    return GestureDetector(
+      key: Key('sidebar-remote-group-$remote'),
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _rebuild(() {
+        final key = _remoteGroupKey(remote);
+        if (!_collapsedRefFolders.remove(key)) _collapsedRefFolders.add(key);
+      }),
+      child: SizedBox(
+        height: 22,
+        child: Padding(
+          padding: const EdgeInsets.only(left: 6, right: 8),
+          child: Row(
+            children: [
+              Icon(
+                collapsed ? Icons.chevron_right : Icons.expand_more,
+                size: 13,
+                color: _palette.muted,
+              ),
+              const SizedBox(width: 6),
+              // A remote may be called `team/site`, and the pane may be
+              // narrow: the name gives way before the rule and the count do.
+              Flexible(
+                child: Text(
+                  remote,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: false,
+                  style: TextStyle(
+                    color: _palette.muted,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Container(
+                  height: 0.5,
+                  color: _palette.border.withValues(alpha: 0.9),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                '$count',
+                style: TextStyle(color: _palette.muted, fontSize: 10),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _remoteGroupKey(String remote) => 'remote-group:$remote';
+
+  bool _remoteGroupCollapsed(String remote) =>
+      _filter.trim().isEmpty &&
+      _collapsedRefFolders.contains(_remoteGroupKey(remote));
+
+  /// The rows a section's names make: the remote section under one heading per
+  /// remote, everything else as a plain tree.
+  Iterable<Widget> _refSectionTree(
+    _RefSection section,
+    List<String> names,
+  ) sync* {
+    if (section != _RefSection.remote) {
+      yield* _refTreeRows(section, buildRefTree(names));
+      return;
+    }
+    for (final group in _remoteGroups(names)) {
+      final remote = group.remote;
+      if (remote == null) {
+        yield* _refTreeRows(section, buildRefTree(group.names));
+        continue;
+      }
+      yield _remoteGroupRow(remote, group.names.length);
+      if (_remoteGroupCollapsed(remote)) continue;
+      yield* _refTreeRows(
+        section,
+        // Filed under the heading, so the tree below it starts at the branch
+        // rather than at the remote's name again.
+        buildRefTree(
+          group.names,
+          pathOf: (name) => name.substring(remote.length + 1),
+        ),
+        indent: _TimelineScreenState._refIndentStep,
+        // The old paths, so a folder collapsed before this heading existed
+        // stays collapsed and two remotes' folders never share a key.
+        parentPath: remote,
+      );
+    }
+  }
+
+  /// [indent] is where these rows start, in pixels, and every level below them
+  /// steps in by one more. A remote's group heading hands its children the
+  /// first step, so a name under `origin` starts where a folder's would.
   Iterable<Widget> _refTreeRows(
     _RefSection section,
     List<RefTreeNode> nodes, {
-    int depth = 0,
+    double indent = 0,
     String parentPath = '',
   }) sync* {
     final filtering = _filter.trim().isNotEmpty;
@@ -1403,14 +1553,14 @@ extension _TimelineSidebarFlows on _TimelineScreenState {
       final path = parentPath.isEmpty
           ? node.segment
           : '$parentPath/${node.segment}';
-      yield _refTreeRow(section, node, path, depth);
+      yield _refTreeRow(section, node, path, indent);
       final folderKey = '${section.name}:$path';
       final collapsed = !filtering && _collapsedRefFolders.contains(folderKey);
       if (node.children.isNotEmpty && !collapsed) {
         yield* _refTreeRows(
           section,
           node.children,
-          depth: depth + 1,
+          indent: indent + _TimelineScreenState._refIndentStep,
           parentPath: path,
         );
       }

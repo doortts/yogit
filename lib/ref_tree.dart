@@ -24,10 +24,19 @@ class _MutableRefTreeNode {
   );
 }
 
-List<RefTreeNode> buildRefTree(Iterable<String> names) {
+/// The tree [names] make, split on `/`.
+///
+/// [pathOf] is what a name is filed under when that is not the name itself:
+/// the remote section groups by remote, so `origin/codex/x` is filed at
+/// `codex/x` under origin's own heading while the node still remembers the
+/// whole ref, which is what everything downstream acts on.
+List<RefTreeNode> buildRefTree(
+  Iterable<String> names, {
+  String Function(String name)? pathOf,
+}) {
   final roots = <String, _MutableRefTreeNode>{};
   for (final name in names) {
-    final segments = name.split('/');
+    final segments = (pathOf?.call(name) ?? name).split('/');
     var level = roots;
     _MutableRefTreeNode? node;
     for (final segment in segments) {
