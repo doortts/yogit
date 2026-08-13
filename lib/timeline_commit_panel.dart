@@ -124,30 +124,15 @@ extension _TimelineCommitPanel on _TimelineScreenState {
                   ),
                 ),
                 const Spacer(),
-                InkWell(
-                  key: Key(
-                    unstaged ? 'commit-stage-all' : 'commit-unstage-all',
-                  ),
-                  onTap: _commitModeBusy || entries.isEmpty
-                      ? null
-                      : () => unawaited(
-                          _runCommitAction(
-                            unstaged
-                                ? () => widget.repository.stageFiles(const [])
-                                : () => widget.repository.unstageFiles(
-                                    const [],
-                                    hasHead: hasHead,
-                                  ),
-                          ),
-                        ),
-                  child: Text(
-                    unstaged ? 'Stage All' : 'Unstage All',
-                    style: TextStyle(
-                      color: _palette.interactive,
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                _commitSectionAction(
+                  area,
+                  entries,
+                  hasHead: hasHead,
+                  // `git add -A`는 마커가 남은 충돌 파일도 그대로 인덱스에
+                  // 올려 커밋 게이트까지 풀어 준다. 파일 단위 Stage가 지나는
+                  // 마커 검사를 여기만 건너뛸 수는 없다.
+                  blocked:
+                      unstaged && entries.any((entry) => entry.conflicted),
                 ),
               ],
             ),
@@ -157,6 +142,46 @@ extension _TimelineCommitPanel on _TimelineScreenState {
           for (final entry in entries)
             _commitFileRow(entry, area, hasHead: hasHead),
       ],
+    );
+  }
+
+  /// 섹션 머리줄의 Stage All / Unstage All. 충돌이 남아 있으면 커밋 버튼과 같은
+  /// 문구로 막힌다.
+  Widget _commitSectionAction(
+    WorkingTreeArea area,
+    List<WorkingTreeEntry> entries, {
+    required bool hasHead,
+    required bool blocked,
+  }) {
+    final unstaged = area == WorkingTreeArea.unstaged;
+    final button = InkWell(
+      key: Key(unstaged ? 'commit-stage-all' : 'commit-unstage-all'),
+      onTap: blocked || _commitModeBusy || entries.isEmpty
+          ? null
+          : () => unawaited(
+              _runCommitAction(
+                unstaged
+                    ? () => widget.repository.stageFiles(const [])
+                    : () => widget.repository.unstageFiles(
+                        const [],
+                        hasHead: hasHead,
+                      ),
+              ),
+            ),
+      child: Text(
+        unstaged ? 'Stage All' : 'Unstage All',
+        style: TextStyle(
+          color: _palette.interactive,
+          fontSize: 11.5,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+    if (!blocked) return button;
+    return Tooltip(
+      message: '충돌 파일을 먼저 해결해야 합니다',
+      waitDuration: _tooltipDelay,
+      child: button,
     );
   }
 

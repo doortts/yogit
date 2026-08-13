@@ -367,6 +367,62 @@ void main() {
     },
   );
 
+  testWidgets('Stage All is disabled while a conflict is unresolved', (
+    tester,
+  ) async {
+    final staged = <List<String>>[];
+    final plain = entry('lib/b.dart');
+    // 충돌을 해결해 인덱스로 올린 다음의 목록.
+    var status = WorkingTreeStatus([
+      entry('lib/x.dart', index: 'U', worktree: 'U', conflicted: true),
+      plain,
+    ]);
+    await pumpPanel(
+      tester,
+      FakeGitRepository(
+        (_, _) async => [commit('1', 'first commit')],
+        workingTree: () async => workingTreeCommit('1'),
+        workingTreeStatus: () async => status,
+        stageFilesCallback: (paths) async => staged.add(paths),
+        stageResolvedFileCallback: (_) async =>
+            status = WorkingTreeStatus([plain]),
+      ),
+    );
+
+    expect(enabled(tester, const Key('commit-stage-all')), isFalse);
+    expect(
+      tester
+          .widget<Tooltip>(
+            find.ancestor(
+              of: find.byKey(const Key('commit-stage-all')),
+              matching: find.byType(Tooltip),
+            ),
+          )
+          .message,
+      '충돌 파일을 먼저 해결해야 합니다',
+      reason: '커밋 버튼이 쓰는 문구와 같아야 한다',
+    );
+    await tester.tap(
+      find.byKey(const Key('commit-stage-all')),
+      warnIfMissed: false,
+    );
+    await tester.pumpAndSettle();
+    expect(staged, isEmpty);
+    // 죽은 버튼을 지난 탭은 머리줄에 닿아 섹션을 접는다. 도로 편다.
+    await tester.tap(find.byKey(const Key('commit-section-unstaged')));
+    await tester.pumpAndSettle();
+
+    // 충돌이 해결되면 게이트도 풀린다 — 상시 잠김이 아니다.
+    await hoverOver(tester, row(WorkingTreeArea.unstaged, 'lib/x.dart'));
+    await tester.tap(find.byKey(const Key('commit-stage-lib/x.dart')));
+    await tester.pumpAndSettle();
+
+    expect(enabled(tester, const Key('commit-stage-all')), isTrue);
+    await tester.tap(find.byKey(const Key('commit-stage-all')));
+    await tester.pumpAndSettle();
+    expect(staged, [<String>[]]);
+  });
+
   testWidgets('the title counter turns orange past 50 without blocking', (
     tester,
   ) async {
