@@ -83,14 +83,36 @@ class UpstreamSyncCapsule extends StatelessWidget {
               onTap: onPull,
             ),
           ],
+          // 재는 동안은 동사가 없다 — 무엇을 하게 될지가 아직 답이 아니라서다.
+          // 아랫줄은 동사 자리에 도는 것 하나를 놓아, 기다리는 중이라는 말을
+          // 글자 없이 한다.
           UpstreamSyncKind.measuring => [
             Padding(
               key: const Key('upstream-sync-measuring'),
               padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-              child: _twoLines(
-                count: '↓ ${state.behind} ↑ ${state.ahead}',
-                word: '재는 중',
-                color: palette.muted,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '↓ ${state.behind} ↑ ${state.ahead}',
+                    style: TextStyle(
+                      fontFamily: technicalFontFamily,
+                      fontFamilyFallback: technicalFontFallback,
+                      fontSize: 11,
+                      height: 1.25,
+                      color: palette.muted,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  SizedBox(
+                    width: 11,
+                    height: 11,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.4,
+                      color: palette.muted,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

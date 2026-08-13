@@ -78,6 +78,12 @@
   .cap2 .verb .n { font: 11px/1.3 ui-monospace, Menlo, monospace; }
   .cap2 .verb .w { font-size: 12px; font-weight: 650; letter-spacing: .01em; }
   .cap2 .verb.hover { background: #234d72; }
+  .spin {
+    width: 11px; height: 11px; margin: 3px 0 1px; border-radius: 999px;
+    border: 1.4px solid rgba(174,174,178,.28); border-top-color: var(--muted);
+    animation: spin .9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .green { color: var(--green); }
   .orange { color: var(--orange); }
   .red { color: var(--red); }
@@ -201,13 +207,16 @@
   </div>
   <div class="state">
     <div class="name">재는 중</div>
-    <div class="row"><div class="cap2" style="margin:0"><div class="verb greyverb"><span class="n">↓ 12 ↑ 46</span><span class="w">재는 중</span></div></div></div>
+    <div class="row"><div class="cap2" style="margin:0"><div class="verb greyverb"><span class="n">↓ 12 ↑ 46</span><span class="spin"></span></div></div></div>
   </div>
 </div>
 <p class="caption">색이 곧 판정이라는 규칙은 <code>docs/upstream-sync-mockup.html</code>의 계약 그대로다 —
   초록은 그대로 됨, 주황은 받아 얹기를 거치면 됨, 빨강은 충돌. 툴팁 문장도 손대지 않는다.
   바뀌는 것은 <b>한 줄이 두 줄이 되는 것뿐</b>이고, 충돌 쪽 두 번째 칸만 <code>↑ 46</code> 아래에
-  무엇을 누르는지(<b>해결</b>)를 적어 넣었다 — 지금은 숫자만 있어 눌러도 되는지 모른다.</p>
+  무엇을 누르는지(<b>해결</b>)를 적어 넣었다 — 지금은 숫자만 있어 눌러도 되는지 모른다.
+  재는 동안에는 동사 자리가 비어 있다: 무엇을 하게 될지가 아직 답이 아니라서, 그 자리에
+  <b>도는 것 하나</b>를 놓아 기다리는 중이라는 말을 글자 없이 한다. 커밋하거나 fetch로 tip이
+  움직인 직후 한 번, 대개 몇 초를 스치는 상태다.</p>
 
 <h2>바뀌는 수</h2>
 <table>

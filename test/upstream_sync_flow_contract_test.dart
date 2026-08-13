@@ -37,10 +37,14 @@ void main() {
     upstreamRemotes: const {'main': 'origin'},
   );
 
+  /// [settle]을 끄면 프레임을 정해진 수만큼만 민다. 재는 동안 캡슐에서 도는
+  /// 것은 답이 올 때까지 멈추지 않아, 판정이 끝내 오지 않는 자리에서는
+  /// pumpAndSettle이 돌아오지 못한다.
   Future<void> pumpApp(
     WidgetTester tester,
     FakeGitRepository repository, {
     bool precisePush = false,
+    bool settle = true,
   }) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1400, 800);
@@ -51,7 +55,13 @@ void main() {
     await tester.pumpWidget(
       app(repository, controller, precisePush: precisePush),
     );
-    await tester.pumpAndSettle();
+    if (settle) {
+      await tester.pumpAndSettle();
+      return;
+    }
+    for (var frame = 0; frame < 10; frame++) {
+      await tester.pump(const Duration(milliseconds: 60));
+    }
   }
 
   testWidgets('the capsule stands beside the base branch selector', (
@@ -598,8 +608,7 @@ void main() {
       refs: refs(ahead: 1, behind: 1),
       // measure 콜백 없음 — 기본이 '실패'다.
     );
-    await pumpApp(tester, repository);
-    await tester.pumpAndSettle();
+    await pumpApp(tester, repository, settle: false);
 
     expect(find.byKey(const Key('upstream-sync-measuring')), findsOneWidget);
     expect(

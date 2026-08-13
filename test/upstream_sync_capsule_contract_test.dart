@@ -105,11 +105,16 @@ void main() {
     final measuring = find.byKey(const Key('upstream-sync-measuring'));
     expect(measuring, findsOneWidget);
     expect(
-      textOf(
-        tester,
-        const Key('upstream-sync-measuring'),
-      ).textSpan!.toPlainText(),
-      '↓ 2 ↑ 3\n재는 중',
+      textOf(tester, const Key('upstream-sync-measuring')).data,
+      '↓ 2 ↑ 3',
+    );
+    expect(
+      find.descendant(
+        of: measuring,
+        matching: find.byType(CircularProgressIndicator),
+      ),
+      findsOneWidget,
+      reason: '동사 자리에는 답 대신 도는 것이 선다',
     );
 
     await tester.tap(measuring, warnIfMissed: false);
