@@ -178,9 +178,15 @@ void main() {
     final resolve = textOf(tester, const Key('upstream-sync-conflict-push'));
     expect(
       resolve.textSpan!.toPlainText(),
-      '↑ 3\n해결',
+      '↑ 3\n해결하기',
       reason: '숫자만 있던 칸도 무엇을 누르는지 말한다',
     );
+    expect(
+      resolve.style?.color,
+      const Color(0xFF4388EE),
+      reason: '판정은 빨강이지만 나가는 길은 컨트롤의 파랑이다',
+    );
+    expect(pull.style?.color, const Color(0xFFFF453A), reason: '판정은 빨강 그대로');
     final tooltip = tester.widget<Tooltip>(
       find.ancestor(
         of: find.byKey(const Key('upstream-sync-conflict')),
