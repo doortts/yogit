@@ -610,7 +610,7 @@ path and reloads files` 한 줄 추가).
 - `arrows walk the cursor across the section boundary`
 - `a commit reloads the timeline and keeps the WIP row while the tree is dirty`
 - `discarding the last change removes the WIP row`
-- `a stage invalidates the empty-sha preview caches` (기존 함정의 계약화)
+- `a stage refreshes the open diff and the panel list`
 - `mutations run inside _changingRepository so no external-change prompt appears`
 
 (b) `_onKeyEvent`/`_onPreviewKeyEvent` 분기, `_runCommitAction`/`_reloadCommitMode`,
@@ -629,7 +629,7 @@ path and reloads files` 한 줄 추가).
 | 공백 무시·다른 알고리즘 화면과 빌더 diff 불일치 | ignore-whitespace 중 헝크 버튼 비활성, 알고리즘 인자는 빌더에 그대로 전달 |
 | index.lock 경합 (연타·동시 조작) | `_commitModeBusy` 직렬화 — 패널 전체가 한 번에 한 조작 |
 | 커밋·amend가 감시자 알림을 유발 | 전 조작 `_changingRepository()` 래핑 (P8 테스트) |
-| 빈 sha 캐시가 조작 후에도 낡은 목록을 보여줌 | `_reloadCommitMode`가 세 캐시의 '' 키를 지운다 — 알려진 함정의 봉인 (P8 테스트) |
+| 빈 sha 캐시가 조작 후에도 낡은 목록을 보여줌 | `_reloadCommitMode`가 세 캐시의 '' 키를 지운다. 커밋 모드에서는 `_previewBody`가 늘 커밋 패널을 돌려주어 이 캐시가 읽히지 않으므로 봉인은 위젯 테스트로 관측할 수 없다 — 세 줄을 지워도 스위트는 전부 초록이다. 남겨 두는 이유는 미리보기가 닫힌 상태의 →이 채운 항목을 지우는 예방책이라서다 |
 | rename 헝크 부분 적용의 경로 얽힘 | v1은 rename 파일 헝크 버튼 비활성, 파일 단위만 |
 | 최초 커밋 전(HEAD 없음) restore/amend 실패 | `parents.isEmpty` 판정으로 `rm --cached` 폴백, amend 비활성 (P3 테스트) |
 | 훅·서명·identity로 커밋이 조용히 실패 | GIT_TERMINAL_PROMPT=0으로 멈춤 방지, stderr 분기 문구 (P3 테스트) |

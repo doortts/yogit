@@ -429,12 +429,11 @@ void main() {
     expect(find.text('first commit'), findsWidgets);
   });
 
-  testWidgets('a stage invalidates the empty-sha preview caches', (
+  testWidgets('a stage refreshes the open diff and the panel list', (
     tester,
   ) async {
     var staged = false;
     var areaReads = 0;
-    var commitFileReads = 0;
     await pumpPanel(
       tester,
       FakeGitRepository(
@@ -445,10 +444,6 @@ void main() {
                 entry('lib/a.dart', index: 'M', worktree: '.'),
               ])
             : WorkingTreeStatus([entry('lib/a.dart'), entry('lib/b.dart')]),
-        files: (_, _) async {
-          commitFileReads++;
-          return [change('stale.dart')];
-        },
         areaFiles: (area) async {
           areaReads++;
           return [
@@ -474,17 +469,12 @@ void main() {
     expect(
       areaReads,
       greaterThan(readsBefore),
-      reason: '빈 sha 키에 남은 옛 목록이 아니라 새로 읽은 목록을 보여야 한다',
+      reason: '열린 diff의 파일 목록을 다시 읽는다',
     );
     expect(
       find.text('lib/b.dart'),
       findsNothing,
       reason: 'Stage 뒤에는 그 축에 남은 파일이 없다',
-    );
-    expect(
-      commitFileReads,
-      0,
-      reason: '작업 트리 행의 목록은 loadFiles의 빈 sha 메모를 아예 타지 않는다',
     );
   });
 
