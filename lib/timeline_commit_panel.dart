@@ -221,7 +221,11 @@ extension _TimelineCommitPanel on _TimelineScreenState {
           _openCommitAreaDiff(area, entry.path);
         },
         child: Container(
-          color: selected ? _palette.selectedRow : null,
+          // 시안의 `.frow.hovered{background:var(--raised)}` — 선택된 행은
+          // 그대로 selectedRow가 이긴다.
+          color: selected
+              ? _palette.selectedRow
+              : (hovered ? _palette.raised : null),
           height: 26,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14),

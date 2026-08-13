@@ -269,6 +269,37 @@ void main() {
     },
   );
 
+  testWidgets('hovering a row paints it raised and selection still wins', (
+    tester,
+  ) async {
+    await pumpPanel(
+      tester,
+      FakeGitRepository(
+        (_, _) async => [commit('1', 'first commit')],
+        workingTree: () async => workingTreeCommit('1'),
+        workingTreeStatus: () async => bothSections(),
+      ),
+    );
+
+    final hovered = row(WorkingTreeArea.unstaged, 'lib/b.dart');
+    expect(rowColor(tester, WorkingTreeArea.unstaged, 'lib/b.dart'), isNull);
+
+    // 시안의 `.frow.hovered{background:var(--raised)}`.
+    await hoverOver(tester, hovered);
+    expect(
+      rowColor(tester, WorkingTreeArea.unstaged, 'lib/b.dart'),
+      palette(tester).raised,
+    );
+
+    // 커서가 앉으면 hover 위로 선택 배경이 선다.
+    await metaKey(tester, LogicalKeyboardKey.arrowDown);
+    await metaKey(tester, LogicalKeyboardKey.arrowDown);
+    expect(
+      rowColor(tester, WorkingTreeArea.unstaged, 'lib/b.dart'),
+      palette(tester).selectedRow,
+    );
+  });
+
   testWidgets(
     'an untracked row carries the untracked chip and its discard dialog names deletion',
     (tester) async {
