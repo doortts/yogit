@@ -215,6 +215,14 @@ class GlobalFileBar extends StatelessWidget {
                     ? FullDiffView.blame
                     : FullDiffView.diff,
                 labelFor: _viewLabel,
+                isEnabled: (value) =>
+                    value != FullDiffView.blame ||
+                    commitArea != WorkingTreeArea.staged,
+                tooltipFor: (value) =>
+                    value == FullDiffView.blame &&
+                        commitArea == WorkingTreeArea.staged
+                    ? '인덱스 blob에는 Blame이 없습니다'
+                    : null,
                 onSelected: onViewSelected,
                 showShortcutHints: showShortcutHints,
                 shortcutLabelFor: (value) => switch (value) {

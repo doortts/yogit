@@ -164,14 +164,20 @@ extension _TimelineDiffMode on _TimelineScreenState {
     // 커밋 모드의 diff는 축 하나에 묶인 어댑터를 통해 읽고, 그 어댑터는 어떤
     // 커밋을 줘도 작업 트리를 답하므로 이웃 커밋을 데리고 다니지 않는다.
     final commitMode = commit.isWorkingTree && _cherryPickState == null;
+    final preferences =
+        _pendingFullDiffPreferences ?? widget.fullDiffPreferences;
     final controller = FullDiffSessionController(
       repository: commitMode
           ? WorkingTreeAreaRepository(widget.repository, _commitDiffArea)
           : widget.repository,
       commits: commitMode ? [commit] : List<GitCommit>.unmodifiable(_commits),
       initialIndex: commitMode ? 0 : math.max(0, _commits.indexOf(commit)),
+      // 인덱스 blob에는 blame을 물을 대상이 없다. 저장된 뷰가 Blame이면 키를
+      // 누르지 않아도 그 자리로 열리므로 인덱스 축에서는 접어 둔다.
       initialPreferences:
-          _pendingFullDiffPreferences ?? widget.fullDiffPreferences,
+          commitMode && _commitDiffArea == WorkingTreeArea.staged
+          ? preferences.copyWith(view: FullDiffView.diff)
+          : preferences,
       initialPath: path,
     )..addListener(_followFullDiffSession);
     if (_scrollController.hasClients) {

@@ -782,6 +782,13 @@ class _FullDiffWorkspaceState extends State<FullDiffWorkspace> {
   }
 
   void _selectPrimaryView(FullDiffView view) {
+    // The staged axis reads the index blob, which no commit ever touched, so
+    // blame has nothing to answer with. Both the segment and ⌘2 come through
+    // here.
+    if (widget.commitArea == WorkingTreeArea.staged &&
+        view == FullDiffView.blame) {
+      return;
+    }
     _controller.setPrimaryView(view);
     _restoreNavigationFocus();
   }

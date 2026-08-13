@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yogit/full_diff_header.dart';
+import 'package:yogit/full_diff_model.dart';
 import 'package:yogit/full_diff_workspace.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/window_frame.dart';
@@ -97,15 +99,18 @@ void main() {
 
   Future<void> pumpPanel(
     WidgetTester tester,
-    FakeGitRepository repository,
-  ) async {
+    FakeGitRepository repository, {
+    FullDiffPreferences preferences = const FullDiffPreferences(),
+  }) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1600, 900);
     addTearDown(() {
       tester.view.resetDevicePixelRatio();
       tester.view.resetPhysicalSize();
     });
-    await tester.pumpWidget(app(repository, controller));
+    await tester.pumpWidget(
+      app(repository, controller, fullDiffPreferences: preferences),
+    );
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
@@ -129,6 +134,21 @@ void main() {
 
   bool enabled(WidgetTester tester, Key key) =>
       tester.widget<InkWell>(find.byKey(key)).onTap != null;
+
+  FullDiffView view(WidgetTester tester) => tester
+      .widget<FullDiffWorkspace>(find.byType(FullDiffWorkspace))
+      .controller
+      .state
+      .view;
+
+  FullDiffSegmentedControl<FullDiffView> mainViewControls(
+    WidgetTester tester,
+  ) => tester.widget<FullDiffSegmentedControl<FullDiffView>>(
+    find.byKey(const Key('main-view-controls')),
+  );
+
+  bool blameEnabled(WidgetTester tester) =>
+      mainViewControls(tester).isEnabled?.call(FullDiffView.blame) ?? true;
 
   testWidgets(
     'clicking a file opens the diff on that file\'s own area and the panel survives',
@@ -392,6 +412,60 @@ void main() {
     expect(statusReads, greaterThan(readsBefore), reason: '패널 목록을 다시 읽는다');
     expect(diffReads, greaterThan(diffsBefore), reason: '열린 diff도 다시 뜬다');
     expect(row(WorkingTreeArea.staged, 'lib/a.dart'), findsOneWidget);
+  });
+
+  testWidgets('the blame view is disabled on the staged axis', (tester) async {
+    final blamed = <String>[];
+    await pumpPanel(
+      tester,
+      FakeGitRepository(
+        (_, _) async => [commit('1', 'first commit')],
+        workingTree: () async => workingTreeCommit('1'),
+        workingTreeStatus: () async => bothSections(),
+        areaFiles: (area) async => areaFilesOf(area),
+        areaDiff: (_, _) async => twoHunks,
+        blame: (_, file, _, _) async {
+          blamed.add(file.path);
+          return const [];
+        },
+      ),
+      // 저장된 뷰가 Blame이어도 인덱스 축은 diff로 선다.
+      preferences: const FullDiffPreferences(view: FullDiffView.blame),
+    );
+
+    await tester.tap(row(WorkingTreeArea.staged, 'lib/a.dart'));
+    await tester.pumpAndSettle();
+    expect(view(tester), FullDiffView.diff);
+    expect(blamed, isEmpty);
+    expect(blameEnabled(tester), isFalse);
+    expect(
+      mainViewControls(tester).tooltipFor?.call(FullDiffView.blame),
+      '인덱스 blob에는 Blame이 없습니다',
+    );
+
+    // 세그먼트도 ⌘2도 그 자리를 지난다.
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('main-view-controls')),
+        matching: find.text('Blame'),
+      ),
+      warnIfMissed: false,
+    );
+    await tester.pumpAndSettle();
+    expect(view(tester), FullDiffView.diff);
+    expect(blamed, isEmpty);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(view(tester), FullDiffView.diff);
+    expect(blamed, isEmpty);
+
+    // 작업 트리 축에는 파일이 있으니 Blame이 다시 산다.
+    await tester.tap(segment('Unstaged'));
+    await tester.pumpAndSettle();
+    expect(blameEnabled(tester), isTrue);
   });
 
   testWidgets(

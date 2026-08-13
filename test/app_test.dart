@@ -18271,11 +18271,13 @@ Widget app(
   String mergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
   String rebaseMergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
   bool precisePush = false,
+  FullDiffPreferences fullDiffPreferences = const FullDiffPreferences(),
 }) => MaterialApp(
   home: TimelineScreen(
     precisePush: precisePush,
     repository: repository,
     controller: controller,
+    fullDiffPreferences: fullDiffPreferences,
     branchPreviewMode: branchPreviewMode,
     onBranchPreviewModeChanged: onBranchPreviewModeChanged,
     onOpenSettings: onOpenSettings,
