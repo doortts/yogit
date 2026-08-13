@@ -29,6 +29,7 @@ void main() {
     String worktree = 'M',
     bool untracked = false,
     bool submodule = false,
+    bool symlink = false,
     String? origPath,
     bool unstagedBinary = false,
   }) => WorkingTreeEntry(
@@ -38,6 +39,7 @@ void main() {
     worktreeStatus: worktree,
     untracked: untracked,
     submodule: submodule,
+    symlink: symlink,
     unstagedBinary: unstagedBinary,
   );
 
@@ -334,7 +336,7 @@ void main() {
   );
 
   testWidgets(
-    'hunk buttons hide for untracked, renamed and binary files and under ignore-whitespace',
+    'hunk buttons hide for untracked, renamed, binary, symlink and submodule files, under ignore-whitespace and outside the hunks scope',
     (tester) async {
       await pumpPanel(
         tester,
@@ -346,12 +348,16 @@ void main() {
             entry('new.txt', worktree: 'A', untracked: true),
             entry('lib/moved.dart', worktree: 'R', origPath: 'lib/old.dart'),
             entry('assets/logo.png', unstagedBinary: true),
+            entry('link.txt', symlink: true),
+            entry('vendor/sub', submodule: true),
           ]),
           areaFiles: (_) async => [
             change('lib/plain.dart'),
             change('new.txt'),
             change('lib/moved.dart'),
             change('assets/logo.png'),
+            change('link.txt'),
+            change('vendor/sub'),
           ],
           areaDiff: (_, _) async => twoHunks,
         ),
@@ -361,7 +367,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Stage Hunk'), findsNWidgets(2));
 
-      for (final path in ['new.txt', 'lib/moved.dart', 'assets/logo.png']) {
+      for (final path in [
+        'new.txt',
+        'lib/moved.dart',
+        'assets/logo.png',
+        'link.txt',
+        'vendor/sub',
+      ]) {
         await tester.tap(row(WorkingTreeArea.unstaged, path));
         await tester.pumpAndSettle();
         expect(
@@ -379,6 +391,15 @@ void main() {
       await tester.pumpAndSettle();
       expect(enabled(tester, const Key('commit-stage-hunk-0')), isFalse);
       expect(find.byTooltip('공백 무시 보기에서는 Hunk 단위로 조작할 수 없습니다'), findsWidgets);
+
+      // full-file 스코프에서는 버튼 자체가 없다: 거대 컨텍스트 한 덩이는
+      // `--unified=3`으로 다시 뜨는 diff와 헝크 번호가 어긋난다.
+      await tester.tap(find.byKey(const Key('ignore-whitespace')));
+      await tester.pumpAndSettle();
+      expect(find.text('Stage Hunk'), findsNWidgets(2));
+      await tester.tap(find.byKey(const Key('hunk-toggle-on')));
+      await tester.pumpAndSettle();
+      expect(find.text('Stage Hunk'), findsNothing);
     },
   );
 
