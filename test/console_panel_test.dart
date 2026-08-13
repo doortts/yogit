@@ -93,6 +93,29 @@ void main() {
     );
   });
 
+  testWidgets('grouped and ungrouped commands share one left edge', (
+    tester,
+  ) async {
+    final log = CommandLog();
+    final run = log.wrap(
+      (executable, arguments, {workingDirectory, environment}) async => ok(),
+    );
+    await run('git', ['status']);
+    await log.action('Pull', () => run('git', ['pull']));
+    await pump(tester, log);
+
+    // 묶인 줄이 8px 밀려 들어가면 한 목록이 두 칸으로 읽힌다.
+    expect(
+      tester.getTopLeft(find.text('git pull')).dx,
+      tester.getTopLeft(find.text('git status')).dx,
+    );
+    // 액션 이름도 같은 칸에서 시작한다.
+    expect(
+      tester.getTopLeft(find.text('Pull')).dx,
+      tester.getTopLeft(find.text('git status')).dx,
+    );
+  });
+
   testWidgets('a failure that opened itself can still be closed', (
     tester,
   ) async {

@@ -331,6 +331,13 @@ class _ConsolePanelState extends State<ConsolePanel> {
     ),
   );
 
+  /// The gutter a grouped command's rule lives in, held open on every row.
+  static const _ruleColumn = 8.0;
+
+  /// Where an opened row's output starts. Left of the command text on purpose:
+  /// output is not another argument, and lining the two up would read as one.
+  static const _detailIndent = 42.0;
+
   Widget _line(TimelineThemePalette palette, CommandLogEntry entry) =>
       entry.kind == CommandLogKind.action
       ? _actionLine(palette, entry)
@@ -344,7 +351,8 @@ class _ConsolePanelState extends State<ConsolePanel> {
         child: Row(
           children: [
             _time(palette, entry),
-            Icon(Icons.play_arrow, size: 12, color: palette.interactive),
+            const SizedBox(width: _ruleColumn),
+            Icon(Icons.play_arrow, size: 13, color: palette.interactive),
             const SizedBox(width: 4),
             Expanded(
               child: Text(
@@ -385,13 +393,17 @@ class _ConsolePanelState extends State<ConsolePanel> {
             Row(
               children: [
                 _time(palette, entry),
-                if (entry.actionId != null)
-                  Container(
-                    width: 2,
-                    height: 16,
-                    margin: const EdgeInsets.only(right: 6),
-                    color: palette.interactive.withValues(alpha: 0.5),
-                  ),
+                // Reserved on every row, drawn on the grouped ones: two lists
+                // of commands that start at different x would read as two
+                // different columns.
+                Container(
+                  width: 2,
+                  height: 16,
+                  margin: const EdgeInsets.only(right: _ruleColumn - 2),
+                  color: entry.actionId == null
+                      ? Colors.transparent
+                      : palette.interactive.withValues(alpha: 0.5),
+                ),
                 Icon(
                   output == null
                       ? Icons.remove
@@ -438,7 +450,7 @@ class _ConsolePanelState extends State<ConsolePanel> {
     CommandLogEntry entry,
     String output,
   ) => Padding(
-    padding: const EdgeInsets.fromLTRB(96, 2, 10, 8),
+    padding: const EdgeInsets.fromLTRB(_detailIndent, 2, 10, 8),
     // The row's own tap closes it; a tap meant for the text it holds is not
     // that tap, and swallowing it here is what lets the output be selected.
     child: GestureDetector(
@@ -462,7 +474,7 @@ class _ConsolePanelState extends State<ConsolePanel> {
     CommandLogEntry entry,
     String note,
   ) => Padding(
-    padding: const EdgeInsets.fromLTRB(96, 0, 10, 5),
+    padding: const EdgeInsets.fromLTRB(_detailIndent, 0, 10, 5),
     child: Row(
       children: [
         if (entry.redacted)
