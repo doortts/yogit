@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -88,8 +90,80 @@ class CommitAvatars {
   final RemoteAvatar? committer;
 }
 
+/// The faces already learned, kept between runs beside the settings file.
+///
+/// Finding one costs a round trip per person, and a commit that has never been
+/// pushed cannot buy that answer at all — so a repository whose newest commits
+/// are all local opens on initials and fills in seconds later, once the rows
+/// deep enough to be on the server have been asked about. Reading the answer
+/// back off disk is what lets the next open draw the faces on its first frame,
+/// without asking anybody.
+///
+/// Only the accounts that were found are written, and only the login and the
+/// URL of each: an enterprise server's token is put back on by the service
+/// that reads this, so it never lands on disk. "This person has no account" is
+/// an answer too, but one that stops being true the day they link the address,
+/// and a session is long enough to hold it.
+class AvatarStore {
+  AvatarStore([File? file]) : file = file ?? File(_defaultPath());
+
+  final File file;
+
+  static String _defaultPath() => pathForHome(Platform.environment['HOME']);
+
+  /// Beside `settings.json`, and homeless for the same reason it is: with no
+  /// HOME there is nowhere safe to write, and a face is not worth handing the
+  /// opened repository a file yogit reads on every launch.
+  @visibleForTesting
+  static String pathForHome(String? home) => home == null || home.isEmpty
+      ? '${Directory.systemTemp.createTempSync('yogit_').path}/avatars.json'
+      : '$home/Library/Application Support/yogit/avatars.json';
+
+  /// What [host] has answered before, by identity. One address can belong to
+  /// different people on two servers, so each host keeps its own answers.
+  Future<Map<String, RemoteAvatar>> load(String host) async {
+    final entries = (await _read())[host];
+    if (entries is! Map<String, dynamic>) return {};
+    return {
+      for (final entry in entries.entries) entry.key: ?_avatarFor(entry.value),
+    };
+  }
+
+  /// Writes [known] back under [host], leaving every other host's answers
+  /// where they are: two yogit windows on two servers do not erase each other.
+  Future<void> save(String host, Map<String, RemoteAvatar> known) async {
+    final json = await _read();
+    json[host] = {
+      for (final entry in known.entries)
+        entry.key: {'login': entry.value.login, 'url': entry.value.url},
+    };
+    await file.parent.create(recursive: true);
+    await file.writeAsString(jsonEncode(json), flush: true);
+  }
+
+  Future<Map<String, dynamic>> _read() async {
+    try {
+      final json = jsonDecode(await file.readAsString());
+      return json is Map<String, dynamic> ? json : {};
+    } on FileSystemException {
+      return {};
+    } on FormatException {
+      return {};
+    }
+  }
+
+  static RemoteAvatar? _avatarFor(Object? value) {
+    if (value is! Map<String, dynamic>) return null;
+    final login = value['login'];
+    final url = value['url'];
+    return login is String && url is String
+        ? RemoteAvatar(login: login, url: url)
+        : null;
+  }
+}
+
 class AvatarService {
-  AvatarService({required this.remote, required this.api});
+  AvatarService({required this.remote, required this.api, this.store});
 
   /// Neon: pink, cyan, green, yellow, orange, purple, blue, red.
   static const defaultColors = [
@@ -116,6 +190,10 @@ class AvatarService {
   final RemoteRepository remote;
   final GitHubApi api;
 
+  /// Where the faces learned this run are kept for the next one. Null in a
+  /// test, and wherever an answer is not worth outliving the window.
+  final AvatarStore? store;
+
   /// The answer already given for a sha, so a row that rebuilds hands
   /// `FutureBuilder` the same object instead of a new one every frame.
   final _cache = <String, Future<CommitAvatars>>{};
@@ -129,8 +207,12 @@ class AvatarService {
   /// account for that identity. It is only ever written from an answer that
   /// arrived, so a lookup that failed leaves nothing behind and can be asked
   /// again.
+  ///
+  /// [restore] fills it from what earlier runs learned, which is what makes an
+  /// opened repository draw faces rather than initials while it waits.
   // ponytail: unbounded identity map, add an LRU trim if a repository with
-  // ten thousand authors ever turns up.
+  // ten thousand authors ever turns up — the same trim would bound the file
+  // [store] writes, which holds one line per person for the same reason.
   final _known = <String, RemoteAvatar?>{};
 
   /// The lookups on their way, so two rows by the same person scrolling in
@@ -145,6 +227,30 @@ class AvatarService {
   final _permits = _PermitPool(4, maxQueued: 32);
   final _saturated = Future.value(const CommitAvatars());
   Future<String?>? _account;
+
+  /// One write at a time, so two answers landing together cannot interleave
+  /// halfway through the file.
+  Future<void> _writing = Future.value();
+
+  Future<void>? _restoring;
+  var _restored = false;
+
+  /// Reads back what earlier runs learned about this server's people, once.
+  /// Every answer waits on it, so a row asked before the disk has been read
+  /// waits for the disk rather than paying the network for something already
+  /// written down. What this run heard for itself wins: the file fills gaps.
+  Future<void> restore() =>
+      _restored ? Future.value() : (_restoring ??= _readStore());
+
+  Future<void> _readStore() async {
+    final store = this.store;
+    if (store != null) {
+      for (final entry in (await store.load(remote.host)).entries) {
+        _known.putIfAbsent(entry.key, () => _headed(entry.value));
+      }
+    }
+    _restored = true;
+  }
 
   /// An identity's key: the email, lowercased, because that is what GitHub
   /// matches a commit to an account by. A commit written without one falls
@@ -182,6 +288,17 @@ class AvatarService {
     required GitIdentity author,
     GitIdentity? committer,
   }) {
+    // Nobody is asked about until the file has been read: the answer is very
+    // often already in it, and a request sent before that is one the app knew
+    // the answer to.
+    // The wait itself is not filed under the sha: the answer behind it is, by
+    // the call on the other side, and a future that finds itself in the cache
+    // would be waiting for its own result.
+    if (!_restored && store != null) {
+      return restore().then(
+        (_) => resolve(sha, author: author, committer: committer),
+      );
+    }
     // A commit the server does not have is answered from its people, and the
     // answer is not kept: the next rebuild reads the map again, so a face that
     // landed meanwhile reaches a row whose own sha will never find one.
@@ -293,6 +410,9 @@ class AvatarService {
   @visibleForTesting
   int get debugCachedRequestCount => _cache.length;
 
+  @visibleForTesting
+  Future<void> get debugWritten => _writing;
+
   Future<String?> accountLogin() => _account ??= _loadAccount();
 
   Future<String?> resolveMergedBranchName(String tipSha) async {
@@ -369,10 +489,25 @@ class AvatarService {
     if (committer != null) {
       _known[_identityKey(committer)] = avatars.committer;
     }
+    if (avatars.author != null || avatars.committer != null) _persist();
     return CommitAvatars(
       author: avatars.author,
       committer: committer == null ? null : avatars.committer,
     );
+  }
+
+  /// Hands the faces found so far to the next run. The whole map goes rather
+  /// than a diff: it holds one line per person, and this happens once per
+  /// person met, not once per commit.
+  void _persist() {
+    final store = this.store;
+    if (store == null) return;
+    final found = {for (final entry in _known.entries) entry.key: ?entry.value};
+    // A write that fails is a face relearned next time, which is what the app
+    // did before there was a file at all.
+    _writing = _writing
+        .then((_) => store.save(remote.host, found))
+        .catchError((Object _) {});
   }
 
   void _forget(GitIdentity author, GitIdentity? committer) {

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -29,11 +30,13 @@ void main() {
       repository: 'yogit',
     ),
     String token = 'token-1',
+    AvatarStore? store,
   }) {
     final requests = <Uri>[];
     return (
       service: AvatarService(
         remote: remote,
+        store: store,
         api: GitHubApi(
           apiBaseUrl: remote.host == 'github.com'
               ? 'https://api.github.com'
@@ -183,6 +186,146 @@ void main() {
 
     expect(again.author?.login, 'ada', reason: '얼굴은 커밋이 아니라 사람의 것이다');
     expect(fake.requests, hasLength(2), reason: '없는 커밋을 다시 묻지는 않는다');
+  });
+
+  group('a face outlives the window that found it', () {
+    late Directory home;
+    late AvatarStore store;
+
+    setUp(() {
+      home = Directory.systemTemp.createTempSync('yogit_avatars_');
+      store = AvatarStore(File('${home.path}/avatars.json'));
+    });
+
+    tearDown(() => home.deleteSync(recursive: true));
+
+    test('the next run answers the first frame without asking', () async {
+      final first = serviceOn((_) => answering(bothAccounts), store: store);
+      await first.service.resolve('aaa1111', author: ada, committer: cam);
+      await first.service.debugWritten;
+
+      final next = serviceOn((_) => answering(bothAccounts), store: store);
+      await next.service.restore();
+
+      final known = next.service.cachedFor(author: ada, committer: cam);
+      expect(known?.author?.login, 'ada', reason: '어제 확인한 얼굴이다');
+      expect(
+        await next.service.resolve('bbb2222', author: ada, committer: cam),
+        isNotNull,
+      );
+      expect(next.requests, isEmpty, reason: '아는 얼굴은 서버에 다시 묻지 않는다');
+    });
+
+    test('the first row asked opens the file rather than the socket', () async {
+      final first = serviceOn((_) => answering(bothAccounts), store: store);
+      await first.service.resolve('aaa1111', author: ada, committer: cam);
+      await first.service.debugWritten;
+
+      // 아무도 restore를 부르지 않는다. 첫 행이 물으면서 파일이 먼저 열린다.
+      final next = serviceOn((_) => answering(bothAccounts), store: store);
+      final row = await next.service.resolve(
+        'bbb2222',
+        author: ada,
+        committer: cam,
+      );
+
+      expect(row.author?.login, 'ada');
+      expect(next.requests, isEmpty, reason: '디스크가 아는 것을 서버에 묻지 않는다');
+    });
+
+    test('an unpushed commit is drawn by the face on disk', () async {
+      final first = serviceOn((_) => answering(bothAccounts), store: store);
+      await first.service.resolve('aaa1111', author: ada, committer: cam);
+      await first.service.debugWritten;
+
+      // 다음 실행의 맨 위 행 — 아직 푸시하지 않은 커밋이라 서버는 답이 없다.
+      final next = serviceOn((_) => noSuchCommit(), store: store);
+      await next.service.restore();
+
+      final top = await next.service.resolve(
+        'local11',
+        author: ada,
+        committer: cam,
+      );
+      expect(top.author?.login, 'ada');
+      expect(next.requests, isEmpty, reason: '사람을 아는데 커밋을 물을 이유가 없다');
+    });
+
+    test('the token is put back on, never written down', () async {
+      const enterprise = RemoteRepository(
+        host: 'git.example.com',
+        owner: 'team',
+        repository: 'yogit',
+      );
+      final first = serviceOn(
+        (_) => answering(
+          '{"author":{"login":"ada","avatar_url":"https://git.example.com/ada"},'
+          '"committer":null}',
+        ),
+        remote: enterprise,
+        token: 'secret-token',
+        store: store,
+      );
+      await first.service.resolve('aaa1111', author: ada, committer: cam);
+      await first.service.debugWritten;
+
+      expect(store.file.readAsStringSync(), isNot(contains('secret-token')));
+      final next = serviceOn(
+        (_) => answering(bothAccounts),
+        remote: enterprise,
+        token: 'secret-token',
+        store: store,
+      );
+      await next.service.restore();
+
+      expect(
+        next.service.cachedFor(author: ada)?.author?.headers['Authorization'],
+        'Bearer secret-token',
+        reason: '열쇠는 킷체인에 있고, 사진을 받을 때마다 다시 걸린다',
+      );
+    });
+
+    test('one server\'s answers leave the other\'s alone', () async {
+      final github = serviceOn((_) => answering(bothAccounts), store: store);
+      await github.service.resolve('aaa1111', author: ada, committer: cam);
+      await github.service.debugWritten;
+
+      final enterprise = serviceOn(
+        (_) => answering(
+          '{"author":{"login":"dana","avatar_url":"https://git.example.com/dana"},'
+          '"committer":null}',
+        ),
+        remote: const RemoteRepository(
+          host: 'git.example.com',
+          owner: 'team',
+          repository: 'yogit',
+        ),
+        store: store,
+      );
+      await enterprise.service.resolve('ccc3333', author: dana);
+      await enterprise.service.debugWritten;
+
+      expect((await store.load('github.com'))['ada@example.com']?.login, 'ada');
+      expect(
+        (await store.load('git.example.com'))['dana@example.com']?.login,
+        'dana',
+      );
+    });
+
+    test('an account GitHub does not have is not written down', () async {
+      final fake = serviceOn(
+        (_) => answering('{"author":null,"committer":null}'),
+        store: store,
+      );
+      await fake.service.resolve('aaa1111', author: ada, committer: cam);
+      await fake.service.debugWritten;
+
+      expect(
+        await store.load('github.com'),
+        isEmpty,
+        reason: '계정이 없다는 답은 주소를 연결하는 날 틀린 답이 된다',
+      );
+    });
   });
 
   test('a known author with a new committer still fetches the commit', () async {

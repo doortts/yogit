@@ -461,6 +461,9 @@ class _YogitAppState extends State<YogitApp> {
         () => _avatarService = AvatarService(
           remote: remote,
           api: GitHubApi(apiBaseUrl: apiBaseUrl, token: token),
+          // The faces earlier runs found: the rows read them off disk instead
+          // of buying each one back over the network.
+          store: AvatarStore(),
         ),
       );
     }
