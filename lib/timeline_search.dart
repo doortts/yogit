@@ -18,6 +18,9 @@ final _searchWord = RegExp(r'[\p{L}\p{N}]+', unicode: true);
 
 extension _TimelineSearch on _TimelineScreenState {
   void _openSearch() {
+    // 이 검색의 기점. ⌘F를 다시 눌러 새 질의를 시작하는 것도 새 검색이라, 그때
+    // 서 있던 줄이 새 기점이 된다.
+    _searchOrigin = _selectedIndex.value;
     if (!_searchOpen) _rebuild(() => _searchOpen = true);
     _searchFocusNode.requestFocus();
     // ⌘F on an open field starts the next search rather than appending to the
@@ -28,13 +31,22 @@ extension _TimelineSearch on _TimelineScreenState {
     );
   }
 
+  /// 찾은 것이 없는 검색은 읽던 자리를 빼앗지 않는다. 질의를 좁히다 결과를
+  /// 놓쳤다면 선택은 마지막으로 찾았던 남의 줄에 서 있으니, 검색을 열 때 서
+  /// 있던 줄로 돌려보낸다. 그 줄이 그새 사라졌다면 맨 처음 줄로 간다.
   void _closeSearch() {
     if (!_searchOpen) return;
+    final strayed = _searchQuery.trim().isNotEmpty && _searchMatches.isEmpty;
+    final origin = _searchOrigin;
     _searchController.clear();
     _rebuild(() {
       _searchOpen = false;
       _searchQuery = '';
     });
+    _searchOrigin = null;
+    if (strayed && origin != null && _entries.isNotEmpty) {
+      _goToRow(origin < _entries.length && _selectable(origin) ? origin : 0);
+    }
     _focusNode.requestFocus();
   }
 
@@ -44,7 +56,7 @@ extension _TimelineSearch on _TimelineScreenState {
     _rebuild(() => _searchQuery = query);
     final matches = _searchMatches;
     if (matches.isEmpty || matches.contains(_selectedIndex.value)) return;
-    _goToMatch(
+    _goToRow(
       matches.firstWhere(
         (index) => index > _selectedIndex.value,
         orElse: () => matches.first,
@@ -93,7 +105,7 @@ extension _TimelineSearch on _TimelineScreenState {
     final matches = _searchMatches;
     if (matches.isEmpty) return;
     final current = _selectedIndex.value;
-    _goToMatch(
+    _goToRow(
       delta > 0
           ? matches.firstWhere(
               (index) => index > current,
@@ -106,7 +118,7 @@ extension _TimelineSearch on _TimelineScreenState {
     );
   }
 
-  void _goToMatch(int index) {
+  void _goToRow(int index) {
     _arrivedGoingDown = null;
     _selectedIndex.value = index;
     _scrollToSelection();

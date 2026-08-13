@@ -596,6 +596,10 @@ class _TimelineScreenState extends State<TimelineScreen>
   final _searchFocusNode = FocusNode(debugLabel: 'timeline search');
   var _searchQuery = '';
   var _searchOpen = false;
+
+  /// 이 검색의 기점 — 검색을 열 때 선택이 서 있던 줄. 찾은 것이 없이 검색창이
+  /// 닫히면 선택을 여기로 돌려보낸다.
+  int? _searchOrigin;
   final _collapsedRefSections = <_RefSection>{};
   final _collapsedRefFolders = <String>{};
   var _showAllTags = false;

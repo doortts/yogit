@@ -252,6 +252,61 @@ void main() {
     );
   });
 
+  testWidgets('a search that found nothing gives the reader their row back', (
+    tester,
+  ) async {
+    await pumpTimeline(tester);
+    // 검색을 열기 전에 읽고 있던 줄.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-c3d4e5f')), findsOneWidget);
+
+    await openSearch(tester);
+    // 찾은 줄로 선택이 옮겨 가고, 질의를 좁히면 결과가 사라진다.
+    await search(tester, 'name');
+    expect(find.byKey(const Key('selected-row-d9a8b7c')), findsOneWidget);
+    await search(tester, 'name zzzz');
+    expect(countLabel(tester), '없음');
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('selected-row-c3d4e5f')),
+      findsOneWidget,
+      reason: '찾은 것이 없으면 검색을 열 때 서 있던 줄로 돌아온다',
+    );
+  });
+
+  testWidgets('with no row read before the search, nothing found goes to the '
+      'first row', (tester) async {
+    await pumpTimeline(tester);
+    await openSearch(tester);
+    await search(tester, 'name');
+    expect(find.byKey(const Key('selected-row-d9a8b7c')), findsOneWidget);
+    await search(tester, 'zzzz');
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('selected-row-a1b2c3d')), findsOneWidget);
+  });
+
+  testWidgets('a search that found something leaves the reader on it', (
+    tester,
+  ) async {
+    await pumpTimeline(tester);
+    await openSearch(tester);
+    await search(tester, 'name');
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('selected-row-d9a8b7c')),
+      findsOneWidget,
+      reason: '찾아서 간 줄은 검색을 닫아도 그대로다',
+    );
+  });
+
   testWidgets('Escape closes the field and puts the lights out', (
     tester,
   ) async {
