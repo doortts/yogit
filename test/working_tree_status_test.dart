@@ -172,37 +172,7 @@ void main() {
     });
   });
 
-  group('areaFileChange', () {
-    test('derives section letters from the section\'s own axis', () {
-      final entries = mergeNumstat(
-        parseStatusV2(
-          status([
-            '$_modified both.txt',
-            '1 AM N... 000000 100644 100644 aaaaaaa bbbbbbb added.txt',
-            '1 .D N... 100644 100644 000000 aaaaaaa bbbbbbb gone.txt',
-          ]),
-        ),
-        unstaged: const {
-          'both.txt': (additions: 2, deletions: 1, isBinary: false),
-        },
-        staged: const {
-          'both.txt': (additions: 4, deletions: 3, isBinary: false),
-        },
-      );
-      final [both, added, gone] = entries;
-
-      expect(areaFileChange(both, WorkingTreeArea.unstaged)!.status, 'M');
-      expect(areaFileChange(both, WorkingTreeArea.staged)!.status, 'M');
-      expect(areaFileChange(both, WorkingTreeArea.unstaged)!.additions, 2);
-      expect(areaFileChange(both, WorkingTreeArea.staged)!.additions, 4);
-
-      expect(areaFileChange(added, WorkingTreeArea.unstaged)!.status, 'M');
-      expect(areaFileChange(added, WorkingTreeArea.staged)!.status, 'A');
-
-      expect(areaFileChange(gone, WorkingTreeArea.unstaged)!.status, 'D');
-      expect(areaFileChange(gone, WorkingTreeArea.staged), isNull);
-    });
-
+  group('WorkingTreeStatus', () {
     test('keeps conflicted entries out of the staged section', () {
       final entries = parseStatusV2(
         status([
@@ -215,11 +185,6 @@ void main() {
       expect(tree.hasConflict, isTrue);
       expect(tree.unstaged.map((e) => e.path), ['conflict.txt']);
       expect(tree.staged, isEmpty);
-      expect(areaFileChange(entries.single, WorkingTreeArea.staged), isNull);
-      expect(
-        areaFileChange(entries.single, WorkingTreeArea.unstaged)!.status,
-        'U',
-      );
     });
   });
 

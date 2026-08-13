@@ -367,6 +367,36 @@ void main() {
     },
   );
 
+  testWidgets("a row's letter comes from its own section's axis", (
+    tester,
+  ) async {
+    await pumpPanel(
+      tester,
+      FakeGitRepository(
+        (_, _) async => [commit('1', 'first commit')],
+        workingTree: () async => workingTreeCommit('1'),
+        workingTreeStatus: () async => WorkingTreeStatus([
+          entry('both.dart', index: 'M', worktree: 'M'),
+          entry('added.dart', index: 'A', worktree: 'M'),
+          entry('gone.dart', worktree: 'D'),
+        ]),
+      ),
+    );
+
+    Finder letter(WorkingTreeArea area, String path, String glyph) =>
+        find.descendant(of: row(area, path), matching: find.text(glyph));
+
+    expect(letter(WorkingTreeArea.unstaged, 'both.dart', 'M'), findsOneWidget);
+    expect(letter(WorkingTreeArea.staged, 'both.dart', 'M'), findsOneWidget);
+
+    // 같은 파일이 축마다 다른 글자를 든다 — 인덱스에는 새 파일, 작업 트리에는 수정.
+    expect(letter(WorkingTreeArea.unstaged, 'added.dart', 'M'), findsOneWidget);
+    expect(letter(WorkingTreeArea.staged, 'added.dart', 'A'), findsOneWidget);
+
+    expect(letter(WorkingTreeArea.unstaged, 'gone.dart', 'D'), findsOneWidget);
+    expect(row(WorkingTreeArea.staged, 'gone.dart'), findsNothing);
+  });
+
   testWidgets('Stage All is disabled while a conflict is unresolved', (
     tester,
   ) async {

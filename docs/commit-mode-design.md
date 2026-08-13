@@ -134,6 +134,11 @@ List<WorkingTreeEntry> parseStatusV2(String output);
 GitFileChange? areaFileChange(WorkingTreeEntry entry, WorkingTreeArea area);
 ```
 
+구현에서는 이 다리를 놓지 않았다. `WorkingTreeAreaRepository`가 `loadAreaFiles`로
+그 축의 목록을 git에게 다시 물어 `GitFileChange`를 받아 오므로 투영 함수를 부르는
+곳이 없어 지웠다. 행 글자가 섹션의 축을 따른다는 계약은 `_commitFileRow`를 재는
+`a row's letter comes from its own section's axis`(P6)가 지킨다.
+
 ## git 명령 계약
 
 모든 새 메서드는 `GitRepository`에 붙고 기존 `runner` 주입으로 테스트에서 가짜로
@@ -163,7 +168,7 @@ git diff --no-ext-diff --no-textconv --no-color --numstat -z --cached   # staged
 | Unstage File (HEAD 없음) | `git rm --cached -r --quiet -- :(literal)<path>` | 최초 커밋 전에는 restore의 소스(HEAD)가 없다 |
 | Unstage All | `git restore --staged -- :/` | HEAD 없으면 `git rm --cached -r --quiet -- :/` |
 | Discard (tracked) | `git restore -- :(literal)<path>` | 소스는 기본값(인덱스) — staged 변경은 남는다. 작업 트리 삭제(D)도 이걸로 되살아난다 |
-| Discard (untracked) | `resolveWorkingTreeFile(root, path)` 검증 후 Dart `File.delete()` | git 명령이 아니라 파일 삭제다. resolveWorkingTreeFile이 경로 탈출을 막는다 |
+| Discard (untracked) | 부모 디렉터리만 `Directory.resolveSymbolicLinks()`로 풀어 저장소 안인지 확인한 뒤 Dart `Link.delete()`/`File.delete()` | git 명령이 아니라 파일 삭제다. 마지막 이름은 따라가지 않는다 — `resolveWorkingTreeFile`은 링크를 끝까지 따라가는 편집기용 헬퍼라 링크가 아니라 대상 파일을 지운다 |
 | 커밋 | 아래 별도 절 | |
 
 HEAD 유무 판정은 WIP 행의 `parents.isEmpty`(loadWorkingTree가 이미 계산)를 쓴다 —
@@ -495,11 +500,10 @@ test`가 무결한 지점이다. 순수 로직을 앞에 놓는다. 실제 저�
 - `parses a -z rename record consuming the second NUL token` (`2` + `R100` + origPath)
 - `parses untracked, conflict, submodule and symlink records` (`?` / `u` UU / sub `S...` / mode 120000)
 - `merges numstat pairs onto the right axis and flags binary`
-- `derives section letters from the section's own axis` (MM → Unstaged 행 M, Staged 행 M / `.D` → D는 Unstaged만)
 - `keeps conflicted entries out of the staged section`
 
 (b) `lib/working_tree_status.dart`의 `WorkingTreeEntry`/`WorkingTreeStatus`/
-`parseStatusV2`/`areaFileChange` + numstat 병합 함수.
+`parseStatusV2` + numstat 병합 함수.
 (c) 완료: 위 테스트 초록, git 프로세스 0회.
 
 ### P2 · 헝크 패치 조립 (순수)
@@ -577,6 +581,7 @@ path and reloads files` 한 줄 추가).
 - `an untracked row carries the untracked chip and its discard dialog names deletion`
 - `a tracked discard dialog says staged changes survive, and confirming calls git`
 - `a conflicted row blocks commit and routes Stage File through the marker check`
+- `a row's letter comes from its own section's axis` (MM → Unstaged 행 M, Staged 행 M / `AM` → Unstaged M, Staged A / `.D` → D는 Unstaged만)
 - `the title counter turns orange past 50 without blocking`
 - `the commit button is disabled while staged is empty or the title is blank`
 - `--amend prefills the HEAD message, relabels the button, and warns on a pushed HEAD`
@@ -636,7 +641,7 @@ path and reloads files` 한 줄 추가).
 | Space가 제목 입력을 가로챔 | editable 포커스 가드 (P8 테스트) |
 | ⌘↵이 기존 Enter 토글에 먹힘 | Enter 분기에 modifier 가드 추가 (P8 테스트) |
 | status와 diff --find-renames의 rename 판정이 어긋남 | numstat·영역 diff에 `--find-renames=50%`를 일관 전달. 그래도 어긋나면 행 통계만 빠질 뿐 동작은 깨지지 않는다 |
-| untracked 삭제가 심볼릭 링크를 타고 저장소 밖을 지움 | `resolveWorkingTreeFile` 검증 후에만 삭제 (P3 테스트) |
+| untracked 삭제가 심볼릭 링크를 타고 저장소 밖을 지움 | 부모 디렉터리만 풀어 저장소 안임을 확인하고 마지막 이름은 따라가지 않는다 — 링크는 링크째 지워진다 (P3 테스트) |
 
 추측임을 밝혀 두는 것 하나: porcelain v2에서 rename이 작업 트리 축(`.R`)으로
 나오는 경우는 없다고 보고 설계했다(작업 트리 rename은 삭제+untracked로 갈라진다).

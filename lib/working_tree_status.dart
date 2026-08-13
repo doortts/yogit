@@ -3,11 +3,10 @@
 ///
 /// `GitFileChange` cannot hold that — its status is a single letter, and
 /// untrackedness rides on an `Expando` beside it — so the commit panel reads
-/// the two axes here and projects one of them into a `GitFileChange` when a
-/// diff view needs the older shape.
+/// the two axes here. A diff view that wants the older shape gets it from
+/// `WorkingTreeAreaRepository.loadAreaFiles`, which asks git for the one axis
+/// it is reading rather than projecting these entries.
 library;
-
-import 'git.dart' show GitFileChange;
 
 /// Which side of the index a row belongs to. Unstaged is worktree ↔ index,
 /// staged is index ↔ HEAD.
@@ -234,21 +233,4 @@ String extractHunkPatch(
     ...lines.getRange(start, end),
   ].join('\n');
   return result.endsWith('\n') ? result : '$result\n';
-}
-
-/// The `GitFileChange` [entry] shows as in [area], or null when that area does
-/// not hold it. The letter is the area's own axis — Unstaged reads Y, Staged
-/// reads X.
-GitFileChange? areaFileChange(WorkingTreeEntry entry, WorkingTreeArea area) {
-  final unstaged = area == WorkingTreeArea.unstaged;
-  if (unstaged ? !entry.inUnstaged : !entry.inStaged) return null;
-  final status = unstaged ? entry.worktreeStatus : entry.indexStatus;
-  return GitFileChange(
-    path: entry.path,
-    status: status,
-    oldPath: status == 'R' || status == 'C' ? entry.origPath : null,
-    additions: unstaged ? entry.unstagedAdditions : entry.stagedAdditions,
-    deletions: unstaged ? entry.unstagedDeletions : entry.stagedDeletions,
-    isBinary: unstaged ? entry.unstagedBinary : entry.stagedBinary,
-  );
 }

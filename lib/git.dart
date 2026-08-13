@@ -3558,16 +3558,16 @@ class GitRepository implements FullDiffRepository {
     if (parent != base && !parent.startsWith(prefix)) {
       throw FileSystemException('File escapes repository root', absolute);
     }
-    switch (await FileSystemEntity.type(absolute, followLinks: false)) {
-      case FileSystemEntityType.link:
-        await Link(absolute).delete();
-      case FileSystemEntityType.file:
-        await File(absolute).delete();
-      case _:
-        throw FileSystemException(
-          'Discard target is not a regular file',
-          absolute,
-        );
+    final type = await FileSystemEntity.type(absolute, followLinks: false);
+    if (type == FileSystemEntityType.link) {
+      await Link(absolute).delete();
+    } else if (type == FileSystemEntityType.file) {
+      await File(absolute).delete();
+    } else {
+      throw FileSystemException(
+        'Discard target is not a regular file',
+        absolute,
+      );
     }
   }
 
