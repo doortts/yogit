@@ -484,7 +484,10 @@ extension _TimelineCommitPanel on _TimelineScreenState {
     if (path == null) return;
     final entry = _commitEntryFor(path);
     final hasHead = _selectedCommit?.parents.isNotEmpty ?? true;
-    await _runCommitAction(
+    final at = _commitCursorRows.indexWhere(
+      (row) => row.area == area && row.path == path,
+    );
+    final done = await _runCommitAction(
       area == WorkingTreeArea.staged
           ? () => widget.repository.unstageFiles([
               path,
@@ -494,6 +497,33 @@ extension _TimelineCommitPanel on _TimelineScreenState {
           ? () => widget.repository.stageResolvedFile(path)
           : () => widget.repository.stageFiles([path]),
     );
+    if (!done || !mounted) return;
+    _rebuild(() => _commitCursor = _commitCursorAfter(area, path, at));
+  }
+
+  /// 조작이 끝난 목록에서 커서가 앉을 자리. 파일이 반대 축으로 넘어갔으면 그리로
+  /// 따라가고, 아직 같은 축에 남아 있으면(MM의 한쪽만 옮겨진 경우) 그대로 있으며,
+  /// 어느 쪽에도 없으면 그 파일이 있던 자리를 지킨다. 커서가 사라진 행에 남으면
+  /// 화면에 표시가 없고 ↑↓이 목록 맨 처음으로 튄다.
+  ({WorkingTreeArea area, String path})? _commitCursorAfter(
+    WorkingTreeArea area,
+    String path,
+    int at,
+  ) {
+    final rows = _commitCursorRows;
+    if (rows.isEmpty) return null;
+    for (final candidate in [
+      (
+        area: area == WorkingTreeArea.staged
+            ? WorkingTreeArea.unstaged
+            : WorkingTreeArea.staged,
+        path: path,
+      ),
+      (area: area, path: path),
+    ]) {
+      if (rows.contains(candidate)) return candidate;
+    }
+    return rows[at.clamp(0, rows.length - 1)];
   }
 
   /// 헝크 헤더가 다는 버튼. 축이 무엇을 걸 수 있는지 정하고, 헝크로 다룰 수 없는

@@ -76,6 +76,35 @@ void main() {
     entry('lib/c.dart', index: 'A', worktree: '.'),
   ]);
 
+  /// 경로마다 XY 두 글자를 든 아주 작은 저장소 모델. 스테이징이 목록을 실제로
+  /// 움직여야 같은 파일에 두 번 누르는 진짜 토글을 볼 수 있다.
+  WorkingTreeStatus statusOf(Map<String, String> axes) => WorkingTreeStatus([
+    for (final axis in axes.entries)
+      entry(axis.key, index: axis.value[0], worktree: axis.value[1]),
+  ]);
+
+  /// 작업 트리 쪽 글자가 인덱스로 넘어간다. 되돌리면 그 반대다.
+  String afterStage(String axes) => '${axes[1] == '.' ? axes[0] : axes[1]}.';
+  String afterUnstage(String axes) => '.${axes[0] == '.' ? axes[1] : axes[0]}';
+
+  /// 위 모델을 stage/unstage 콜백에 물린 저장소. [log]에 무엇이 불렸는지 남는다.
+  FakeGitRepository movingRepository(
+    Map<String, String> axes,
+    List<String> log,
+  ) => FakeGitRepository(
+    (_, _) async => [commit('1', 'first commit')],
+    workingTree: () async => workingTreeCommit('1'),
+    workingTreeStatus: () async => statusOf(axes),
+    stageFilesCallback: (paths) async {
+      log.add('stage ${paths.single}');
+      axes[paths.single] = afterStage(axes[paths.single]!);
+    },
+    unstageFilesCallback: (paths, hasHead) async {
+      log.add('unstage ${paths.single}');
+      axes[paths.single] = afterUnstage(axes[paths.single]!);
+    },
+  );
+
   GitFileChange change(String path) =>
       GitFileChange(path: path, status: 'M', additions: 1, deletions: 1);
 
@@ -158,45 +187,56 @@ void main() {
   testWidgets('Space toggles the cursor row between the sections', (
     tester,
   ) async {
-    final staged = <List<String>>[];
-    final unstaged = <(List<String>, bool)>[];
-    await pumpPanel(
-      tester,
-      FakeGitRepository(
-        (_, _) async => [commit('1', 'first commit')],
-        workingTree: () async => workingTreeCommit('1'),
-        workingTreeStatus: () async => bothSections(),
-        stageFilesCallback: (paths) async => staged.add(paths),
-        unstageFilesCallback: (paths, hasHead) async =>
-            unstaged.add((paths, hasHead)),
-      ),
-    );
+    final log = <String>[];
+    // 커서가 걷는 줄은 넷이다: (Unstaged a, b) 다음 (Staged a, c).
+    final axes = {'lib/a.dart': 'MM', 'lib/b.dart': '.M', 'lib/c.dart': 'A.'};
+    await pumpPanel(tester, movingRepository(axes, log));
 
     // 커서가 없으면 Space는 아무것도 하지 않는다.
     await tester.sendKeyEvent(LogicalKeyboardKey.space);
     await tester.pumpAndSettle();
-    expect(staged, isEmpty);
+    expect(log, isEmpty);
 
     await metaKey(tester, LogicalKeyboardKey.arrowDown);
     await metaKey(tester, LogicalKeyboardKey.arrowDown);
     expect(cursorOn(tester, WorkingTreeArea.unstaged, 'lib/b.dart'), isTrue);
 
-    // Unstaged 행의 Space는 Stage다.
+    // Unstaged 행의 Space는 Stage다. 파일이 인덱스로 넘어갔으니 커서도 따라간다.
     await tester.sendKeyEvent(LogicalKeyboardKey.space);
     await tester.pumpAndSettle();
-    expect(staged, [
-      ['lib/b.dart'],
-    ]);
-    expect(unstaged, isEmpty);
+    expect(log, ['stage lib/b.dart']);
+    expect(row(WorkingTreeArea.unstaged, 'lib/b.dart'), findsNothing);
+    expect(cursorOn(tester, WorkingTreeArea.staged, 'lib/b.dart'), isTrue);
 
     // Staged 행의 Space는 그 반대다.
-    await metaKey(tester, LogicalKeyboardKey.arrowDown);
+    await metaKey(tester, LogicalKeyboardKey.arrowUp);
     expect(cursorOn(tester, WorkingTreeArea.staged, 'lib/a.dart'), isTrue);
     await tester.sendKeyEvent(LogicalKeyboardKey.space);
     await tester.pumpAndSettle();
-    expect(unstaged.single.$1, ['lib/a.dart']);
-    expect(unstaged.single.$2, isTrue);
-    expect(staged, hasLength(1));
+    expect(log, ['stage lib/b.dart', 'unstage lib/a.dart']);
+    expect(cursorOn(tester, WorkingTreeArea.unstaged, 'lib/a.dart'), isTrue);
+  });
+
+  testWidgets('Space twice returns the file to where it started', (
+    tester,
+  ) async {
+    final log = <String>[];
+    final axes = {'lib/a.dart': '.M'};
+    await pumpPanel(tester, movingRepository(axes, log));
+
+    await metaKey(tester, LogicalKeyboardKey.arrowDown);
+    expect(cursorOn(tester, WorkingTreeArea.unstaged, 'lib/a.dart'), isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    expect(log, ['stage lib/a.dart']);
+    expect(cursorOn(tester, WorkingTreeArea.staged, 'lib/a.dart'), isTrue);
+
+    // 같은 파일에 한 번 더 누르면 되돌아온다 — Stage가 두 번 되는 것이 아니다.
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    expect(log, ['stage lib/a.dart', 'unstage lib/a.dart']);
+    expect(cursorOn(tester, WorkingTreeArea.unstaged, 'lib/a.dart'), isTrue);
   });
 
   testWidgets('Space typed into the title field stays a space', (tester) async {
