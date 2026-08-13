@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/timeline_palette.dart';
+import 'package:yogit/timeline_theme.dart';
 import 'package:yogit/window_frame.dart';
 import 'package:yogit/working_tree_status.dart';
 
@@ -108,6 +109,31 @@ void main() {
 
   bool enabled(WidgetTester tester, Key key) =>
       tester.widget<InkWell>(find.byKey(key)).onTap != null;
+
+  TimelineThemePalette palette(WidgetTester tester) =>
+      TimelineThemePalette.of(tester.element(find.byKey(const Key('commit-panel'))));
+
+  /// 행 배경을 칠하는 Container — 시안의 `.frow`.
+  Color? rowColor(WidgetTester tester, WorkingTreeArea area, String path) =>
+      tester
+          .widget<Container>(
+            find
+                .descendant(of: row(area, path), matching: find.byType(Container))
+                .first,
+          )
+          .color;
+
+  /// 커서가 앉은 행만 `.frow.selected`의 배경을 얻는다.
+  bool cursorOn(WidgetTester tester, WorkingTreeArea area, String path) =>
+      rowColor(tester, area, path) == palette(tester).selectedRow;
+
+  /// 타임라인이 키보드를 든 채로도 ⌘↑↓은 커밋 패널의 커서를 걷는다.
+  Future<void> metaKey(WidgetTester tester, LogicalKeyboardKey key) async {
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(key);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+  }
 
   testWidgets('selecting the WIP row turns the preview into the commit panel', (
     tester,
@@ -451,6 +477,53 @@ void main() {
     await tester.tap(find.byKey(const Key('commit-stage-all')));
     await tester.pumpAndSettle();
     expect(staged, [<String>[]]);
+  });
+
+  testWidgets('the cursor lands on the next row when Discard removes the one it sat on', (
+    tester,
+  ) async {
+    var status = WorkingTreeStatus([
+      entry('lib/a.dart'),
+      entry('lib/b.dart'),
+      entry('lib/c.dart'),
+    ]);
+    await pumpPanel(
+      tester,
+      FakeGitRepository(
+        (_, _) async => [commit('1', 'first commit')],
+        workingTree: () async => workingTreeCommit('1'),
+        workingTreeStatus: () async => status,
+        discardWorktreeFileCallback: (path, _) async => status =
+            WorkingTreeStatus([entry('lib/a.dart'), entry('lib/c.dart')]),
+      ),
+    );
+
+    // 가운데 행에 커서를 앉힌다.
+    await metaKey(tester, LogicalKeyboardKey.arrowDown);
+    await metaKey(tester, LogicalKeyboardKey.arrowDown);
+    expect(cursorOn(tester, WorkingTreeArea.unstaged, 'lib/b.dart'), isTrue);
+
+    await hoverOver(tester, row(WorkingTreeArea.unstaged, 'lib/b.dart'));
+    await tester.tap(find.byKey(const Key('commit-discard-lib/b.dart')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('commit-discard-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(row(WorkingTreeArea.unstaged, 'lib/b.dart'), findsNothing);
+    expect(
+      cursorOn(tester, WorkingTreeArea.unstaged, 'lib/c.dart'),
+      isTrue,
+      reason: '버린 행이 있던 자리를 다음 파일이 잇는다',
+    );
+
+    // 커서가 사라진 경로에 남아 있으면 여기서 목록 맨 처음으로 튄다.
+    await metaKey(tester, LogicalKeyboardKey.arrowDown);
+    expect(cursorOn(tester, WorkingTreeArea.unstaged, 'lib/a.dart'), isFalse);
+    expect(
+      cursorOn(tester, WorkingTreeArea.unstaged, 'lib/c.dart'),
+      isTrue,
+      reason: '마지막 행에서 ↓은 제자리다',
+    );
   });
 
   testWidgets('Unstage All is disabled while a conflict is unresolved', (

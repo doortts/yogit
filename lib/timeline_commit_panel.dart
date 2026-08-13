@@ -1039,6 +1039,14 @@ extension _TimelineCommitPanel on _TimelineScreenState {
   /// 않는 함정이라 여기서 끊는다. 커밋 모드로 열린 diff는 파일 목록도 패치도
   /// 낡았으므로 같이 다시 읽는다.
   Future<void> _reloadCommitMode({bool timelineToo = false}) async {
+    // 조작이 커서 행 자체를 버렸을 수 있다. 모든 조작이 여기를 지나므로 복구도
+    // 여기 하나로 둔다 — 자리는 조작 이전 목록에서 재어야 한다.
+    final was = _commitCursor;
+    final at = was == null
+        ? -1
+        : _commitCursorRows.indexWhere(
+            (row) => row.area == was.area && row.path == was.path,
+          );
     _rebuild(() {
       _commitStatusRequest = _readWorkingTreeStatus();
       _previewFiles.remove('');
@@ -1055,6 +1063,15 @@ extension _TimelineCommitPanel on _TimelineScreenState {
       return;
     }
     if (!mounted) return;
+    if (was != null && !_commitCursorRows.contains(was)) {
+      _rebuild(
+        () => _commitCursor = _commitCursorAfter(
+          was.area,
+          was.path,
+          at < 0 ? 0 : at,
+        ),
+      );
+    }
     if (_fullDiffSession case final session?
         when session.repository is WorkingTreeAreaRepository) {
       await session.refreshWorkingTree();
