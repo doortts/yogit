@@ -194,12 +194,40 @@ void main() {
 
     expect(File('${root.path}/fresh.txt').existsSync(), isFalse);
 
+    // 링크를 discard하면 링크만 사라진다 — 저장소 밖의 대상은 그대로다.
+    await repository.discardWorktreeFile('escape.txt', untracked: true);
+
+    expect(Link('${root.path}/escape.txt').existsSync(), isFalse);
+    expect(await secret.readAsString(), 'keep\n');
+
+    // 부모 디렉터리가 저장소 밖으로 새는 경로는 거부한다.
+    await Link('${root.path}/outdir').create(outside.path);
+
     await expectLater(
-      repository.discardWorktreeFile('escape.txt', untracked: true),
+      repository.discardWorktreeFile('outdir/secret.txt', untracked: true),
       throwsA(isA<FileSystemException>()),
     );
 
     expect(await secret.readAsString(), 'keep\n');
+  });
+
+  test('discarding an untracked symlink deletes the link, not its target', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await writeAndCommit(root, 'precious.txt', 'keep\n', 'base');
+    await Link('${root.path}/link.txt').create('precious.txt');
+
+    await GitRepository(
+      root.path,
+    ).discardWorktreeFile('link.txt', untracked: true);
+
+    expect(File('${root.path}/precious.txt').existsSync(), isTrue);
+    expect(await File('${root.path}/precious.txt').readAsString(), 'keep\n');
+    expect(
+      await runGit(root, ['status', '--porcelain']),
+      isNot(contains(' D precious.txt')),
+    );
+    expect(Link('${root.path}/link.txt').existsSync(), isFalse);
   });
 
   test('commitIndex creates the commit with title and body and returns HEAD', () async {

@@ -3536,8 +3536,11 @@ class GitRepository implements FullDiffRepository {
   /// Throws away the worktree change to [path]. A tracked path is restored
   /// from the index, so a staged change survives and a worktree deletion comes
   /// back. An [untracked] path has no index copy to restore, so discarding it
-  /// is deleting it — `resolveWorkingTreeFile` is what keeps that delete from
-  /// following a link out of the repository.
+  /// is deleting it.
+  ///
+  /// The delete resolves the parent directory only, so a path can still not
+  /// lead out of the repository, while the last name is never followed: a
+  /// symlink is unlinked itself instead of its target being deleted.
   Future<void> discardWorktreeFile(
     String path, {
     bool untracked = false,
@@ -3546,7 +3549,26 @@ class GitRepository implements FullDiffRepository {
       await _run(['restore', '--', ':(literal)$path']);
       return;
     }
-    await (await resolveWorkingTreeFile(root, path)).delete();
+    final absolute = '$root${Platform.pathSeparator}$path';
+    final base = await Directory(root).resolveSymbolicLinks();
+    final parent = await File(absolute).parent.resolveSymbolicLinks();
+    final prefix = base.endsWith(Platform.pathSeparator)
+        ? base
+        : '$base${Platform.pathSeparator}';
+    if (parent != base && !parent.startsWith(prefix)) {
+      throw FileSystemException('File escapes repository root', absolute);
+    }
+    switch (await FileSystemEntity.type(absolute, followLinks: false)) {
+      case FileSystemEntityType.link:
+        await Link(absolute).delete();
+      case FileSystemEntityType.file:
+        await File(absolute).delete();
+      case _:
+        throw FileSystemException(
+          'Discard target is not a regular file',
+          absolute,
+        );
+    }
   }
 
   /// Commits the index and returns the new HEAD. [message] is passed as one
