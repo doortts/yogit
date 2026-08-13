@@ -36,6 +36,36 @@ void main() {
     ),
   );
 
+  /// 열 사이를 가르는 선은 마지막 열의 오른쪽에서 그친다. 목록의 끝은 창이
+  /// 이미 그어 두었으니, 거기 한 줄을 더 그으면 두 줄로 보인다.
+  testWidgets('the rightmost column heading draws no rule of its own', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      timeline(
+        controller: WindowFrameController(
+          channel: const MethodChannel('test/yogit-window'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    BorderSide rightRule(String column) {
+      final box = tester.widget<Container>(
+        find
+            .descendant(
+              of: find.byKey(Key('$column-header')),
+              matching: find.byType(Container),
+            )
+            .first,
+      );
+      return ((box.decoration! as BoxDecoration).border! as Border).right;
+    }
+
+    expect(rightRule('name'), BorderSide.none, reason: '맨 오른쪽 열');
+    expect(rightRule('commit').color, isNot(BorderSide.none.color));
+  });
+
   testWidgets('the hash rule is a one pixel hairline', (tester) async {
     await tester.pumpWidget(
       timeline(

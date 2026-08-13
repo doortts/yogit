@@ -480,7 +480,14 @@ extension _TimelineChrome on _TimelineScreenState {
                   color: _palette.panel,
                   border: Border(
                     bottom: BorderSide(color: _palette.border),
-                    right: BorderSide(color: _palette.border),
+                    // 열 사이를 가르는 선이라, 마지막 열의 오른쪽에는 가를
+                    // 것이 없다. 그 자리는 목록의 끝이고 그 끝은 이미 창이
+                    // 그어 두었으니, 한 줄 더 그으면 두 줄로 보인다.
+                    right:
+                        timelineColumns.keys.where(_columnVisible).last ==
+                            column
+                        ? BorderSide.none
+                        : BorderSide(color: _palette.border),
                   ),
                 ),
                 child: Row(
