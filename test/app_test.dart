@@ -3240,6 +3240,7 @@ void main() {
                     'config',
                     'for-each-ref',
                     'rev-parse',
+                    'reflog',
                   }.contains(arguments.first)) {
                     calls.add(arguments);
                   }
@@ -3325,6 +3326,7 @@ void main() {
                     'config',
                     'for-each-ref',
                     'rev-parse',
+                    'reflog',
                   }.contains(arguments.first)) {
                     calls.add(arguments);
                   }
@@ -3441,6 +3443,137 @@ void main() {
       await tester.pump(const Duration(seconds: 5));
       await tester.pumpAndSettle();
     });
+  });
+
+  testWidgets('the REMOTE header fetches on demand', (tester) async {
+    final remotes = <String>[];
+    final gate = <Completer<FetchOriginResult>>[];
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(
+            local: ['main'],
+            remote: ['origin/main'],
+            remoteNames: ['origin'],
+            current: 'main',
+          ),
+          fetchRemoteCallback: (remote) {
+            remotes.add(remote);
+            final pending = Completer<FetchOriginResult>();
+            gate.add(pending);
+            return pending.future;
+          },
+        ),
+        controller,
+      ),
+    );
+    await tester.pump();
+    gate.single.complete(FetchOriginResult.unchanged);
+    await tester.pumpAndSettle();
+    expect(remotes, ['origin']);
+
+    final refresh = find.byKey(const Key('sidebar-remote-refresh'));
+    await tester.ensureVisible(refresh);
+    await tester.tap(refresh);
+    await tester.pump();
+
+    // 도는 동안에는 다시 누를 수 없고, 도는 것이 보인다.
+    expect(remotes, ['origin', 'origin']);
+    expect(
+      tester.widget<IconButton>(refresh).onPressed,
+      isNull,
+      reason: '한 번에 하나만 돈다',
+    );
+
+    gate.last.complete(FetchOriginResult.unchanged);
+    await tester.pumpAndSettle();
+    expect(tester.widget<IconButton>(refresh).onPressed, isNotNull);
+  });
+
+  testWidgets('⌘R fetches the remotes too', (tester) async {
+    final remotes = <String>[];
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(
+            local: ['main'],
+            remote: ['origin/main'],
+            remoteNames: ['origin'],
+            current: 'main',
+          ),
+          fetchRemoteCallback: (remote) async {
+            remotes.add(remote);
+            return FetchOriginResult.unchanged;
+          },
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(remotes, ['origin']);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyR);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
+    await tester.pumpAndSettle();
+
+    expect(remotes, ['origin', 'origin']);
+  });
+
+  testWidgets('a repository with no remote cannot be refreshed', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(local: ['main'], current: 'main'),
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final refresh = find.byKey(const Key('sidebar-remote-refresh'));
+    await tester.ensureVisible(refresh);
+    expect(tester.widget<IconButton>(refresh).onPressed, isNull);
+  });
+
+  testWidgets('a disabled refresh swallows the tap meant for it', (
+    tester,
+  ) async {
+    final pending = Completer<FetchOriginResult>();
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refs: const RepoRefs(
+            local: ['main'],
+            remote: ['origin/main'],
+            remoteNames: ['origin'],
+            current: 'main',
+          ),
+          // 열자마자 나간 fetch가 아직 안 끝났으니 버튼은 눌리지 않는다.
+          fetchRemoteCallback: (_) => pending.future,
+        ),
+        controller,
+      ),
+    );
+    await tester.pump();
+
+    final refresh = find.byKey(const Key('sidebar-remote-refresh'));
+    await tester.ensureVisible(refresh);
+    expect(tester.widget<IconButton>(refresh).onPressed, isNull);
+    await tester.tap(refresh);
+    await tester.pump();
+
+    // 눌리지 않는 버튼의 탭이 뒤로 새면 그 뒤의 머리줄이 섹션을 접는다.
+    expect(find.byKey(const Key('sidebar-ref-origin/main')), findsOneWidget);
+
+    pending.complete(FetchOriginResult.unchanged);
+    await tester.pumpAndSettle();
   });
 
   testWidgets('a remote nobody tracks is refreshed too', (tester) async {

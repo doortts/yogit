@@ -1496,6 +1496,11 @@ class _TimelineScreenState extends State<TimelineScreen>
       _openSearch();
       return KeyEventResult.handled;
     }
+    // ⌘R 원격 새로고침. 사이드바 REMOTE 머리줄의 버튼과 같은 자리로 간다.
+    if (event.logicalKey == LogicalKeyboardKey.keyR && shortcutModifierHeld) {
+      _refreshRemotesNow();
+      return KeyEventResult.handled;
+    }
     // ⌘` 콘솔. 편집 중에도 열려야 한다 — 방금 무엇이 나갔는지 보려는 것이다.
     if (event.logicalKey == LogicalKeyboardKey.backquote &&
         shortcutModifierHeld) {
@@ -1969,6 +1974,24 @@ class _TimelineScreenState extends State<TimelineScreen>
         );
       },
     );
+  }
+
+  /// Whether asking for a refresh right now would actually send anything.
+  /// A fetch already in flight, a repository with no remote, and the middle of
+  /// a cherry-pick are all reasons [_refreshRemotes] would return without a
+  /// word — the button says so instead of taking a press that does nothing.
+  bool get _canRefreshRemotesNow =>
+      !_fetchingRemotes.value &&
+      _cherryPickState == null &&
+      _remotesToRefresh.isNotEmpty;
+
+  /// The manual remote refresh, named so the console says who asked. Runs even
+  /// when the timer has just run: pressing it is the point.
+  void _refreshRemotesNow() {
+    if (!_canRefreshRemotesNow) return;
+    final log = widget.commandLog;
+    if (log == null) return unawaited(_refreshRemotes());
+    log.runNamed('원격 새로고침', () => unawaited(_refreshRemotes()));
   }
 
   void _toggleConsole() {

@@ -1265,6 +1265,7 @@ extension _TimelineSidebarFlows on _TimelineScreenState {
                   ),
                 ),
               ),
+              if (section == _RefSection.remote) _remoteRefreshButton(),
               SizedBox(
                 key: Key('sidebar-section-count-${section.name}'),
                 child: Text(
@@ -1294,6 +1295,54 @@ extension _TimelineSidebarFlows on _TimelineScreenState {
       yield _tagOverflowRow(hiddenTagCount);
     }
   }
+
+  /// Fetches every remote the section lists, now. The three-minute timer and
+  /// the catch-up on coming back to the window are both about not having to
+  /// think about it; this is for the moment you know something landed and are
+  /// not going to wait to find out.
+  Widget _remoteRefreshButton() => ValueListenableBuilder<bool>(
+    valueListenable: _fetchingRemotes,
+    builder: (context, fetching, _) {
+      final idle = _canRefreshRemotesNow;
+      return Tooltip(
+        message: fetching
+            ? '원격을 가져오는 중'
+            : _cherryPickState != null
+            ? 'Cherry-pick을 마친 뒤 가져옵니다'
+            : _remotesToRefresh.isEmpty
+            ? '가져올 원격이 없습니다'
+            : '원격 새로고침 (⌘R)',
+        // 눌리지 않는 버튼은 제스처를 걸지 않아서, 그대로 두면 그 탭이 뒤의
+        // 머리줄로 새어 섹션이 접힌다. 자리를 막는 것도 이 버튼의 일이다.
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {},
+          child: SizedBox(
+            width: 22,
+            height: 20,
+            child: IconButton(
+              key: const Key('sidebar-remote-refresh'),
+              // 같은 글리프가 흐려질 뿐 — 도는 표시를 두면 fetch가 도는 내내
+              // 사이드바가 매 프레임 다시 그려진다.
+              icon: Icon(
+                Icons.refresh,
+                size: 14,
+                color: idle
+                    ? _palette.text.withValues(alpha: 0.82)
+                    : _palette.muted.withValues(alpha: 0.45),
+              ),
+              onPressed: idle ? _refreshRemotesNow : null,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints.tightFor(width: 22, height: 20),
+              style: IconButton.styleFrom(
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
 
   /// The names a section shows, after tag ordering/projection and the filter.
   /// Shared with [_visibleRefRows] so keyboard navigation walks exactly the
