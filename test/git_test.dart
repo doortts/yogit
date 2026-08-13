@@ -3955,6 +3955,64 @@ void main() {
     },
   );
 
+  /// 원격 ref 삭제는 refspec 모양이 전부다. 실제 저장소에 대고 지워 봐야 그 모양이
+  /// 맞는지 알 수 있으므로 흉내 runner가 아니라 진짜 원격에 붙는다.
+  test('deleteRemoteRef takes a branch off the remote', () async {
+    final fixture = await _upstreamFixture();
+    await _git(fixture.root, ['push', 'origin', 'main:refs/heads/lane']);
+    final repository = GitRepository(fixture.root.path);
+
+    await repository.deleteRemoteRef('origin', 'refs/heads/lane');
+
+    final remoteBranches = await _git(fixture.remote, [
+      'for-each-ref',
+      '--format=%(refname)',
+      'refs/heads/',
+    ]);
+    expect(remoteBranches, isNot(contains('refs/heads/lane')));
+    expect(remoteBranches, contains('refs/heads/main'), reason: 'main은 남는다');
+  });
+
+  test('a tag dies locally first and on the remote only when asked', () async {
+    final fixture = await _upstreamFixture();
+    await _git(fixture.root, ['tag', 'v1.0']);
+    await _git(fixture.root, ['push', 'origin', 'v1.0']);
+    final repository = GitRepository(fixture.root.path);
+    Future<String> remoteTags() => _git(fixture.remote, [
+      'for-each-ref',
+      '--format=%(refname)',
+      'refs/tags/',
+    ]);
+
+    await repository.deleteTag('v1.0');
+    expect((await _git(fixture.root, ['tag', '--list'])).trim(), isEmpty);
+    expect(
+      await remoteTags(),
+      contains('refs/tags/v1.0'),
+      reason: '로컬 삭제는 원격 태그를 건드리지 않는다',
+    );
+
+    await repository.deleteRemoteRef('origin', 'refs/tags/v1.0');
+    expect((await remoteTags()).trim(), isEmpty);
+  });
+
+  /// 완전한 ref 이름으로 지우면 원격에 그 ref가 없어도 git은 경고만 남기고 성공한다
+  /// (짧은 이름으로 지울 때만 "remote ref does not exist"로 거절한다). 태그를
+  /// 원격에서도 지우는 흐름이 이 성질에 기대고 있다 — 원격에 태그가 있었는지 미리
+  /// 물어보지 않아도 된다.
+  test(
+    'deleting a fully qualified ref the remote lacks still succeeds',
+    () async {
+      final fixture = await _upstreamFixture();
+      final repository = GitRepository(fixture.root.path);
+
+      await expectLater(
+        repository.deleteRemoteRef('origin', 'refs/tags/never-pushed'),
+        completes,
+      );
+    },
+  );
+
   test('removeWorktree force-removes the checkout', () async {
     final calls = <List<String>>[];
     final repository = GitRepository(

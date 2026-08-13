@@ -130,13 +130,26 @@ extension _TimelineSidebar on _TimelineScreenState {
                     height: 16,
                     child: VerticalDivider(width: 9, color: _palette.border),
                   ),
+                  // One button, three reaches: the local branch, the remote's
+                  // own copy, the tag. The tooltip says which one it is about
+                  // to take, since they are not the same kind of loss.
                   button(
                     key: const Key('sidebar-action-delete'),
                     icon: Icons.delete_outline,
-                    tooltip: '브랜치 삭제',
+                    tooltip: switch (section) {
+                      _RefSection.remote => '원격 브랜치 삭제',
+                      _RefSection.tags => '태그 삭제',
+                      _ => '브랜치 삭제',
+                    },
                     color: remoteBehindRed,
-                    onPressed: isLocal && !current && !busy
+                    onPressed: busy || name == null
+                        ? null
+                        : isLocal && !current
                         ? () => unawaited(_confirmDeleteBranch(name))
+                        : isRemote
+                        ? () => unawaited(_confirmDeleteRemoteBranch(name))
+                        : section == _RefSection.tags
+                        ? () => unawaited(_confirmDeleteTag(name))
                         : null,
                   ),
                 ],
@@ -348,6 +361,14 @@ extension _TimelineSidebar on _TimelineScreenState {
             onPressed: current || busy
                 ? null
                 : () => unawaited(_confirmDeleteBranch(name)),
+          ),
+        if (section == _RefSection.tags)
+          RefMenuAction(
+            key: Key('sidebar-menu-delete-$name'),
+            title: '태그 삭제',
+            subtitle: _tagRemote == null ? null : '원격에서도 지울지 물어봅니다',
+            danger: true,
+            onPressed: busy ? null : () => unawaited(_confirmDeleteTag(name)),
           ),
       ],
     );
@@ -1054,6 +1075,11 @@ extension _TimelineSidebar on _TimelineScreenState {
                                               ),
                                               onCompare: () => unawaited(
                                                 _selectComparison(name),
+                                              ),
+                                              onDelete: () => unawaited(
+                                                _confirmDeleteRemoteBranch(
+                                                  name,
+                                                ),
                                               ),
                                             )
                                           // A remote belonging to no known

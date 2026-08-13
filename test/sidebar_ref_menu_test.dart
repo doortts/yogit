@@ -9,6 +9,21 @@ import 'app_test.dart' show FakeGitRepository, app, commit;
 
 /// 로컬 브랜치와 태그 이름도 더블클릭하면 원격 행처럼 메뉴가 열린다. 메뉴는 그
 /// ref가 할 수 있는 일만 눌리게 두고, 못 하는 일은 자리에 남긴 채 흐리게 둔다.
+/// 삭제는 세 섹션이 각각 다른 것을 지운다 — 로컬 브랜치, 원격의 브랜치, 태그.
+class _RecordingRepository extends FakeGitRepository {
+  _RecordingRepository(super.loader, {required super.refs});
+
+  /// 지운 것들을 시킨 순서대로. 원격이 먼저인지도 이 목록이 말해 준다.
+  final deleted = <String>[];
+
+  @override
+  Future<void> deleteRemoteRef(String remote, String qualifiedRef) async =>
+      deleted.add('$remote $qualifiedRef');
+
+  @override
+  Future<void> deleteTag(String tag) async => deleted.add('tag $tag');
+}
+
 void main() {
   late WindowFrameController controller;
 
@@ -20,19 +35,21 @@ void main() {
 
   const refs = RepoRefs(
     local: ['main', 'lane'],
+    remote: ['origin/lane'],
+    remoteNames: ['origin'],
     tags: ['v1.0'],
     current: 'main',
-    tips: {'main': '1', 'lane': '1', 'v1.0': '1'},
+    tips: {'main': '1', 'lane': '1', 'origin/lane': '1', 'v1.0': '1'},
   );
 
-  Future<void> pump(WidgetTester tester) async {
-    await tester.pumpWidget(
-      app(
-        FakeGitRepository((_, _) async => [commit('1', 'c')], refs: refs),
-        controller,
-      ),
+  Future<_RecordingRepository> pump(WidgetTester tester) async {
+    final repository = _RecordingRepository(
+      (_, _) async => [commit('1', 'c')],
+      refs: refs,
     );
+    await tester.pumpWidget(app(repository, controller));
     await tester.pumpAndSettle();
+    return repository;
   }
 
   Future<void> doubleTap(WidgetTester tester, String name) async {
@@ -40,6 +57,11 @@ void main() {
     await tester.tap(row);
     await tester.pump(kDoubleTapMinTime);
     await tester.tap(row);
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> tapKey(WidgetTester tester, String key) async {
+    await tester.tap(find.byKey(Key(key)));
     await tester.pumpAndSettle();
   }
 
@@ -82,7 +104,7 @@ void main() {
     expect(actionOf(tester, 'sidebar-menu-hide-main'), isNull);
   });
 
-  testWidgets('a tag offers the comparison and no branch action', (
+  testWidgets('a tag offers the comparison and its own deletion', (
     tester,
   ) async {
     await pump(tester);
@@ -90,9 +112,63 @@ void main() {
 
     expect(find.byKey(const Key('sidebar-menu-header-v1.0')), findsOneWidget);
     expect(actionOf(tester, 'sidebar-menu-compare-v1.0'), isNotNull);
-    // 태그는 체크아웃·기준·삭제의 대상이 아니라 항목 자체가 없다.
+    expect(actionOf(tester, 'sidebar-menu-delete-v1.0'), isNotNull);
+    // 태그는 체크아웃 대상도 기준도 아니라 항목 자체가 없다.
     expect(find.byKey(const Key('sidebar-menu-checkout-v1.0')), findsNothing);
     expect(find.byKey(const Key('sidebar-menu-base-v1.0')), findsNothing);
-    expect(find.byKey(const Key('sidebar-menu-delete-v1.0')), findsNothing);
+  });
+
+  testWidgets('the remote branch deletion goes up to the remote', (
+    tester,
+  ) async {
+    final repository = await pump(tester);
+    await doubleTap(tester, 'origin/lane');
+    expect(actionOf(tester, 'remote-pull-delete'), isNotNull);
+
+    await tapKey(tester, 'remote-pull-delete');
+    // 원격을 건드리는 유일한 삭제다 — 무엇이 사라지는지 먼저 말한다.
+    expect(find.text('원격 브랜치를 삭제할까요?'), findsOneWidget);
+    expect(repository.deleted, isEmpty, reason: '묻는 동안에는 아무것도 지우지 않는다');
+
+    await tapKey(tester, 'delete-remote-branch-confirm');
+
+    expect(repository.deleted, ['origin refs/heads/lane']);
+    expect(find.textContaining('origin/lane 삭제됨'), findsOneWidget);
+  });
+
+  testWidgets('a tag can die locally alone or on the remote too', (
+    tester,
+  ) async {
+    final repository = await pump(tester);
+    await doubleTap(tester, 'v1.0');
+    await tapKey(tester, 'sidebar-menu-delete-v1.0');
+
+    // 원격이 있으면 두 반경을 함께 내민다: 로컬만, 아니면 원격까지.
+    expect(find.byKey(const Key('delete-tag-confirm')), findsOneWidget);
+    expect(find.byKey(const Key('delete-tag-remote-confirm')), findsOneWidget);
+
+    await tapKey(tester, 'delete-tag-confirm');
+    expect(repository.deleted, ['tag v1.0']);
+
+    repository.deleted.clear();
+    await doubleTap(tester, 'v1.0');
+    await tapKey(tester, 'sidebar-menu-delete-v1.0');
+    await tapKey(tester, 'delete-tag-remote-confirm');
+
+    // 원격이 먼저다: 거절당하면 태그는 양쪽에 그대로 남는다.
+    expect(repository.deleted, ['origin refs/tags/v1.0', 'tag v1.0']);
+  });
+
+  testWidgets('the strip deletes whatever kind of ref the cursor holds', (
+    tester,
+  ) async {
+    final repository = await pump(tester);
+    await tester.tap(find.byKey(const Key('sidebar-ref-origin/lane')));
+    await tester.pumpAndSettle();
+
+    await tapKey(tester, 'sidebar-action-delete');
+    await tapKey(tester, 'delete-remote-branch-confirm');
+
+    expect(repository.deleted, ['origin refs/heads/lane']);
   });
 }

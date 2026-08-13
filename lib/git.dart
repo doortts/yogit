@@ -5003,6 +5003,28 @@ class GitRepository implements FullDiffRepository {
   Future<void> deleteLocalBranch(String branch) =>
       _run(['branch', '-D', branch]);
 
+  /// Deletes a local tag. The remote's copy of the same tag is a separate ask —
+  /// [deleteRemoteRef].
+  Future<void> deleteTag(String tag) => _run(['tag', '-d', tag]);
+
+  /// Deletes a ref on [remote]: `push --delete`. [qualifiedRef] is the ref's
+  /// full name (`refs/heads/main`, `refs/tags/v1.0`) so a branch and a tag
+  /// answering to the same name are never confused for each other.
+  ///
+  /// The only sidebar action that changes something outside this repository.
+  /// A ref the remote does not hold is not a failure — git warns and succeeds
+  /// when the name is fully qualified — so a caller deleting a tag on both
+  /// sides need not ask the remote first whether it has one.
+  Future<void> deleteRemoteRef(String remote, String qualifiedRef) =>
+      _runWithoutPrompts([
+        '-c',
+        'credential.interactive=never',
+        'push',
+        '--delete',
+        remote,
+        qualifiedRef,
+      ]);
+
   /// Switches the checkout to an existing local branch.
   Future<void> checkoutLocalBranch(String branch) => _run(['switch', branch]);
 

@@ -27,6 +27,7 @@ class RemotePullMenu extends StatelessWidget {
     required this.onPull,
     required this.onCheckout,
     required this.onCompare,
+    required this.onDelete,
     this.controller,
     super.key,
   });
@@ -40,6 +41,9 @@ class RemotePullMenu extends StatelessWidget {
   final VoidCallback onPull;
   final VoidCallback onCheckout;
   final VoidCallback onCompare;
+
+  /// `push --delete`: the ref leaves the remote itself.
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -111,6 +115,15 @@ class RemotePullMenu extends StatelessWidget {
         for (final entry in ordered)
           if (entry.$2 case final action?)
             if (entry.$1 != defaultAction) action,
+        // Last, past the separator, and never the default — the deletion
+        // reaches the remote itself.
+        RefMenuAction(
+          key: const Key('remote-pull-delete'),
+          title: '원격 브랜치 삭제',
+          subtitle: '${state.remote}에서 지웁니다',
+          danger: true,
+          onPressed: onDelete,
+        ),
       ],
     );
   }

@@ -2308,6 +2308,110 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
   }
 
+  /// Deletes a remote branch — the one sidebar action that changes something
+  /// outside this repository, so the dialog says so before the button does it.
+  /// The local branch it tracks is left where it stands.
+  Future<void> _confirmDeleteRemoteBranch(String remoteBranch) async {
+    final split = splitRemoteBranchName(remoteBranch, _refs.remoteNames);
+    if (split == null) return;
+    final approved = await showYogitAlert<bool>(
+      context,
+      YogitAlert(
+        title: '원격 브랜치를 삭제할까요?',
+        message: remoteBranch,
+        detail:
+            '${split.remote}에서 ${split.branch} 브랜치가 사라집니다. 같은 원격을 쓰는 다른 '
+            '사람에게도 사라집니다. 로컬 브랜치는 그대로 남습니다.',
+        role: YogitAlertRole.destructive,
+        confirmLabel: '삭제',
+        confirmKey: const Key('delete-remote-branch-confirm'),
+      ),
+    );
+    if (approved != true || !mounted) return;
+    await _deletingRef(
+      () => widget.repository.deleteRemoteRef(
+        split.remote,
+        'refs/heads/${split.branch}',
+      ),
+      done: '$remoteBranch 삭제됨',
+      failed: '원격 브랜치 삭제 실패',
+    );
+  }
+
+  /// Where a tag's own copy would be pushed or deleted: what the branch's
+  /// upstream says for a branch has no counterpart on a tag, so this follows
+  /// the same last convention — the one remote if there is only one, else
+  /// `origin` when it exists. Null leaves the deletion local-only.
+  String? get _tagRemote => _refs.remoteNames.length == 1
+      ? _refs.remoteNames.single
+      : _refs.remoteNames.contains('origin')
+      ? 'origin'
+      : null;
+
+  /// A tag deleted here alone comes back with the next fetch while the remote
+  /// still holds it, so the dialog offers both reaches: the local delete as the
+  /// safe primary, the remote one tinted beside it.
+  Future<void> _confirmDeleteTag(String tag) async {
+    final remote = _tagRemote;
+    final answer = await showYogitAlert<Object>(
+      context,
+      YogitAlert(
+        title: '태그를 삭제할까요?',
+        message: tag,
+        detail: remote == null
+            ? '이 저장소에서 태그가 사라집니다. 태그가 가리키던 커밋은 그대로 남습니다.'
+            : '로컬에서만 지우면 $remote에 남은 같은 태그가 다음 fetch에 돌아옵니다.',
+        role: remote == null
+            ? YogitAlertRole.destructive
+            : YogitAlertRole.normal,
+        confirmLabel: remote == null ? '삭제' : '로컬에서만 삭제',
+        confirmKey: const Key('delete-tag-confirm'),
+        destructiveLabel: remote == null ? null : '원격에서도 삭제',
+        destructiveKey: const Key('delete-tag-remote-confirm'),
+      ),
+    );
+    if (answer == null || !mounted) return;
+    final alsoRemote = answer == 'destructive' && remote != null;
+    await _deletingRef(
+      () async {
+        // The remote goes first: a refused push leaves the tag standing on both
+        // sides, which is one state to retry from rather than two. A remote
+        // that never held this tag is not a refusal — git warns and succeeds.
+        if (alsoRemote) {
+          await widget.repository.deleteRemoteRef(remote, 'refs/tags/$tag');
+        }
+        await widget.repository.deleteTag(tag);
+      },
+      done: alsoRemote ? '$tag 태그 삭제됨 · $remote에서도 삭제' : '$tag 태그 삭제됨',
+      failed: '태그 삭제 실패',
+    );
+  }
+
+  /// Runs a ref deletion and reloads the page whole: the ref that just died may
+  /// have been the timeline's base or decorated a loaded row, so patching refs
+  /// in place would leave the graph pointing at something gone.
+  Future<void> _deletingRef(
+    Future<void> Function() delete, {
+    required String done,
+    required String failed,
+  }) async {
+    try {
+      await _changingRepository(() async {
+        await delete();
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(done)));
+        await _reloadTimelineAfterCherryPick(null);
+      });
+    } on ProcessException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$failed: ${error.message.trim()}')),
+      );
+    }
+  }
+
   // ---------------------------------------------------------------- sidebar
 
   /// Hangs a key-combination badge under [child] while the command modifier
