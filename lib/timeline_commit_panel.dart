@@ -159,9 +159,10 @@ extension _TimelineCommitPanel on _TimelineScreenState {
     required bool blocked,
   }) {
     final unstaged = area == WorkingTreeArea.unstaged;
+    final dead = blocked || _commitModeBusy || entries.isEmpty;
     final button = InkWell(
       key: Key(unstaged ? 'commit-stage-all' : 'commit-unstage-all'),
-      onTap: blocked || _commitModeBusy || entries.isEmpty
+      onTap: dead
           ? null
           : () => unawaited(
               _runCommitAction(
@@ -183,11 +184,14 @@ extension _TimelineCommitPanel on _TimelineScreenState {
         ),
       ),
     );
-    if (!blocked) return button;
+    // 머리줄 전체가 접기 InkWell이라 죽은 버튼을 지난 탭은 그리로 떨어져 섹션을
+    // 접는다. 가장 깊은 recognizer가 제스처를 먹어 거기까지 내려가지 않게 한다.
+    final gated = dead ? GestureDetector(onTap: () {}, child: button) : button;
+    if (!blocked) return gated;
     return Tooltip(
       message: '충돌 파일을 먼저 해결해야 합니다',
       waitDuration: _tooltipDelay,
-      child: button,
+      child: gated,
     );
   }
 

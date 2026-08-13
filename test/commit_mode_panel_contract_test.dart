@@ -464,9 +464,11 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(staged, isEmpty);
-    // 죽은 버튼을 지난 탭은 머리줄에 닿아 섹션을 접는다. 도로 편다.
-    await tester.tap(find.byKey(const Key('commit-section-unstaged')));
-    await tester.pumpAndSettle();
+    expect(
+      row(WorkingTreeArea.unstaged, 'lib/b.dart'),
+      findsOneWidget,
+      reason: '죽은 버튼을 지난 탭이 머리줄에 닿아 섹션을 접어서는 안 된다',
+    );
 
     // 충돌이 해결되면 게이트도 풀린다 — 상시 잠김이 아니다.
     await hoverOver(tester, row(WorkingTreeArea.unstaged, 'lib/x.dart'));
