@@ -48,6 +48,7 @@ extension _TimelineCommitPanel on _TimelineScreenState {
                     WorkingTreeArea.unstaged,
                     status?.unstaged ?? const [],
                     hasHead: hasHead,
+                    hasConflict: status?.hasConflict ?? false,
                   ),
                   Container(
                     height: 1,
@@ -58,6 +59,7 @@ extension _TimelineCommitPanel on _TimelineScreenState {
                     WorkingTreeArea.staged,
                     status?.staged ?? const [],
                     hasHead: hasHead,
+                    hasConflict: status?.hasConflict ?? false,
                   ),
                 ],
               ),
@@ -73,6 +75,7 @@ extension _TimelineCommitPanel on _TimelineScreenState {
     WorkingTreeArea area,
     List<WorkingTreeEntry> entries, {
     required bool hasHead,
+    required bool hasConflict,
   }) {
     final unstaged = area == WorkingTreeArea.unstaged;
     final collapsed = unstaged
@@ -130,8 +133,11 @@ extension _TimelineCommitPanel on _TimelineScreenState {
                   hasHead: hasHead,
                   // `git add -A`는 마커가 남은 충돌 파일도 그대로 인덱스에
                   // 올려 커밋 게이트까지 풀어 준다. 파일 단위 Stage가 지나는
-                  // 마커 검사를 여기만 건너뛸 수는 없다.
-                  blocked: unstaged && entries.any((entry) => entry.conflicted),
+                  // 마커 검사를 여기만 건너뛸 수는 없다. `restore --staged :/`
+                  // 는 반대로 충돌 경로의 stage 1/2/3까지 덮어 병합 중인 것을
+                  // 되돌릴 수 없게 지운다. 충돌은 어느 섹션 목록에도 서지
+                  // 않으므로 판정은 상태 전체가 한다.
+                  blocked: hasConflict,
                 ),
               ],
             ),

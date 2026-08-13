@@ -453,6 +453,74 @@ void main() {
     expect(staged, [<String>[]]);
   });
 
+  testWidgets('Unstage All is disabled while a conflict is unresolved', (
+    tester,
+  ) async {
+    final unstaged = <(List<String>, bool)>[];
+    final staged = entry(
+      'lib/c.dart',
+      index: 'A',
+      worktree: '.',
+      stagedAdditions: 4,
+    );
+    var status = WorkingTreeStatus([
+      entry('lib/x.dart', index: 'U', worktree: 'U', conflicted: true),
+      staged,
+    ]);
+    await pumpPanel(
+      tester,
+      FakeGitRepository(
+        (_, _) async => [commit('1', 'first commit')],
+        workingTree: () async => workingTreeCommit('1'),
+        workingTreeStatus: () async => status,
+        unstageFilesCallback: (paths, hasHead) async =>
+            unstaged.add((paths, hasHead)),
+        stageResolvedFileCallback: (_) async =>
+            status = WorkingTreeStatus([staged]),
+      ),
+    );
+
+    expect(
+      row(WorkingTreeArea.staged, 'lib/x.dart'),
+      findsNothing,
+      reason: '충돌은 Staged 목록에 서지 않는다 — 섹션 목록만 보는 가드는 이것을 놓친다',
+    );
+    expect(enabled(tester, const Key('commit-unstage-all')), isFalse);
+    expect(
+      tester
+          .widget<Tooltip>(
+            find.ancestor(
+              of: find.byKey(const Key('commit-unstage-all')),
+              matching: find.byType(Tooltip),
+            ),
+          )
+          .message,
+      '충돌 파일을 먼저 해결해야 합니다',
+      reason: 'Stage All과 같은 문구로 막힌다',
+    );
+
+    await tester.tap(
+      find.byKey(const Key('commit-unstage-all')),
+      warnIfMissed: false,
+    );
+    await tester.pumpAndSettle();
+    expect(
+      unstaged,
+      isEmpty,
+      reason: 'restore --staged :/는 충돌 경로의 stage 1/2/3까지 지운다',
+    );
+
+    // 충돌이 해결되면 게이트가 풀린다 — 상시 잠김이 아니다.
+    await hoverOver(tester, row(WorkingTreeArea.unstaged, 'lib/x.dart'));
+    await tester.tap(find.byKey(const Key('commit-stage-lib/x.dart')));
+    await tester.pumpAndSettle();
+
+    expect(enabled(tester, const Key('commit-unstage-all')), isTrue);
+    await tester.tap(find.byKey(const Key('commit-unstage-all')));
+    await tester.pumpAndSettle();
+    expect(unstaged.single.$1, isEmpty);
+  });
+
   testWidgets('the title counter turns orange past 50 without blocking', (
     tester,
   ) async {
