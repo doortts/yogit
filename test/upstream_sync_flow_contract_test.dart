@@ -815,7 +815,7 @@ void main() {
     );
     expect(
       push.textSpan!.toPlainText(),
-      '↑ 1 Push',
+      '↑ 1\nPush',
       reason: '남은 걸음은 Push뿐 — 계약 그대로',
     );
   });

@@ -4,6 +4,48 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/repository_branch_selector.dart';
 
 void main() {
+  /// 이름은 고르라고 있는 것이 아니라 지금 어디에 서 있는지 말하려고 있다.
+  /// docs/toolbar-selectors-mockup.html의 몫: 저장소 4, 기준 브랜치 4,
+  /// 브랜치 diff 3 — 대개 '선택' 두 글자인 칸이 이름의 자리를 가져가지 않는다.
+  testWidgets('the names take the width, the comparison gives it up', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 620,
+            child: RepositoryBranchSelector(
+              repositoryName: 'yogit-desktop-workspace',
+              repositoryPath: '/repos/yogit',
+              localBranches: const ['feature/search-pill'],
+              branchTimes: const {},
+              selectedBranch: 'feature/search-pill',
+              refsLoading: false,
+              refsLoadFailed: false,
+              onRepositoryPressed: () {},
+              onBranchSelected: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+
+    double widthOf(String key) => tester.getSize(find.byKey(Key(key))).width;
+
+    expect(widthOf('repository-selector'), widthOf('base-branch-selector'));
+    expect(
+      widthOf('repository-selector'),
+      greaterThan(widthOf('branch-diff-selector')),
+      reason: '이름 두 칸이 비교 칸보다 넓다',
+    );
+    // 이 폭이면 이름이 잘리지 않는다 — 잘리던 'yona…'가 시안의 출발점이었다.
+    expect(
+      tester.getSize(find.text('yogit-desktop-workspace')).width,
+      lessThan(widthOf('repository-selector')),
+    );
+  });
+
   testWidgets('shows repository and only supplied local branches', (
     tester,
   ) async {

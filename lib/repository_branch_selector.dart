@@ -96,7 +96,11 @@ class RepositoryBranchSelector extends StatelessWidget {
       color: Colors.transparent,
       child: Row(
         children: [
+          // 이름은 고르라고 있는 것이 아니라 지금 어디에 서 있는지 말하려고
+          // 있다. 저장소와 브랜치가 몫을 더 받고, 대개 '선택' 두 글자인 브랜치
+          // diff가 덜 받는다.
           Expanded(
+            flex: 4,
             child: _RepositorySelector(
               repositoryName: repositoryName,
               repositoryPath: repositoryPath,
@@ -107,6 +111,7 @@ class RepositoryBranchSelector extends StatelessWidget {
             ),
           ),
           Expanded(
+            flex: 4,
             child: _BaseBranchSelector(
               localBranches: localBranches,
               remoteBranches: remoteBranches,
@@ -131,6 +136,7 @@ class RepositoryBranchSelector extends StatelessWidget {
               ),
             ),
           Expanded(
+            flex: 3,
             child: _ComparisonSelector(
               localBranches: localBranches,
               remoteBranches: remoteBranches,
@@ -426,7 +432,7 @@ class _RepositorySelectorState extends State<_RepositorySelector> {
           caption: '저장소',
           value: widget.repositoryName,
           tooltip: widget.repositoryPath,
-          maxWidth: 180,
+          maxWidth: 260,
         ),
       ),
     );
@@ -654,7 +660,7 @@ class _BaseBranchSelectorState extends State<_BaseBranchSelector> {
           caption: '기준 브랜치',
           value: widget.label,
           tooltip: widget.selectedBranch ?? widget.label,
-          maxWidth: 160,
+          maxWidth: 240,
         ),
       ),
     );

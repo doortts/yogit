@@ -38,8 +38,10 @@ extension _TimelineChrome on _TimelineScreenState {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final previewControlsWidth = _compareRef == null ? 0.0 : 212.0;
+            // 이름이 잘리는 것보다 창을 끄는 빈칸이 좁아지는 편이 낫다: 그
+            // 자리는 어차피 비어 있고, 최소 폭은 아래에서 지켜진다.
             final selectorWidth = math.min(
-              460.0,
+              620.0,
               math.max(
                 0.0,
                 constraints.maxWidth -

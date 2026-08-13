@@ -91,19 +91,26 @@ void main() {
     await pump(tester, state(UpstreamSyncKind.pushOnly, ahead: 3));
     expect(find.byKey(const Key('upstream-sync-pull')), findsNothing);
     final push = textOf(tester, const Key('upstream-sync-push'));
-    expect(push.textSpan!.toPlainText(), '↑ 3 Push');
+    expect(push.textSpan!.toPlainText(), '↑ 3\nPush', reason: '개수 위, 동사 아래');
     expect(push.style?.color, const Color(0xFF8AD6A1), reason: '초록 — 그대로 됨');
 
     await pump(tester, state(UpstreamSyncKind.pullOnly, behind: 2));
     expect(find.byKey(const Key('upstream-sync-push')), findsNothing);
     final pull = textOf(tester, const Key('upstream-sync-pull'));
-    expect(pull.textSpan!.toPlainText(), '↓ 2 Pull');
+    expect(pull.textSpan!.toPlainText(), '↓ 2\nPull');
   });
 
   testWidgets('measuring is colourless and answers no clicks', (tester) async {
     await pump(tester, state(UpstreamSyncKind.measuring, ahead: 3, behind: 2));
     final measuring = find.byKey(const Key('upstream-sync-measuring'));
     expect(measuring, findsOneWidget);
+    expect(
+      textOf(
+        tester,
+        const Key('upstream-sync-measuring'),
+      ).textSpan!.toPlainText(),
+      '↓ 2 ↑ 3\n재는 중',
+    );
 
     await tester.tap(measuring, warnIfMissed: false);
     await tester.pump();
@@ -123,8 +130,8 @@ void main() {
 
     final pull = textOf(tester, const Key('upstream-sync-pull'));
     final push = textOf(tester, const Key('upstream-sync-push'));
-    expect(pull.textSpan!.toPlainText(), '↓ 2 Pull');
-    expect(push.textSpan!.toPlainText(), '↑ 3 Push');
+    expect(pull.textSpan!.toPlainText(), '↓ 2\nPull');
+    expect(push.textSpan!.toPlainText(), '↑ 3\nPush');
     expect(pull.style?.color, push.style?.color, reason: '두 동사가 같은 판정을 입는다');
     expect(push.style?.color, const Color(0xFFF0A35E), reason: '주황 — 얹으면 됨');
     final pushTip = tester.widget<Tooltip>(
@@ -162,7 +169,13 @@ void main() {
     );
 
     final pull = textOf(tester, const Key('upstream-sync-conflict'));
-    expect(pull.textSpan!.toPlainText(), '↓ 2 충돌 2파일');
+    expect(pull.textSpan!.toPlainText(), '↓ 2\n충돌 2');
+    final resolve = textOf(tester, const Key('upstream-sync-conflict-push'));
+    expect(
+      resolve.textSpan!.toPlainText(),
+      '↑ 3\n해결',
+      reason: '숫자만 있던 칸도 무엇을 누르는지 말한다',
+    );
     final tooltip = tester.widget<Tooltip>(
       find.ancestor(
         of: find.byKey(const Key('upstream-sync-conflict')),
@@ -187,7 +200,7 @@ void main() {
       ),
     );
     final push = textOf(tester, const Key('upstream-sync-push'));
-    expect(push.textSpan!.toPlainText(), '↑ 처음 Push');
+    expect(push.textSpan!.toPlainText(), '처음\nPush');
     await tester.tap(find.byKey(const Key('upstream-sync-push')));
     expect(pushes, 1);
   });
