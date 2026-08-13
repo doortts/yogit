@@ -3470,6 +3470,51 @@ void main() {
     expect(remotes, ['origin']);
   });
 
+  testWidgets('a repository opened after a long absence lists what the '
+      'remote has now', (tester) async {
+    // 마지막으로 pull 받았을 때의 remote-tracking ref만 남아 있는 저장소.
+    var refs = const RepoRefs(
+      local: ['main'],
+      remote: ['origin/main'],
+      remoteNames: ['origin'],
+      current: 'main',
+      upstreams: {'main': 'origin/main'},
+      upstreamRemotes: {'main': 'origin'},
+      tips: {'main': '1', 'origin/main': '1'},
+    );
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          refsLoader: () async => refs,
+          fetchRemoteCallback: (_) async {
+            // 그 사이 서버에 두 개가 더 생겼다.
+            refs = const RepoRefs(
+              local: ['main'],
+              remote: ['origin/main', 'origin/release', 'origin/hotfix'],
+              remoteNames: ['origin'],
+              current: 'main',
+              upstreams: {'main': 'origin/main'},
+              upstreamRemotes: {'main': 'origin'},
+              tips: {
+                'main': '1',
+                'origin/main': '1',
+                'origin/release': '1',
+                'origin/hotfix': '1',
+              },
+            );
+            return FetchOriginResult.updated;
+          },
+        ),
+        controller,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('sidebar-ref-origin/release')), findsOneWidget);
+    expect(find.byKey(const Key('sidebar-ref-origin/hotfix')), findsOneWidget);
+  });
+
   testWidgets('a dead extra remote does not raise the failure banner', (
     tester,
   ) async {
