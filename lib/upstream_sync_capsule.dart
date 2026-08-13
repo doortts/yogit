@@ -152,13 +152,13 @@ class UpstreamSyncCapsule extends StatelessWidget {
                   '충돌합니다 — 눌러서 해결$_measured',
               onTap: onResolveConflict,
             ),
-            // 빨강은 판정이고, 이 칸은 판정이 아니라 나가는 길이다. 판정 색이
-            // 아닌 컨트롤의 파랑을 입어 '막혔다' 옆에 '이리로 나간다'가 선다 —
-            // 여기서 실행되는 것은 없고, 해결 화면이 열릴 뿐이다.
+            // 빨강은 판정이고, 이 칸은 판정이 아니라 나가는 길이다. 초록을
+            // 입어 '막혔다' 옆에 '이리로 나간다'가 선다 — 여기서 실행되는 것은
+            // 없고, 해결 화면이 열릴 뿐이다.
             _verb(
               key: const Key('upstream-sync-conflict-push'),
               palette: palette,
-              color: previewControlBlue,
+              color: mainAccent,
               // 46개가 막혀 있다는 사실은 여전히 판정의 것이다.
               countColor: remoteBehindRed,
               count: '↑ ${state.ahead}',

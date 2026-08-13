@@ -183,8 +183,8 @@ void main() {
     );
     expect(
       resolve.style?.color,
-      const Color(0xFF4388EE),
-      reason: '판정은 빨강이지만 나가는 길은 컨트롤의 파랑이다',
+      const Color(0xFF8AD6A1),
+      reason: '판정은 빨강이지만 나가는 길은 초록이다',
     );
     expect(
       ((resolve.textSpan! as TextSpan).children!.first as TextSpan)
