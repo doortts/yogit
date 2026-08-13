@@ -12,8 +12,8 @@ import 'timeline_theme.dart';
 import 'typography.dart';
 
 /// The small pieces the timeline builds itself from: its wordmark, the hover
-/// and keycap wrappers, the copy button, the row-state scope, the legend dot
-/// and the merge-message dialog. None of them knows anything about commits.
+/// wrapper, the copy button, the row-state scope, the legend dot and the
+/// merge-message dialog. None of them knows anything about commits.
 
 class Wordmark extends StatelessWidget {
   const Wordmark({required this.fontSize, super.key});

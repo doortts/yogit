@@ -151,6 +151,12 @@ void main() {
     final store = MemorySettingsStore()
       ..current = const AppSettings(previewPlacement: PreviewPlacement.bottom);
     expect(controller.previewPlacement, PreviewPlacement.closed);
+    // 거쳐 간 자리를 다 적어 둔다: 마지막 자리만 보면 기본값 우측으로 먼저 열고
+    // 옮겨 가는 구현도 통과해 버린다.
+    final placements = <PreviewPlacement>[];
+    void record() => placements.add(controller.previewPlacement);
+    controller.addListener(record);
+    addTearDown(() => controller.removeListener(record));
     await tester.pumpWidget(
       YogitApp(
         repository: FakeGitRepository(
@@ -163,9 +169,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // 자리는 설정이 도착한 뒤에 정해진다 — 기본값 우측으로 먼저 열고 마는 일이
-    // 없어야 지난번에 두고 간 자리가 산다.
-    expect(controller.previewPlacement, PreviewPlacement.bottom);
+    // 자리는 설정이 도착한 뒤에 한 번만 정해진다 — 기본값 우측을 거치지 않아야
+    // 지난번에 두고 간 자리가 산다.
+    expect(placements, [PreviewPlacement.bottom]);
     expect(find.byKey(const Key('preview-surface')), findsOneWidget);
 
     // 세우는 것은 창의 몫이고, 닫는 것은 사용자의 몫이다.
@@ -18707,10 +18713,10 @@ void main() {
       ),
     );
 
-    // The narrowest window the app opens at still shows it: the drag stretch is
-    // reserved before the selector takes its width, and the glyphs ride inside
-    // that stretch rather than asking for room beside it. Rendering at all is
-    // the no-overflow assertion.
+    // The width the native window used to stop at still shows it: the drag
+    // stretch is reserved before the selector takes its width, and the glyphs
+    // ride inside that stretch rather than asking for room beside it. Rendering
+    // at all is the no-overflow assertion.
     tester.view.physicalSize = const Size(960, 800);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('wordmark')), findsOneWidget);
@@ -18718,6 +18724,26 @@ void main() {
       tester.getRect(find.byKey(const Key('toolbar-drag'))).width,
       greaterThanOrEqualTo(200),
     );
+
+    // The window really does go narrower — 480 is the native minimum. Under
+    // ~560 the selector has nothing left to give and the stretch itself starts
+    // shrinking, so the wordmark steps down to its small size rather than crowd
+    // what is left of the bar.
+    tester.view.physicalSize = const Size(480, 800);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<Text>(
+            find.descendant(
+              of: find.byKey(const Key('wordmark')),
+              matching: find.byType(Text),
+            ),
+          )
+          .style
+          ?.fontSize,
+      20,
+    );
+    expect(find.byKey(const Key('toolbar-drag')), findsOneWidget);
   });
 }
 

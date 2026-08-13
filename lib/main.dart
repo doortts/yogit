@@ -403,6 +403,13 @@ class _YogitAppState extends State<YogitApp> {
   /// The log the console reads. Owned here only when nobody handed one down,
   /// which is what the disposal below turns on.
   late final CommandLog _commandLog = widget.commandLog ?? CommandLog();
+
+  /// The window the timeline's panes live in, under the same rule: owned here
+  /// only when nobody handed one down. Built rather than skipped so that a
+  /// window without a native frame — a test, a Dart-only run — still opens its
+  /// preview where the settings say.
+  late final WindowFrameController _windowFrame =
+      widget.windowFrameController ?? WindowFrameController();
   late GitRepository _repository = widget.repository;
   late AvatarService? _avatarService = widget.avatarService;
   var _settings = const AppSettings();
@@ -442,10 +449,8 @@ class _YogitAppState extends State<YogitApp> {
   /// 이 앱의 기본 화면이다. 자리는 지난번에 두고 간 곳이라 설정을 읽은 뒤에야
   /// 안다. 판을 세우는 것은 창의 몫이고, 타임라인은 컨트롤러가 말하는 자리를
   /// 따를 뿐이다.
-  void _openPreviewAtStart(PreviewPlacement placement) {
-    final frame = widget.windowFrameController;
-    if (frame != null) unawaited(frame.setPreview(placement));
-  }
+  void _openPreviewAtStart(PreviewPlacement placement) =>
+      unawaited(_windowFrame.setPreview(placement));
 
   /// The timeline subtree is keyed by root, so switching repositories remounts
   /// it and every per-repository future reloads.
@@ -501,6 +506,7 @@ class _YogitAppState extends State<YogitApp> {
   @override
   void dispose() {
     if (widget.commandLog == null) _commandLog.dispose();
+    if (widget.windowFrameController == null) _windowFrame.dispose();
     super.dispose();
   }
 
@@ -552,7 +558,7 @@ class _YogitAppState extends State<YogitApp> {
           key: Key('timeline-screen-${_repository.root}'),
           repository: _repository,
           commandLog: _commandLog,
-          controller: widget.windowFrameController,
+          controller: _windowFrame,
           onOpenRepository: _openRepository,
           onOpenMonitor: _openMonitor,
           recentRepositories: _settings
