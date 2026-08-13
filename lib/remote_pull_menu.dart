@@ -52,6 +52,7 @@ class RemotePullMenu extends StatelessWidget {
     final pullItem = switch (state.kind) {
       RemotePullKind.fastForward => RefMenuAction(
         key: const Key('remote-pull-pull'),
+        icon: Icons.arrow_downward,
         title: 'Pull — ${state.ahead}개 커밋',
         subtitle: state.checkedOut
             ? '현재 브랜치를 fast-forward'
@@ -60,11 +61,13 @@ class RemotePullMenu extends StatelessWidget {
       ),
       RemotePullKind.diverged => const RefMenuAction(
         key: Key('remote-pull-pull'),
+        icon: Icons.arrow_downward,
         title: 'Pull',
         subtitle: 'fast-forward 불가',
       ),
       RemotePullKind.upToDate => const RefMenuAction(
         key: Key('remote-pull-pull'),
+        icon: Icons.arrow_downward,
         title: 'Pull',
         subtitle: '받을 커밋 없음',
       ),
@@ -75,6 +78,7 @@ class RemotePullMenu extends StatelessWidget {
         ? null
         : RefMenuAction(
             key: const Key('remote-pull-checkout'),
+            icon: Icons.logout,
             title: '체크아웃',
             subtitle: switch (state.kind) {
               RemotePullKind.noLocal => '추적 브랜치 ${state.localBranch} 생성',
@@ -86,6 +90,7 @@ class RemotePullMenu extends StatelessWidget {
 
     final compareItem = RefMenuAction(
       key: const Key('remote-pull-compare'),
+      icon: Icons.compare_arrows,
       title: '브랜치 diff로 비교',
       subtitle: state.kind == RemotePullKind.diverged
           ? 'merge / rebase는 미리보기에서 결정'
@@ -119,6 +124,7 @@ class RemotePullMenu extends StatelessWidget {
         // reaches the remote itself.
         RefMenuAction(
           key: const Key('remote-pull-delete'),
+          icon: Icons.delete_outline,
           title: '원격 브랜치 삭제',
           subtitle: '${state.remote}에서 지웁니다',
           danger: true,

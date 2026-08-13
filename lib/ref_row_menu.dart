@@ -8,6 +8,7 @@ import 'timeline_theme.dart';
 class RefMenuAction {
   const RefMenuAction({
     required this.key,
+    required this.icon,
     required this.title,
     this.subtitle,
     this.onPressed,
@@ -15,6 +16,11 @@ class RefMenuAction {
   });
 
   final Key key;
+
+  /// Drawn in the gutter, on the title's line. Every action carries one: a line
+  /// without it would start where the others' words do and read as a heading.
+  final IconData icon;
+
   final String title;
   final String? subtitle;
   final VoidCallback? onPressed;
@@ -98,7 +104,9 @@ class _RefRowMenuState extends State<RefRowMenu> {
           ? Colors.white.withValues(alpha: 0.78)
           : palette.muted;
       return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
+        // The gap between two lines, which is what tells them apart: without
+        // it the pills touch and a title reads as the line above's third row.
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
         child: MenuItemButton(
           key: action.key,
           autofocus: isDefault,
@@ -109,7 +117,7 @@ class _RefRowMenuState extends State<RefRowMenu> {
             backgroundColor: isDefault
                 ? palette.interactive
                 : Colors.transparent,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             minimumSize: const Size(_menuWidth - 8, 0),
             maximumSize: const Size(_menuWidth - 8, double.infinity),
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -117,31 +125,48 @@ class _RefRowMenuState extends State<RefRowMenu> {
               borderRadius: BorderRadius.circular(5),
             ),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      action.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 13, color: foreground),
-                    ),
-                  ),
-                  if (isDefault)
-                    Text('⏎', style: TextStyle(fontSize: 12, color: secondary)),
-                ],
+              // A pixel down, so the glyph sits on the title's line rather than
+              // on the top of its box.
+              Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: Icon(action.icon, size: 15, color: foreground),
               ),
-              if (action.subtitle case final subtitle?)
-                Text(
-                  subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11, color: secondary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            action.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 13, color: foreground),
+                          ),
+                        ),
+                        if (isDefault)
+                          Text(
+                            '⏎',
+                            style: TextStyle(fontSize: 12, color: secondary),
+                          ),
+                      ],
+                    ),
+                    if (action.subtitle case final subtitle?)
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 11, color: secondary),
+                      ),
+                  ],
                 ),
+              ),
             ],
           ),
         ),
@@ -149,7 +174,7 @@ class _RefRowMenuState extends State<RefRowMenu> {
     }
 
     Widget separator() =>
-        Divider(height: 9, thickness: 0.5, color: palette.border);
+        Divider(height: 11, thickness: 0.5, color: palette.border);
 
     final items = [for (final action in widget.actions) item(action)];
     if (items.length > 1) items.insert(items.length - 1, separator());
@@ -159,7 +184,7 @@ class _RefRowMenuState extends State<RefRowMenu> {
       style: MenuStyle(
         backgroundColor: WidgetStatePropertyAll(palette.raised),
         padding: const WidgetStatePropertyAll(
-          EdgeInsets.symmetric(vertical: 4),
+          EdgeInsets.symmetric(vertical: 5),
         ),
         shape: WidgetStatePropertyAll(
           RoundedRectangleBorder(
@@ -173,7 +198,7 @@ class _RefRowMenuState extends State<RefRowMenu> {
           key: widget.headerKey,
           width: _menuWidth,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
+            padding: const EdgeInsets.fromLTRB(14, 7, 14, 7),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

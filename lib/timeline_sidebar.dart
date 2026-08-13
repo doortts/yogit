@@ -319,6 +319,7 @@ extension _TimelineSidebar on _TimelineScreenState {
         if (isLocal)
           RefMenuAction(
             key: Key('sidebar-menu-checkout-$name'),
+            icon: Icons.logout,
             title: '체크아웃',
             subtitle: current ? '이미 여기에 서 있습니다' : 'HEAD를 이 브랜치로 전환',
             onPressed: current || busy
@@ -329,12 +330,14 @@ extension _TimelineSidebar on _TimelineScreenState {
         if (isLocal)
           RefMenuAction(
             key: Key('sidebar-menu-base-$name'),
+            icon: Icons.anchor,
             title: '기준 브랜치로',
             subtitle: isBase ? '이미 기준입니다' : '비교와 적용의 기준을 여기로',
             onPressed: isBase || busy ? null : () => _selectBaseBranch(name),
           ),
         RefMenuAction(
           key: Key('sidebar-menu-compare-$name'),
+          icon: Icons.compare_arrows,
           title: '브랜치 diff로 비교',
           subtitle: isBase ? '기준과 자기 자신은 비교하지 않습니다' : null,
           onPressed: isBase || busy
@@ -345,6 +348,9 @@ extension _TimelineSidebar on _TimelineScreenState {
         if (isLocal)
           RefMenuAction(
             key: Key('sidebar-menu-hide-$name'),
+            icon: allHidden
+                ? Icons.visibility_outlined
+                : Icons.visibility_off_outlined,
             title: allHidden ? '그래프에 다시 표시' : '그래프에서 숨기기',
             subtitle: governed.isEmpty ? '체크아웃된 브랜치는 그래프에 남습니다' : null,
             onPressed: governed.isEmpty
@@ -355,6 +361,7 @@ extension _TimelineSidebar on _TimelineScreenState {
         if (isLocal)
           RefMenuAction(
             key: Key('sidebar-menu-delete-$name'),
+            icon: Icons.delete_outline,
             title: '브랜치 삭제',
             subtitle: current ? '체크아웃된 브랜치는 지울 수 없습니다' : null,
             danger: true,
@@ -365,6 +372,7 @@ extension _TimelineSidebar on _TimelineScreenState {
         if (section == _RefSection.tags)
           RefMenuAction(
             key: Key('sidebar-menu-delete-$name'),
+            icon: Icons.delete_outline,
             title: '태그 삭제',
             subtitle: _tagRemote == null ? null : '원격에서도 지울지 물어봅니다',
             danger: true,

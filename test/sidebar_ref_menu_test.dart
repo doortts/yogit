@@ -159,6 +159,41 @@ void main() {
     expect(repository.deleted, ['origin refs/tags/v1.0', 'tag v1.0']);
   });
 
+  testWidgets('menu lines stand apart, each behind its own icon', (
+    tester,
+  ) async {
+    await pump(tester);
+    await doubleTap(tester, 'lane');
+
+    // 아이콘은 행 위에 뜨는 버튼들과 같은 그림이다: 같은 일에 같은 표시.
+    const icons = {
+      'sidebar-menu-checkout-lane': Icons.logout,
+      'sidebar-menu-base-lane': Icons.anchor,
+      'sidebar-menu-compare-lane': Icons.compare_arrows,
+      'sidebar-menu-delete-lane': Icons.delete_outline,
+    };
+    for (final entry in icons.entries) {
+      expect(
+        find.descendant(
+          of: find.byKey(Key(entry.key)),
+          matching: find.byIcon(entry.value),
+        ),
+        findsOneWidget,
+        reason: entry.key,
+      );
+    }
+
+    // 그리고 알약끼리 붙어 있지 않다 — 붙으면 제목이 윗 항목의 세 번째 줄로
+    // 읽힌다.
+    final checkout = tester.getRect(
+      find.byKey(const Key('sidebar-menu-checkout-lane')),
+    );
+    final base = tester.getRect(
+      find.byKey(const Key('sidebar-menu-base-lane')),
+    );
+    expect(base.top - checkout.bottom, greaterThanOrEqualTo(4));
+  });
+
   testWidgets('the strip deletes whatever kind of ref the cursor holds', (
     tester,
   ) async {
