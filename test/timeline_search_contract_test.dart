@@ -280,6 +280,30 @@ void main() {
     expect(countLabel(tester), '없음');
   });
 
+  testWidgets('the pill walks the matches without unfolding', (tester) async {
+    await pumpTimeline(tester);
+    await openSearch(tester);
+    await search(tester, 'feat');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(countLabel(tester), '1/3');
+
+    await tester.tap(find.byKey(const Key('timeline-search-pill-next')));
+    await tester.pumpAndSettle();
+    expect(countLabel(tester), '2/3');
+    expect(find.byKey(const Key('selected-row-c3d4e5f')), findsOneWidget);
+    expect(
+      find.byKey(const Key('timeline-search')),
+      findsNothing,
+      reason: '결과를 걸어도 줄은 접힌 채다',
+    );
+
+    await tester.tap(find.byKey(const Key('timeline-search-pill-previous')));
+    await tester.pumpAndSettle();
+    expect(countLabel(tester), '1/3');
+    expect(find.byKey(const Key('selected-row-b7e0f19')), findsOneWidget);
+  });
+
   testWidgets('⌘F unfolds the collapsed search with its query', (tester) async {
     await pumpTimeline(tester);
     await openSearch(tester);

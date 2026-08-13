@@ -395,6 +395,20 @@ extension _TimelineSearch on _TimelineScreenState {
                 const SizedBox(width: 6),
                 _searchCount(),
                 const SizedBox(width: 2),
+                // 접힌 채로도 결과는 걸어 다닐 수 있다. 줄을 다시 펼치지 않고
+                // 결과 사이만 옮겨 다니는 것이 이 두 버튼이다.
+                _searchStep(
+                  const Key('timeline-search-pill-previous'),
+                  Icons.keyboard_arrow_up,
+                  -1,
+                  size: 14,
+                ),
+                _searchStep(
+                  const Key('timeline-search-pill-next'),
+                  Icons.keyboard_arrow_down,
+                  1,
+                  size: 14,
+                ),
                 HoverBuilder(
                   builder: (closeHovered) => GestureDetector(
                     key: const Key('timeline-search-pill-close'),
@@ -440,22 +454,24 @@ extension _TimelineSearch on _TimelineScreenState {
   );
 
   /// A step button takes no focus of its own, so the field keeps the keyboard
-  /// and the next Enter still walks the matches.
-  Widget _searchStep(Key key, IconData icon, int delta) => HoverBuilder(
-    builder: (hovered) => GestureDetector(
-      key: key,
-      behavior: HitTestBehavior.opaque,
-      onTap: () => _stepSearchMatch(delta),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 3),
-        child: Icon(
-          icon,
-          size: 16,
-          color: hovered ? _palette.text : _palette.muted,
+  /// and ⇧Enter still walks the matches. 접힌 알약도 같은 버튼을 쓴다 — 알약의
+  /// 글씨에 맞춰 조금 작게 그릴 뿐이다.
+  Widget _searchStep(Key key, IconData icon, int delta, {double size = 16}) =>
+      HoverBuilder(
+        builder: (hovered) => GestureDetector(
+          key: key,
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _stepSearchMatch(delta),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 3),
+            child: Icon(
+              icon,
+              size: size,
+              color: hovered ? _palette.text : _palette.muted,
+            ),
+          ),
         ),
-      ),
-    ),
-  );
+      );
 
   KeyEventResult _onSearchKeyEvent(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
