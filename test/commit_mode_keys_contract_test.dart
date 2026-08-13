@@ -448,6 +448,41 @@ void main() {
     );
   });
 
+  testWidgets('reselecting the working tree row reads the status again', (
+    tester,
+  ) async {
+    var reads = 0;
+    await pumpPanel(
+      tester,
+      FakeGitRepository(
+        (_, _) async => [commit('1', 'first commit')],
+        workingTree: () async => workingTreeCommit('1'),
+        // 밖(터미널)에서 저장소가 바뀐 것을 흉내낸다 — 두 번째 읽기부터 다른 목록.
+        workingTreeStatus: () async {
+          reads++;
+          return WorkingTreeStatus([
+            entry(reads == 1 ? 'lib/a.dart' : 'lib/z.dart'),
+          ]);
+        },
+      ),
+    );
+
+    expect(reads, 1);
+    expect(row(WorkingTreeArea.unstaged, 'lib/a.dart'), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('commit-panel')), findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+
+    expect(reads, 2);
+    expect(row(WorkingTreeArea.unstaged, 'lib/z.dart'), findsOneWidget);
+    expect(row(WorkingTreeArea.unstaged, 'lib/a.dart'), findsNothing);
+  });
+
   testWidgets(
     'mutations run inside _changingRepository so no external-change prompt appears',
     (tester) async {

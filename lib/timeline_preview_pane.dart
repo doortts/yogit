@@ -1720,6 +1720,9 @@ extension _TimelinePreviewFlows on _TimelineScreenState {
       _previewFileLists.clear();
       _previewDiffs.clear();
       _previewPaths.clear();
+      // The selection listener misses a reload that leaves the index where it
+      // already was, and this list is as stale as the ones above it.
+      _commitStatusRequest = null;
       _hasWorkingTree = false;
       _end = false;
       _loadError = null;

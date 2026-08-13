@@ -1556,8 +1556,14 @@ class _TimelineScreenState extends State<TimelineScreen>
     _focusNode.requestFocus();
   }
 
-  void _selectedCommitChanged() =>
-      unawaited(_resolveSelectedDeletedBranchName());
+  void _selectedCommitChanged() {
+    // The commit panel has no worktree watcher, so a selection landing back on
+    // the working tree row is when it catches up with whatever happened outside
+    // the app. Clearing here costs nothing while another row is selected: the
+    // panel is not built, so nothing asks git anything.
+    _commitStatusRequest = null;
+    unawaited(_resolveSelectedDeletedBranchName());
+  }
 
   ({String selectedSha, String tipSha})? _selectedDeletedBranchLine() {
     if (!_refsLoaded || _comparison != null || _entries.isEmpty) return null;
