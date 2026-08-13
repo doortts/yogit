@@ -423,7 +423,11 @@ void main() {
     );
     expect(
       patchArguments,
-      containsAll(['--find-renames=50%', 'old name.pas', 'new name.pas']),
+      containsAll([
+        '--find-renames=50%',
+        ':(literal)old name.pas',
+        ':(literal)new name.pas',
+      ]),
     );
   });
 

@@ -2076,7 +2076,12 @@ const safeDiffArguments = <String>[
   '--find-renames=50%',
 ];
 
-List<String> pathspecsFor(GitFileChange file) => [?file.oldPath, file.path];
+/// The pathspecs one file's diff is read under. Literal, because a name is a
+/// name: `a[1].txt` read as a wildcard also brings back `a1.txt`, and the
+/// screen would file that stranger's hunks under this file's numbers.
+List<String> pathspecsFor(GitFileChange file) => [
+  for (final path in [?file.oldPath, file.path]) ':(literal)$path',
+];
 
 class GitRepository implements FullDiffRepository {
   GitRepository(

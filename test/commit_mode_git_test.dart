@@ -645,6 +645,34 @@ void main() {
     );
   });
 
+  test('a file whose name holds glob characters diffs only itself', () async {
+    final root = await createGitFixture();
+    addTearDown(() => root.delete(recursive: true));
+    await _write(root, 'a1.txt', 'one\ntwo\nthree\n');
+    await _write(root, 'a[1].txt', 'one\ntwo\nthree\n');
+    await runGit(root, ['add', '-A']);
+    await runGit(root, ['commit', '-m', 'base']);
+    // 이름이 pathspec 와일드카드로 읽히면 `a[1].txt`가 `a1.txt`까지 함께 문다.
+    await _write(root, 'a1.txt', 'one\nOTHER-CHANGED\nthree\n');
+    await _write(root, 'a[1].txt', 'one\nONE-CHANGED\nthree\n');
+    const file = GitFileChange(
+      path: 'a[1].txt',
+      status: 'M',
+      additions: null,
+      deletions: null,
+    );
+
+    expect(
+      _changes(
+        await GitRepository(
+          root.path,
+        ).loadAreaDiff(WorkingTreeArea.unstaged, file),
+      ),
+      ['-two', '+ONE-CHANGED'],
+      reason: '남의 헝크가 섞이면 화면의 헝크 번호가 어긋나 Discard Hunk가 엉뚱한 파일을 지운다',
+    );
+  });
+
   test('loadAreaFiles(unstaged) appends untracked files with a synthetic all-add diff', () async {
     final root = await createGitFixture();
     addTearDown(() => root.delete(recursive: true));
