@@ -135,6 +135,26 @@ void main() {
     );
   });
 
+  testWidgets('a line narrower than its column still stops at the divider', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_sideBySide(_longLineDocument()));
+    await tester.pumpAndSettle();
+    await _wheel(tester, 120);
+
+    // 'tail' fits its column, so the column has no overflow of its own to
+    // clip -- but the shared offset slides it left all the same, out over the
+    // divider and onto the other side, unless the column always clips.
+    final pan = find
+        .descendant(
+          of: find.byKey(const Key('side-by-side-row-0-1')),
+          matching: find.byKey(const Key('code-row-horizontal-pan')),
+        )
+        .last;
+    expect(pan, findsOneWidget);
+    expect(tester.renderObject(pan), paints..clipRect());
+  });
+
   testWidgets('wrapped lines leave nothing to scroll', (tester) async {
     await tester.pumpWidget(_sideBySide(_longLineDocument(), wrapLines: true));
     await tester.pumpAndSettle();

@@ -142,6 +142,12 @@ class _FullDiffHorizontalScrollSurfaceState
 
 /// One source column: its text laid out at full width, clipped to the column
 /// and slid by the pane's offset.
+///
+/// The clip is its own [ClipRect] rather than the unconstrained box's
+/// `clipBehavior`, which only engages once the child overflows. A line
+/// narrower than its column overflows nothing, so that clip stayed off and the
+/// offset slid the line straight out of the column — left past the split
+/// divider and over the other side of the diff.
 class FullDiffHorizontalPan extends StatelessWidget {
   const FullDiffHorizontalPan({required this.child, super.key});
 
@@ -150,20 +156,24 @@ class FullDiffHorizontalPan extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final offset = DiffHorizontalOffset.maybeOf(context);
-    return UnconstrainedBox(
-      constrainedAxis: Axis.vertical,
-      alignment: Alignment.topLeft,
-      clipBehavior: Clip.hardEdge,
-      child: offset == null
-          ? child
-          : AnimatedBuilder(
-              animation: offset,
-              builder: (context, child) => Transform.translate(
-                offset: Offset(-offset.value, 0),
+    return ClipRect(
+      child: UnconstrainedBox(
+        constrainedAxis: Axis.vertical,
+        alignment: Alignment.topLeft,
+        // Kept for the overflowing case: without it the box reports the line
+        // it cannot show as a layout overflow and paints the striped banner.
+        clipBehavior: Clip.hardEdge,
+        child: offset == null
+            ? child
+            : AnimatedBuilder(
+                animation: offset,
+                builder: (context, child) => Transform.translate(
+                  offset: Offset(-offset.value, 0),
+                  child: child,
+                ),
                 child: child,
               ),
-              child: child,
-            ),
+      ),
     );
   }
 }
