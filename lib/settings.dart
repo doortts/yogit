@@ -1620,6 +1620,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 8),
           _timelineFontSizeControl(),
+          const SizedBox(height: 28),
+          const Text(
+            '커밋 아바타',
+            style: TextStyle(
+              color: Color(0xFFE8EAF2),
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            '타임라인, 미리보기, blame이 사람을 그리는 방식입니다. 사진은 GitHub·GHE에서만 '
+            '받아오고 Gravatar는 조회하지 않습니다.',
+            style: TextStyle(color: Color(0xFF8D94A8), fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          RadioGroup<bool>(
+            groupValue: _settings.showAvatars,
+            onChanged: (value) {
+              if (value != null) {
+                _change(_settings.copyWith(showAvatars: value));
+              }
+            },
+            child: Column(
+              children: [
+                for (final (photo, label, hint) in const [
+                  (true, '프로필 사진', '사진이 없거나 받아오지 못하면 이니셜로 그립니다'),
+                  (false, '이름 이니셜', '사진을 요청하지 않고 이름 첫 글자만 그립니다 — jung.min은 JM'),
+                ])
+                  RadioListTile<bool>(
+                    key: Key('avatar-style-${photo ? 'photo' : 'initials'}'),
+                    value: photo,
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: Text(
+                      label,
+                      style: const TextStyle(
+                        color: Color(0xFFE8EAF2),
+                        fontSize: 13,
+                      ),
+                    ),
+                    subtitle: Text(
+                      hint,
+                      style: const TextStyle(
+                        color: Color(0xFF8D94A8),
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ],
       ),
     ),
@@ -1920,21 +1972,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 14),
           _githubLoginCard(),
           const SizedBox(height: 14),
-          SwitchListTile(
-            key: const Key('show-avatars-toggle'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text(
-              'Show commit avatars',
-              style: TextStyle(color: Color(0xFFE8EAF2), fontSize: 13),
-            ),
-            subtitle: const Text(
-              'GitHub and GHE only. Gravatar is never queried.',
-              style: TextStyle(color: Color(0xFF8D94A8), fontSize: 11),
-            ),
-            value: _settings.showAvatars,
-            onChanged: (value) =>
-                _change(_settings.copyWith(showAvatars: value)),
-          ),
           SwitchListTile(
             key: const Key('precise-push-toggle'),
             contentPadding: EdgeInsets.zero,

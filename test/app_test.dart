@@ -13790,10 +13790,13 @@ void main() {
     await tester.tap(find.byKey(const Key('open-settings')));
     await tester.pumpAndSettle();
     expect(find.text('Git integrations'), findsWidgets);
-    // The GitHub 서버 section sits above the toggle, so it has to be scrolled to.
-    await tester.ensureVisible(find.byKey(const Key('show-avatars-toggle')));
+    await tester.tap(find.byKey(const Key('settings-section-appearance')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('show-avatars-toggle')));
+    // The theme cards and the font controls sit above the choice, so it has to
+    // be scrolled to.
+    await tester.ensureVisible(find.byKey(const Key('avatar-style-initials')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('avatar-style-initials')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
