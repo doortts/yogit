@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>미리보기 머리줄 두 줄 — 배치 버튼을 아랫줄로</title>
+<style>
+  :root {
+    --panel:#1C1C1E; --border:#38383A; --raised:#2C2C2E; --text:#F2F2F7;
+    --muted:#8E8E93; --sel:#234D72; --hash:#EF6C63; --bad:#FF7A84; --good:#7CE0A0;
+    --mono:Menlo,"D2Coding",Monaco,monospace;
+  }
+  body { margin:0; padding:26px 24px 70px; background:#0E0E10; color:var(--text);
+         font:13px/1.6 -apple-system,"Apple SD Gothic Neo",sans-serif; }
+  h1 { font-size:19px; font-weight:600; margin:0 0 6px; }
+  h2 { font-size:14px; font-weight:600; margin:28px 0 6px; }
+  p.note { margin:0 0 12px; color:#98989F; font-size:12px; max-width:940px; }
+  code { font-family:var(--mono); font-size:11px; background:#2C2C2E; padding:1px 5px; border-radius:4px; }
+  .bad { color:var(--bad); } .good { color:var(--good); }
+  .cap { font-size:11.5px; color:#8E8E93; padding:6px 2px 0; max-width:560px; }
+  .row2 { display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start; }
+
+  .pane { width:560px; background:var(--panel); border:1px solid var(--border);
+          border-radius:8px; overflow:hidden; }
+  .pane.narrow { width:300px; }
+  .head { height:34px; display:flex; align-items:center; padding:0 6px 0 12px;
+          gap:8px; }
+  .head .sha { font-family:var(--mono); font-size:12px; }
+  .head .sha b { color:var(--hash); font-weight:600; }
+  .head .sub { color:var(--muted); font-size:11px; flex:1; overflow:hidden;
+               white-space:nowrap; text-overflow:ellipsis; }
+  .copy { color:var(--muted); font-size:11px; }
+
+  .hint { height:24px; display:flex; align-items:center; padding:0 6px 0 12px;
+          gap:8px; border-bottom:1px solid var(--border); }
+  .hint .keys { font-family:var(--mono); font-size:10px; color:var(--muted);
+                flex:1; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .hint .keys em { font-style:normal; color:#C7C7CC; }
+
+  .place { display:flex; padding:2px; background:var(--raised);
+           border:1px solid var(--border); border-radius:6px; }
+  .place button { all:unset; width:20px; height:16px; display:flex; align-items:center;
+                  justify-content:center; border-radius:4px; cursor:pointer; }
+  .place button.on { background:var(--sel); }
+  .close { width:18px; height:18px; display:flex; align-items:center;
+           justify-content:center; color:var(--muted); font-size:12px; border-radius:5px; }
+  .close:hover, .place button:hover { background:#3A3A3C; }
+
+  .body { height:96px; padding:10px 12px; }
+  .file { display:flex; gap:8px; font-size:11.5px; color:#C7C7CC; padding:3px 0; }
+  .file .st { color:var(--muted); font-family:var(--mono); }
+  .file .add { color:#7CE0A0; margin-left:auto; font-family:var(--mono); font-size:10.5px; }
+
+  .tag { display:inline-block; font-size:10px; padding:0 6px; border-radius:9px;
+         border:1px solid var(--border); color:var(--muted); margin-left:6px; }
+  table { border-collapse:collapse; font-size:12px; margin:8px 0 0; }
+  th, td { border:1px solid var(--border); padding:5px 9px; text-align:left; }
+  th { color:var(--muted); font-weight:600; }
+  td.k { font-family:var(--mono); font-size:11px; }
+</style>
+</head>
+<body>
+
+<h1>미리보기 머리줄 — 배치 버튼을 아랫줄로</h1>
+<p class="note">확정된 규칙은 아래 3절. 닫기(✕)는 은퇴하고, 키 설명은 ←/→가 실제로 하는 일을 말한다.</p>
+
+<h2>1. 지금 <span class="bad">— 첫 줄이 붐빈다</span></h2>
+<div class="pane">
+  <div class="head">
+    <span class="sha">커밋 <b>5d01d21</b></span><span class="copy">⧉</span>
+    <span class="sub">· 부모 6e4b9c…</span>
+    <span class="place">
+      <button><svg width="14" height="11"><rect x="0.5" y="0.5" width="13" height="10" rx="1.5" fill="none" stroke="#8E8E93"/><rect x="1.5" y="1.5" width="4" height="8" fill="#8E8E93"/></svg></button>
+      <button class="on"><svg width="14" height="11"><rect x="0.5" y="0.5" width="13" height="10" rx="1.5" fill="none" stroke="#fff"/><rect x="8" y="1.5" width="4.5" height="8" fill="#fff"/></svg></button>
+      <button><svg width="14" height="11"><rect x="0.5" y="0.5" width="13" height="10" rx="1.5" fill="none" stroke="#8E8E93"/><rect x="1.5" y="6" width="11" height="3.5" fill="#8E8E93"/></svg></button>
+    </span>
+    <span class="close">✕</span>
+  </div>
+  <div class="hint"><span class="keys">파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓</span></div>
+  <div class="body">
+    <div class="file"><span class="st">M</span> lib/timeline_chrome.dart <span class="add">+73 −6</span></div>
+    <div class="file"><span class="st">M</span> lib/timeline_preview_pane.dart <span class="add">+41 −12</span></div>
+    <div class="file"><span class="st">A</span> test/preview_header_contract_test.dart <span class="add">+34</span></div>
+  </div>
+</div>
+<p class="cap">커밋 줄이 이름과 버튼을 한 줄에서 나눠 쓴다. 240px까지 좁히면 남는 여유가 1.9px다.</p>
+
+<h2>2. 제안 <span class="good">— 아랫줄 오른쪽, 키 설명 옆</span></h2>
+<div class="row2">
+  <div>
+    <div class="pane">
+      <div class="head">
+        <span class="sha">커밋 <b>5d01d21</b></span><span class="copy">⧉</span>
+        <span class="sub">· 부모 6e4b9c1 fix(diff): stop a short line sliding out of its own column</span>
+      </div>
+      <div class="hint">
+        <span class="keys">패널이동 <em>←/→</em> · 화면 스크롤 <em>⇧⌘↑/↓</em></span>
+        <span class="place">
+          <button title="좌측"><svg width="14" height="11"><rect x="0.5" y="0.5" width="13" height="10" rx="1.5" fill="none" stroke="#8E8E93"/><rect x="1.5" y="1.5" width="4" height="8" fill="#8E8E93"/></svg></button>
+          <button class="on" title="우측"><svg width="14" height="11"><rect x="0.5" y="0.5" width="13" height="10" rx="1.5" fill="none" stroke="#fff"/><rect x="8" y="1.5" width="4.5" height="8" fill="#fff"/></svg></button>
+          <button title="하단"><svg width="14" height="11"><rect x="0.5" y="0.5" width="13" height="10" rx="1.5" fill="none" stroke="#8E8E93"/><rect x="1.5" y="6" width="11" height="3.5" fill="#8E8E93"/></svg></button>
+        </span>
+      </div>
+      <div class="body">
+        <div class="file"><span class="st">M</span> lib/timeline_chrome.dart <span class="add">+73 −6</span></div>
+        <div class="file"><span class="st">M</span> lib/timeline_preview_pane.dart <span class="add">+41 −12</span></div>
+        <div class="file"><span class="st">A</span> test/preview_header_contract_test.dart <span class="add">+34</span></div>
+      </div>
+    </div>
+    <p class="cap">배치 세그먼트가 키 설명 오른쪽 끝으로 내려간다. 닫기(✕)는 은퇴한다 —
+    툴바 오른쪽 위의 여닫기 버튼이 이미 그 일을 한다. 커밋 줄이 되찾는 90px은 부모 커밋
+    제목이 쓴다.</p>
+  </div>
+  <div>
+    <div class="pane narrow">
+      <div class="head">
+        <span class="sha">커밋 <b>5d01d21</b></span><span class="copy">⧉</span>
+        <span class="sub">· 부모 6e4b9c1 fix(diff): stop…</span>
+      </div>
+      <div class="hint">
+        <span class="keys">패널이동 <em>←/→</em> · 화면…</span>
+        <span class="place">
+          <button><svg width="14" height="11"><rect x="0.5" y="0.5" width="13" height="10" rx="1.5" fill="none" stroke="#8E8E93"/><rect x="1.5" y="1.5" width="4" height="8" fill="#8E8E93"/></svg></button>
+          <button class="on"><svg width="14" height="11"><rect x="0.5" y="0.5" width="13" height="10" rx="1.5" fill="none" stroke="#fff"/><rect x="8" y="1.5" width="4.5" height="8" fill="#fff"/></svg></button>
+          <button><svg width="14" height="11"><rect x="0.5" y="0.5" width="13" height="10" rx="1.5" fill="none" stroke="#8E8E93"/><rect x="1.5" y="6" width="11" height="3.5" fill="#8E8E93"/></svg></button>
+        </span>
+      </div>
+      <div class="body">
+        <div class="file"><span class="st">M</span> lib/timeline_chrome.dart <span class="add">+73</span></div>
+        <div class="file"><span class="st">M</span> lib/timeline_preview_pane.dart</div>
+      </div>
+    </div>
+    <p class="cap">240px(판의 바닥)에서는 키 설명이 먼저 줄고 버튼은 끝까지 남는다 —
+    누를 수 있는 것이 읽을거리보다 먼저다.</p>
+  </div>
+</div>
+
+<h2>3. 확정된 규칙</h2>
+
+<p class="note"><b>키 설명은 <code>패널이동 ←/→ · 화면 스크롤 ⇧⌘↑/↓</code>.</b> ←/→가 실제로
+하는 일이 판 사이를 오가는 것이라, 안내가 코드와 같아진다. 대신 파일 목록을 걷는
+⌘↑/↓는 안내에서 빠진다 — 판 안에서는 맨 ↑/↓가 같은 일을 하고, 그 줄에 넣을 자리가
+남지 않는다.</p>
+
+<p class="note"><b>닫기(✕)는 은퇴.</b> 판을 닫는 문은 툴바 오른쪽 위의 여닫기 버튼과
+Enter 하나로 모은다. 같은 일을 하는 문이 둘일 이유가 없다.</p>
+
+<p class="note"><b>키 설명 줄은 판이 열려 있는 동안 늘 선다.</b> 지금 그 줄은 브랜치 diff의
+가상 병합·리베이스 결과를 볼 때 통째로 사라진다(<code>timeline_preview_pane.dart:165</code>).
+배치 버튼이 그 줄에 사는 이상 줄 자체는 남아야 하고, 사라지는 것은 그 안의 글자뿐이다.</p>
+
+<p class="note"><b>좁아지면 글자가 먼저 준다.</b> 240px(판의 바닥)에서 키 설명은
+말줄임으로 줄고 버튼은 끝까지 남는다 — 누를 수 있는 것이 읽을거리보다 먼저다.</p>
+
+</body>
+</html>

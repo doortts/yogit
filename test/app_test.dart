@@ -5024,7 +5024,22 @@ void main() {
 
     expect(find.byKey(const Key('branch-preview-file-list')), findsOneWidget);
     expect(find.text('브랜치 Diff'), findsNothing);
-    expect(find.byKey(const Key('preview-shortcut-hint')), findsNothing);
+    // 안내줄은 배치 세그먼트를 이고 있으니 여기서도 선다 — 비는 건 글자뿐.
+    final hint = find.byKey(const Key('preview-shortcut-hint'));
+    expect(hint, findsOneWidget);
+    expect(
+      tester
+          .widget<Text>(find.descendant(of: hint, matching: find.byType(Text)))
+          .data,
+      isEmpty,
+    );
+    expect(
+      find.descendant(
+        of: hint,
+        matching: find.byKey(const Key('preview-placement')),
+      ),
+      findsOneWidget,
+    );
     expect(find.byKey(const Key('preview-full-diff')), findsNothing);
     expect(find.text('가상 병합 커밋'), findsOneWidget);
     expect(find.text('feature.txt'), findsWidgets);
@@ -18207,14 +18222,12 @@ void main() {
     expect(
       find.descendant(
         of: preview,
-        matching: find.text('파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓'),
+        matching: find.text('패널이동 ←/→ · 화면 스크롤 ⇧⌘↑/↓'),
       ),
       findsOneWidget,
     );
     expect(find.byKey(const Key('preview-hash')), findsNothing);
-    final shortcut = tester.widget<Text>(
-      find.text('파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓'),
-    );
+    final shortcut = tester.widget<Text>(find.text('패널이동 ←/→ · 화면 스크롤 ⇧⌘↑/↓'));
     expect(shortcut.style?.fontFamily, technicalFontFamily);
     expect(shortcut.style?.fontFamilyFallback, technicalFontFallback);
     final author = find.byKey(const Key('preview-author'));

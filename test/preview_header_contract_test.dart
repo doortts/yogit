@@ -145,30 +145,37 @@ void main() {
     );
   });
 
-  testWidgets('the placement segment and the close button belong to the pane', (
+  testWidgets('the placement segment sits at the end of the hint row', (
     tester,
   ) async {
     await pumpPreview(tester);
 
-    for (final name in ['preview-placement', 'preview-close']) {
-      final control = find.byKey(Key(name));
-      expect(
-        find.descendant(
-          of: find.byKey(const Key('preview-header')),
-          matching: control,
-        ),
-        findsOneWidget,
-        reason: name,
-      );
-      expect(
-        find.descendant(
-          of: find.byKey(const Key('toolbar')),
-          matching: control,
-        ),
-        findsNothing,
-        reason: '$name은 툴바를 떠났다',
-      );
-    }
+    final segment = find.byKey(const Key('preview-placement'));
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('preview-shortcut-hint')),
+        matching: segment,
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('preview-header')),
+        matching: segment,
+      ),
+      findsNothing,
+      reason: '머리줄은 커밋 이름만 짓는다',
+    );
+    expect(
+      find.descendant(of: find.byKey(const Key('toolbar')), matching: segment),
+      findsNothing,
+      reason: '배치 세그먼트는 툴바를 떠났다',
+    );
+    expect(
+      find.byKey(const Key('preview-close')),
+      findsNothing,
+      reason: '판을 닫는 문은 툴바 토글과 Enter 하나로 모았다',
+    );
 
     // 글리프만 남아도 배치는 바뀐다 — 낱말은 툴팁이 지킨다.
     await tester.tap(
@@ -179,14 +186,12 @@ void main() {
     expect(find.byTooltip('하단'), findsOneWidget);
   });
 
-  testWidgets('the narrowest pane still holds the whole header', (
-    tester,
-  ) async {
+  testWidgets('the narrowest pane still holds both rows', (tester) async {
     await pumpPreview(tester);
+    final segment = find.byKey(const Key('preview-placement'));
+    final roomy = tester.getSize(segment);
 
-    // 240px가 판의 바닥이라 끝까지 끌어도 거기서 멈춘다. 자리 고르기와 닫기가
-    // 머리줄에 들어온 뒤로는 이 폭이 제일 좁은 시험대다 — 커밋 줄에 125px가
-    // 남고 그 줄이 123.1px를 쓴다.
+    // 240px가 판의 바닥이라 끝까지 끌어도 거기서 멈춘다.
     await tester.drag(
       find.byKey(const Key('preview-resizer')),
       const Offset(1200, 0),
@@ -195,18 +200,27 @@ void main() {
     expect(tester.getSize(find.byKey(const Key('preview-panel'))).width, 240);
 
     // 넘치는 Row는 위젯 테스트에서 그대로 예외가 되니, 여기까지 왔다는 것이
-    // 머리줄이 다 들어섰다는 뜻이다. 남은 건 무엇이 남아 있는지다.
-    final header = find.byKey(const Key('preview-header'));
-    for (final name in ['preview-placement', 'preview-close', 'preview-sha']) {
-      expect(
-        find.descendant(of: header, matching: find.byKey(Key(name))),
-        findsOneWidget,
-        reason: name,
-      );
-    }
+    // 두 줄이 다 들어섰다는 뜻이다. 자리 고르기가 내려간 뒤로 머리줄에서 폭을
+    // 다투는 것은 커밋 줄뿐이고, 좁아서 다투는 곳은 안내줄로 옮겨 갔다.
     expect(
-      find.descendant(of: header, matching: find.text('2280d58')),
+      find.descendant(
+        of: find.byKey(const Key('preview-header')),
+        matching: find.byKey(const Key('preview-sha')),
+      ),
       findsOneWidget,
+      reason: '머리줄은 240px을 커밋 줄에 통째로 준다',
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('preview-shortcut-hint')),
+        matching: segment,
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester.getSize(segment),
+      roomy,
+      reason: '읽을거리가 먼저 줄고 누를 수 있는 것은 제 폭 그대로 남는다',
     );
   });
 

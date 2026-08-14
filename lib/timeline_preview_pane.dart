@@ -162,28 +162,40 @@ extension _TimelinePreviewPane on _TimelineScreenState {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _previewHeader(commit),
-                  if (!_usesBranchPreviewResult(commit))
-                    Container(
-                      key: const Key('preview-shortcut-hint'),
-                      height: 24,
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        _cherryPickState != null
-                            ? '충돌 파일을 해결한 뒤 계속할 수 있습니다'
-                            : commit?.isWorkingTree ?? false
-                            ? 'Space Stage/Unstage · ⌘↵ 커밋 · ↑↓ 파일 이동 · Esc diff 닫기'
-                            : '파일 이동 ⌘↑/↓ · 화면 스크롤 ⇧⌘↑/↓',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: _palette.muted,
-                          fontSize: 10,
-                          fontFamily: technicalFontFamily,
-                          fontFamilyFallback: technicalFontFallback,
+                  // 배치 세그먼트가 이 줄에 사는 이상 줄 자체는 판이 열려 있는
+                  // 동안 늘 선다 — 브랜치 diff 결과에서는 글자만 빈다.
+                  Container(
+                    key: const Key('preview-shortcut-hint'),
+                    height: 24,
+                    padding: const EdgeInsets.only(left: 12, right: 6),
+                    child: Row(
+                      children: [
+                        // 좁아지면 읽을거리가 먼저 준다 — 누를 수 있는 것이
+                        // 끝까지 남도록 세그먼트는 늘리지도 줄이지도 않는다.
+                        Expanded(
+                          child: Text(
+                            _usesBranchPreviewResult(commit)
+                                ? ''
+                                : _cherryPickState != null
+                                ? '충돌 파일을 해결한 뒤 계속할 수 있습니다'
+                                : commit?.isWorkingTree ?? false
+                                ? 'Space Stage/Unstage · ⌘↵ 커밋 · ↑↓ 파일 이동 · Esc diff 닫기'
+                                : '패널이동 ←/→ · 화면 스크롤 ⇧⌘↑/↓',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: _palette.muted,
+                              fontSize: 10,
+                              fontFamily: technicalFontFamily,
+                              fontFamilyFallback: technicalFontFallback,
+                            ),
+                          ),
                         ),
-                      ),
+                        const SizedBox(width: 6),
+                        _previewPlacementControls(),
+                      ],
                     ),
+                  ),
                   Expanded(
                     child: _cherryPickState != null
                         ? _cherryPickPanel()
@@ -239,114 +251,63 @@ extension _TimelinePreviewPane on _TimelineScreenState {
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: _palette.border)),
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: namesCommit
-                ? _previewCommitLine(commit)
-                : Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          _cherryPickState != null
-                              ? '체리픽 충돌'
-                              : branchPreview
-                              ? branchTitle
-                              : '선택한 커밋의 diff',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: branchPreview
-                                ? _palette.text
-                                : _palette.muted,
-                            fontSize: 12,
-                            fontWeight: branchPreview
-                                ? FontWeight.w700
-                                : FontWeight.w500,
-                            letterSpacing: branchPreview ? 0 : 0.66,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      if (branchPreview)
-                        Text(
-                          branchStatus,
-                          style: TextStyle(color: _palette.muted, fontSize: 10),
-                        ),
-                    ],
+      // 머리줄은 커밋을 이름 짓는 일만 한다 — 자리 고르기는 아랫줄로 내려갔고,
+      // 되찾은 폭은 부모 커밋 제목이 쓴다.
+      child: namesCommit
+          ? _previewCommitLine(commit)
+          : Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _cherryPickState != null
+                        ? '체리픽 충돌'
+                        : branchPreview
+                        ? branchTitle
+                        : '선택한 커밋의 diff',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: branchPreview ? _palette.text : _palette.muted,
+                      fontSize: 12,
+                      fontWeight: branchPreview
+                          ? FontWeight.w700
+                          : FontWeight.w500,
+                      letterSpacing: branchPreview ? 0 : 0.66,
+                    ),
                   ),
-          ),
-          const SizedBox(width: 6),
-          // 머리줄이 무엇을 이름 짓든 자리 고르기와 닫기는 판의 일이라 같은
-          // 자리에 선다.
-          _previewPlacementControls(),
-        ],
-      ),
+                ),
+                const SizedBox(width: 8),
+                if (branchPreview)
+                  Text(
+                    branchStatus,
+                    style: TextStyle(color: _palette.muted, fontSize: 10),
+                  ),
+              ],
+            ),
     );
   }
 
-  /// 배치 세그먼트와 닫기 — 판 안에서 판의 자리를 고르고 판을 닫는 자리.
-  /// 고른 자리를 아는 것은 여전히 `_activePlacement`이고, 무엇을 할지는
-  /// 컨트롤러가 답한다. 머리줄은 그림을 그리고 누른 것을 전할 뿐이다.
+  /// 배치 세그먼트 — 판 안에서 판의 자리를 고르는 자리. 고른 자리를 아는 것은
+  /// 여전히 `_activePlacement`이고, 무엇을 할지는 컨트롤러가 답한다. 이 줄은
+  /// 그림을 그리고 누른 것을 전할 뿐이다.
   Widget _previewPlacementControls() => SelectionContainer.disabled(
-    child: Row(
-      children: [
-        Container(
-          key: const Key('preview-placement'),
-          padding: const EdgeInsets.all(2),
-          decoration: BoxDecoration(
-            color: _palette.raised,
-            border: Border.all(color: _palette.border),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Row(
-            children: [
-              _placementButton('좌측', PreviewPlacement.left),
-              _placementButton('우측', PreviewPlacement.right),
-              _placementButton('하단', PreviewPlacement.bottom),
-            ],
-          ),
-        ),
-        const SizedBox(width: 4),
-        // 머리줄 글자 크기에 맞춘 손그림 버튼 — IconButton은 48px 탭 영역을
-        // 들고 와서 36px 머리줄을 혼자 다 먹는다. 상태바의 콘솔 버튼과 같은 꼴.
-        _tooltip(
-          '미리보기 닫기 (Enter)',
-          HoverBuilder(
-            builder: (hovered) => Semantics(
-              button: true,
-              onTap: _closePreviewFromHeader,
-              child: GestureDetector(
-                key: const Key('preview-close'),
-                behavior: HitTestBehavior.opaque,
-                onTap: _closePreviewFromHeader,
-                child: Container(
-                  width: 20,
-                  height: 20,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: hovered ? _palette.raised : null,
-                    borderRadius: BorderRadius.circular(5),
-                  ),
-                  child: Icon(
-                    Icons.close,
-                    size: 13,
-                    color: hovered ? _palette.text : _palette.muted,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
+    child: Container(
+      key: const Key('preview-placement'),
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: _palette.raised,
+        border: Border.all(color: _palette.border),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        children: [
+          _placementButton('좌측', PreviewPlacement.left),
+          _placementButton('우측', PreviewPlacement.right),
+          _placementButton('하단', PreviewPlacement.bottom),
+        ],
+      ),
     ),
   );
-
-  /// 툴바 토글이 부르는 것과 같은 문 — 판 안에서 닫아도 하는 일은 같다.
-  void _closePreviewFromHeader() {
-    _togglePreview();
-    _focusNode.requestFocus();
-  }
 
   /// 라벨 대신 판의 자리를 그리는 글리프. 처음 보는 사람은 그림만으로 못 읽으니
   /// 낱말은 툴팁이 지킨다.
@@ -365,8 +326,8 @@ extension _TimelinePreviewPane on _TimelineScreenState {
           },
           child: Container(
             key: Key('placement-hover-$placement'),
-            // 240px까지 좁아지는 판에서도 커밋 줄이 설 자리를 남기는 폭 —
-            // 24px면 세 칸이 12px 더 먹어 머리줄이 10px 넘친다.
+            // 24px 안내줄이 높이의 천장이다 — 세그먼트의 테두리와 안쪽 여백이
+            // 6px을 먹으니 남는 18px까지만 그려진다.
             width: 20,
             height: 20,
             alignment: Alignment.center,
