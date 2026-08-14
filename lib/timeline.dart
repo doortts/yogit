@@ -317,6 +317,11 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// allowed any room.
   static const _minDragWidth = 200.0;
 
+  /// Three 12px lights, two 8px gaps, and the 14px the selector keeps clear of
+  /// them. Declared rather than left to the row's own sum: the toolbar has to
+  /// know where its left cluster starts before it can find the window's centre.
+  static const _windowButtonsWidth = 66.0;
+
   /// The repository's last path segment; the full path lives in its tooltip. A
   /// root with no segment ('/') keeps the whole string.
   String get _repositoryName {
@@ -2168,11 +2173,9 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
   }
 
-  Widget _windowButtons() => Row(
-    children: [
-      WindowButtons(controller: _previewController),
-      const SizedBox(width: 14),
-    ],
+  Widget _windowButtons() => SizedBox(
+    width: _windowButtonsWidth,
+    child: WindowButtons(controller: _previewController),
   );
 
   List<String> get _recentLocalBranches => sortRefsNewestFirst(_refs.local, {
@@ -2185,43 +2188,21 @@ class _TimelineScreenState extends State<TimelineScreen>
         ),
   });
 
-  /// The drag stretch and wordmark share whatever the functional clusters
-  /// leave. The wordmark rides *inside* the stretch rather than beside it: the
-  /// glyphs ignore the pointer, so the bar still drags from under them, and the
-  /// drag target is already protected upstream — [_minDragWidth] is reserved
-  /// before the branch selector takes its width. So the only question left here
-  /// is whether the glyphs fit; asking for the drag width *on top of* them hid
-  /// the wordmark on every window the toolbar's own clusters fit in.
-  Widget _dragAndWordmark() => LayoutBuilder(
-    builder: (context, constraints) {
-      final size = [26.0, 20.0].firstWhere(
-        (size) => constraints.maxWidth >= size * 5 + 24,
-        orElse: () => 0.0,
-      );
-      return GestureDetector(
-        key: const Key('toolbar-drag'),
-        behavior: HitTestBehavior.opaque,
-        onPanStart: (_) => unawaited(_previewController.startDrag()),
-        onDoubleTap: () => unawaited(_previewController.toggleZoom()),
-        child: SizedBox(
-          width: constraints.maxWidth,
-          height: constraints.maxHeight,
-          child: Row(
-            children: [
-              const Spacer(flex: 5),
-              if (size > 0) ...[
-                const Spacer(flex: 2),
-                IgnorePointer(
-                  child: Wordmark(key: const Key('wordmark'), fontSize: size),
-                ),
-                const Spacer(flex: 2),
-              ],
-              const Spacer(flex: 5),
-            ],
-          ),
-        ),
-      );
-    },
+  /// Whatever the functional clusters leave is where the window drags from —
+  /// [_minDragWidth] of it is reserved before the branch selector takes its
+  /// width. The wordmark rides in here, not because it belongs to the drag
+  /// target but because this stretch is the free space itself: the selector's
+  /// box ends where its ink ends, so this width is the room the mark has to ask
+  /// for. It is still drawn at the window's centre, not at this stretch's.
+  Widget _dragRegion(double toolbarWidth) => GestureDetector(
+    key: const Key('toolbar-drag'),
+    behavior: HitTestBehavior.opaque,
+    onPanStart: (_) => unawaited(_previewController.startDrag()),
+    onDoubleTap: () => unawaited(_previewController.toggleZoom()),
+    child: LayoutBuilder(
+      builder: (context, constraints) =>
+          _centeredWordmark(context, toolbarWidth, constraints.maxWidth),
+    ),
   );
 
   /// 기준은 원격 브랜치도 될 수 있다. 로컬 브랜치를 원격 위로 재배치하는 방향은

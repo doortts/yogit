@@ -10,86 +10,159 @@ extension _TimelineChrome on _TimelineScreenState {
     color: _palette.surface,
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14),
-      child: _toolbarRow(),
+      // The row is handed its own width because the wordmark has to know where
+      // the window's centre is, and the padding is symmetric, so this box's
+      // centre is the window's.
+      child: LayoutBuilder(
+        builder: (context, constraints) => _toolbarRow(constraints.maxWidth),
+      ),
     ),
   );
 
-  Widget _toolbarRow() => Row(
+  Widget _toolbarRow(double width) => Row(
     children: [
-      Expanded(child: _toolbarLeft()),
+      Expanded(child: _toolbarLeft(width)),
       _toolbarRight(),
     ],
   );
 
-  Widget _toolbarLeft() => Row(
-    children: [
-      _windowButtons(),
-      Expanded(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final previewControlsWidth = _compareRef == null ? 0.0 : 212.0;
-            // 이름이 잘리는 것보다 창을 끄는 빈칸이 좁아지는 편이 낫다: 그
-            // 자리는 어차피 비어 있고, 최소 폭은 아래에서 지켜진다.
-            final selectorWidth = math.min(
-              620.0,
-              math.max(
-                0.0,
-                constraints.maxWidth -
-                    _TimelineScreenState._minDragWidth -
-                    previewControlsWidth,
-              ),
-            );
-            return Row(
-              children: [
-                SizedBox(
-                  width: selectorWidth,
-                  child: AbsorbPointer(
-                    key: const Key('branch-preview-toolbar-lock'),
-                    absorbing: _branchApplyBusy,
-                    child: RepositoryBranchSelector(
-                      repositoryName: _repositoryName,
-                      repositoryPath: widget.repository.root,
-                      trailing: _upstreamSyncCapsule(),
-                      localBranches: _recentLocalBranches,
-                      branchTimes: _refs.branchActivityTimes,
-                      remoteBranches: sortRefsNewestFirst(
-                        _refs.remote,
-                        _refs.branchActivityTimes,
-                      ),
-                      tags: sortRefsNewestFirst(
-                        _refs.tags,
-                        _refs.tagCreatorTimes,
-                      ),
-                      tagTimes: _refs.tagCreatorTimes,
-                      selectedBranch: _baseBranch,
-                      comparedBranch: _compareRef,
-                      refsLoading: _refsLoading,
-                      refsLoadFailed: _refsLoadFailed,
-                      onRepositoryPressed: () => unawaited(_pickRepository()),
-                      recentRepositories: widget.recentRepositories,
-                      onRecentRepositorySelected: (path) =>
-                          unawaited(_openRepositoryPath(path)),
-                      onRecentRepositoryRemoved:
-                          widget.onForgetRecentRepository,
-                      onBranchSelected: _selectBaseBranch,
-                      onComparisonSelected: (branch) =>
-                          unawaited(_selectComparison(branch)),
-                      onComparisonCleared: _clearComparison,
-                    ),
-                  ),
-                ),
-                if (_compareRef != null) ...[
-                  const SizedBox(width: 8),
-                  SizedBox(width: 200, child: _branchPreviewControls()),
-                ],
-                Expanded(child: _dragAndWordmark()),
-              ],
-            );
-          },
+  /// The selector takes what the bar has left once the window buttons, the
+  /// cluster on the right, the drag stretch and the preview controls have
+  /// theirs. Computed from the toolbar's own width rather than under a
+  /// [LayoutBuilder] of its own, because the wordmark needs the same number to
+  /// know where the left cluster ends.
+  double _selectorWidth(double width) {
+    final previewControlsWidth = _compareRef == null ? 0.0 : 212.0;
+    // 이름이 잘리는 것보다 창을 끄는 빈칸이 좁아지는 편이 낫다: 그
+    // 자리는 어차피 비어 있고, 최소 폭은 아래에서 지켜진다.
+    return math.min(
+      620.0,
+      math.max(
+        0.0,
+        width -
+            _TimelineScreenState._windowButtonsWidth -
+            _toolbarRightWidth -
+            _TimelineScreenState._minDragWidth -
+            previewControlsWidth,
+      ),
+    );
+  }
+
+  /// Where the mark goes and whether it goes at all, decided from [dragWidth] —
+  /// the drag stretch's own width, which is the free space itself now that the
+  /// selector's box ends where its ink ends. The stretch's right edge is where
+  /// the cluster on the right begins, so its left edge follows, and the window's
+  /// centre restated in the stretch's coordinates is where the glyphs sit — the
+  /// centre of the window, never the centre of what the row had left over.
+  /// 26px while the whole mark plus 24px of air on each side clears both ends of
+  /// the stretch, 20px while only the smaller band does, nothing once the centre
+  /// belongs to the clusters.
+  Widget _centeredWordmark(
+    BuildContext context,
+    double toolbarWidth,
+    double dragWidth,
+  ) {
+    final dragRight = toolbarWidth - _toolbarRightWidth;
+    final dragLeft = dragRight - dragWidth;
+    final size = [26.0, 20.0].firstWhere((size) {
+      final reach = Wordmark.widthAt(context, size) / 2 + 24;
+      return toolbarWidth / 2 - reach >= dragLeft &&
+          toolbarWidth / 2 + reach <= dragRight;
+    }, orElse: () => 0.0);
+    if (size == 0) return const SizedBox.expand();
+    return Padding(
+      padding: EdgeInsets.only(
+        left: toolbarWidth / 2 - Wordmark.widthAt(context, size) / 2 - dragLeft,
+      ),
+      // The glyphs never eat a pointer: the bar still drags from under them.
+      child: IgnorePointer(
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Wordmark(key: const Key('wordmark'), fontSize: size),
         ),
       ),
+    );
+  }
+
+  Widget _toolbarLeft(double width) => Row(
+    children: [
+      _windowButtons(),
+      // A maximum, not a size: the selector's row shrink-wraps its ink inside
+      // it, so the drag stretch that follows really is the room left over. The
+      // cap still has to be finite — it is what the names ellipsize against.
+      ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: _selectorWidth(width)),
+        child: AbsorbPointer(
+          key: const Key('branch-preview-toolbar-lock'),
+          absorbing: _branchApplyBusy,
+          child: RepositoryBranchSelector(
+            repositoryName: _repositoryName,
+            repositoryPath: widget.repository.root,
+            trailing: _upstreamSyncCapsule(),
+            localBranches: _recentLocalBranches,
+            branchTimes: _refs.branchActivityTimes,
+            remoteBranches: sortRefsNewestFirst(
+              _refs.remote,
+              _refs.branchActivityTimes,
+            ),
+            tags: sortRefsNewestFirst(_refs.tags, _refs.tagCreatorTimes),
+            tagTimes: _refs.tagCreatorTimes,
+            selectedBranch: _baseBranch,
+            comparedBranch: _compareRef,
+            refsLoading: _refsLoading,
+            refsLoadFailed: _refsLoadFailed,
+            onRepositoryPressed: () => unawaited(_pickRepository()),
+            recentRepositories: widget.recentRepositories,
+            onRecentRepositorySelected: (path) =>
+                unawaited(_openRepositoryPath(path)),
+            onRecentRepositoryRemoved: widget.onForgetRecentRepository,
+            onBranchSelected: _selectBaseBranch,
+            onComparisonSelected: (branch) =>
+                unawaited(_selectComparison(branch)),
+            onComparisonCleared: _clearComparison,
+          ),
+        ),
+      ),
+      if (_compareRef != null) ...[
+        const SizedBox(width: 8),
+        SizedBox(width: 200, child: _branchPreviewControls()),
+      ],
+      Expanded(child: _dragRegion(width)),
     ],
   );
+
+  /// Measured and drawn from one place, so the two cannot drift apart.
+  static const _monitorLabel = '모니터링';
+
+  /// What the cluster on the right takes, summed from the controls themselves.
+  /// The selector's width and the wordmark's centre band both need it while the
+  /// bar is still laying itself out, and a fourth control has to add its term
+  /// here — a single constant for the lot would go stale in silence. The monitor
+  /// button's term is measured rather than rounded: the mark's centre is only as
+  /// true as this sum, and rounding the label up nudged the glyphs a few pixels
+  /// right of the window's centre in the one configuration that ships.
+  double get _toolbarRightWidth =>
+      28 + // the preview toggle's own box
+      12 +
+      (widget.onOpenMonitor == null ? 0 : _monitorButtonWidth + 8) +
+      40; // the settings gear at compact density
+
+  /// The 모니터링 button's own width: its label laid out in the style the button
+  /// draws it in — `labelLarge` is where a [TextButton] takes its text style
+  /// from and 13 is what the child overrides it with — plus the 10px of padding
+  /// on each side. Measured the way the profile chip measures itself, text scale
+  /// included. The border strokes inside the shape, so it costs the box nothing.
+  double get _monitorButtonWidth =>
+      (TextPainter(
+        text: TextSpan(
+          text: _monitorLabel,
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(fontSize: 13),
+        ),
+        textDirection: TextDirection.ltr,
+        textScaler: MediaQuery.textScalerOf(context),
+        maxLines: 1,
+      )..layout()).width +
+      20;
 
   Widget _toolbarRight() => Row(
     mainAxisAlignment: MainAxisAlignment.end,
@@ -115,7 +188,7 @@ extension _TimelineChrome on _TimelineScreenState {
             final branch = _baseBranch ?? _refs.current;
             if (branch != null) widget.onOpenMonitor!(branch);
           },
-          child: const Text('모니터링', style: TextStyle(fontSize: 13)),
+          child: const Text(_monitorLabel, style: TextStyle(fontSize: 13)),
         ),
         const SizedBox(width: 8),
       ],

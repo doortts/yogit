@@ -29,11 +29,28 @@ class Wordmark extends StatelessWidget {
     ('t', Color(0xFFBAE1FF)),
   ];
 
-  TextStyle get _style => TextStyle(
+  static TextStyle _styleAt(double fontSize) => TextStyle(
     fontFamily: 'DancingScript',
     fontSize: fontSize,
     fontWeight: FontWeight.w700,
   );
+
+  TextStyle get _style => _styleAt(fontSize);
+
+  /// How wide the five glyphs come out at [fontSize], letter spacing and text
+  /// scale of [context] included so this answers what the [Text] below will
+  /// actually paint. The toolbar asks before it decides whether the window's
+  /// centre has room for the mark: a script face is far narrower than five
+  /// nominal em squares, and guessing would fold the mark away on windows it
+  /// fits in.
+  static double widthAt(BuildContext context, double fontSize) => (TextPainter(
+    text: TextSpan(
+      text: letters.map((letter) => letter.$1).join(),
+      style: DefaultTextStyle.of(context).style.merge(_styleAt(fontSize)),
+    ),
+    textScaler: MediaQuery.textScalerOf(context),
+    textDirection: TextDirection.ltr,
+  )..layout()).width;
 
   /// Where the 'Y' ends, so the badge can float in the space the lowercase
   /// letters leave above them.

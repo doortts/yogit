@@ -95,6 +95,10 @@ class RepositoryBranchSelector extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: Row(
+        // 몫이 상한일 뿐이라면 행도 상한만큼 넓을 이유가 없다: 이름들이 쓴
+        // 만큼에서 끝나야 오른쪽에 남는 빈칸이 진짜 빈칸이 된다. 툴바는 그
+        // 빈칸을 재서 워드마크 자리를 정한다.
+        mainAxisSize: MainAxisSize.min,
         children: [
           // 이름은 고르라고 있는 것이 아니라 지금 어디에 서 있는지 말하려고
           // 있다. 저장소와 브랜치가 몫을 더 받고, 대개 '선택' 두 글자인 브랜치

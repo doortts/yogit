@@ -18700,76 +18700,102 @@ void main() {
           .any((box) => box.ignoring),
       isTrue,
     );
-    // Nothing may run under it: the path ellipsizes before the wordmark, and the
-    // right cluster starts after it.
-    final slot = tester.getRect(find.byKey(const Key('wordmark')));
-    expect(
-      tester
-          .getRect(find.text('yogit-480bbcc5-8064-43d5-976e-5e5ec891eba5'))
-          .right,
-      lessThanOrEqualTo(slot.left - 8),
-    );
-    expect(
-      // The toggle opens the right cluster now that placement lives in the pane.
-      tester.getRect(find.byKey(const Key('preview-toggle'))).left,
-      greaterThanOrEqualTo(slot.right + 8),
-    );
-    // The drag handle keeps a usable stretch of bar.
-    expect(
-      tester.getRect(find.byKey(const Key('toolbar-drag'))).width,
-      greaterThanOrEqualTo(200),
-    );
-
-    // The user's own window size: still there, still clear of both sides.
-    tester.view.physicalSize = const Size(1548, 800);
-    await tester.pumpAndSettle();
-    final narrow = tester.getRect(find.byKey(const Key('wordmark')));
-    final path = tester.getRect(find.byKey(const Key('toolbar-drag')));
-    expect(path.width, greaterThanOrEqualTo(200));
-    expect(
-      tester
-          .getRect(find.text('yogit-480bbcc5-8064-43d5-976e-5e5ec891eba5'))
-          .right,
-      lessThanOrEqualTo(narrow.left - 8),
-    );
-    expect(
-      narrow.right + 8,
-      lessThanOrEqualTo(
+    // Where the mark stands and whether it stands at all, at one window width
+    // after another. What it has to clear is the drag stretch's two ends: the
+    // selector's ink on the left, the first control of the right-hand cluster
+    // on the right.
+    Future<double?> markSizeAt(double width) async {
+      tester.view.physicalSize = Size(width, 800);
+      await tester.pumpAndSettle();
+      // The drag handle keeps a usable stretch of bar at every width.
+      expect(
+        tester.getRect(find.byKey(const Key('toolbar-drag'))).width,
+        greaterThanOrEqualTo(200),
+      );
+      final glyphs = find.descendant(
+        of: find.byKey(const Key('wordmark')),
+        matching: find.byType(Text),
+      );
+      if (glyphs.evaluate().isEmpty) return null;
+      final slot = tester.getRect(find.byKey(const Key('wordmark')));
+      // The window's centre, not the centre of what the row has left over —
+      // the two clusters differ in width, so those are different points.
+      expect(
+        slot.center.dx,
+        closeTo(
+          tester.getRect(find.byKey(const Key('toolbar'))).center.dx,
+          0.5,
+        ),
+      );
+      // And 24px of air on each side of it. The selector's box is measured
+      // rather than its cap because the box now ends where the ink ends.
+      final selector = tester.getRect(
+        find.byKey(const Key('branch-preview-toolbar-lock')),
+      );
+      expect(
+        selector.right,
+        closeTo(
+          tester.getRect(find.byKey(const Key('branch-diff-selector'))).right,
+          0.5,
+        ),
+        reason: '박스가 잉크에서 끝난다',
+      );
+      expect(selector.right, lessThanOrEqualTo(slot.left - 24));
+      expect(
         tester.getRect(find.byKey(const Key('preview-toggle'))).left,
+        greaterThanOrEqualTo(slot.right + 24),
+      );
+      return tester.widget<Text>(glyphs).style?.fontSize;
+    }
+
+    // 1240 is the QA capture width, and the mark stands there. Gating on the
+    // selector's 620px box hid it here while the bar was visibly half empty:
+    // the names only reach 502.
+    expect(await markSizeAt(1240), 26);
+    // Narrowing the window does not narrow the mark's slot — the ink stops
+    // growing once the cap does — it walks the window's centre left toward the
+    // names. Each rung is the width where the 24px runs out: 1183 is the last
+    // one the 26px glyphs keep it at, 1153 the last for the 20px glyphs, and
+    // below that the left menus really do reach the centre. 480 is the native
+    // minimum, where they own it outright.
+    expect(await markSizeAt(1660), 26);
+    expect(await markSizeAt(1183), 26);
+    expect(await markSizeAt(1182), 20);
+    expect(await markSizeAt(1153), 20);
+    expect(await markSizeAt(1152), isNull);
+    expect(await markSizeAt(480), isNull);
+
+    // Everything above ran without a monitor button, and that is not what
+    // ships: the app always hands one over. The 모니터링 label widens the
+    // cluster on the right by a fraction of a pixel that no round number
+    // survives, so the same centre has to hold with the button standing there.
+    tester.view.physicalSize = const Size(1660, 800);
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository(
+          (_, _) async => [commit('1', 'first commit')],
+          root: root,
+        ),
+        controller,
+        onOpenMonitor: (_) {},
       ),
     );
-
-    // The width the native window used to stop at still shows it: the drag
-    // stretch is reserved before the selector takes its width, and the glyphs
-    // ride inside that stretch rather than asking for room beside it. Rendering
-    // at all is the no-overflow assertion.
-    tester.view.physicalSize = const Size(960, 800);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('wordmark')), findsOneWidget);
-    expect(
-      tester.getRect(find.byKey(const Key('toolbar-drag'))).width,
-      greaterThanOrEqualTo(200),
-    );
-
-    // The window really does go narrower — 480 is the native minimum. The
-    // placement segment left for the pane's header, so the 200px stretch the
-    // bar reserves now holds the full wordmark even here; the step-down ladder
-    // is still there, it just no longer has to fire at the native minimum.
-    tester.view.physicalSize = const Size(480, 800);
-    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('toolbar-monitor')), findsOneWidget);
+    final withMonitor = find.byKey(const Key('wordmark'));
     expect(
       tester
           .widget<Text>(
-            find.descendant(
-              of: find.byKey(const Key('wordmark')),
-              matching: find.byType(Text),
-            ),
+            find.descendant(of: withMonitor, matching: find.byType(Text)),
           )
           .style
           ?.fontSize,
       26,
     );
-    expect(find.byKey(const Key('toolbar-drag')), findsOneWidget);
+    expect(
+      tester.getRect(withMonitor).center.dx,
+      closeTo(tester.getRect(find.byKey(const Key('toolbar'))).center.dx, 0.5),
+    );
   });
 }
 
