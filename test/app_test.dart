@@ -422,7 +422,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('preview-surface')), findsOneWidget);
 
-    await tester.tap(find.text('하단'));
+    await tester.tap(
+      find.byKey(const Key('placement-PreviewPlacement.bottom')),
+    );
     await tester.pumpAndSettle();
     expect(controller.previewPlacement, PreviewPlacement.bottom);
 
@@ -705,7 +707,9 @@ void main() {
     await tester.pumpAndSettle();
 
     final before = tester.getSize(find.byKey(const Key('preview-panel')));
-    await tester.tap(find.text('하단'));
+    await tester.tap(
+      find.byKey(const Key('placement-PreviewPlacement.bottom')),
+    );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 90));
     final intermediate = tester.getSize(find.byKey(const Key('preview-panel')));
@@ -798,14 +802,18 @@ void main() {
         tester.getRect(find.byKey(const Key('preview-panel'))).left,
       );
 
-      await tester.tap(find.text('좌측'));
+      await tester.tap(
+        find.byKey(const Key('placement-PreviewPlacement.left')),
+      );
       await tester.pumpAndSettle();
       expect(
         tester.getRect(find.byKey(const Key('preview-panel'))).right,
         tester.getRect(diff).left,
       );
 
-      await tester.tap(find.text('하단'));
+      await tester.tap(
+        find.byKey(const Key('placement-PreviewPlacement.bottom')),
+      );
       await tester.pumpAndSettle();
       expect(
         tester.getRect(diff).bottom,
@@ -1011,7 +1019,9 @@ void main() {
     );
     expect(scrollable.position.pixels, 360);
 
-    await tester.tap(find.text('하단'));
+    await tester.tap(
+      find.byKey(const Key('placement-PreviewPlacement.bottom')),
+    );
     tester.view.physicalSize = const Size(800, 880);
     await tester.pumpAndSettle();
 
@@ -4921,11 +4931,12 @@ void main() {
     ]);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
-    // 비교 중에도 실제 커밋을 고르면 헤더는 그 커밋의 해시를 말한다.
+    // 비교 중에도 실제 커밋을 고르면 헤더는 그 커밋의 해시를 말한다 — 앱이
+    // 받는 것과 같이 일곱 자리로 줄여서.
     expect(
       find.descendant(
         of: find.byKey(const Key('preview-header')),
-        matching: find.text('main-tip'),
+        matching: find.text('main-ti'),
       ),
       findsOneWidget,
     );
@@ -11538,7 +11549,7 @@ void main() {
 
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('좌측'));
+    await tester.tap(find.byKey(const Key('placement-PreviewPlacement.left')));
     await tester.pumpAndSettle();
 
     expect(controller.previewPlacement, PreviewPlacement.left);
@@ -14960,23 +14971,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    double sizeOf(String label) =>
-        tester.widget<Text>(find.text(label)).style!.fontSize!;
-    expect(sizeOf('미리보기'), 14);
-    // The caption sits outside the bordered box, to its left.
-    final box = tester.getRect(find.byKey(const Key('preview-placement')));
-    expect(
-      find.descendant(
-        of: find.byKey(const Key('preview-placement')),
-        matching: find.text('미리보기'),
-      ),
-      findsNothing,
-    );
-    expect(
-      tester.getRect(find.text('미리보기')).right,
-      lessThanOrEqualTo(box.left),
-    );
-    expect(sizeOf('하단'), 14);
+    // The caption retired with the placement box: choosing a placement is the
+    // pane's own business, so the segment left for its header and the caption
+    // had nothing left to introduce.
+    expect(find.text('미리보기'), findsNothing);
+    expect(find.byKey(const Key('preview-placement')), findsNothing);
     expect(find.text('↑'), findsNothing);
     expect(find.text('↓'), findsNothing);
     expect(find.text(' 이동 · '), findsNothing);
@@ -14984,10 +14983,8 @@ void main() {
     // spends room saying so.
     expect(find.text('상세'), findsNothing);
     expect(find.byKey(const Key('keycap-Enter')), findsNothing);
-    // Right cluster order: caption, placement box, the pane's own button, gear.
+    // Right cluster order: the pane's own button, then the gear.
     final lefts = [
-      tester.getRect(find.text('미리보기')).left,
-      box.left,
       tester.getRect(find.byKey(const Key('preview-toggle'))).left,
       tester.getRect(find.byIcon(Icons.settings_outlined)).left,
     ];
@@ -15020,8 +15017,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('preview-surface')), findsOneWidget);
 
-    // The placement buttons grew but still respond.
-    await tester.tap(find.text('하단'));
+    // The placement buttons answer from the header the pane just opened.
+    await tester.tap(
+      find.byKey(const Key('placement-PreviewPlacement.bottom')),
+    );
     await tester.pumpAndSettle();
     expect(controller.previewPlacement, PreviewPlacement.bottom);
   });
@@ -15292,7 +15291,7 @@ void main() {
     }
   });
 
-  testWidgets('toolbar controls expose their approved hover feedback', (
+  testWidgets('the chrome controls expose their approved hover feedback', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -15302,6 +15301,9 @@ void main() {
         onOpenSettings: () {},
       ),
     );
+    await tester.pumpAndSettle();
+    // 배치 버튼은 미리보기 머리줄에 사니, 판을 세워야 잴 수 있다.
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
     final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
@@ -15959,7 +15961,9 @@ void main() {
 
     // The bottom panel can grow to the column headers, regardless of the old
     // fixed 480px ceiling.
-    await tester.tap(find.text('하단'));
+    await tester.tap(
+      find.byKey(const Key('placement-PreviewPlacement.bottom')),
+    );
     await tester.pumpAndSettle();
     await tester.drag(
       find.byKey(const Key('preview-resizer')),
@@ -18596,9 +18600,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(calls, ['toggleZoom']);
 
-    // The controls on top of the drag region still take their own taps.
+    // The control on top of the drag region still takes its own tap, and the
+    // pane it opens answers on its own segment.
     calls.clear();
-    await tester.tap(find.text('하단'));
+    await tester.tap(find.byKey(const Key('preview-toggle')));
+    await tester.pumpAndSettle();
+    expect(controller.previewPlacement, PreviewPlacement.right);
+    await tester.tap(
+      find.byKey(const Key('placement-PreviewPlacement.bottom')),
+    );
     await tester.pumpAndSettle();
     expect(controller.previewPlacement, PreviewPlacement.bottom);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
@@ -18700,7 +18710,8 @@ void main() {
       lessThanOrEqualTo(slot.left - 8),
     );
     expect(
-      tester.getRect(find.byKey(const Key('preview-placement'))).left,
+      // The toggle opens the right cluster now that placement lives in the pane.
+      tester.getRect(find.byKey(const Key('preview-toggle'))).left,
       greaterThanOrEqualTo(slot.right + 8),
     );
     // The drag handle keeps a usable stretch of bar.
@@ -18724,7 +18735,7 @@ void main() {
     expect(
       narrow.right + 8,
       lessThanOrEqualTo(
-        tester.getRect(find.byKey(const Key('preview-placement'))).left,
+        tester.getRect(find.byKey(const Key('preview-toggle'))).left,
       ),
     );
 
@@ -18740,10 +18751,10 @@ void main() {
       greaterThanOrEqualTo(200),
     );
 
-    // The window really does go narrower — 480 is the native minimum. Under
-    // ~560 the selector has nothing left to give and the stretch itself starts
-    // shrinking, so the wordmark steps down to its small size rather than crowd
-    // what is left of the bar.
+    // The window really does go narrower — 480 is the native minimum. The
+    // placement segment left for the pane's header, so the 200px stretch the
+    // bar reserves now holds the full wordmark even here; the step-down ladder
+    // is still there, it just no longer has to fire at the native minimum.
     tester.view.physicalSize = const Size(480, 800);
     await tester.pumpAndSettle();
     expect(
@@ -18756,7 +18767,7 @@ void main() {
           )
           .style
           ?.fontSize,
-      20,
+      26,
     );
     expect(find.byKey(const Key('toolbar-drag')), findsOneWidget);
   });
@@ -19782,7 +19793,9 @@ GitCommit commit(
   ),
 }) => GitCommit(
   sha: sha,
-  shortSha: sha,
+  // git.dart와 같은 자리에서 자른다 — 여기서 통째로 넘기면 앱이 절대 받지 않는
+  // 여덟 자리 이상 해시로 화면을 재게 된다.
+  shortSha: sha.length <= 7 ? sha : sha.substring(0, 7),
   parents: parents,
   author: GitIdentity(name: 'Ada Author', email: 'ada@example.com'),
   authorTimestamp: 1700000000,

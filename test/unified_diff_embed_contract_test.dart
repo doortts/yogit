@@ -116,7 +116,7 @@ void main() {
       reason: '우측 배치: diff가 미리보기 왼쪽을 다 차지한다',
     );
 
-    await tester.tap(find.text('좌측'));
+    await tester.tap(find.byKey(const Key('placement-PreviewPlacement.left')));
     await tester.pumpAndSettle();
     expect(
       tester.getRect(preview).right,
@@ -124,7 +124,9 @@ void main() {
       reason: '좌측 배치: 거울로 뒤집힌다',
     );
 
-    await tester.tap(find.text('하단'));
+    await tester.tap(
+      find.byKey(const Key('placement-PreviewPlacement.bottom')),
+    );
     await tester.pumpAndSettle();
     expect(
       tester.getRect(workspace).bottom,

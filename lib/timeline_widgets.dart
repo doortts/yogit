@@ -10,6 +10,7 @@ import 'timeline_graph_painters.dart';
 import 'timeline_palette.dart';
 import 'timeline_theme.dart';
 import 'typography.dart';
+import 'window_frame.dart';
 
 /// The small pieces the timeline builds itself from: its wordmark, the hover
 /// wrapper, the copy button, the row-state scope, the legend dot and the
@@ -187,6 +188,57 @@ class PaneToggleIconPainter extends CustomPainter {
       oldDelegate.opens != opens ||
       oldDelegate.color != color ||
       oldDelegate.mirrored != mirrored;
+}
+
+/// The window with the preview panel filled in, for the placement segment in
+/// the preview's own header. Which edge the panel lies against is the only
+/// difference between the three glyphs; the tooltip carries the word.
+class PreviewPlacementIconPainter extends CustomPainter {
+  const PreviewPlacementIconPainter({
+    required this.placement,
+    required this.color,
+  });
+
+  final PreviewPlacement placement;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final frame = Rect.fromLTWH(0.5, 0.5, size.width - 1, size.height - 1);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(frame, const Radius.circular(1.5)),
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke,
+    );
+    final inside = frame.deflate(1);
+    // `closed` never gets a button, so it falls in with the bottom panel.
+    final panel = switch (placement) {
+      PreviewPlacement.left => Rect.fromLTWH(
+        inside.left,
+        inside.top,
+        inside.width * 0.36,
+        inside.height,
+      ),
+      PreviewPlacement.right => Rect.fromLTRB(
+        inside.right - inside.width * 0.36,
+        inside.top,
+        inside.right,
+        inside.bottom,
+      ),
+      _ => Rect.fromLTRB(
+        inside.left,
+        inside.bottom - inside.height * 0.42,
+        inside.right,
+        inside.bottom,
+      ),
+    };
+    canvas.drawRect(panel, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(covariant PreviewPlacementIconPainter oldDelegate) =>
+      oldDelegate.placement != placement || oldDelegate.color != color;
 }
 
 /// Copies a ref name and answers with a check for a moment, so the click has

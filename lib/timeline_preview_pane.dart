@@ -239,37 +239,151 @@ extension _TimelinePreviewPane on _TimelineScreenState {
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: _palette.border)),
       ),
-      child: namesCommit
-          ? _previewCommitLine(commit)
-          : Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _cherryPickState != null
-                        ? '체리픽 충돌'
-                        : branchPreview
-                        ? branchTitle
-                        : '선택한 커밋의 diff',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: branchPreview ? _palette.text : _palette.muted,
-                      fontSize: 12,
-                      fontWeight: branchPreview
-                          ? FontWeight.w700
-                          : FontWeight.w500,
-                      letterSpacing: branchPreview ? 0 : 0.66,
-                    ),
+      child: Row(
+        children: [
+          Expanded(
+            child: namesCommit
+                ? _previewCommitLine(commit)
+                : Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _cherryPickState != null
+                              ? '체리픽 충돌'
+                              : branchPreview
+                              ? branchTitle
+                              : '선택한 커밋의 diff',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: branchPreview
+                                ? _palette.text
+                                : _palette.muted,
+                            fontSize: 12,
+                            fontWeight: branchPreview
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                            letterSpacing: branchPreview ? 0 : 0.66,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      if (branchPreview)
+                        Text(
+                          branchStatus,
+                          style: TextStyle(color: _palette.muted, fontSize: 10),
+                        ),
+                    ],
+                  ),
+          ),
+          const SizedBox(width: 6),
+          // 머리줄이 무엇을 이름 짓든 자리 고르기와 닫기는 판의 일이라 같은
+          // 자리에 선다.
+          _previewPlacementControls(),
+        ],
+      ),
+    );
+  }
+
+  /// 배치 세그먼트와 닫기 — 판 안에서 판의 자리를 고르고 판을 닫는 자리.
+  /// 고른 자리를 아는 것은 여전히 `_activePlacement`이고, 무엇을 할지는
+  /// 컨트롤러가 답한다. 머리줄은 그림을 그리고 누른 것을 전할 뿐이다.
+  Widget _previewPlacementControls() => SelectionContainer.disabled(
+    child: Row(
+      children: [
+        Container(
+          key: const Key('preview-placement'),
+          padding: const EdgeInsets.all(2),
+          decoration: BoxDecoration(
+            color: _palette.raised,
+            border: Border.all(color: _palette.border),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Row(
+            children: [
+              _placementButton('좌측', PreviewPlacement.left),
+              _placementButton('우측', PreviewPlacement.right),
+              _placementButton('하단', PreviewPlacement.bottom),
+            ],
+          ),
+        ),
+        const SizedBox(width: 4),
+        // 머리줄 글자 크기에 맞춘 손그림 버튼 — IconButton은 48px 탭 영역을
+        // 들고 와서 36px 머리줄을 혼자 다 먹는다. 상태바의 콘솔 버튼과 같은 꼴.
+        _tooltip(
+          '미리보기 닫기 (Enter)',
+          HoverBuilder(
+            builder: (hovered) => Semantics(
+              button: true,
+              onTap: _closePreviewFromHeader,
+              child: GestureDetector(
+                key: const Key('preview-close'),
+                behavior: HitTestBehavior.opaque,
+                onTap: _closePreviewFromHeader,
+                child: Container(
+                  width: 20,
+                  height: 20,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: hovered ? _palette.raised : null,
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: Icon(
+                    Icons.close,
+                    size: 13,
+                    color: hovered ? _palette.text : _palette.muted,
                   ),
                 ),
-                const SizedBox(width: 8),
-                if (branchPreview)
-                  Text(
-                    branchStatus,
-                    style: TextStyle(color: _palette.muted, fontSize: 10),
-                  ),
-              ],
+              ),
             ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  /// 툴바 토글이 부르는 것과 같은 문 — 판 안에서 닫아도 하는 일은 같다.
+  void _closePreviewFromHeader() {
+    _togglePreview();
+    _focusNode.requestFocus();
+  }
+
+  /// 라벨 대신 판의 자리를 그리는 글리프. 처음 보는 사람은 그림만으로 못 읽으니
+  /// 낱말은 툴팁이 지킨다.
+  Widget _placementButton(String tooltip, PreviewPlacement placement) {
+    final pressed = _activePlacement == placement;
+    return _tooltip(
+      tooltip,
+      HoverBuilder(
+        builder: (hovered) => GestureDetector(
+          key: Key('placement-$placement'),
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            widget.onPreviewPlacementChanged?.call(placement);
+            unawaited(_previewController.setPreview(placement));
+            _focusNode.requestFocus();
+          },
+          child: Container(
+            key: Key('placement-hover-$placement'),
+            // 240px까지 좁아지는 판에서도 커밋 줄이 설 자리를 남기는 폭 —
+            // 24px면 세 칸이 12px 더 먹어 머리줄이 10px 넘친다.
+            width: 20,
+            height: 20,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: pressed || hovered ? _palette.selectedRow : null,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: CustomPaint(
+              size: const Size(14, 11),
+              painter: PreviewPlacementIconPainter(
+                placement: placement,
+                color: pressed || hovered ? Colors.white : _palette.muted,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 

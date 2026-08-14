@@ -1,8 +1,11 @@
+import 'dart:io';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/git.dart';
+import 'package:yogit/typography.dart';
 import 'package:yogit/window_frame.dart';
 
 import 'app_test.dart' show FakeGitRepository, app, commit;
@@ -16,6 +19,19 @@ import 'app_test.dart' show FakeGitRepository, app, commit;
 void main() {
   late WindowFrameController controller;
   final copied = <String>[];
+
+  // 해시는 Menlo로 그려지는데, 기본 시험 글꼴은 글자마다 한 칸(12px)을 써서
+  // 일곱 자리를 실제보다 33px 넓게 잰다. 제일 좁은 판에서 머리줄이 서는지
+  // 보려면 앱이 쓰는 글꼴로 재야 한다.
+  setUpAll(() async {
+    final loader = FontLoader(technicalFontFamily);
+    loader.addFont(
+      File(
+        '/System/Library/Fonts/Menlo.ttc',
+      ).readAsBytes().then((bytes) => ByteData.sublistView(bytes)),
+    );
+    await loader.load();
+  });
 
   setUp(() {
     copied.clear();
@@ -126,6 +142,71 @@ void main() {
       parentLine,
       contains('feat(app): 메뉴바 밝기를 외양에 맞춘다'),
       reason: '부모 제목이 남는 폭을 쓴다',
+    );
+  });
+
+  testWidgets('the placement segment and the close button belong to the pane', (
+    tester,
+  ) async {
+    await pumpPreview(tester);
+
+    for (final name in ['preview-placement', 'preview-close']) {
+      final control = find.byKey(Key(name));
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('preview-header')),
+          matching: control,
+        ),
+        findsOneWidget,
+        reason: name,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('toolbar')),
+          matching: control,
+        ),
+        findsNothing,
+        reason: '$name은 툴바를 떠났다',
+      );
+    }
+
+    // 글리프만 남아도 배치는 바뀐다 — 낱말은 툴팁이 지킨다.
+    await tester.tap(
+      find.byKey(const Key('placement-PreviewPlacement.bottom')),
+    );
+    await tester.pumpAndSettle();
+    expect(controller.previewPlacement, PreviewPlacement.bottom);
+    expect(find.byTooltip('하단'), findsOneWidget);
+  });
+
+  testWidgets('the narrowest pane still holds the whole header', (
+    tester,
+  ) async {
+    await pumpPreview(tester);
+
+    // 240px가 판의 바닥이라 끝까지 끌어도 거기서 멈춘다. 자리 고르기와 닫기가
+    // 머리줄에 들어온 뒤로는 이 폭이 제일 좁은 시험대다 — 커밋 줄에 125px가
+    // 남고 그 줄이 123.1px를 쓴다.
+    await tester.drag(
+      find.byKey(const Key('preview-resizer')),
+      const Offset(1200, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byKey(const Key('preview-panel'))).width, 240);
+
+    // 넘치는 Row는 위젯 테스트에서 그대로 예외가 되니, 여기까지 왔다는 것이
+    // 머리줄이 다 들어섰다는 뜻이다. 남은 건 무엇이 남아 있는지다.
+    final header = find.byKey(const Key('preview-header'));
+    for (final name in ['preview-placement', 'preview-close', 'preview-sha']) {
+      expect(
+        find.descendant(of: header, matching: find.byKey(Key(name))),
+        findsOneWidget,
+        reason: name,
+      );
+    }
+    expect(
+      find.descendant(of: header, matching: find.text('2280d58')),
+      findsOneWidget,
     );
   });
 

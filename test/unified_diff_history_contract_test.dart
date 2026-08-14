@@ -145,7 +145,7 @@ void main() {
     final pane = find.byKey(const Key('history-pane'));
     final preview = find.byKey(const Key('preview-panel'));
 
-    await tester.tap(find.text('좌측'));
+    await tester.tap(find.byKey(const Key('placement-PreviewPlacement.left')));
     await tester.pumpAndSettle();
     expect(
       tester.getRect(preview).right,
@@ -157,7 +157,9 @@ void main() {
       lessThanOrEqualTo(tester.getRect(workspace).left),
     );
 
-    await tester.tap(find.text('하단'));
+    await tester.tap(
+      find.byKey(const Key('placement-PreviewPlacement.bottom')),
+    );
     await tester.pumpAndSettle();
     expect(
       tester.getRect(workspace).bottom,

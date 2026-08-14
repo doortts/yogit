@@ -1656,7 +1656,9 @@ void _timelineCaptures() {
       prepare: () async {
         await _enterDiffMode(tester);
         await _tapKey(tester, 'history-toggle');
-        await tester.tap(find.text('하단'));
+        await tester.tap(
+          find.byKey(const Key('placement-PreviewPlacement.bottom')),
+        );
         await tester.pumpAndSettle();
         expect(find.byKey(const Key('preview-layout-bottom')), findsOneWidget);
       },

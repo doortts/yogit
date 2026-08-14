@@ -10,19 +10,14 @@ extension _TimelineChrome on _TimelineScreenState {
     color: _palette.surface,
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14),
-      // Decoration goes before anything functional when the window narrows:
-      // the wordmark first, then the caption.
-      child: LayoutBuilder(
-        builder: (context, constraints) =>
-            _toolbarRow(showPreviewLabel: constraints.maxWidth >= 900),
-      ),
+      child: _toolbarRow(),
     ),
   );
 
-  Widget _toolbarRow({required bool showPreviewLabel}) => Row(
+  Widget _toolbarRow() => Row(
     children: [
       Expanded(child: _toolbarLeft()),
-      _toolbarRight(showPreviewLabel),
+      _toolbarRight(),
     ],
   );
 
@@ -96,35 +91,11 @@ extension _TimelineChrome on _TimelineScreenState {
     ],
   );
 
-  Widget _toolbarRight(bool showPreviewLabel) => Row(
+  Widget _toolbarRight() => Row(
     mainAxisAlignment: MainAxisAlignment.end,
     children: [
-      // The caption sits beside the box, not inside it.
-      if (showPreviewLabel)
-        Padding(
-          padding: const EdgeInsets.only(right: 8),
-          child: Text(
-            '미리보기',
-            style: TextStyle(color: _palette.muted, fontSize: 14),
-          ),
-        ),
-      Container(
-        key: const Key('preview-placement'),
-        padding: const EdgeInsets.all(3),
-        decoration: BoxDecoration(
-          color: _palette.raised,
-          border: Border.all(color: _palette.border),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Row(
-          children: [
-            _placementButton('좌측', PreviewPlacement.left),
-            _placementButton('우측', PreviewPlacement.right),
-            _placementButton('하단', PreviewPlacement.bottom),
-          ],
-        ),
-      ),
-      const SizedBox(width: 4),
+      // Placement moved into the pane's own header. What stays here is the way
+      // back in: with the pane shut there is no header to hold a button.
       _previewToggleButton(),
       const SizedBox(width: 12),
       if (widget.onOpenMonitor != null) ...[
@@ -176,38 +147,6 @@ extension _TimelineChrome on _TimelineScreenState {
       ),
     ],
   );
-
-  Widget _placementButton(String label, PreviewPlacement placement) {
-    final pressed = _activePlacement == placement;
-    return HoverBuilder(
-      builder: (hovered) => GestureDetector(
-        key: Key('placement-$placement'),
-        behavior: HitTestBehavior.opaque,
-        onTap: () {
-          widget.onPreviewPlacementChanged?.call(placement);
-          unawaited(_previewController.setPreview(placement));
-          _focusNode.requestFocus();
-        },
-        child: Container(
-          key: Key('placement-hover-$placement'),
-          height: 30,
-          alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(horizontal: 11),
-          decoration: BoxDecoration(
-            color: pressed || hovered ? _palette.selectedRow : null,
-            borderRadius: BorderRadius.circular(5),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: pressed || hovered ? Colors.white : _palette.muted,
-              fontSize: 14,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 
   /// 미리보기를 여닫는 버튼. 왼쪽 패널의 버튼과 같은 그림을 좌우로 뒤집어 쓴다.
   Widget _previewToggleButton() => ListenableBuilder(
