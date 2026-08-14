@@ -434,6 +434,7 @@ class AppSettings {
     this.rebaseMergeMessageTemplate = defaultMergeMessageTemplate,
     this.githubApiBaseUrl = defaultGithubApiBaseUrl,
     this.customGithubApiBaseUrls = const [],
+    this.settingsSection = SettingsSection.gitIntegrations,
   });
 
   /// How many repositories the picker remembers before the oldest drops off.
@@ -543,6 +544,9 @@ class AppSettings {
 
   /// Servers the user typed in, offered alongside [defaultGithubApiBaseUrls].
   final List<String> customGithubApiBaseUrls;
+
+  /// The section the settings screen opens on — wherever it was last left.
+  final SettingsSection settingsSection;
 
   /// The detail panel's size, per placement axis.
   final double previewWidth;
@@ -660,6 +664,7 @@ class AppSettings {
     String? rebaseMergeMessageTemplate,
     String? githubApiBaseUrl,
     List<String>? customGithubApiBaseUrls,
+    SettingsSection? settingsSection,
   }) => AppSettings(
     showAvatars: showAvatars ?? this.showAvatars,
     precisePush: precisePush ?? this.precisePush,
@@ -696,6 +701,7 @@ class AppSettings {
     githubApiBaseUrl: githubApiBaseUrl ?? this.githubApiBaseUrl,
     customGithubApiBaseUrls:
         customGithubApiBaseUrls ?? this.customGithubApiBaseUrls,
+    settingsSection: settingsSection ?? this.settingsSection,
   );
 
   factory AppSettings.fromJson(Object? value) {
@@ -835,6 +841,7 @@ class AppSettings {
       customGithubApiBaseUrls: _parseGithubApiBaseUrls(
         value['customGithubApiBaseUrls'],
       ),
+      settingsSection: SettingsSection.parse(value['settingsSection']),
     );
   }
 
@@ -914,6 +921,7 @@ class AppSettings {
     'rebaseMergeMessageTemplate': rebaseMergeMessageTemplate,
     'githubApiBaseUrl': githubApiBaseUrl,
     'customGithubApiBaseUrls': customGithubApiBaseUrls,
+    'settingsSection': settingsSection.name,
   };
 
   @override
@@ -947,7 +955,8 @@ class AppSettings {
       mergeMessageTemplate == other.mergeMessageTemplate &&
       rebaseMergeMessageTemplate == other.rebaseMergeMessageTemplate &&
       githubApiBaseUrl == other.githubApiBaseUrl &&
-      listEquals(customGithubApiBaseUrls, other.customGithubApiBaseUrls);
+      listEquals(customGithubApiBaseUrls, other.customGithubApiBaseUrls) &&
+      settingsSection == other.settingsSection;
 
   // Object.hash tops out at 20 arguments and this settled on exactly 20, so the
   // list form is what keeps taking fields.
@@ -998,6 +1007,7 @@ class AppSettings {
     rebaseMergeMessageTemplate,
     githubApiBaseUrl,
     Object.hashAll(customGithubApiBaseUrls),
+    settingsSection,
   ]);
 }
 
@@ -1080,11 +1090,22 @@ class SettingsStore {
   }
 }
 
-enum _SettingsSection {
+/// Public because [AppSettings] remembers the section the screen was last left
+/// on. The screen never spells the stored name itself: it hands over a value
+/// from here and reads one back.
+enum SettingsSection {
   gitIntegrations,
   commitProfiles,
   commitMessages,
-  appearance,
+  appearance;
+
+  /// A name this build no longer has — renamed, retired — opens where a fresh
+  /// install does. Matching over the values rather than arm by arm so a section
+  /// added later is remembered without anyone remembering to come back here.
+  static SettingsSection parse(Object? value) => values.firstWhere(
+    (section) => section.name == value,
+    orElse: () => SettingsSection.gitIntegrations,
+  );
 }
 
 class SettingsScreen extends StatefulWidget {
@@ -1174,7 +1195,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   );
 
   late AppSettings _settings = widget.settings;
-  var _section = _SettingsSection.gitIntegrations;
   late final _refPaletteFields = [
     for (final entry in _settings.refPalette)
       (
@@ -1432,28 +1452,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: Column(
                   children: [
                     _settingsSectionRow(
-                      section: _SettingsSection.appearance,
+                      section: SettingsSection.appearance,
                       key: const Key('settings-section-appearance'),
                       icon: Icons.palette_outlined,
                       label: 'Appearance',
                     ),
                     const SizedBox(height: 4),
                     _settingsSectionRow(
-                      section: _SettingsSection.gitIntegrations,
+                      section: SettingsSection.gitIntegrations,
                       key: const Key('settings-git-integrations'),
                       icon: Icons.account_tree_outlined,
                       label: 'Git integrations',
                     ),
                     const SizedBox(height: 4),
                     _settingsSectionRow(
-                      section: _SettingsSection.commitProfiles,
+                      section: SettingsSection.commitProfiles,
                       key: const Key('settings-section-commit-profiles'),
                       icon: Icons.badge_outlined,
                       label: '커밋 프로필',
                     ),
                     const SizedBox(height: 4),
                     _settingsSectionRow(
-                      section: _SettingsSection.commitMessages,
+                      section: SettingsSection.commitMessages,
                       key: const Key('settings-section-commit-messages'),
                       icon: Icons.notes_outlined,
                       label: '커밋 메시지 템플릿',
@@ -1463,11 +1483,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               const VerticalDivider(width: 1, color: Color(0xFF343946)),
               Expanded(
-                child: switch (_section) {
-                  _SettingsSection.appearance => _appearance(),
-                  _SettingsSection.gitIntegrations => _gitIntegrations(),
-                  _SettingsSection.commitProfiles => _commitProfiles(),
-                  _SettingsSection.commitMessages => _commitMessages(),
+                child: switch (_settings.settingsSection) {
+                  SettingsSection.appearance => _appearance(),
+                  SettingsSection.gitIntegrations => _gitIntegrations(),
+                  SettingsSection.commitProfiles => _commitProfiles(),
+                  SettingsSection.commitMessages => _commitMessages(),
                 },
               ),
             ],
@@ -1478,18 +1498,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
   );
 
   Widget _settingsSectionRow({
-    required _SettingsSection section,
+    required SettingsSection section,
     required Key key,
     required IconData icon,
     required String label,
   }) {
-    final selected = _section == section;
+    final selected = _settings.settingsSection == section;
     return Material(
       key: key,
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(6),
-        onTap: () => setState(() => _section = section),
+        // The section is a setting like any other, so picking one saves the
+        // same way — no second path back to the store.
+        onTap: () => _change(_settings.copyWith(settingsSection: section)),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
           decoration: BoxDecoration(

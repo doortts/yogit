@@ -3558,6 +3558,25 @@ void main() {
     expect(remotes, ['origin', 'origin']);
   });
 
+  testWidgets('⌘, opens settings, as macOS reads it', (tester) async {
+    var opened = 0;
+    await tester.pumpWidget(
+      app(
+        FakeGitRepository((_, _) async => [commit('1', 'first commit')]),
+        controller,
+        onOpenSettings: () => opened++,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
+    await tester.sendKeyEvent(LogicalKeyboardKey.comma);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
+    await tester.pumpAndSettle();
+
+    expect(opened, 1);
+  });
+
   testWidgets('a repository with no remote cannot be refreshed', (
     tester,
   ) async {
@@ -10457,6 +10476,40 @@ void main() {
     expect(AppSettings.fromJson(saved.last.toJson()), saved.last);
   });
 
+  testWidgets('the settings screen opens on the section it was left on', (
+    tester,
+  ) async {
+    final saved = <AppSettings>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          settings: const AppSettings(),
+          onChanged: saved.add,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Git integrations'), findsWidgets);
+
+    await tester.tap(find.byKey(const Key('settings-section-commit-messages')));
+    await tester.pumpAndSettle();
+    expect(saved.last.settingsSection, SettingsSection.commitMessages);
+
+    // 다른 key로 세워 진짜 다시 여는 길을 밟는다 — 같은 key면 State가 살아남아
+    // 기억한 섹션을 읽지 않는다.
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(
+          key: const Key('reopened'),
+          settings: saved.last,
+          onChanged: saved.add,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('merge-message-template')), findsOneWidget);
+  });
+
   testWidgets('timeline colors only shows the unified palette editor', (
     tester,
   ) async {
@@ -12934,6 +12987,18 @@ void main() {
       const AppSettings(previewPlacement: PreviewPlacement.left),
     );
     expect((await store.load()).previewPlacement, PreviewPlacement.left);
+  });
+
+  test('the remembered settings section round-trips, unknown falls back', () {
+    const custom = AppSettings(settingsSection: SettingsSection.appearance);
+    expect(custom.toJson()['settingsSection'], 'appearance');
+    expect(AppSettings.fromJson(custom.toJson()), custom);
+    expect(
+      AppSettings.fromJson(const {
+        'settingsSection': 'branches',
+      }).settingsSection,
+      SettingsSection.gitIntegrations,
+    );
   });
 
   test('the settings path never comes from the working directory', () {

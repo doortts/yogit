@@ -1525,6 +1525,12 @@ class _TimelineScreenState extends State<TimelineScreen>
       _toggleConsole();
       return KeyEventResult.handled;
     }
+    // ⌘, 설정. macOS 관례다. 편집 중에도 열린다 — ⌘를 쥔 쉼표는 글자가 아니라서
+    // 캐럿이 쓸 일이 없다.
+    if (event.logicalKey == LogicalKeyboardKey.comma && shortcutModifierHeld) {
+      widget.onOpenSettings?.call();
+      return KeyEventResult.handled;
+    }
     // ⌘↵ 커밋. 제목칸에 포커스가 있어도 동작한다 — 치고 바로 커밋하는 흐름이다.
     // 게이트는 커밋 버튼의 것과 같고, 막히면 아래 Enter로 새지 않는다.
     if (event.logicalKey == LogicalKeyboardKey.enter && shortcutModifierHeld) {
