@@ -441,4 +441,27 @@ void main() {
     expect(find.text('AA'), findsNothing, reason: '이니셜을 거치지 않는다');
     expect(fake.requests, hasLength(1));
   });
+
+  group('이니셜은 점도 이름 구분자로 읽는다', () {
+    String initialsOf(String name) => AvatarService.initials(
+      GitIdentity(name: name, email: 'someone@example.com'),
+    );
+
+    test('점으로 이어 쓴 이름은 두 글자로 선다', () {
+      expect(initialsOf('jung.min'), 'JM');
+      expect(initialsOf('jung.min.kim'), 'JK');
+    });
+
+    test('공백으로 나뉜 이름은 그대로다', () {
+      expect(initialsOf('Ada Lovelace'), 'AL');
+      expect(initialsOf('Ada'), 'A');
+    });
+
+    test('빈 조각은 이름으로 세지 않는다', () {
+      expect(initialsOf('kim.'), 'K');
+      expect(initialsOf('jung..min'), 'JM');
+      expect(initialsOf('  '), '?');
+      expect(initialsOf('.'), '?');
+    });
+  });
 }

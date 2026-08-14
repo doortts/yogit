@@ -765,9 +765,15 @@ class AvatarService {
     );
   }
 
+  /// A dot parts a name the way a space does: plenty of people commit as
+  /// `jung.min`, and that reads as JM, not J. Empty pieces — a trailing dot,
+  /// two in a row — drop out rather than count as a name.
   static String initials(GitIdentity identity) {
-    final parts = identity.name.trim().split(RegExp(r'\s+'));
-    if (parts.isEmpty || parts.first.isEmpty) return '?';
+    final parts = identity.name
+        .split(RegExp(r'[\s.]+'))
+        .where((part) => part.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return '?';
     return [
       parts.first[0],
       if (parts.length > 1) parts.last[0],
