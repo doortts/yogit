@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'full_diff_anchor_probe.dart';
 import 'full_diff_code_row.dart';
+import 'full_diff_horizontal_scroll.dart';
 import 'full_diff_hunk_header.dart';
 import 'full_diff_model.dart';
 import 'full_diff_syntax.dart';
@@ -170,6 +171,38 @@ class SideBySidePresentationView extends StatelessWidget {
         },
       ),
     );
+    return FullDiffHorizontalScrollSurface(
+      resetKey: document,
+      overflowForWidth: _overflowForWidth,
+      child: _withOldPane(list),
+    );
+  }
+
+  /// Both sides ride one offset, so the range has to clear whichever side's
+  /// longest line reaches furthest past its own column.
+  double _overflowForWidth(double viewportWidth) {
+    if (wrapLines) return 0;
+    final widths = diffSourceWidths(document, fullDiffSourceTextStyle);
+    if (!showOldSide) return _sideOverflow(viewportWidth, widths.newSide);
+    final ratio = splitRatio.clamp(0.2, 0.8).toDouble();
+    final oldOverflow = _sideOverflow(viewportWidth * ratio, widths.oldSide);
+    final newOverflow = _sideOverflow(
+      viewportWidth * (1 - ratio),
+      widths.newSide,
+    );
+    return oldOverflow > newOverflow ? oldOverflow : newOverflow;
+  }
+
+  double _sideOverflow(double sideWidth, double longestLine) =>
+      longestLine +
+      diffHorizontalTailPadding -
+      fullDiffSourceColumnWidth(
+        sideWidth,
+        compactGutter: true,
+        gutterWidth: fullDiffSideLineNumberWidth,
+      );
+
+  Widget _withOldPane(Widget list) {
     if (!showOldSide) return list;
     final ratio = splitRatio.clamp(0.2, 0.8).toDouble();
     return KeyedSubtree(

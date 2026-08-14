@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'full_diff_anchor_probe.dart';
 import 'full_diff_code_row.dart';
+import 'full_diff_horizontal_scroll.dart';
 import 'full_diff_hunk_header.dart';
 import 'full_diff_model.dart';
 import 'full_diff_syntax.dart';
@@ -85,7 +86,7 @@ class UnifiedPresentationView extends StatelessWidget {
     final scrollTargetIndex = sourceTargetIndex < 0
         ? -1
         : sourceTargetIndex + headerOffset;
-    return FullDiffSelectionArea(
+    final list = FullDiffSelectionArea(
       allSourceTextBuilder: () {
         debugMetrics?.recordSelectionTextBuild();
         return items.buildSelectionText();
@@ -159,6 +160,15 @@ class UnifiedPresentationView extends StatelessWidget {
           );
         },
       ),
+    );
+    return FullDiffHorizontalScrollSurface(
+      resetKey: document,
+      overflowForWidth: (width) => wrapLines
+          ? 0
+          : diffSourceWidths(document, fullDiffSourceTextStyle).widest +
+                diffHorizontalTailPadding -
+                fullDiffSourceColumnWidth(width, compactGutter: false),
+      child: list,
     );
   }
 

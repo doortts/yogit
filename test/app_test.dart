@@ -11296,7 +11296,11 @@ void main() {
         find
             .descendant(
               of: find.byKey(const Key('content-scrollable')),
-              matching: find.byType(Scrollable),
+              matching: find.byWidgetPredicate(
+                (widget) =>
+                    widget is Scrollable &&
+                    widget.axisDirection == AxisDirection.down,
+              ),
             )
             .first,
       );
@@ -12502,7 +12506,11 @@ void main() {
           find
               .descendant(
                 of: find.byKey(const Key('content-scrollable')),
-                matching: find.byType(Scrollable),
+                matching: find.byWidgetPredicate(
+                  (widget) =>
+                      widget is Scrollable &&
+                      widget.axisDirection == AxisDirection.down,
+                ),
               )
               .first,
         )
@@ -12513,7 +12521,11 @@ void main() {
         find
             .descendant(
               of: find.byKey(const Key('content-scrollable')),
-              matching: find.byType(Scrollable),
+              matching: find.byWidgetPredicate(
+                (widget) =>
+                    widget is Scrollable &&
+                    widget.axisDirection == AxisDirection.down,
+              ),
             )
             .first,
         const Offset(0, -500),

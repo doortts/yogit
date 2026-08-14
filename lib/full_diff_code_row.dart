@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
+import 'full_diff_horizontal_scroll.dart';
 import 'full_diff_syntax.dart';
 import 'full_diff_syntax_contract.dart';
 import 'full_diff_theme.dart';
@@ -14,6 +15,20 @@ const fullDiffSourceRowHeight = 21.0;
 
 /// The +/− column beside the numbers in a one-number gutter.
 const _signColumnWidth = 16.0;
+
+/// The sign riding with the source, where the gutter carries two numbers.
+const _sourceSignWidth = 14.0;
+
+/// What the source has left of [paneWidth] once the gutter, the sign and the
+/// row's padding have taken their share. The pane's horizontal scroll measures
+/// its range against this.
+double fullDiffSourceColumnWidth(
+  double paneWidth, {
+  required bool compactGutter,
+  double gutterWidth = fullDiffLineNumberWidth,
+}) => compactGutter
+    ? paneWidth - gutterWidth - 20
+    : paneWidth - gutterWidth - 12 - _sourceSignWidth;
 
 const fullDiffSourceTextStyle = TextStyle(
   color: Colors.white,
@@ -334,10 +349,8 @@ class FullDiffCodeRow extends StatelessWidget {
     );
     final source = wrapLines || !horizontalScroll
         ? richText
-        : SingleChildScrollView(
-            key: const Key('code-row-horizontal-scroll'),
-            scrollDirection: Axis.horizontal,
-            primary: false,
+        : FullDiffHorizontalPan(
+            key: const Key('code-row-horizontal-pan'),
             child: richText,
           );
 
@@ -377,7 +390,7 @@ class FullDiffCodeRow extends StatelessWidget {
                                   // with the gutter — that is, not at all.
                                   SelectionContainer.disabled(
                                     child: SizedBox(
-                                      width: 14,
+                                      width: _sourceSignWidth,
                                       child: Text(marker, style: _signStyle),
                                     ),
                                   ),

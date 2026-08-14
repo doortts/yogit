@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Diff 가로 스크롤 — pane 하나가 통째로 움직인다</title>
+<style>
+  :root {
+    --canvas:#0D1117; --divider:#3D444D; --muted:#9198A1; --accent:#83C4FF;
+    --add:#12261E; --addgut:#1C4328; --del:#25171C; --delgut:#542426;
+    --hunk:#161B22; --text:#E6EDF3;
+    --mono:Menlo,"D2Coding",Monaco,monospace;
+  }
+  body { margin:0; padding:26px 24px 70px; background:#0E0E10; color:var(--text);
+         font:13px/1.6 -apple-system,"Apple SD Gothic Neo",sans-serif; }
+  h1 { font-size:19px; font-weight:600; margin:0 0 6px; }
+  h2 { font-size:14px; font-weight:600; margin:28px 0 4px; }
+  p.note { margin:0 0 12px; color:#98989F; font-size:12px; max-width:940px; }
+  code { font-family:var(--mono); font-size:11px; background:#2C2C2E; padding:1px 5px; border-radius:4px; }
+  .bad { color:#FF7A84; } .good { color:#7CE0A0; }
+
+  .pane { width:940px; background:var(--canvas); border:1px solid var(--divider);
+          border-radius:8px; overflow:hidden; }
+  .hunk { height:22px; line-height:22px; padding-left:10px; background:var(--hunk);
+          color:var(--accent); font:11px/22px var(--mono); border-bottom:1px solid var(--divider);
+          display:flex; justify-content:space-between; }
+  .hunk .act { color:var(--muted); padding-right:8px; }
+  .split { display:flex; align-items:stretch; }
+  .side { flex:1 1 0; min-width:0; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
+  .side::-webkit-scrollbar { display:none; }
+  .vline { width:1px; background:var(--divider); }
+
+  .row { display:flex; width:max-content; min-width:100%; height:21px; }
+  .row.a { background:var(--add); } .row.d { background:var(--del); }
+  .gut { position:sticky; left:0; z-index:1; width:46px; flex:0 0 46px; text-align:right;
+         padding-right:4px; font:10px/21px var(--mono); color:var(--muted); background:var(--canvas); }
+  .row.a .gut { background:var(--addgut); } .row.d .gut { background:var(--delgut); }
+  .sign { position:sticky; left:46px; z-index:1; width:16px; flex:0 0 16px; text-align:center;
+          font:12px/21px var(--mono); color:var(--muted); background:inherit; }
+  .code { font:12px/21px var(--mono); white-space:pre; padding:0 8px; }
+  .code em { font-style:normal; background:#1F6F3F; }
+  .code s { text-decoration:none; background:#6E2431; }
+
+  /* 아래쪽 가로 막대 하나 — pane 전체를 민다 */
+  .hbar { height:9px; border-top:1px solid var(--divider); background:var(--canvas);
+          position:relative; cursor:pointer; }
+  .thumb { position:absolute; top:2px; height:5px; border-radius:3px; background:#5A6169; }
+  .hbar:hover .thumb { background:#8A929B; }
+
+  /* 지금 동작: 줄마다 스크롤 */
+  .old .side { overflow:hidden; }
+  .old .code { overflow-x:auto; flex:1 1 0; min-width:0; scrollbar-width:thin; }
+  .old .row { width:100%; }
+  .cap { font-size:11.5px; color:#8E8E93; padding:8px 2px 0; max-width:940px; }
+  .legend { display:flex; gap:18px; font-size:11.5px; color:#98989F; margin:6px 0 0; }
+</style>
+</head>
+<body>
+
+<h1>Diff 가로 스크롤 — 줄이 아니라 pane이 움직인다</h1>
+<p class="note">
+  설계 문서: <code>docs/diff-horizontal-scroll-design.md</code> ·
+  두 화면 모두 실제로 밀어 볼 수 있다. 트랙패드를 옆으로 밀거나 아래 막대를 끌면 된다.
+</p>
+
+<h2>1. 지금 <span class="bad">— 줄마다 따로 논다</span></h2>
+<p class="note">줄 하나를 밀어 보면 그 줄만 움직인다. 반대편은 아예 반응하지 않는다.</p>
+<div class="pane old">
+  <div class="hunk"><span>@@ -113,9 +136,9 @@ repaint는 확인됐다: `_rebuildGraph`가 `layoutGraph`로</span><span class="act">hunk 되돌리기</span></div>
+  <div class="split">
+    <div class="side" id="oldL"></div>
+    <div class="vline"></div>
+    <div class="side" id="oldR"></div>
+  </div>
+</div>
+<p class="cap">스크린샷의 계단 현상 그대로다. 116행만 밀리고 117·118행은 제자리다.</p>
+
+<h2>2. 제안 <span class="good">— pane 하나에 오프셋 하나</span></h2>
+<p class="note">
+  어느 쪽을 밀든 반대편이 같이 온다. 줄 번호와 +/− 부호, hunk 헤더는 왼쪽에 남는다.
+  분할 구분선도 제자리다.
+</p>
+<div class="pane" id="new">
+  <div class="hunk"><span>@@ -113,9 +136,9 @@ repaint는 확인됐다: `_rebuildGraph`가 `layoutGraph`로</span><span class="act">hunk 되돌리기</span></div>
+  <div class="split">
+    <div class="side" id="newL"></div>
+    <div class="vline"></div>
+    <div class="side" id="newR"></div>
+  </div>
+  <div class="hbar" id="hbar"><div class="thumb" id="thumb"></div></div>
+</div>
+<div class="legend">
+  <span>· 스크롤 범위 = 문서에서 가장 긴 줄 (보이는 줄 아님)</span>
+  <span>· 막대는 멈추면 사라진다 (여기서는 계속 보이게 뒀다)</span>
+  <span>· 줄바꿈(⇧L)을 켜면 범위 0</span>
+</div>
+
+<h2>3. unified도 같은 규칙</h2>
+<p class="note">칼럼이 하나일 뿐, 거터 고정과 pane 단위 오프셋은 그대로다.</p>
+<div class="pane" id="uni">
+  <div class="hunk"><span>@@ -113,9 +136,9 @@</span><span class="act">hunk 되돌리기</span></div>
+  <div class="split"><div class="side" id="uniS"></div></div>
+  <div class="hbar" id="ubar"><div class="thumb" id="uthumb"></div></div>
+</div>
+
+<script>
+const L = [
+  ['d',116,'−','| 재실행 | restore가 저장된 tone을 <s>즉시 줌 → 첫 그래프부터 조정된 배정, 점멸 없음</s> | 저장된 tone이 그대로 살아 있어야 한다 |'],
+  ['d',117,'−','| 사진 교체 (URL 동일) | 저장값으로 뜬 뒤 <s>라이브 재계산이 다르면 한 번 바뀌고 다시 고정</s> | 두 번째 계산이 최종이다 |'],
+  ['d',118,'−','| 신원 미설정 / 계정 없음 / 토큰 없음 | tone null → 오늘과 완전히 동일 | 아무 것도 하지 않는다 |'],
+  ['c',142,' ',''],
+  ['c',143,' ','## 계약 테스트'],
+  ['c',144,' ',''],
+  ['c',154,' ','    pump 전후 `AvatarService.branchAssignments` 변화 확인.'],
+  ['c',155,' ','    9. 같은 저장소·같은 tone이면 rebuild를 반복해도 배정이 같다 — 순수 함수여야 한다.'],
+];
+const R = [
+  ['a',139,'+','| 재실행 | restore가 저장된 tone을 <em>요청 없이 바로 준다 → 첫 페이지가 도착한 직후부터 조정된 배정</em> | 저장된 tone이 그대로 살아 있어야 한다 |'],
+  ['a',140,'+','| 사진 교체 (URL 동일) | 저장값으로 뜬다. 라이브 재계산이 다르면 <em>**새 tone을 적용하고 한 번만 다시 칠한다**</em> | 두 번째 계산이 최종이다 |'],
+  ['a',141,'+','| 신원 미설정 / 계정 없음 / 토큰 없음 / <em>본인 커밋이 로드된 페이지에 없음</em> | tone null → 오늘과 완전히 동일 | 아무 것도 하지 않는다 |'],
+  ['c',142,' ',''],
+  ['c',143,' ','## 계약 테스트'],
+  ['c',144,' ',''],
+  ['c',154,' ','    pump 전후 `AvatarService.branchAssignments` 변화 확인.'],
+  ['c',155,' ','    9. 같은 저장소·같은 tone이면 rebuild를 반복해도 배정이 같다 — 순수 함수여야 한다.'],
+];
+const UNI = L.slice(0,3).concat(R.slice(0,3)).concat(L.slice(3));
+
+const fill = (id, rows) => {
+  document.getElementById(id).innerHTML = rows.map(([k,n,s,t]) =>
+    `<div class="row ${k}"><div class="gut">${n}</div><div class="sign">${s}</div><div class="code">${t||' '}</div></div>`
+  ).join('');
+};
+['oldL','newL'].forEach(id => fill(id, L));
+['oldR','newR'].forEach(id => fill(id, R));
+fill('uniS', UNI);
+
+// 지금: 줄마다 제각각인 상태를 그대로 재현해 둔다.
+requestAnimationFrame(() => {
+  const rows = document.querySelectorAll('#oldL .code');
+  if (rows[0]) rows[0].scrollLeft = 240;
+  if (rows[1]) rows[1].scrollLeft = 60;
+});
+
+// 제안: 한 오프셋을 여러 칼럼이 나눠 쓴다.
+function link(sides, bar, thumb) {
+  const max = () => Math.max(...sides.map(s => s.scrollWidth - s.clientWidth));
+  let offset = 0, dragging = false;
+  const apply = () => {
+    sides.forEach(s => { if (Math.round(s.scrollLeft) !== Math.round(offset)) s.scrollLeft = offset; });
+    const m = max(), view = sides[0].clientWidth, total = view + m;
+    const w = Math.max(28, bar.clientWidth * view / total);
+    thumb.style.width = w + 'px';
+    thumb.style.left = (m === 0 ? 0 : (bar.clientWidth - w) * offset / m) + 'px';
+  };
+  const set = v => { offset = Math.min(Math.max(v, 0), max()); apply(); };
+  sides.forEach(s => s.addEventListener('scroll', () => { if (!dragging) set(s.scrollLeft); }));
+  bar.addEventListener('pointerdown', e => {
+    dragging = true; bar.setPointerCapture(e.pointerId);
+    const move = ev => {
+      const r = bar.getBoundingClientRect(), w = thumb.offsetWidth;
+      set((ev.clientX - r.left - w / 2) / (r.width - w) * max());
+    };
+    move(e);
+    bar.onpointermove = move;
+    bar.onpointerup = () => { dragging = false; bar.onpointermove = bar.onpointerup = null; };
+  });
+  new ResizeObserver(apply).observe(bar);
+  apply();
+}
+link([document.getElementById('newL'), document.getElementById('newR')],
+     document.getElementById('hbar'), document.getElementById('thumb'));
+link([document.getElementById('uniS')],
+     document.getElementById('ubar'), document.getElementById('uthumb'));
+</script>
+</body>
+</html>

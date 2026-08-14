@@ -185,6 +185,7 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
   int _programmaticScrollSerial = 0;
   DiffAnchor? _lastDragAnchor;
   bool _metricsRebuildScheduled = false;
+  bool _retriedForAttach = false;
   MinimapGeometry? _cachedGeometry;
   DiffDocument? _cachedDocument;
   DiffAnchor? _cachedActiveAnchor;
@@ -206,6 +207,7 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
       oldWidget.scrollController.removeListener(_handleExternalScroll);
       widget.scrollController.addListener(_handleExternalScroll);
     }
+    _retriedForAttach = false;
   }
 
   @override
@@ -224,6 +226,15 @@ class _FullDiffMinimapState extends State<FullDiffMinimap> {
   MinimapViewport? _viewport(double height) {
     final position = _position;
     if (position == null) {
+      // Nothing attached yet: the diff pane builds its list inside the
+      // horizontal scroll's layout, which lands after this build, and a list
+      // sitting still sends no scroll notification to wake the map. Look once
+      // more next frame — once, because a pane with no list at all (loading,
+      // an error panel) would otherwise keep the frames coming forever.
+      if (!_retriedForAttach && widget.scrollController.positions.isEmpty) {
+        _retriedForAttach = true;
+        _scheduleMetricsRebuild();
+      }
       return MinimapViewport(top: 0, height: math.max(0, height));
     }
     if (!position.hasContentDimensions) {

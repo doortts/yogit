@@ -555,25 +555,67 @@ void main() {
       (widget) =>
           widget is Scrollable && widget.axisDirection == AxisDirection.right,
     );
-    expect(horizontal, findsNWidgets(2));
-    final position = tester.state<ScrollableState>(horizontal.last).position;
+    // One scroll for the pane, not one per row.
+    expect(horizontal, findsOneWidget);
+    final position = tester.state<ScrollableState>(horizontal).position;
     expect(position.maxScrollExtent, greaterThan(0));
 
-    await tester.drag(horizontal.last, const Offset(-160, 0));
-    await tester.pumpAndSettle();
-
-    expect(position.pixels, greaterThan(0));
-
-    position.jumpTo(position.maxScrollExtent);
-    await tester.pump();
-    final lastSource = find.descendant(
+    final deleted = find.descendant(
+      of: find.byKey(const Key('unified-line-0-0')),
+      matching: find.byKey(const Key('code-row-source-text')),
+    );
+    final added = find.descendant(
       of: find.byKey(const Key('unified-line-0-1')),
       matching: find.byKey(const Key('code-row-source-text')),
     );
-    expect(lastSource, findsOneWidget);
+    final deletedLeft = tester.getRect(deleted).left;
+    final addedLeft = tester.getRect(added).left;
+    final numberLeft = tester
+        .getRect(
+          find.descendant(
+            of: find.byKey(const Key('unified-line-0-0')),
+            matching: find.text('1'),
+          ),
+        )
+        .left;
+
+    // Sideways trackpad/wheel over a row, not a drag: a drag over the source
+    // belongs to text selection, as it does in every other diff viewer.
+    final pointer = TestPointer(1, ui.PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(
+      pointer.hover(tester.getCenter(horizontal)),
+    );
+    await tester.sendEventToBinding(pointer.scroll(const Offset(160, 0)));
+    await tester.pumpAndSettle();
+
+    expect(position.pixels, greaterThan(0));
     expect(
-      tester.getRect(lastSource).right,
-      lessThanOrEqualTo(tester.getRect(horizontal.last).right),
+      deletedLeft - tester.getRect(deleted).left,
+      moreOrLessEquals(position.pixels, epsilon: 0.5),
+      reason: '민 줄만이 아니라 pane 전체가 같은 거리를 간다',
+    );
+    expect(
+      addedLeft - tester.getRect(added).left,
+      moreOrLessEquals(position.pixels, epsilon: 0.5),
+    );
+    expect(
+      tester
+          .getRect(
+            find.descendant(
+              of: find.byKey(const Key('unified-line-0-0')),
+              matching: find.text('1'),
+            ),
+          )
+          .left,
+      moreOrLessEquals(numberLeft, epsilon: 0.5),
+      reason: '줄 번호는 따라가지 않는다',
+    );
+
+    position.jumpTo(position.maxScrollExtent);
+    await tester.pump();
+    expect(
+      tester.getRect(added).right,
+      lessThanOrEqualTo(tester.getRect(horizontal).right),
     );
   });
 
@@ -855,7 +897,9 @@ void main() {
     );
     final indexBuilds = measuredHunks.iterationCount;
     final fullScanTailReads = measuredLines.tailReadCount;
-    expect(indexBuilds, 1);
+    // One pass builds the row index, one measures the widest line for the
+    // pane's horizontal range. Both are per document, not per frame.
+    expect(indexBuilds, 2);
     expect(fullScanTailReads, greaterThan(0));
 
     final gesture = await tester.startGesture(
@@ -1371,7 +1415,7 @@ void main() {
     expect(find.text('+'), findsOneWidget);
     expect(find.text('314'), findsOneWidget);
     expect(find.byKey(const Key('code-row-current-marker')), findsOneWidget);
-    expect(find.byKey(const Key('code-row-horizontal-scroll')), findsOneWidget);
+    expect(find.byKey(const Key('code-row-horizontal-pan')), findsOneWidget);
     final richText = tester.widget<RichText>(
       find.byKey(const Key('code-row-source-text')),
     );
