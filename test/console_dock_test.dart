@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/gestures.dart';
@@ -6,11 +7,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yogit/command_log.dart';
 import 'package:yogit/git.dart';
+import 'package:yogit/timeline_palette.dart';
+import 'package:yogit/timeline_theme.dart';
 import 'package:yogit/window_frame.dart';
 
 import 'app_test.dart' show FakeGitRepository, app, commit;
 
-/// 콘솔은 창 아래에 붙어 있고, 툴바 버튼이나 ⌘`로 열린다. 사용자가 메뉴에서 고른
+/// 콘솔은 창 아래에 붙어 있고, 상태바 버튼이나 ⌘`로 열린다. 사용자가 메뉴에서 고른
 /// 일은 그 이름이 먼저 찍히고, 그 일이 부른 git이 그 아래에 놓인다.
 void main() {
   late WindowFrameController controller;
@@ -41,12 +44,14 @@ void main() {
     return log;
   }
 
-  testWidgets('the console is shut until the toolbar opens it', (tester) async {
+  testWidgets('the console is shut until the status bar opens it', (
+    tester,
+  ) async {
     await pump(tester);
 
     expect(find.byKey(const Key('console-dock')), findsNothing);
 
-    await tester.tap(find.byKey(const Key('toolbar-console')));
+    await tester.tap(find.byKey(const Key('console-toggle')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('console-dock')), findsOneWidget);
@@ -56,6 +61,65 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('console-dock')), findsNothing);
+  });
+
+  testWidgets('the door stands in the status bar, left of the profile chip', (
+    tester,
+  ) async {
+    await pump(tester);
+
+    final toggle = find.byKey(const Key('console-toggle'));
+    // 로그를 보는 일은 상태 확인이라 문은 툴바를 떠났다.
+    expect(
+      find.descendant(of: find.byKey(const Key('toolbar')), matching: toggle),
+      findsNothing,
+    );
+    final door = tester.getRect(toggle);
+    final chip = tester.getRect(find.byKey(const Key('commit-profile-chip')));
+    expect(chip.left - door.right, moreOrLessEquals(8, epsilon: 0.5));
+    expect(door.center.dy, moreOrLessEquals(chip.center.dy, epsilon: 0.5));
+    // 그림 하나로 선 문이라, 눌리는 것이라고 스스로 말해야 한다 — 툴바의 버튼은
+    // 말해 주고 있었다.
+    expect(
+      tester.getSemantics(toggle),
+      matchesSemantics(isButton: true, hasTapAction: true, tooltip: '콘솔 (⌘`)'),
+    );
+  });
+
+  testWidgets('the glyph goes orange while a command is out there', (
+    tester,
+  ) async {
+    final log = await pump(tester);
+    // 시험이 세우는 앱에는 팔레트 확장이 없으니 기본 팔레트가 쓰인다.
+    final idle = TimelineThemePalette.systemGraphite.muted;
+    Color? glyph() => tester
+        .widget<Text>(
+          find.descendant(
+            of: find.byKey(const Key('console-toggle')),
+            matching: find.text('>_'),
+          ),
+        )
+        .style
+        ?.color;
+
+    expect(glyph(), idle);
+
+    // 문이 닫혀 있는 동안에는 이 색이 명령이 돌고 있다는 유일한 신호다.
+    final finished = Completer<ProcessResult>();
+    final run = log.wrap(
+      (executable, arguments, {workingDirectory, environment}) =>
+          finished.future,
+    );
+    final running = run('git', ['fetch']);
+    await tester.pump();
+
+    expect(glyph(), behindOrange);
+
+    finished.complete(ProcessResult(1, 0, '', ''));
+    await running;
+    await tester.pump();
+
+    expect(glyph(), idle);
   });
 
   testWidgets('⌘` opens and closes it too', (tester) async {
@@ -73,7 +137,7 @@ void main() {
     tester,
   ) async {
     final log = await pump(tester);
-    await tester.tap(find.byKey(const Key('toolbar-console')));
+    await tester.tap(find.byKey(const Key('console-toggle')));
     await tester.pumpAndSettle();
 
     final row = find.byKey(const Key('sidebar-ref-lane'));
@@ -101,7 +165,7 @@ void main() {
           ProcessResult(1, 0, '', ''),
     );
     await log.action('브랜치 체크아웃 — lane', () => run('git', ['checkout', 'lane']));
-    await tester.tap(find.byKey(const Key('toolbar-console')));
+    await tester.tap(find.byKey(const Key('console-toggle')));
     await tester.pumpAndSettle();
 
     expect(find.text('브랜치 체크아웃 — lane'), findsOneWidget);

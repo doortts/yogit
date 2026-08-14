@@ -2690,7 +2690,14 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// the date is the thing that must stay readable, so the chip yields.
   double get _statusReadoutLeft {
     final rightmost =
-        _statusBarWidth - 12 - _statusChipWidth() - 8 - _statusStampWidth;
+        _statusBarWidth -
+        12 -
+        _statusChipWidth() -
+        8 -
+        // The console glyph shares the chip's end of the row, so the stamp has
+        // to yield for it too — otherwise a narrow bar overflows by its width.
+        (widget.commandLog == null ? 0 : _consoleToggleWidth + 8) -
+        _statusStampWidth;
     return math.max(
       0,
       math.min(_hashColumnLeft + _railedColumnTextInset, rightmost),
@@ -2935,6 +2942,10 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// The strip along the bottom. What floats above the timeline has to clear
   /// it rather than sit on it.
   static const _statusBarHeight = 29.0;
+
+  /// The console glyph's slot, left of the chip. Fixed rather than measured so
+  /// the stamp's column can budget for it before either one is laid out.
+  static const _consoleToggleWidth = 28.0;
 
   /// The header label and the hash cell, without the colors that come and go
   /// with hover and selection. Shared with the double-click fit, which measures

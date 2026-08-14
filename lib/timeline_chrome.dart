@@ -148,27 +148,6 @@ extension _TimelineChrome on _TimelineScreenState {
         ),
         const SizedBox(width: 8),
       ],
-      if (widget.commandLog case final log?)
-        ListenableBuilder(
-          listenable: log,
-          builder: (context, _) => IconButton(
-            key: const Key('toolbar-console'),
-            tooltip: '콘솔 (⌘`)',
-            visualDensity: VisualDensity.compact,
-            onPressed: _toggleConsole,
-            icon: Icon(
-              Icons.terminal,
-              size: 20,
-              // The dot is the only sign a command is out there while the
-              // console is shut.
-              color: _consoleOpen
-                  ? _palette.text
-                  : log.runningCount > 0
-                  ? behindOrange
-                  : _palette.muted,
-            ),
-          ),
-        ),
       HoverBuilder(
         enabled: widget.onOpenSettings != null,
         builder: (hovered) => Container(
@@ -251,9 +230,7 @@ extension _TimelineChrome on _TimelineScreenState {
               _focusNode.requestFocus();
             },
             icon: CustomPaint(
-              key: Key(
-                open ? 'preview-collapse-icon' : 'preview-expand-icon',
-              ),
+              key: Key(open ? 'preview-collapse-icon' : 'preview-expand-icon'),
               size: const Size(14.4, 14.4),
               painter: PaneToggleIconPainter(
                 opens: !open,
@@ -459,6 +436,10 @@ extension _TimelineChrome on _TimelineScreenState {
                 },
               ),
               const Spacer(),
+              if (widget.commandLog case final log?) ...[
+                _consoleToggle(log),
+                const SizedBox(width: 8),
+              ],
               KeyedSubtree(
                 key: _profileChipKey,
                 child: CommitProfileChip(
@@ -475,6 +456,59 @@ extension _TimelineChrome on _TimelineScreenState {
           ),
         ),
       ],
+    ),
+  );
+
+  /// The console's door, filed with the readouts: reading the log is checking
+  /// state, not editing. A prompt rather than a terminal glyph — at the status
+  /// bar's text size a drawn window frame turns to mush, `>_` still reads.
+  Widget _consoleToggle(CommandLog log) => ListenableBuilder(
+    listenable: log,
+    builder: (context, _) => Tooltip(
+      message: '콘솔 (⌘`)',
+      child: HoverBuilder(
+        // A gesture node says nothing about being pressable. The button this
+        // replaced announced itself, so this has to announce itself too.
+        builder: (hovered) => Semantics(
+          button: true,
+          onTap: _toggleConsole,
+          // The glyph is a picture of a prompt, not a word: read out, `>_`
+          // says less than the tooltip already does.
+          excludeSemantics: true,
+          child: GestureDetector(
+            key: const Key('console-toggle'),
+            behavior: HitTestBehavior.opaque,
+            onTap: _toggleConsole,
+            child: Container(
+              // Wider and taller than the two glyphs so the pointer has
+              // something to hit, without the bar growing around it.
+              width: _TimelineScreenState._consoleToggleWidth,
+              height: 20,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: hovered ? _palette.raised : null,
+                borderRadius: BorderRadius.circular(5),
+              ),
+              child: Text(
+                '>_',
+                style: TextStyle(
+                  // The colour is the only sign a command is out there while
+                  // the console is shut.
+                  color: _consoleOpen
+                      ? _palette.text
+                      : log.runningCount > 0
+                      ? behindOrange
+                      : _palette.muted,
+                  fontSize: 11,
+                  letterSpacing: 0.5,
+                  fontFamily: technicalFontFamily,
+                  fontFamilyFallback: technicalFontFallback,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     ),
   );
 
