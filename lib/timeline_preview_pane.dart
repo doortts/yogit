@@ -163,11 +163,18 @@ extension _TimelinePreviewPane on _TimelineScreenState {
                 children: [
                   _previewHeader(commit),
                   // 배치 세그먼트가 이 줄에 사는 이상 줄 자체는 판이 열려 있는
-                  // 동안 늘 선다 — 브랜치 diff 결과에서는 글자만 빈다.
+                  // 동안 늘 선다 — 브랜치 diff 결과에서는 글자만 빈다. 판을
+                  // 가르는 선은 이 줄 아래다: 커밋 이름과 그 아래 키 안내는 한
+                  // 덩어리로 읽히고, 선이 가르는 것은 머리와 본문이다.
                   Container(
                     key: const Key('preview-shortcut-hint'),
                     height: 24,
                     padding: const EdgeInsets.only(left: 12, right: 6),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(color: _palette.border),
+                      ),
+                    ),
                     child: Row(
                       children: [
                         // 좁아지면 읽을거리가 먼저 준다 — 누를 수 있는 것이
@@ -248,9 +255,6 @@ extension _TimelinePreviewPane on _TimelineScreenState {
       key: const Key('preview-header'),
       height: 36,
       padding: const EdgeInsets.only(left: 12, right: 6),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: _palette.border)),
-      ),
       // 머리줄은 커밋을 이름 짓는 일만 한다 — 자리 고르기는 아랫줄로 내려갔고,
       // 되찾은 폭은 부모 커밋 제목이 쓴다.
       child: namesCommit
