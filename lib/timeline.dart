@@ -158,6 +158,7 @@ class TimelineScreen extends StatefulWidget {
     this.onHiddenRefsChanged,
     this.showRemoteAvatars = true,
     this.precisePush = false,
+    this.autoReloadExternalChanges = false,
     this.preferredPreviewPlacement = PreviewPlacement.right,
     this.columnWidths = const TimelineColumnWidths(),
     this.fullDiffColumnWidths = const FullDiffColumnWidths(),
@@ -231,6 +232,10 @@ class TimelineScreen extends StatefulWidget {
   /// Push the tip a confirmation showed instead of the branch name — see
   /// [AppSettings.precisePush].
   final bool precisePush;
+
+  /// Reload a change made outside the app without asking — see
+  /// [AppSettings.autoReloadExternalChanges].
+  final bool autoReloadExternalChanges;
 
   final PreviewPlacement preferredPreviewPlacement;
   final TimelineColumnWidths columnWidths;
@@ -846,6 +851,9 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// asked about. Nothing on screen can be lost to a deletion the user just
   /// performed, and deleting a dozen branches from a terminal is a dozen
   /// separate readings — one question each, which no debounce can collapse.
+  ///
+  /// [TimelineScreen.autoReloadExternalChanges] widens that exception to every
+  /// reading: nothing is asked, and the card carries what changed.
   Future<void> _checkLocalChanges() async {
     if (!mounted || _localChangePromptOpen) return;
     // A mutation the app is running will refresh on its own; interrupting it
@@ -878,7 +886,9 @@ class _TimelineScreenState extends State<TimelineScreen>
     // "새로 읽어올까요?" needs the change in front of it, not after it.
     final details = await _localChangeDetails(change);
     if (!mounted) return;
-    if (!change.isPureDeletion) {
+    // With 자동 새로고침 on, everything else takes the deletion path too: load
+    // it, and let the card be the only place the reading is told.
+    if (!change.isPureDeletion && !widget.autoReloadExternalChanges) {
       _localChangePromptOpen = true;
       final accepted = await showYogitAlert<bool>(
         context,

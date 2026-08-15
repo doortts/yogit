@@ -2790,6 +2790,37 @@ void main() {
     expect(historyLoads, greaterThan(loadsBefore));
   });
 
+  testWidgets('자동 새로고침을 켜면 묻지 않고 새로 읽어온다', (tester) async {
+    var signature = 'HEAD aaa\nrefs/heads/main aaa';
+    var historyLoads = 0;
+    final repository = FakeGitRepository(
+      (_, _) async {
+        historyLoads++;
+        return [commit('1', 'first commit')];
+      },
+      refs: const RepoRefs(local: ['main'], current: 'main'),
+      runner: (executable, arguments, {workingDirectory, environment}) async =>
+          arguments.first == 'for-each-ref'
+          ? ProcessResult(1, 0, signature, '')
+          : ProcessResult(1, 0, '', ''),
+    );
+    await tester.pumpWidget(
+      app(repository, controller, autoReloadExternalChanges: true),
+    );
+    await tester.pumpAndSettle();
+
+    final loadsBefore = historyLoads;
+
+    // The shape that asks with the setting off: a checkout behind the app's
+    // back, which no deletion rule covers.
+    signature = 'HEAD bbb\nrefs/heads/main aaa\nrefs/heads/work bbb';
+    await tester.pump(const Duration(seconds: 61));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('local-change-refresh')), findsNothing);
+    expect(historyLoads, greaterThan(loadsBefore));
+  });
+
   testWidgets('declining the refresh stops the prompt from returning', (
     tester,
   ) async {
@@ -18903,11 +18934,13 @@ Widget app(
   String mergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
   String rebaseMergeMessageTemplate = AppSettings.defaultMergeMessageTemplate,
   bool precisePush = false,
+  bool autoReloadExternalChanges = false,
   CommandLog? commandLog,
   FullDiffPreferences fullDiffPreferences = const FullDiffPreferences(),
 }) => MaterialApp(
   home: TimelineScreen(
     precisePush: precisePush,
+    autoReloadExternalChanges: autoReloadExternalChanges,
     repository: repository,
     commandLog: commandLog,
     controller: controller,

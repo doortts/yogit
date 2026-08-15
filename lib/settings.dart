@@ -407,6 +407,7 @@ class AppSettings {
   const AppSettings({
     this.showAvatars = true,
     this.precisePush = false,
+    this.autoReloadExternalChanges = false,
     this.timelineTheme = TimelineThemeKind.systemGraphite,
     this.previewPlacement = PreviewPlacement.right,
     this.branchPreviewMode = BranchPreviewMode.merge,
@@ -503,6 +504,12 @@ class AppSettings {
   /// what a person types, and the difference only shows when a commit lands
   /// while the dialog is open.
   final bool precisePush;
+
+  /// Reload on a change made outside the app instead of asking first. Off by
+  /// default: a reading that arrives while the user is reading one commit
+  /// moves the timeline under them, and the question is what keeps that a
+  /// choice.
+  final bool autoReloadExternalChanges;
   final TimelineThemeKind timelineTheme;
   final PreviewPlacement previewPlacement;
   final BranchPreviewMode branchPreviewMode;
@@ -636,6 +643,7 @@ class AppSettings {
   AppSettings copyWith({
     bool? showAvatars,
     bool? precisePush,
+    bool? autoReloadExternalChanges,
     TimelineThemeKind? timelineTheme,
     PreviewPlacement? previewPlacement,
     BranchPreviewMode? branchPreviewMode,
@@ -668,6 +676,8 @@ class AppSettings {
   }) => AppSettings(
     showAvatars: showAvatars ?? this.showAvatars,
     precisePush: precisePush ?? this.precisePush,
+    autoReloadExternalChanges:
+        autoReloadExternalChanges ?? this.autoReloadExternalChanges,
     timelineTheme: timelineTheme ?? this.timelineTheme,
     previewPlacement: previewPlacement ?? this.previewPlacement,
     branchPreviewMode: branchPreviewMode ?? this.branchPreviewMode,
@@ -785,6 +795,7 @@ class AppSettings {
           ? value['showAvatars'] as bool
           : true,
       precisePush: value['precisePush'] == true,
+      autoReloadExternalChanges: value['autoReloadExternalChanges'] == true,
       timelineTheme: TimelineThemeKind.parse(value['timelineTheme']),
       previewPlacement: switch (value['previewPlacement']) {
         'bottom' => PreviewPlacement.bottom,
@@ -892,6 +903,7 @@ class AppSettings {
   Map<String, Object> toJson() => {
     'showAvatars': showAvatars,
     'precisePush': precisePush,
+    'autoReloadExternalChanges': autoReloadExternalChanges,
     'timelineTheme': timelineTheme.storageValue,
     'previewPlacement': previewPlacement.name,
     'branchPreviewMode': branchPreviewMode.name,
@@ -929,6 +941,7 @@ class AppSettings {
       other is AppSettings &&
       showAvatars == other.showAvatars &&
       precisePush == other.precisePush &&
+      autoReloadExternalChanges == other.autoReloadExternalChanges &&
       timelineTheme == other.timelineTheme &&
       previewPlacement == other.previewPlacement &&
       branchPreviewMode == other.branchPreviewMode &&
@@ -964,6 +977,7 @@ class AppSettings {
   int get hashCode => Object.hashAll([
     showAvatars,
     precisePush,
+    autoReloadExternalChanges,
     timelineTheme,
     previewPlacement,
     branchPreviewMode,
@@ -2010,6 +2024,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
             value: _settings.precisePush,
             onChanged: (value) =>
                 _change(_settings.copyWith(precisePush: value)),
+          ),
+          SwitchListTile(
+            key: const Key('auto-reload-toggle'),
+            contentPadding: EdgeInsets.zero,
+            title: const Text(
+              '자동 새로고침',
+              style: TextStyle(color: Color(0xFFE8EAF2), fontSize: 13),
+            ),
+            subtitle: const Text(
+              '터미널이나 다른 도구가 저장소를 바꾸면 묻지 않고 바로 새로 '
+              '읽어옵니다. 끄면 무엇이 바뀌었는지 보여주고 새로 읽어올지 '
+              '먼저 물어봅니다.',
+              style: TextStyle(color: Color(0xFF8D94A8), fontSize: 11),
+            ),
+            value: _settings.autoReloadExternalChanges,
+            onChanged: (value) =>
+                _change(_settings.copyWith(autoReloadExternalChanges: value)),
           ),
           const SizedBox(height: 24),
           _laneColors(),
