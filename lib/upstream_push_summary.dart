@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'local_state_signature.dart';
 import 'timeline_palette.dart';
 import 'timeline_theme.dart';
+import 'timeline_widgets.dart';
 import 'typography.dart';
 
 /// Push 확인창의 제목 아래 한 줄: 'origin'이 실제로 어디인지. 올리기 전에
@@ -380,7 +381,7 @@ class _SummaryBlockState extends State<_SummaryBlock> {
           else
             rows,
           if (_open || (more > 0 && widget.loadRest != null))
-            _MoreLink(
+            MoreLink(
               key: widget.moreKey,
               label: _loading
                   ? '불러오는 중'
@@ -398,35 +399,6 @@ class _SummaryBlockState extends State<_SummaryBlock> {
               ),
             ),
         ],
-      ),
-    );
-  }
-}
-
-/// '외 N개' / '접기' — 세기만 하던 글자가 누를 자리가 된다.
-class _MoreLink extends StatelessWidget {
-  const _MoreLink({required this.label, required this.onTap, super.key});
-
-  final String label;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = context.timelineTheme;
-    return Padding(
-      padding: const EdgeInsets.only(left: 17, top: 3),
-      child: MouseRegion(
-        cursor: onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
-        child: GestureDetector(
-          onTap: onTap,
-          child: Text(
-            label,
-            style: TextStyle(
-              color: onTap == null ? palette.muted : previewControlBlue,
-              fontSize: 12,
-            ),
-          ),
-        ),
       ),
     );
   }

@@ -1002,19 +1002,32 @@ typedef NoticeCommit = ({bool incoming, String shortSha, String subject});
 /// A line that scrolls past before it is read is no better than silence, so
 /// this one stays: `esc`, or a press anywhere else, takes it away. That is
 /// also what lets it carry the commits themselves rather than a count alone.
+///
+/// 읽는 사이에 저장소가 또 바뀌면 새 읽음이 카드를 갈아치우지 않고 아래에
+/// 제 영역으로 붙는다 — 읽던 줄은 제자리에 남는다.
+/// docs/local-change-notice-stack-mockup.html이 계약이다.
 class LocalChangeNotice extends StatelessWidget {
   const LocalChangeNotice({
-    required this.details,
+    required this.readings,
     required this.onDismiss,
     super.key,
   });
 
-  final LocalChangeDetails details;
+  /// 밖에서 벌어진 읽음들, 오래된 것부터. 마지막이 방금 온 것이다.
+  final List<LocalChangeDetails> readings;
   final VoidCallback onDismiss;
+
+  /// 카드가 세워 두는 영역의 수. 넘긴 것은 이미 화면의 역사에 반영된 뒤라
+  /// 다시 펼칠 것이 없다 — 머리 한 줄이 세기만 한다.
+  static const maxReadings = 5;
 
   @override
   Widget build(BuildContext context) {
     final palette = context.timelineTheme;
+    final shown = readings.length <= maxReadings
+        ? readings
+        : readings.sublist(readings.length - maxReadings);
+    final folded = readings.length - shown.length;
     return TapRegion(
       // The press that dismisses is still the press the reader meant: it
       // selects the row it landed on, and the notice goes with it.
@@ -1043,17 +1056,112 @@ class LocalChangeNotice extends StatelessWidget {
                 ),
               ],
             ),
-            child: LocalChangeDetailsView(
-              details: details,
-              // A notice that will not leave on its own has to show the way
-              // out.
-              trailing: _EscHint(palette: palette, onPressed: onDismiss),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    // 머리줄도 영역이 서는 자리에서 시작한다 — 왼쪽 선이
+                    // 차지한 11px 만큼.
+                    const SizedBox(width: 11),
+                    Text(
+                      '저장소가 밖에서 바뀜',
+                      style: TextStyle(color: palette.text, fontSize: 13),
+                    ),
+                    Text(
+                      '  ·  ${readings.length}건',
+                      key: const Key('local-change-notice-count'),
+                      style: TextStyle(color: palette.muted, fontSize: 13),
+                    ),
+                    const Spacer(),
+                    const SizedBox(width: 20),
+                    // A notice that will not leave on its own has to show the
+                    // way out. 영역이 몇이든 나가는 문은 하나다.
+                    _EscHint(palette: palette, onPressed: onDismiss),
+                  ],
+                ),
+                const SizedBox(height: 9),
+                Divider(height: 1, color: palette.border),
+                // 쌓인 영역이 화면을 넘기면 영역만 구르고, 머리줄과 나가는
+                // 문은 제자리에 남는다.
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (folded > 0)
+                          Padding(
+                            padding: const EdgeInsets.only(
+                              left: 11,
+                              top: 4,
+                              bottom: 7,
+                            ),
+                            child: Text(
+                              '이전 $folded건',
+                              key: const Key('local-change-notice-folded'),
+                              style: TextStyle(
+                                color: palette.muted,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        for (final (index, details) in shown.indexed)
+                          _NoticeReading(
+                            details: details,
+                            palette: palette,
+                            // 하나뿐인 영역은 무엇과도 견줄 것이 없어 표시할
+                            // 새것도 없다.
+                            fresh:
+                                shown.length > 1 && index == shown.length - 1,
+                            ruled: index > 0 || folded > 0,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
       ),
     );
   }
+}
+
+/// 카드 안의 한 읽음. 갓 붙은 것은 왼쪽에 가는 선이 서서 어디가 새것인지
+/// 말하고, 다음 것이 오면 그 선은 새것에게 넘어간다.
+class _NoticeReading extends StatelessWidget {
+  const _NoticeReading({
+    required this.details,
+    required this.palette,
+    required this.fresh,
+    required this.ruled,
+  });
+
+  final LocalChangeDetails details;
+  final TimelineThemePalette palette;
+  final bool fresh;
+  final bool ruled;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    // 선은 새것에만 색이 든다. 자리는 늘 잡아 두어야 영역들이 한 줄에 선다.
+    decoration: BoxDecoration(
+      border: Border(
+        top: ruled
+            ? BorderSide(color: palette.border)
+            : const BorderSide(color: Colors.transparent, width: 0),
+        left: BorderSide(
+          color: fresh ? mainAccent : Colors.transparent,
+          width: 2,
+        ),
+      ),
+    ),
+    padding: const EdgeInsets.only(left: 9, top: 7, bottom: 6),
+    child: LocalChangeDetailsView(details: details),
+  );
 }
 
 /// What changed, as the notice and the question both say it: a headline, the
@@ -1064,6 +1172,7 @@ class LocalChangeDetails {
     required this.lines,
     required this.commits,
     required this.more,
+    this.loadRest,
   });
 
   /// The first thing that changed, said in full.
@@ -1079,6 +1188,10 @@ class LocalChangeDetails {
   /// How many more there were than there was room for.
   final int more;
 
+  /// '외 N개'를 누를 때 도는 조회 — 목록 전체를, 세어 둔 순서 그대로. 없으면
+  /// 그 줄은 세기만 하고 눌리지 않는다.
+  final Future<List<NoticeCommit>> Function()? loadRest;
+
   /// The list stops here. Whether it is a notice that stays or a question
   /// waiting to be answered, taller than this stops being either — and the
   /// whole story is on the timeline behind it.
@@ -1090,7 +1203,7 @@ class LocalChangeDetails {
 /// Draws [LocalChangeDetails]. The card wraps it in its own panel; the
 /// question that asks whether to reload puts it in the alert's body, so the
 /// reader answers with the change in front of them rather than after it.
-class LocalChangeDetailsView extends StatelessWidget {
+class LocalChangeDetailsView extends StatefulWidget {
   const LocalChangeDetailsView({
     required this.details,
     this.trailing,
@@ -1102,9 +1215,59 @@ class LocalChangeDetailsView extends StatelessWidget {
   /// Sits at the end of the headline. The card puts its way out here.
   final Widget? trailing;
 
+  /// 펼친 목록이 자라는 한계. 넘긴 것은 제 안에서 구른다 — 카드도 물음도
+  /// 화면을 넘지 않는다.
+  static const openHeight = 172.0;
+
+  @override
+  State<LocalChangeDetailsView> createState() => _LocalChangeDetailsViewState();
+}
+
+class _LocalChangeDetailsViewState extends State<LocalChangeDetailsView> {
+  var _open = false;
+  var _loading = false;
+  List<NoticeCommit>? _rest;
+
+  /// 접힌 것을 펼치고, 펼친 것을 접는다. 나머지는 실제로 펼친 사람만 값을
+  /// 치른다 — 카드를 여는 조회는 여덟 개로 가볍게 둔다.
+  Future<void> _toggle() async {
+    if (_open) {
+      setState(() => _open = false);
+      return;
+    }
+    if (_rest != null) {
+      setState(() => _open = true);
+      return;
+    }
+    final loader = widget.details.loadRest;
+    if (loader == null) return;
+    setState(() => _loading = true);
+    List<NoticeCommit> rest;
+    try {
+      rest = await loader();
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+    if (!mounted) return;
+    setState(() {
+      _rest = rest;
+      _open = true;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final palette = context.timelineTheme;
+    final details = widget.details;
+    final commits = _open ? _rest ?? details.commits : details.commits;
+    final rows = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final commit in commits)
+          _NoticeCommitRow(commit: commit, palette: palette),
+      ],
+    );
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1120,7 +1283,7 @@ class LocalChangeDetailsView extends StatelessWidget {
                 style: TextStyle(color: palette.text, fontSize: 13),
               ),
             ),
-            if (trailing case final trailing?) ...[
+            if (widget.trailing case final trailing?) ...[
               const SizedBox(width: 20),
               trailing,
             ],
@@ -1140,19 +1303,58 @@ class LocalChangeDetailsView extends StatelessWidget {
                 style: TextStyle(color: palette.text, fontSize: 13),
               ),
             ),
-          for (final commit in details.commits)
-            _NoticeCommitRow(commit: commit, palette: palette),
-          if (details.more > 0)
-            Padding(
-              padding: const EdgeInsets.only(left: 17, top: 3),
-              child: Text(
-                '외 ${details.more}개',
-                key: const Key('local-change-notice-more'),
-                style: TextStyle(color: palette.muted, fontSize: 12),
+          if (_open)
+            ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxHeight: LocalChangeDetailsView.openHeight,
               ),
+              child: SingleChildScrollView(child: rows),
+            )
+          else
+            rows,
+          if (details.more > 0)
+            MoreLink(
+              key: const Key('local-change-notice-more'),
+              label: _loading
+                  ? '불러오는 중'
+                  : _open
+                  ? '접기'
+                  : '외 ${details.more}개',
+              // 불러올 데가 없으면 세기만 하던 그대로 — 회색으로, 눌리지 않고.
+              onTap: _loading || details.loadRest == null ? null : _toggle,
             ),
         ],
       ],
+    );
+  }
+}
+
+/// '외 N개' / '접기' — 세기만 하던 글자가 누를 자리가 된다. Push 확인창과
+/// 밖에서 바뀜 알림이 같은 글자를 쓴다.
+class MoreLink extends StatelessWidget {
+  const MoreLink({required this.label, required this.onTap, super.key});
+
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.timelineTheme;
+    return Padding(
+      padding: const EdgeInsets.only(left: 17, top: 3),
+      child: MouseRegion(
+        cursor: onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: onTap,
+          child: Text(
+            label,
+            style: TextStyle(
+              color: onTap == null ? palette.muted : previewControlBlue,
+              fontSize: 12,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

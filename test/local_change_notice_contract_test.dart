@@ -5,6 +5,7 @@ import 'package:yogit/git.dart';
 import 'package:yogit/local_state_signature.dart';
 import 'package:yogit/timeline.dart';
 import 'package:yogit/timeline_palette.dart';
+import 'package:yogit/timeline_theme.dart';
 import 'package:yogit/window_frame.dart';
 import 'package:yogit/yogit_alert.dart';
 
@@ -62,9 +63,14 @@ class _ChangingRepository extends FakeGitRepository {
 void main() {
   late _ChangingRepository repository;
 
-  Future<void> pump(WidgetTester tester, {String? startingAt}) async {
+  Future<void> pump(
+    WidgetTester tester, {
+    String? startingAt,
+    bool autoReload = false,
+    Size size = const Size(1400, 900),
+  }) async {
     tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.physicalSize = size;
     addTearDown(() {
       tester.view.resetDevicePixelRatio();
       tester.view.resetPhysicalSize();
@@ -85,6 +91,7 @@ void main() {
       MaterialApp(
         home: TimelineScreen(
           repository: repository,
+          autoReloadExternalChanges: autoReload,
           controller: WindowFrameController(
             channel: const MethodChannel('test/yogit-window'),
           ),
@@ -118,6 +125,12 @@ void main() {
   Finder ask() => find.text('새로 읽어올까요?');
   Finder headline() => find.byKey(const Key('local-change-notice-headline'));
   Finder card() => find.byKey(const Key('local-change-notice'));
+  Finder more() => find.byKey(const Key('local-change-notice-more'));
+
+  /// 세기만 하던 자리가 이제 누를 자리라, 글자는 그 안에 있다.
+  String? moreLabel(WidgetTester tester) => tester
+      .widget<Text>(find.descendant(of: more(), matching: find.byType(Text)))
+      .data;
 
   // ── 묻는 쪽 ──────────────────────────────────────────────────────
   testWidgets('계약 1 — 묻기 전에 무엇이 바뀌었는지 보인다', (tester) async {
@@ -195,12 +208,7 @@ void main() {
 
     expect(find.textContaining('feat: number 7'), findsOneWidget);
     expect(find.textContaining('feat: number 8'), findsNothing);
-    expect(
-      tester
-          .widget<Text>(find.byKey(const Key('local-change-notice-more')))
-          .data,
-      '외 34개',
-    );
+    expect(moreLabel(tester), '외 34개');
   });
 
   testWidgets('계약 4 — 브랜치가 여럿이면 브랜치마다 한 줄', (tester) async {
@@ -314,6 +322,160 @@ void main() {
 
     expect(card(), findsNothing);
     expect(find.byKey(const Key('selected-row-root')), findsOneWidget);
+  });
+
+  // ── 쌓이는 카드 ─────────────────────────────────────────────────
+  // docs/local-change-notice-stack-mockup.html
+  testWidgets('쌓기 계약 1 — 읽는 사이에 또 바뀌면 덮지 않고 아래에 붙는다', (tester) async {
+    await pump(tester, autoReload: true);
+    await moveHead(tester, tip: 'first-tip');
+
+    expect(headline(), findsOneWidget);
+    expect(
+      find.textContaining('feat: let a remote branch stand'),
+      findsWidgets,
+    );
+
+    repository.operation = 'reset';
+    repository.counts = (outgoing: 2, incoming: 0);
+    repository.moved = const [
+      (incoming: false, shortSha: 'ddd4444', subject: 'chore: the rolled back'),
+    ];
+    await moveHead(tester, tip: 'second-tip');
+
+    // 앞의 읽음이 살아 있고, 새 읽음이 제 영역으로 붙었다.
+    expect(headline(), findsNWidgets(2));
+    expect(
+      find.textContaining('feat: let a remote branch stand'),
+      findsWidgets,
+    );
+    expect(find.textContaining('chore: the rolled back'), findsOneWidget);
+    // 머리줄은 쌓인 건수를 센다.
+    expect(
+      tester
+          .widget<Text>(find.byKey(const Key('local-change-notice-count')))
+          .data,
+      '  ·  2건',
+    );
+    // 나가는 문은 하나다 — 영역마다 달리지 않는다.
+    expect(
+      find.byKey(const Key('local-change-notice-dismiss')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('쌓기 계약 3 — 다섯을 넘으면 오래된 것부터 접힌다', (tester) async {
+    await pump(tester, autoReload: true);
+    repository.moved = const [];
+    for (var index = 0; index < 7; index++) {
+      await moveHead(tester, tip: 'tip-$index');
+    }
+
+    expect(headline(), findsNWidgets(LocalChangeNotice.maxReadings));
+    expect(
+      tester
+          .widget<Text>(find.byKey(const Key('local-change-notice-folded')))
+          .data,
+      '이전 2건',
+    );
+    expect(
+      tester
+          .widget<Text>(find.byKey(const Key('local-change-notice-count')))
+          .data,
+      '  ·  7건',
+    );
+  });
+
+  testWidgets('쌓기 계약 5 — esc는 카드 전체를 한 번에 닫는다', (tester) async {
+    await pump(tester, autoReload: true);
+    await moveHead(tester, tip: 'first-tip');
+    await moveHead(tester, tip: 'second-tip');
+    expect(card(), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(card(), findsNothing);
+  });
+
+  testWidgets('쌓기 계약 7 — 카드는 창을 넘지 않고 제 안에서 구른다', (tester) async {
+    await pump(tester, autoReload: true, size: const Size(1400, 420));
+    for (var index = 0; index < 5; index++) {
+      await moveHead(tester, tip: 'tip-$index');
+    }
+
+    final rect = tester.getRect(card());
+    // 위아래 24씩 비워 둔 자리 안에 선다 — 창 밖으로 자라지 않는다.
+    expect(rect.height, lessThanOrEqualTo(420 - 48 + 0.5));
+    expect(rect.top, greaterThanOrEqualTo(23.5));
+    expect(
+      find.descendant(of: card(), matching: find.byType(Scrollable)),
+      findsWidgets,
+      reason: '넘친 영역은 카드 안에서 굴러야 한다',
+    );
+  });
+
+  // ── 눌러서 펼치는 '외 N개' ──────────────────────────────────────
+  testWidgets('쌓기 계약 6 — 외 N개를 누르면 전체가 펼쳐지고 접기가 된다', (tester) async {
+    await pump(tester, autoReload: true);
+    repository.counts = (outgoing: 0, incoming: 42);
+    repository.moved = [
+      for (var index = 0; index < 12; index++)
+        (
+          incoming: true,
+          shortSha: 'c00000$index',
+          subject: 'feat: number $index',
+        ),
+    ];
+    await moveHead(tester);
+
+    expect(find.textContaining('feat: number 8'), findsNothing);
+    expect(moreLabel(tester), '외 34개');
+
+    await tester.tap(more());
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('feat: number 8'), findsOneWidget);
+    expect(find.textContaining('feat: number 11'), findsOneWidget);
+    expect(moreLabel(tester), '접기');
+
+    await tester.tap(more());
+    await tester.pumpAndSettle();
+    expect(find.textContaining('feat: number 8'), findsNothing);
+    expect(moreLabel(tester), '외 34개');
+  });
+
+  testWidgets('펼칠 데가 없으면 세기만 한다', (tester) async {
+    await pump(tester);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: timelineThemeData(
+          ThemeData.dark(),
+          TimelineThemeKind.systemGraphite,
+        ),
+        home: const Material(
+          child: LocalChangeDetailsView(
+            details: LocalChangeDetails(
+              headline: 'main 갱신됨',
+              lines: [],
+              commits: [],
+              more: 3,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(moreLabel(tester), '외 3개');
+    expect(
+      tester
+          .widget<GestureDetector>(
+            find.descendant(of: more(), matching: find.byType(GestureDetector)),
+          )
+          .onTap,
+      isNull,
+      reason: '불러올 데가 없는 글자는 누를 자리가 아니다',
+    );
   });
 
   testWidgets('카드는 뒤의 역사가 비치도록 선다', (tester) async {

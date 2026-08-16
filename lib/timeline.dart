@@ -536,10 +536,10 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// fact and stops spending round trips on a line already too long to read.
   static const _detailedBranchLimit = 3;
 
-  /// 밖에서 벌어진 변화를 설명하는 알림. 스스로 사라지지 않고, esc나 바깥 클릭을
-  /// 기다린다. 읽는 중에 저장소가 또 바뀌면 새 것으로 갈린다 — 알림이 쌓이면
-  /// 그때부터는 알림이 아니라 잔해다.
-  LocalChangeNotice? _localChangeNotice;
+  /// 밖에서 벌어진 변화를 설명하는 알림에 선 읽음들, 오래된 것부터. 스스로
+  /// 사라지지 않고 esc나 바깥 클릭을 기다린다. 읽는 중에 저장소가 또 바뀌면
+  /// 갈아치우지 않고 여기에 하나 더 쌓인다 — 방금 읽던 줄이 사라지지 않도록.
+  final _localChangeReadings = <LocalChangeDetails>[];
 
   final _localChangeNoticeOverlay = OverlayPortalController();
 
@@ -549,23 +549,34 @@ class _TimelineScreenState extends State<TimelineScreen>
   Widget _localChangeNoticeHost() => OverlayPortal(
     controller: _localChangeNoticeOverlay,
     overlayChildBuilder: (context) {
-      final notice = _localChangeNotice;
-      if (notice == null) return const SizedBox.shrink();
-      return Positioned.fill(child: Center(child: notice));
+      if (_localChangeReadings.isEmpty) return const SizedBox.shrink();
+      // 여백은 카드가 창을 넘지 않게 잡아 두는 천장이다. 쌓인 영역이 그보다
+      // 길어지면 카드가 자라는 대신 제 안에서 구른다.
+      return Positioned.fill(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Center(
+            child: LocalChangeNotice(
+              readings: List.of(_localChangeReadings),
+              onDismiss: _dismissLocalChangeNotice,
+            ),
+          ),
+        ),
+      );
     },
     child: const SizedBox.shrink(),
   );
 
-  void _showLocalChangeNotice(LocalChangeNotice notice) {
-    _rebuild(() => _localChangeNotice = notice);
+  void _showLocalChangeNotice(LocalChangeDetails details) {
+    _rebuild(() => _localChangeReadings.add(details));
     if (!_localChangeNoticeOverlay.isShowing) {
       _localChangeNoticeOverlay.show();
     }
   }
 
   void _dismissLocalChangeNotice() {
-    if (_localChangeNotice == null) return;
-    _rebuild(() => _localChangeNotice = null);
+    if (_localChangeReadings.isEmpty) return;
+    _rebuild(_localChangeReadings.clear);
     if (_localChangeNoticeOverlay.isShowing) _localChangeNoticeOverlay.hide();
   }
 
@@ -930,9 +941,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (!mounted || details == null) return;
     // Nothing asked, so nothing has said it yet. The card is the only place
     // this reading gets told.
-    _showLocalChangeNotice(
-      LocalChangeNotice(details: details, onDismiss: _dismissLocalChangeNotice),
-    );
+    _showLocalChangeNotice(details);
   }
 
   /// Turns what changed into the lines that explain it, asking git only for
@@ -1005,7 +1014,30 @@ class _TimelineScreenState extends State<TimelineScreen>
           )
           .toList(),
       more: math.max(0, total - LocalChangeDetails.maxCommits),
+      // 펼칠 것이 있는 쪽만 누를 자리를 얻는다 — 브랜치가 여럿이면 애초에
+      // 커밋 목록이 서지 않는다.
+      loadRest: single ? () => _restMovedCommits(change.moved.single) : null,
     );
+  }
+
+  /// '외 N개'를 누를 때 도는 조회. 카드를 여는 조회는 아홉 개로 가볍게 두고,
+  /// 나머지는 실제로 펼친 사람만 값을 치른다.
+  /// ponytail: 500-commit ceiling, same as the push summary's; past it the
+  /// count stays honest and the list simply stops.
+  Future<List<NoticeCommit>> _restMovedCommits(MovedTip tip) async {
+    final moved = await widget.repository.loadMovedCommits(
+      tip.before,
+      tip.after,
+      limit: 500,
+    );
+    return [
+      for (final commit in moved)
+        (
+          incoming: commit.incoming,
+          shortSha: commit.shortSha,
+          subject: commit.subject,
+        ),
+    ];
   }
 
   @override
@@ -1564,7 +1596,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
     if (event.logicalKey == LogicalKeyboardKey.escape) {
       // 방금 선 알림이 가장 앞의 관심사다. 미리보기나 diff보다 먼저 닫힌다.
-      if (_localChangeNotice != null) {
+      if (_localChangeReadings.isNotEmpty) {
         _dismissLocalChangeNotice();
       } else if (_fullDiffOpen) {
         _closeFullDiff();
