@@ -127,9 +127,15 @@ void main() {
   Finder card() => find.byKey(const Key('local-change-notice'));
   Finder more() => find.byKey(const Key('local-change-notice-more'));
 
+  Finder folded() => find.byKey(const Key('local-change-notice-folded'));
+
   /// 세기만 하던 자리가 이제 누를 자리라, 글자는 그 안에 있다.
   String? moreLabel(WidgetTester tester) => tester
       .widget<Text>(find.descendant(of: more(), matching: find.byType(Text)))
+      .data;
+
+  String? foldedLabel(WidgetTester tester) => tester
+      .widget<Text>(find.descendant(of: folded(), matching: find.byType(Text)))
       .data;
 
   // ── 묻는 쪽 ──────────────────────────────────────────────────────
@@ -371,19 +377,59 @@ void main() {
       await moveHead(tester, tip: 'tip-$index');
     }
 
-    expect(headline(), findsNWidgets(LocalChangeNotice.maxReadings));
-    expect(
-      tester
-          .widget<Text>(find.byKey(const Key('local-change-notice-folded')))
-          .data,
-      '이전 2건',
-    );
+    expect(headline(), findsNWidgets(5));
+    expect(foldedLabel(tester), '이전 2건 보기');
     expect(
       tester
           .widget<Text>(find.byKey(const Key('local-change-notice-count')))
           .data,
       '  ·  7건',
     );
+  });
+
+  testWidgets('쌓기 계약 3 — 접힌 것도 눌러서 전부 볼 수 있다', (tester) async {
+    await pump(tester, autoReload: true);
+    repository.moved = const [];
+    for (var index = 0; index < 7; index++) {
+      await moveHead(tester, tip: 'tip-$index');
+    }
+    // 접혀 있는 동안 앞의 둘은 어디에도 서지 않는다.
+    expect(headline(), findsNWidgets(5));
+
+    await tester.tap(folded());
+    await tester.pumpAndSettle();
+
+    expect(headline(), findsNWidgets(7), reason: '처음 것까지 선다');
+    expect(foldedLabel(tester), '접기');
+
+    await tester.tap(folded());
+    await tester.pumpAndSettle();
+    expect(headline(), findsNWidgets(5));
+    expect(foldedLabel(tester), '이전 2건 보기');
+  });
+
+  testWidgets('새 읽음은 맨 아래를 보고 있을 때만 따라 내려간다', (tester) async {
+    await pump(tester, autoReload: true, size: const Size(1400, 320));
+    for (var index = 0; index < 5; index++) {
+      await moveHead(tester, tip: 'tip-$index');
+    }
+
+    final scroll = tester.widget<Scrollable>(
+      find.descendant(of: card(), matching: find.byType(Scrollable)).first,
+    );
+    final position = scroll.controller!.position;
+    expect(position.maxScrollExtent, greaterThan(0), reason: '넘쳐야 굴러간다');
+    expect(position.pixels, closeTo(position.maxScrollExtent, 0.5));
+
+    // 맨 아래에서 온 새 읽음은 따라 내려간다.
+    await moveHead(tester, tip: 'tip-fresh');
+    expect(position.pixels, closeTo(position.maxScrollExtent, 0.5));
+
+    // 위쪽을 읽고 있으면 그 자리를 지킨다.
+    position.jumpTo(0);
+    await tester.pump();
+    await moveHead(tester, tip: 'tip-later');
+    expect(position.pixels, 0);
   });
 
   testWidgets('쌓기 계약 5 — esc는 카드 전체를 한 번에 닫는다', (tester) async {

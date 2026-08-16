@@ -135,6 +135,8 @@
   갈린다</b> — 방금 읽던 것이 사라진다. 두 가지를 고친다:
   <b>읽음마다 영역을 나눠 한 카드에 쌓고</b>, 세기만 하던
   <span class="mono" style="color:var(--dim)">외 N개</span>를 <b>눌러서 펼치게</b> 한다.
+  세어만 두고 열 수 없던 <span class="mono" style="color:var(--dim)">이전 N건</span>도 같은
+  자리를 얻는다 — 밖에서 벌어진 일은 하나도 못 본 채로 지나가지 않는다.
 </p>
 
 <h2>지금 <span class="tag">바꾸기 전</span></h2>
@@ -191,11 +193,13 @@
   </div>
 </div>
 
-<h2>많이 쌓였을 때</h2>
+<h2>많이 쌓였을 때 <span class="tag">고침</span></h2>
 <p class="note">
-  카드는 <b>다섯 건</b>까지 세워 두고, 그보다 오래된 것은 머리 한 줄로 접는다. 접힌 것은 이미
-  화면의 역사에 반영된 뒤라 다시 펼칠 것이 없다 — 세기만 한다. 카드가 화면을 넘기면 영역만
-  스크롤되고 머리줄과 <span class="keycap">esc</span>는 제자리에 남는다.
+  카드는 <b>다섯 건</b>까지 세워 두고, 그보다 오래된 것은 머리 한 줄로 접는다. 처음 시안은 그
+  한 줄이 <b>세기만 한다</b>고 했는데, 48건이 쌓인 자리에서 <b>이전 43건</b>은 세어 봐야 아무
+  데서도 읽을 수 없는 숫자였다. 그 줄도 <span class="mono">외 N개</span>와 같은
+  <b>누를 자리</b>가 된다 — 밖에서 벌어진 일은 하나도 못 보고 지나치지 않는다.
+  카드가 화면을 넘기면 영역만 스크롤되고 머리줄과 <span class="keycap">esc</span>는 제자리에 남는다.
 </p>
 <div class="card">
   <div class="head">
@@ -203,7 +207,7 @@
     <span class="esc"><span class="keycap">esc</span> 닫기</span>
   </div>
   <div class="rule"></div>
-  <div class="older">이전 2건</div>
+  <div class="more" style="padding-left:0">이전 2건 보기</div>
   <div class="reading">
     <div class="headline"><span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">3개 들어옴</span></div>
   </div>
@@ -220,6 +224,52 @@
     <div class="headline">HEAD 분리됨</div>
   </div>
 </div>
+
+<h2>접힌 것을 열면 전부 선다 <span class="tag pick">고침 · 권장</span></h2>
+<p class="note">
+  <b>이전 N건 보기</b>를 누르면 접혀 있던 읽음이 위로 이어 서고, 라벨은 <b>접기</b>가 된다.
+  카드는 여전히 창 안에 머무르고 넘친 만큼은 제 안에서 구른다 — 열어 놓은 채로 끝까지 훑어
+  내려가면 <b>처음 것</b>까지 읽힌다. 펼치는 데 조회는 없다: 이미 다 읽어 둔 것을 그리기만
+  한다.
+</p>
+<div class="card">
+  <div class="head">
+    <span>저장소가 밖에서 바뀜</span><span class="sep">·</span><span class="count">48건</span>
+    <span class="esc"><span class="keycap">esc</span> 닫기</span>
+  </div>
+  <div class="rule"></div>
+  <div class="more" style="padding-left:0">접기</div>
+  <div class="scrollbox" style="max-height:250px;margin:6px 0 0;border-left:none;padding-left:0">
+    <div class="reading" style="border-top:none">
+      <div class="headline"><span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">2개 들어옴</span></div>
+    </div>
+    <div class="reading">
+      <div class="headline"><span class="name">fix/resolve-asset-changed-ids</span> 브랜치 추가됨</div>
+    </div>
+    <div class="reading">
+      <div class="headline"><span class="name">claude/kind-gould-d08758</span><span class="sep">·</span><span class="op">merge</span><span class="sep">·</span>커밋&nbsp;<span class="in">4개 들어옴</span></div>
+    </div>
+    <div class="reading">
+      <div class="headline"><span class="name">spike</span> 브랜치 삭제됨</div>
+    </div>
+    <div class="reading">
+      <div class="headline">HEAD 분리됨</div>
+    </div>
+    <div class="reading">
+      <div class="headline"><span class="name">fix/duplicate-waiting-image</span><span class="sep">·</span><span class="op">merge</span><span class="sep">·</span>커밋&nbsp;<span class="in">15개 들어옴</span></div>
+      <div class="item plus"><span class="mark">+</span><span class="id">d6932f2c</span><span class="subject">Merge branch 'main' into fix/duplicate-waiting-image</span></div>
+      <div class="more">외 7개</div>
+    </div>
+    <div class="reading fresh">
+      <div class="headline"><span class="name">fix/trashed-picture-keeps-its-picture</span> 브랜치 추가됨</div>
+    </div>
+  </div>
+</div>
+<p class="note" style="margin-top:14px">
+  읽는 사이에 새 읽음이 붙으면 <b>맨 아래</b>에 서는데, 그때 카드가 이미 맨 아래를 보고 있으면
+  따라 내려가고, 위쪽 어딘가를 읽고 있으면 <b>그 자리를 지킨다</b> — 읽던 줄을 빼앗지 않는다.
+  건수는 머리줄이 세고 있으니 새것이 왔다는 사실은 접혀 있어도 드러난다.
+</p>
 
 <h2>'외 N개'를 눌러서 펼친다</h2>
 <p class="note">
@@ -315,7 +365,12 @@
   <tr>
     <td class="what">쌓이는 한도</td>
     <td>—</td>
-    <td>다섯 건, 넘으면 <span class="mono" style="color:var(--dim)">이전 N건</span> 한 줄</td>
+    <td>기본 다섯 건, 넘으면 <span class="mono" style="color:var(--blue)">이전 N건 보기</span> — 누르면 전부</td>
+  </tr>
+  <tr>
+    <td class="what">새 읽음이 붙을 때</td>
+    <td>—</td>
+    <td>맨 아래를 보고 있었으면 따라 내려가고, 아니면 자리를 지킨다</td>
   </tr>
   <tr>
     <td class="what"><span class="mono">외 N개</span></td>
@@ -338,7 +393,8 @@
 <table>
   <tr><th>1</th><td>카드가 떠 있는 동안 온 읽음은 <b>덮지 않고</b> 아래에 영역으로 붙는다.</td></tr>
   <tr><td>2</td><td>머리줄은 쌓인 건수를 <b>정직하게</b> 센다 — 접힌 것까지 포함해서.</td></tr>
-  <tr><td>3</td><td>영역은 다섯까지. 넘으면 오래된 것부터 <span class="mono" style="color:var(--dim)">이전 N건</span>으로 접힌다.</td></tr>
+  <tr><td>3</td><td>영역은 다섯까지. 넘으면 오래된 것부터 <span class="mono" style="color:var(--blue)">이전 N건 보기</span>로 접히고,
+    그 줄을 누르면 <b>전부</b> 선다 — 접힌 채로 사라지는 읽음은 없다.</td></tr>
   <tr><td>4</td><td>갓 붙은 영역은 왼쪽 선으로 표시된다. 다음 것이 오면 그 표시는 새것에게 넘어간다.
     영역이 하나뿐이면 견줄 것이 없어 선도 서지 않는다.</td></tr>
   <tr><td>5</td><td><span class="keycap">esc</span>나 바깥 클릭은 <b>카드 전체</b>를 한 번에 닫는다 — 영역마다 닫지 않는다.</td></tr>

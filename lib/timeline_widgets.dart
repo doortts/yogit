@@ -1006,7 +1006,7 @@ typedef NoticeCommit = ({bool incoming, String shortSha, String subject});
 /// 읽는 사이에 저장소가 또 바뀌면 새 읽음이 카드를 갈아치우지 않고 아래에
 /// 제 영역으로 붙는다 — 읽던 줄은 제자리에 남는다.
 /// docs/local-change-notice-stack-mockup.html이 계약이다.
-class LocalChangeNotice extends StatelessWidget {
+class LocalChangeNotice extends StatefulWidget {
   const LocalChangeNotice({
     required this.readings,
     required this.onDismiss,
@@ -1017,16 +1017,49 @@ class LocalChangeNotice extends StatelessWidget {
   final List<LocalChangeDetails> readings;
   final VoidCallback onDismiss;
 
-  /// 카드가 세워 두는 영역의 수. 넘긴 것은 이미 화면의 역사에 반영된 뒤라
-  /// 다시 펼칠 것이 없다 — 머리 한 줄이 세기만 한다.
+  /// 카드가 처음에 세워 두는 영역의 수. 넘긴 것은 머리 한 줄로 접히지만,
+  /// 그 줄을 누르면 처음 것까지 선다 — 접힌 채로 사라지는 읽음은 없다.
   static const maxReadings = 5;
+
+  @override
+  State<LocalChangeNotice> createState() => _LocalChangeNoticeState();
+}
+
+class _LocalChangeNoticeState extends State<LocalChangeNotice> {
+  final _scroll = ScrollController();
+  var _showAll = false;
+
+  @override
+  void didUpdateWidget(covariant LocalChangeNotice oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.readings.length > oldWidget.readings.length) _followNewest();
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// 새 읽음은 맨 아래에 선다. 맨 아래를 보고 있던 눈은 따라 내려가고, 위쪽
+  /// 어딘가를 읽던 눈은 제자리에 남는다 — 읽던 줄을 빼앗지 않는다. 붙기 전의
+  /// 자리로 판단해야 하므로 이 물음은 새 영역이 그려지기 전에 던진다.
+  void _followNewest() {
+    if (!_scroll.hasClients) return;
+    if (_scroll.position.pixels < _scroll.position.maxScrollExtent - 4) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final palette = context.timelineTheme;
-    final shown = readings.length <= maxReadings
+    final readings = widget.readings;
+    final onDismiss = widget.onDismiss;
+    final shown = _showAll || readings.length <= LocalChangeNotice.maxReadings
         ? readings
-        : readings.sublist(readings.length - maxReadings);
+        : readings.sublist(readings.length - LocalChangeNotice.maxReadings);
     final folded = readings.length - shown.length;
     return TapRegion(
       // The press that dismisses is still the press the reader meant: it
@@ -1085,28 +1118,21 @@ class LocalChangeNotice extends StatelessWidget {
                 Divider(height: 1, color: palette.border),
                 // 쌓인 영역이 화면을 넘기면 영역만 구르고, 머리줄과 나가는
                 // 문은 제자리에 남는다.
+                if (folded > 0 || _showAll)
+                  MoreLink(
+                    key: const Key('local-change-notice-folded'),
+                    indent: 11,
+                    label: _showAll ? '접기' : '이전 $folded건 보기',
+                    // 접힌 것도 이미 읽어 둔 것이라 펼치는 데 조회가 없다.
+                    onTap: () => setState(() => _showAll = !_showAll),
+                  ),
                 Flexible(
                   child: SingleChildScrollView(
+                    controller: _scroll,
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (folded > 0)
-                          Padding(
-                            padding: const EdgeInsets.only(
-                              left: 11,
-                              top: 4,
-                              bottom: 7,
-                            ),
-                            child: Text(
-                              '이전 $folded건',
-                              key: const Key('local-change-notice-folded'),
-                              style: TextStyle(
-                                color: palette.muted,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
                         for (final (index, details) in shown.indexed)
                           _NoticeReading(
                             details: details,
@@ -1115,7 +1141,7 @@ class LocalChangeNotice extends StatelessWidget {
                             // 새것도 없다.
                             fresh:
                                 shown.length > 1 && index == shown.length - 1,
-                            ruled: index > 0 || folded > 0,
+                            ruled: index > 0 || folded > 0 || _showAll,
                           ),
                       ],
                     ),
@@ -1332,16 +1358,25 @@ class _LocalChangeDetailsViewState extends State<LocalChangeDetailsView> {
 /// '외 N개' / '접기' — 세기만 하던 글자가 누를 자리가 된다. Push 확인창과
 /// 밖에서 바뀜 알림이 같은 글자를 쓴다.
 class MoreLink extends StatelessWidget {
-  const MoreLink({required this.label, required this.onTap, super.key});
+  const MoreLink({
+    required this.label,
+    required this.onTap,
+    this.indent = 17,
+    super.key,
+  });
 
   final String label;
   final VoidCallback? onTap;
+
+  /// 목록 아래에 설 때는 제목 칸에 맞춰 17만큼 들어간다. 카드 머리 밑에 설
+  /// 때처럼 다른 자리를 맞춰야 하면 호출부가 정한다.
+  final double indent;
 
   @override
   Widget build(BuildContext context) {
     final palette = context.timelineTheme;
     return Padding(
-      padding: const EdgeInsets.only(left: 17, top: 3),
+      padding: EdgeInsets.only(left: indent, top: 3),
       child: MouseRegion(
         cursor: onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
         child: GestureDetector(
