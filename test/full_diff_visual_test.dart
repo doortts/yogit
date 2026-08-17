@@ -1604,6 +1604,10 @@ void _timelineCaptures() {
       channel: const MethodChannel('test/yogit-window'),
     ),
     previewHeight: previewHeight,
+    // The shipping app always hands the toolbar a monitor entry, and the
+    // right cluster reports its own width — leave it out and the captured
+    // bar's geometry is not the bar that ships.
+    onOpenMonitor: (_) {},
     fullDiffColumnWidths: const FullDiffColumnWidths(history: 264),
   );
 
