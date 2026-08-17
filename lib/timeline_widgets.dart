@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'commit_time.dart';
 import 'timeline_graph_painters.dart';
 import 'timeline_palette.dart';
 import 'timeline_theme.dart';
@@ -1003,8 +1004,8 @@ typedef NoticeCommit = ({bool incoming, String shortSha, String subject});
 /// this one stays: `esc`, or a press anywhere else, takes it away. That is
 /// also what lets it carry the commits themselves rather than a count alone.
 ///
-/// 읽는 사이에 저장소가 또 바뀌면 새 읽음이 카드를 갈아치우지 않고 아래에
-/// 제 영역으로 붙는다 — 읽던 줄은 제자리에 남는다.
+/// 읽는 사이에 저장소가 또 바뀌면 새 읽음이 카드를 갈아치우지 않고 맨 위에
+/// 제 영역으로 붙는다 — 최근 것이 위, 역사가 서는 그 순서다.
 /// docs/local-change-notice-stack-mockup.html이 계약이다.
 class LocalChangeNotice extends StatefulWidget {
   const LocalChangeNotice({
@@ -1029,26 +1030,47 @@ class _LocalChangeNoticeState extends State<LocalChangeNotice> {
   final _scroll = ScrollController();
   var _showAll = false;
 
+  /// 지난 시간을 적어 둔 글자는 가만히 두면 스스로 늙는다. 카드가 서 있는 동안
+  /// 만 그것을 다시 쓰고, 카드가 닫히면 이 시계도 멈춘다.
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => setState(() {}),
+    );
+  }
+
   @override
   void didUpdateWidget(covariant LocalChangeNotice oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.readings.length > oldWidget.readings.length) _followNewest();
+    if (widget.readings.length > oldWidget.readings.length) _holdPlace();
   }
 
   @override
   void dispose() {
+    _ticker?.cancel();
     _scroll.dispose();
     super.dispose();
   }
 
-  /// 새 읽음은 맨 아래에 선다. 맨 아래를 보고 있던 눈은 따라 내려가고, 위쪽
-  /// 어딘가를 읽던 눈은 제자리에 남는다 — 읽던 줄을 빼앗지 않는다. 붙기 전의
-  /// 자리로 판단해야 하므로 이 물음은 새 영역이 그려지기 전에 던진다.
-  void _followNewest() {
+  /// 새 읽음은 맨 위에 선다. 맨 위를 보고 있던 눈은 그 자리에서 새것을 만나고,
+  /// 아래쪽을 읽던 눈은 읽던 줄을 그대로 지킨다 — 위로 끼어든 만큼 자리를 함께
+  /// 밀어 준다. 붙기 전의 자리로 재야 하므로 값은 새 영역이 그려지기 전에
+  /// 읽는다.
+  void _holdPlace() {
     if (!_scroll.hasClients) return;
-    if (_scroll.position.pixels < _scroll.position.maxScrollExtent - 4) return;
+    final position = _scroll.position;
+    if (position.pixels <= 4) return;
+    final pixels = position.pixels;
+    final extentBefore = position.maxScrollExtent;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
+      if (!_scroll.hasClients) return;
+      final grew = _scroll.position.maxScrollExtent - extentBefore;
+      if (grew <= 0) return;
+      _scroll.jumpTo(math.min(pixels + grew, _scroll.position.maxScrollExtent));
     });
   }
 
@@ -1057,9 +1079,12 @@ class _LocalChangeNoticeState extends State<LocalChangeNotice> {
     final palette = context.timelineTheme;
     final readings = widget.readings;
     final onDismiss = widget.onDismiss;
-    final shown = _showAll || readings.length <= LocalChangeNotice.maxReadings
-        ? readings
-        : readings.sublist(readings.length - LocalChangeNotice.maxReadings);
+    // 쌓인 것은 오래된 것부터 들어오지만, 서는 순서는 그 반대다.
+    final newestFirst = readings.reversed.toList();
+    final shown =
+        _showAll || newestFirst.length <= LocalChangeNotice.maxReadings
+        ? newestFirst
+        : newestFirst.sublist(0, LocalChangeNotice.maxReadings);
     final folded = readings.length - shown.length;
     return TapRegion(
       // The press that dismisses is still the press the reader meant: it
@@ -1118,14 +1143,6 @@ class _LocalChangeNoticeState extends State<LocalChangeNotice> {
                 Divider(height: 1, color: palette.border),
                 // 쌓인 영역이 화면을 넘기면 영역만 구르고, 머리줄과 나가는
                 // 문은 제자리에 남는다.
-                if (folded > 0 || _showAll)
-                  MoreLink(
-                    key: const Key('local-change-notice-folded'),
-                    indent: 11,
-                    label: _showAll ? '접기' : '이전 $folded건 보기',
-                    // 접힌 것도 이미 읽어 둔 것이라 펼치는 데 조회가 없다.
-                    onTap: () => setState(() => _showAll = !_showAll),
-                  ),
                 Flexible(
                   child: SingleChildScrollView(
                     controller: _scroll,
@@ -1139,14 +1156,30 @@ class _LocalChangeNoticeState extends State<LocalChangeNotice> {
                             palette: palette,
                             // 하나뿐인 영역은 무엇과도 견줄 것이 없어 표시할
                             // 새것도 없다.
-                            fresh:
-                                shown.length > 1 && index == shown.length - 1,
-                            ruled: index > 0 || folded > 0 || _showAll,
+                            fresh: shown.length > 1 && index == 0,
+                            ruled: index > 0,
                           ),
                       ],
                     ),
                   ),
                 ),
+                // 접히는 것은 오래된 쪽 — 목록의 끝이다.
+                if (folded > 0 || _showAll)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        border: Border(top: BorderSide(color: palette.border)),
+                      ),
+                      child: MoreLink(
+                        key: const Key('local-change-notice-folded'),
+                        indent: 11,
+                        label: _showAll ? '접기' : '이전 $folded건 보기',
+                        // 접힌 것도 이미 읽어 둔 것이라 펼치는 데 조회가 없다.
+                        onTap: () => setState(() => _showAll = !_showAll),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -1186,7 +1219,19 @@ class _NoticeReading extends StatelessWidget {
       ),
     ),
     padding: const EdgeInsets.only(left: 9, top: 7, bottom: 6),
-    child: LocalChangeDetailsView(details: details),
+    child: LocalChangeDetailsView(
+      details: details,
+      // 언제 알아챘는지는 머리줄 오른쪽 끝에 선다. 무엇이 바뀌었는지가 먼저
+      // 읽히고, 얼마나 지났는지는 한 겹 물러나 앉는다.
+      trailing: switch (details.noticedAt) {
+        final at? => Text(
+          noticedAgo(at),
+          key: const Key('local-change-notice-stamp'),
+          style: TextStyle(color: palette.muted, fontSize: 11.5),
+        ),
+        null => null,
+      },
+    ),
   );
 }
 
@@ -1199,6 +1244,7 @@ class LocalChangeDetails {
     required this.commits,
     required this.more,
     this.loadRest,
+    this.noticedAt,
   });
 
   /// The first thing that changed, said in full.
@@ -1217,6 +1263,10 @@ class LocalChangeDetails {
   /// '외 N개'를 누를 때 도는 조회 — 목록 전체를, 세어 둔 순서 그대로. 없으면
   /// 그 줄은 세기만 하고 눌리지 않는다.
   final Future<List<NoticeCommit>> Function()? loadRest;
+
+  /// 이 변화를 알아챈 때. 머무는 카드만 이것을 적는다 — 답을 기다리는 물음은
+  /// 방금 온 하나뿐이라 언제였는지가 물음이 되지 않는다.
+  final DateTime? noticedAt;
 
   /// The list stops here. Whether it is a notice that stays or a question
   /// waiting to be answered, taller than this stops being either — and the

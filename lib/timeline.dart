@@ -1034,6 +1034,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       // 펼칠 것이 있는 쪽만 누를 자리를 얻는다 — 브랜치가 여럿이면 애초에
       // 커밋 목록이 서지 않는다.
       loadRest: single ? () => _restMovedCommits(change.moved.single) : null,
+      // 알아챈 때는 지금이다. 카드가 이것으로 '방금'과 '9시간 전'을 가른다.
+      noticedAt: DateTime.now(),
     );
   }
 

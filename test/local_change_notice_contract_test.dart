@@ -332,7 +332,7 @@ void main() {
 
   // ── 쌓이는 카드 ─────────────────────────────────────────────────
   // docs/local-change-notice-stack-mockup.html
-  testWidgets('쌓기 계약 1 — 읽는 사이에 또 바뀌면 덮지 않고 아래에 붙는다', (tester) async {
+  testWidgets('쌓기 계약 1 — 읽는 사이에 또 바뀌면 덮지 않고 맨 위에 붙는다', (tester) async {
     await pump(tester, autoReload: true);
     await moveHead(tester, tip: 'first-tip');
 
@@ -356,6 +356,15 @@ void main() {
       findsWidgets,
     );
     expect(find.textContaining('chore: the rolled back'), findsOneWidget);
+    // 최근 것이 위다 — 방금 온 읽음이 앞의 것보다 높이 선다.
+    expect(
+      tester.getRect(find.textContaining('chore: the rolled back')).top,
+      lessThan(
+        tester
+            .getRect(find.textContaining('feat: let a remote branch stand'))
+            .top,
+      ),
+    );
     // 머리줄은 쌓인 건수를 센다.
     expect(
       tester
@@ -408,7 +417,7 @@ void main() {
     expect(foldedLabel(tester), '이전 2건 보기');
   });
 
-  testWidgets('새 읽음은 맨 아래를 보고 있을 때만 따라 내려간다', (tester) async {
+  testWidgets('아래쪽을 읽고 있으면 새 읽음이 자리를 밀지 않는다', (tester) async {
     await pump(tester, autoReload: true, size: const Size(1400, 320));
     for (var index = 0; index < 5; index++) {
       await moveHead(tester, tip: 'tip-$index');
@@ -419,17 +428,49 @@ void main() {
     );
     final position = scroll.controller!.position;
     expect(position.maxScrollExtent, greaterThan(0), reason: '넘쳐야 굴러간다');
-    expect(position.pixels, closeTo(position.maxScrollExtent, 0.5));
-
-    // 맨 아래에서 온 새 읽음은 따라 내려간다.
-    await moveHead(tester, tip: 'tip-fresh');
-    expect(position.pixels, closeTo(position.maxScrollExtent, 0.5));
-
-    // 위쪽을 읽고 있으면 그 자리를 지킨다.
-    position.jumpTo(0);
-    await tester.pump();
-    await moveHead(tester, tip: 'tip-later');
+    // 맨 위가 새것이 서는 자리라, 카드는 처음부터 그 위를 보고 있다.
     expect(position.pixels, 0);
+
+    // 위를 보고 있으면 새것은 눈이 이미 있는 자리에 선다.
+    await moveHead(tester, tip: 'tip-fresh');
+    expect(position.pixels, 0);
+
+    // 아래쪽을 읽고 있으면 위로 끼어든 만큼 자리를 함께 밀어, 읽던 줄이 그대로
+    // 남는다. 접힌 것을 펼쳐 두어야 새것이 붙을 때 목록이 실제로 길어진다.
+    await tester.tap(folded());
+    await tester.pumpAndSettle();
+    position.jumpTo(position.maxScrollExtent);
+    await tester.pump();
+    final before = position.pixels;
+    final extentBefore = position.maxScrollExtent;
+    await moveHead(tester, tip: 'tip-later');
+    expect(position.maxScrollExtent, greaterThan(extentBefore));
+    expect(
+      position.pixels,
+      closeTo(before + (position.maxScrollExtent - extentBefore), 0.5),
+    );
+  });
+
+  testWidgets('영역마다 알아챈 뒤 얼마나 지났는지 선다', (tester) async {
+    await pump(tester, autoReload: true);
+    await moveHead(tester, tip: 'first-tip');
+
+    // 시험의 시계는 가짜라 지난 시간은 늘 '방금'이다. 글자가 어떻게 바뀌는지는
+    // noticedAgo가 저 혼자 시험받는다.
+    Finder stamp() => find.byKey(const Key('local-change-notice-stamp'));
+    expect(tester.widget<Text>(stamp()).data, '방금');
+
+    await moveHead(tester, tip: 'second-tip');
+    expect(stamp(), findsNWidgets(2), reason: '영역마다 하나씩');
+  });
+
+  testWidgets('묻는 창은 언제였는지 적지 않는다', (tester) async {
+    // 답을 기다리는 물음은 방금 온 하나뿐이라 언제였는지가 물음이 되지 않는다.
+    await pump(tester);
+    await moveHead(tester);
+
+    expect(ask(), findsOneWidget);
+    expect(find.byKey(const Key('local-change-notice-stamp')), findsNothing);
   });
 
   testWidgets('쌓기 계약 5 — esc는 카드 전체를 한 번에 닫는다', (tester) async {

@@ -76,7 +76,11 @@
   .reading { padding: 7px 0 6px; }
   .reading + .reading { border-top: 1px solid var(--border); }
   .reading.fresh { border-left: 2px solid var(--green); padding-left: 9px; margin-left: -11px; }
-  .reading .headline { font-size: 13px; white-space: nowrap; }
+  .reading .headline { font-size: 13px; white-space: nowrap; display: flex; align-items: baseline; }
+  /* 알아챈 시각 — 영역마다 오른쪽 끝에. 우리말이라 고정폭은 쓰지 않는다 */
+  .stamp {
+    margin-left: auto; padding-left: 14px; color: var(--dim); font-size: 11.5px;
+  }
   .older {
     color: var(--dim); font-size: 12px; padding: 4px 0 7px;
     border-bottom: 1px solid var(--border); margin-bottom: 2px;
@@ -132,9 +136,9 @@
 <p class="lede">
   자동 새로고침을 켜면 밖에서 벌어진 변화는 묻지 않고 바로 읽어들이고, 무엇이 바뀌었는지는
   머무는 카드 하나가 말한다. 그 카드를 읽는 동안 저장소가 또 바뀌면 <b>지금은 카드가 새 것으로
-  갈린다</b> — 방금 읽던 것이 사라진다. 두 가지를 고친다:
-  <b>읽음마다 영역을 나눠 한 카드에 쌓고</b>, 세기만 하던
-  <span class="mono" style="color:var(--dim)">외 N개</span>를 <b>눌러서 펼치게</b> 한다.
+  갈린다</b> — 방금 읽던 것이 사라진다. 읽음마다 영역을 나눠 <b>한 카드에 최근 것부터</b> 쌓고,
+  영역마다 <b>알아챈 뒤 얼마나 지났는지</b>를 적는다. 세기만 하던
+  <span class="mono" style="color:var(--dim)">외 N개</span>도 <b>눌러서 펼치는</b> 자리가 된다.
   세어만 두고 열 수 없던 <span class="mono" style="color:var(--dim)">이전 N건</span>도 같은
   자리를 얻는다 — 밖에서 벌어진 일은 하나도 못 본 채로 지나가지 않는다.
 </p>
@@ -167,8 +171,9 @@
 <h2>시안 · 읽음마다 영역을 나눠 쌓는다 <span class="tag pick">권장</span></h2>
 <p class="note">
   머리줄은 <b>몇 건인지</b>만 말하고, 그 아래로 읽음이 하나씩 <b>제 영역</b>을 갖는다.
-  새로 온 것은 <b>맨 아래</b>에 붙는다 — 읽던 줄이 제자리에 남고, 눈은 이미 아래로 내려가고 있다.
-  갓 붙은 영역만 왼쪽에 가는 선이 서서 어디가 새것인지 말한다.
+  <b>최근 것이 맨 위</b>다 — 역사가 최근 커밋부터 서는 그 순서이고, 카드를 열었을 때 눈이
+  가장 먼저 닿는 자리에 가장 알고 싶은 것이 있어야 한다. 맨 위 영역만 왼쪽에 가는 선이 서서
+  어디가 새것인지 말한다.
 </p>
 <div class="card">
   <div class="head">
@@ -176,26 +181,106 @@
     <span class="esc"><span class="keycap">esc</span> 닫기</span>
   </div>
   <div class="rule"></div>
+  <div class="reading fresh">
+    <div class="headline"><span class="name">codex/lane-palette</span> 브랜치 추가됨<span class="stamp">방금</span></div>
+    <div class="branchline"><span class="name">fix/monaco-native-drop</span> 브랜치 삭제됨</div>
+  </div>
   <div class="reading">
-    <div class="headline"><span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">3개 들어옴</span></div>
+    <div class="headline"><span class="name">feature/pr-monitoring</span><span class="sep">·</span><span class="op">reset</span><span class="sep">·</span>커밋&nbsp;<span class="out">2개 물러남</span><span class="stamp">3분 전</span></div>
+    <div class="item minus"><span class="mark">−</span><span class="id">1064dc9</span><span class="subject">refactor: give the graph its palette and painters</span></div>
+    <div class="item minus"><span class="mark">−</span><span class="id">d6f98e2</span><span class="subject">refactor: lift the timeline's model out of its screen</span></div>
+  </div>
+  <div class="reading">
+    <div class="headline"><span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">3개 들어옴</span><span class="stamp">5분 전</span></div>
     <div class="item plus"><span class="mark">+</span><span class="id">89a61cb</span><span class="subject">feat: let a remote branch stand as the base</span></div>
     <div class="item plus"><span class="mark">+</span><span class="id">06fdbd1</span><span class="subject">test: pin the origin/HEAD drop against real git</span></div>
     <div class="item plus"><span class="mark">+</span><span class="id">954e6e8</span><span class="subject">fix: stop drawing origin/HEAD as a branch</span></div>
   </div>
-  <div class="reading">
-    <div class="headline"><span class="name">feature/pr-monitoring</span><span class="sep">·</span><span class="op">reset</span><span class="sep">·</span>커밋&nbsp;<span class="out">2개 물러남</span></div>
-    <div class="item minus"><span class="mark">−</span><span class="id">1064dc9</span><span class="subject">refactor: give the graph its palette and painters</span></div>
-    <div class="item minus"><span class="mark">−</span><span class="id">d6f98e2</span><span class="subject">refactor: lift the timeline's model out of its screen</span></div>
+</div>
+
+<h2>영역마다 알아챈 시각 <span class="tag pick">더함 · 권장</span></h2>
+<p class="note">
+  영역이 쌓이면 <b>무엇이</b> 바뀌었는지만으로는 순서가 다 읽히지 않는다. 방금 것인지 아침에 온
+  것인지가 카드 안에서 갈리지 않기 때문이다. 영역마다 <b>얼마나 지났는지</b>가 머리줄 오른쪽
+  끝에 선다 — <b>방금</b>, <b>3분 전</b>. 커밋이 만들어진 시각이 아니라 <b>yogit이 그 변화를
+  발견한</b> 때다. 둘은 다를 수 있고, 카드가 말하는 것은 발견이다.
+</p>
+<p class="note">
+  읽는 사람이 알고 싶은 것은 시계가 아니라 <b>얼마나 지났는지</b>라서, 초는 세지 않는다:
+  <b>1분 안</b>은 방금, 그 뒤로 <b>N분 전</b> · <b>N시간 전</b>. 회색으로 한 겹
+  물러나 앉아 머리줄이 먼저 읽히게 둔다. 상대 시각은 가만히 두면 스스로 늙으므로 카드가 서
+  있는 동안 <b>30초마다</b> 저 글자만 다시 쓴다 — 카드가 닫히면 그 시계도 멈춘다.
+  하루를 넘기면 상대 시각이 오히려 헷갈리는데, 그 자리는 <a href="#overnight" style="color:var(--blue)">다음 절</a>이 말한다.
+</p>
+<div class="card">
+  <div class="head">
+    <span>저장소가 밖에서 바뀜</span><span class="sep">·</span><span class="count">3건</span>
+    <span class="esc"><span class="keycap">esc</span> 닫기</span>
   </div>
+  <div class="rule"></div>
   <div class="reading fresh">
-    <div class="headline"><span class="name">codex/lane-palette</span> 브랜치 추가됨</div>
-    <div class="branchline"><span class="name">fix/monaco-native-drop</span> 브랜치 삭제됨</div>
+    <div class="headline">HEAD 분리됨<span class="stamp">방금</span></div>
+  </div>
+  <div class="reading">
+    <div class="headline"><span class="name">work</span><span class="sep">·</span><span class="op">rebase</span><span class="sep">·</span>커밋&nbsp;<span class="out">3개 나가고</span>&nbsp;<span class="in">3개 들어옴</span><span class="stamp">2분 전</span></div>
+  </div>
+  <div class="reading">
+    <div class="headline"><span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">3개 들어옴</span><span class="stamp">7시간 전</span></div>
+  </div>
+</div>
+
+<h2 id="overnight">하루를 넘긴 읽음 <span class="tag pick">더함 · 권장</span></h2>
+<p class="note">
+  <b>27시간 전</b>은 사람이 머리로 한 번 더 계산해야 하는 숫자다. 상대 시각은 <b>24시간</b>까지만
+  하고, 그 뒤로는 <b>그 시각 자체</b>를 적는다 — 초는 여전히 없다. 날짜가 바뀌었는지는 묻지
+  않는다: 밤 11시에 알아챈 것은 새벽 1시에도 <b>2시간 전</b>이다. 두 시간밖에 안 지난 일을
+  날짜로 적으면 오히려 멀어 보인다.
+</p>
+<table style="max-width:720px;margin-bottom:16px">
+  <tr><th>지난 만큼</th><th>글자</th></tr>
+  <tr><td class="what">1분 안</td><td><b>방금</b></td></tr>
+  <tr><td class="what">1시간 안</td><td><b>3분 전</b> · <b>59분 전</b></td></tr>
+  <tr><td class="what">24시간 안</td><td><b>2시간 전</b> · <b>23시간 전</b> — 자정을 넘겨도 시간으로 센다</td></tr>
+  <tr><td class="what">24시간 넘음</td><td><b>08-15(토) 09:12</b> — 커밋 시각을 적는 그 모양에 요일을 더하고 초를 뺀 것</td></tr>
+  <tr><td class="what">해를 넘김</td><td><b>2025-12-31(수) 23:59</b> — 해는 그것이 올해가 아닐 때만 값한다</td></tr>
+</table>
+<p class="note">
+  날짜를 적기 시작하면 <b>요일</b>도 같이 적는다. <span class="mono">08-15</span>가 무슨 날이었는지
+  세어 보는 사람은 없고, 밖에서 벌어진 일은 대개 <b>어느 요일이었나</b>로 기억된다 — 금요일 저녁에
+  올라온 것인지 주말 사이에 들어온 것인지가 그 한 글자로 갈린다. 괄호 한 글자라 자리도 거의
+  들지 않는다.
+</p>
+<p class="note">
+  30초마다 다시 쓰는 그 시계가 경계를 넘는 순간을 대신 잡는다 — 밤새 열어 둔 카드의
+  <b>23시간 전</b>은 한 시간 뒤 스스로 <b>08-16(일) 09:12</b>이 된다. 상대 시각으로 쓰던 자리와 같은
+  자리, 같은 회색이라 한 열로 읽힌다.
+</p>
+<div class="card">
+  <div class="head">
+    <span>저장소가 밖에서 바뀜</span><span class="sep">·</span><span class="count">5건</span>
+    <span class="esc"><span class="keycap">esc</span> 닫기</span>
+  </div>
+  <div class="rule"></div>
+  <div class="reading fresh">
+    <div class="headline"><span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">2개 들어옴</span><span class="stamp">방금</span></div>
+  </div>
+  <div class="reading">
+    <div class="headline"><span class="name">work</span> 브랜치 추가됨<span class="stamp">14분 전</span></div>
+  </div>
+  <div class="reading">
+    <div class="headline"><span class="name">main</span><span class="sep">·</span><span class="op">rebase</span><span class="sep">·</span>커밋&nbsp;<span class="out">3개 나가고</span>&nbsp;<span class="in">3개 들어옴</span><span class="stamp">9시간 전</span></div>
+  </div>
+  <div class="reading">
+    <div class="headline">HEAD 분리됨<span class="stamp">23시간 전</span></div>
+  </div>
+  <div class="reading">
+    <div class="headline"><span class="name">spike</span> 브랜치 삭제됨<span class="stamp">08-15(토) 09:12</span></div>
   </div>
 </div>
 
 <h2>많이 쌓였을 때 <span class="tag">고침</span></h2>
 <p class="note">
-  카드는 <b>다섯 건</b>까지 세워 두고, 그보다 오래된 것은 머리 한 줄로 접는다. 처음 시안은 그
+  카드는 <b>다섯 건</b>까지 세워 두고, 그보다 오래된 것은 목록 끝 한 줄로 접는다. 처음 시안은 그
   한 줄이 <b>세기만 한다</b>고 했는데, 48건이 쌓인 자리에서 <b>이전 43건</b>은 세어 봐야 아무
   데서도 읽을 수 없는 숫자였다. 그 줄도 <span class="mono">외 N개</span>와 같은
   <b>누를 자리</b>가 된다 — 밖에서 벌어진 일은 하나도 못 보고 지나치지 않는다.
@@ -207,27 +292,28 @@
     <span class="esc"><span class="keycap">esc</span> 닫기</span>
   </div>
   <div class="rule"></div>
-  <div class="more" style="padding-left:0">이전 2건 보기</div>
-  <div class="reading">
-    <div class="headline"><span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">3개 들어옴</span></div>
-  </div>
-  <div class="reading">
-    <div class="headline"><span class="name">work</span><span class="sep">·</span><span class="op">rebase</span><span class="sep">·</span>커밋&nbsp;<span class="out">3개 나가고</span>&nbsp;<span class="in">3개 들어옴</span></div>
-  </div>
-  <div class="reading">
-    <div class="headline"><span class="name">spike</span> 브랜치 삭제됨</div>
-  </div>
-  <div class="reading">
-    <div class="headline"><span class="name">codex/lane-palette</span> 브랜치 추가됨</div>
-  </div>
   <div class="reading fresh">
-    <div class="headline">HEAD 분리됨</div>
+    <div class="headline">HEAD 분리됨<span class="stamp">방금</span></div>
   </div>
+  <div class="reading">
+    <div class="headline"><span class="name">codex/lane-palette</span> 브랜치 추가됨<span class="stamp">3분 전</span></div>
+  </div>
+  <div class="reading">
+    <div class="headline"><span class="name">spike</span> 브랜치 삭제됨<span class="stamp">6분 전</span></div>
+  </div>
+  <div class="reading">
+    <div class="headline"><span class="name">work</span><span class="sep">·</span><span class="op">rebase</span><span class="sep">·</span>커밋&nbsp;<span class="out">3개 나가고</span>&nbsp;<span class="in">3개 들어옴</span><span class="stamp">9분 전</span></div>
+  </div>
+  <div class="reading">
+    <div class="headline"><span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">3개 들어옴</span><span class="stamp">12분 전</span></div>
+  </div>
+  <div class="more" style="padding-left:0;border-top:1px solid var(--border);margin-top:7px;padding-top:7px">이전 2건 보기</div>
 </div>
 
 <h2>접힌 것을 열면 전부 선다 <span class="tag pick">고침 · 권장</span></h2>
 <p class="note">
-  <b>이전 N건 보기</b>를 누르면 접혀 있던 읽음이 위로 이어 서고, 라벨은 <b>접기</b>가 된다.
+  최근 것이 위에 서므로 접히는 것은 <b>아래쪽</b> — 오래된 것들이다. 목록 끝의
+  <b>이전 N건 보기</b>를 누르면 그것들이 아래로 이어 서고, 라벨은 <b>접기</b>가 된다.
   카드는 여전히 창 안에 머무르고 넘친 만큼은 제 안에서 구른다 — 열어 놓은 채로 끝까지 훑어
   내려가면 <b>처음 것</b>까지 읽힌다. 펼치는 데 조회는 없다: 이미 다 읽어 둔 것을 그리기만
   한다.
@@ -238,37 +324,37 @@
     <span class="esc"><span class="keycap">esc</span> 닫기</span>
   </div>
   <div class="rule"></div>
-  <div class="more" style="padding-left:0">접기</div>
-  <div class="scrollbox" style="max-height:250px;margin:6px 0 0;border-left:none;padding-left:0">
-    <div class="reading" style="border-top:none">
-      <div class="headline"><span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">2개 들어옴</span></div>
+  <div class="scrollbox" style="max-height:250px;margin:0;border-left:none;padding-left:0">
+    <div class="reading fresh" style="border-top:none">
+      <div class="headline"><span class="name">fix/trashed-picture-keeps-its-picture</span> 브랜치 추가됨<span class="stamp">방금</span></div>
     </div>
     <div class="reading">
-      <div class="headline"><span class="name">fix/resolve-asset-changed-ids</span> 브랜치 추가됨</div>
-    </div>
-    <div class="reading">
-      <div class="headline"><span class="name">claude/kind-gould-d08758</span><span class="sep">·</span><span class="op">merge</span><span class="sep">·</span>커밋&nbsp;<span class="in">4개 들어옴</span></div>
-    </div>
-    <div class="reading">
-      <div class="headline"><span class="name">spike</span> 브랜치 삭제됨</div>
-    </div>
-    <div class="reading">
-      <div class="headline">HEAD 분리됨</div>
-    </div>
-    <div class="reading">
-      <div class="headline"><span class="name">fix/duplicate-waiting-image</span><span class="sep">·</span><span class="op">merge</span><span class="sep">·</span>커밋&nbsp;<span class="in">15개 들어옴</span></div>
+      <div class="headline"><span class="name">fix/duplicate-waiting-image</span><span class="sep">·</span><span class="op">merge</span><span class="sep">·</span>커밋&nbsp;<span class="in">15개 들어옴</span><span class="stamp">12분 전</span></div>
       <div class="item plus"><span class="mark">+</span><span class="id">d6932f2c</span><span class="subject">Merge branch 'main' into fix/duplicate-waiting-image</span></div>
       <div class="more">외 7개</div>
     </div>
-    <div class="reading fresh">
-      <div class="headline"><span class="name">fix/trashed-picture-keeps-its-picture</span> 브랜치 추가됨</div>
+    <div class="reading">
+      <div class="headline">HEAD 분리됨<span class="stamp">27분 전</span></div>
+    </div>
+    <div class="reading">
+      <div class="headline"><span class="name">spike</span> 브랜치 삭제됨<span class="stamp">30분 전</span></div>
+    </div>
+    <div class="reading">
+      <div class="headline"><span class="name">claude/kind-gould-d08758</span><span class="sep">·</span><span class="op">merge</span><span class="sep">·</span>커밋&nbsp;<span class="in">4개 들어옴</span><span class="stamp">34분 전</span></div>
+    </div>
+    <div class="reading">
+      <div class="headline"><span class="name">fix/resolve-asset-changed-ids</span> 브랜치 추가됨<span class="stamp">38분 전</span></div>
+    </div>
+    <div class="reading">
+      <div class="headline"><span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">2개 들어옴</span><span class="stamp">41분 전</span></div>
     </div>
   </div>
+  <div class="more" style="padding-left:0;border-top:1px solid var(--border);margin-top:7px;padding-top:7px">접기</div>
 </div>
 <p class="note" style="margin-top:14px">
-  읽는 사이에 새 읽음이 붙으면 <b>맨 아래</b>에 서는데, 그때 카드가 이미 맨 아래를 보고 있으면
-  따라 내려가고, 위쪽 어딘가를 읽고 있으면 <b>그 자리를 지킨다</b> — 읽던 줄을 빼앗지 않는다.
-  건수는 머리줄이 세고 있으니 새것이 왔다는 사실은 접혀 있어도 드러난다.
+  읽는 사이에 새 읽음이 붙으면 <b>맨 위</b>에 서는데, 그때 카드가 이미 맨 위를 보고 있으면
+  따라 올라가고, 아래쪽 어딘가를 읽고 있으면 <b>그 자리를 지킨다</b> — 읽던 줄을 빼앗지 않는다.
+  건수는 머리줄이 세고 있으니 새것이 왔다는 사실은 그 자리에서도 드러난다.
 </p>
 
 <h2>'외 N개'를 눌러서 펼친다</h2>
@@ -286,7 +372,7 @@
     </div>
     <div class="rule"></div>
     <div class="reading">
-      <div class="headline"><span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">42개 들어옴</span></div>
+      <div class="headline"><span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">42개 들어옴</span><span class="stamp">방금</span></div>
       <div class="item plus"><span class="mark">+</span><span class="id">32ee935</span><span class="subject">fix: let the app say a thing once, not twice</span></div>
       <div class="item plus"><span class="mark">+</span><span class="id">04de17c</span><span class="subject">fix: count the chip's own hairline</span></div>
       <div class="item plus"><span class="mark">+</span><span class="id">9af12b0</span><span class="subject">feat: let deleted branches reload without a question</span></div>
@@ -306,7 +392,7 @@
     </div>
     <div class="rule"></div>
     <div class="reading">
-      <div class="headline"><span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">42개 들어옴</span></div>
+      <div class="headline"><span class="name">main</span><span class="sep">·</span><span class="op">pull</span><span class="sep">·</span>커밋&nbsp;<span class="in">42개 들어옴</span><span class="stamp">방금</span></div>
       <div class="scrollbox">
         <div class="item plus"><span class="mark">+</span><span class="id">32ee935</span><span class="subject">fix: let the app say a thing once, not twice</span></div>
         <div class="item plus"><span class="mark">+</span><span class="id">04de17c</span><span class="subject">fix: count the chip's own hairline</span></div>
@@ -355,7 +441,7 @@
   <tr>
     <td class="what">카드가 떠 있는데 또 바뀜</td>
     <td>새 카드로 갈린다 — 읽던 것이 사라짐</td>
-    <td>한 카드에 영역이 하나 더 붙는다</td>
+    <td>한 카드에 영역이 하나 더, <b>맨 위</b>에 붙는다</td>
   </tr>
   <tr>
     <td class="what">카드 머리줄</td>
@@ -368,9 +454,15 @@
     <td>기본 다섯 건, 넘으면 <span class="mono" style="color:var(--blue)">이전 N건 보기</span> — 누르면 전부</td>
   </tr>
   <tr>
+    <td class="what">알아챈 때</td>
+    <td>어디에도 없음 — 순서만 짐작</td>
+    <td>영역마다 머리줄 오른쪽 끝에 <b>방금</b> / <b>3분 전</b>, 30초마다 갱신.
+      24시간을 넘으면 <b>08-15(토) 09:12</b></td>
+  </tr>
+  <tr>
     <td class="what">새 읽음이 붙을 때</td>
     <td>—</td>
-    <td>맨 아래를 보고 있었으면 따라 내려가고, 아니면 자리를 지킨다</td>
+    <td>맨 위를 보고 있었으면 따라 올라가고, 아니면 자리를 지킨다</td>
   </tr>
   <tr>
     <td class="what"><span class="mono">외 N개</span></td>
@@ -391,16 +483,24 @@
 
 <h2>계약</h2>
 <table>
-  <tr><th>1</th><td>카드가 떠 있는 동안 온 읽음은 <b>덮지 않고</b> 아래에 영역으로 붙는다.</td></tr>
+  <tr><th>1</th><td>카드가 떠 있는 동안 온 읽음은 <b>덮지 않고</b> 맨 위에 영역으로 붙는다 —
+    <b>최근 것이 위</b>, 역사가 서는 그 순서다.</td></tr>
   <tr><td>2</td><td>머리줄은 쌓인 건수를 <b>정직하게</b> 센다 — 접힌 것까지 포함해서.</td></tr>
-  <tr><td>3</td><td>영역은 다섯까지. 넘으면 오래된 것부터 <span class="mono" style="color:var(--blue)">이전 N건 보기</span>로 접히고,
+  <tr><td>3</td><td>영역은 다섯까지. 넘으면 오래된 것부터 목록 끝의
+    <span class="mono" style="color:var(--blue)">이전 N건 보기</span>로 접히고,
     그 줄을 누르면 <b>전부</b> 선다 — 접힌 채로 사라지는 읽음은 없다.</td></tr>
-  <tr><td>4</td><td>갓 붙은 영역은 왼쪽 선으로 표시된다. 다음 것이 오면 그 표시는 새것에게 넘어간다.
+  <tr><td>4</td><td>맨 위 영역은 왼쪽 선으로 표시된다. 다음 것이 오면 그 표시는 새것에게 넘어간다.
     영역이 하나뿐이면 견줄 것이 없어 선도 서지 않는다.</td></tr>
   <tr><td>5</td><td><span class="keycap">esc</span>나 바깥 클릭은 <b>카드 전체</b>를 한 번에 닫는다 — 영역마다 닫지 않는다.</td></tr>
   <tr><td>6</td><td><span class="mono">외 N개</span>는 누를 자리다. 펼치는 동안 <b>불러오는 중</b>, 펼친 뒤 <b>접기</b>.</td></tr>
   <tr><td>7</td><td>펼친 목록은 제 안에서 스크롤한다. 카드는 화면을 넘지 않는다.</td></tr>
   <tr><td>8</td><td>묻는 창은 쌓이지 않는다. 답을 기다리는 물음은 언제나 하나다.</td></tr>
+  <tr><td>9</td><td>영역마다 <b>알아챈 뒤 얼마나 지났는지</b>가 머리줄 오른쪽 끝에 선다 —
+    발견한 때이고 커밋 시각이 아니다. <b>방금</b> · <b>N분 전</b> · <b>N시간 전</b>,
+    초는 세지 않는다. 카드가 서 있는 동안 30초마다 그 글자만 다시 쓴다.</td></tr>
+  <tr><td>10</td><td>상대 시각은 <b>24시간</b>까지다. 넘으면 <b>08-15(토) 09:12</b>, 해를 넘기면
+    <b>2025-12-31(수) 23:59</b>. 자정을 지났는지는 묻지 않는다 — 경계는 지난 시간이다.
+    날짜를 적는 자리에는 <b>요일</b>이 괄호로 함께 선다.</td></tr>
 </table>
 
 </body>

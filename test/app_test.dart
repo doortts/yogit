@@ -15671,6 +15671,27 @@ void main() {
     );
   });
 
+  test('알아챈 뒤 지난 시간은 하루까지 상대 시각, 그 뒤로는 요일까지 적은 시각', () {
+    final now = DateTime(2026, 8, 17, 9, 12, 30);
+    String ago(DateTime at) => noticedAgo(at, now: now);
+
+    // 1분 안은 방금 — 초는 세지 않는다.
+    expect(ago(now), '방금');
+    expect(ago(now.subtract(const Duration(seconds: 59))), '방금');
+    expect(ago(now.subtract(const Duration(minutes: 1))), '1분 전');
+    expect(ago(now.subtract(const Duration(minutes: 59))), '59분 전');
+    expect(ago(now.subtract(const Duration(hours: 2))), '2시간 전');
+    // 자정을 넘겼는지는 묻지 않는다. 경계는 지난 시간이다.
+    expect(ago(now.subtract(const Duration(hours: 23))), '23시간 전');
+    // 하루를 넘기면 시각 자체를, 요일까지, 초는 없이.
+    expect(ago(now.subtract(const Duration(hours: 24))), '08-16(일) 09:12');
+    expect(ago(DateTime(2026, 8, 15, 9, 12)), '08-15(토) 09:12');
+    // 해는 그것이 올해가 아닐 때만 값한다.
+    expect(ago(DateTime(2025, 12, 31, 23, 59)), '2025-12-31(수) 23:59');
+    // 시계가 앞서 있어도 '-1분 전'을 말하지는 않는다.
+    expect(ago(now.add(const Duration(minutes: 5))), '방금');
+  });
+
   testWidgets('the status bar never truncates the profile address', (
     tester,
   ) async {
