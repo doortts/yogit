@@ -10,8 +10,26 @@ extension _TimelineSidebar on _TimelineScreenState {
     }
     if (event is KeyDownEvent &&
         event.logicalKey == LogicalKeyboardKey.escape) {
-      _rebuild(() => _sidebarCursor = null);
+      _rebuild(() {
+        _sidebarCursor = null;
+        _checkedRefs.clear();
+      });
       _focusNode.requestFocus();
+      return KeyEventResult.handled;
+    }
+    // ↵는 더블클릭과 같은 자리를 연다 — 커서가 선 ref의 메뉴다.
+    if (event is KeyDownEvent &&
+        (event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.numpadEnter)) {
+      final cursor = _sidebarCursor;
+      if (cursor == null) return KeyEventResult.ignored;
+      final (section, name) = cursor;
+      // 어느 원격에도 속하지 않는 이름에는 걸어 둔 메뉴가 없다.
+      if (section == _RefSection.remote &&
+          remotePullState(_refs, name) == null) {
+        return KeyEventResult.ignored;
+      }
+      _refMenuController(section, name).open();
       return KeyEventResult.handled;
     }
     final keyboard = HardwareKeyboard.instance;
@@ -35,7 +53,7 @@ extension _TimelineSidebar on _TimelineScreenState {
       _ => 0,
     };
     if (step == 0) return KeyEventResult.ignored;
-    _moveSidebarCursor(step);
+    _moveSidebarCursor(step, extend: keyboard.isShiftPressed);
     return KeyEventResult.handled;
   }
 
@@ -50,6 +68,18 @@ extension _TimelineSidebar on _TimelineScreenState {
     final current = isLocal && name == _refs.current;
     final pullState = isRemote ? remotePullState(_refs, name) : null;
     final busy = _pullingRemote != null || _branchApplyBusy;
+    // More than one row checked turns the strip into the selection's strip:
+    // only the delete button reaches several refs at once, so the rest go
+    // quiet rather than acting on whichever row the cursor happens to be on.
+    final selection = _checkedRefs.toList();
+    final multi = selection.length > 1;
+    final deleteSection = multi ? selection.first.$1 : section;
+    final deleteTargets = deleteSection == null
+        ? const <String>[]
+        : _deletableNames(
+            deleteSection,
+            multi ? [for (final (_, rowName) in selection) rowName] : [?name],
+          );
 
     Widget button({
       required Key key,
@@ -101,7 +131,7 @@ extension _TimelineSidebar on _TimelineScreenState {
                     key: const Key('sidebar-action-base'),
                     icon: Icons.anchor,
                     tooltip: '기준 브랜치로',
-                    onPressed: isLocal && name != _baseBranch
+                    onPressed: isLocal && !multi && name != _baseBranch
                         ? () => _selectBaseBranch(name)
                         : null,
                   ),
@@ -109,7 +139,8 @@ extension _TimelineSidebar on _TimelineScreenState {
                     key: const Key('sidebar-action-compare'),
                     icon: Icons.compare_arrows,
                     tooltip: '브랜치 diff로 비교',
-                    onPressed: name != null && name != _baseBranch && !busy
+                    onPressed:
+                        name != null && !multi && name != _baseBranch && !busy
                         ? () => unawaited(_selectComparison(name))
                         : null,
                   ),
@@ -118,7 +149,9 @@ extension _TimelineSidebar on _TimelineScreenState {
                     icon: Icons.arrow_downward,
                     tooltip: 'Pull',
                     onPressed:
-                        pullState?.kind == RemotePullKind.fastForward && !busy
+                        pullState?.kind == RemotePullKind.fastForward &&
+                            !multi &&
+                            !busy
                         ? () => unawaited(_confirmRemotePull(name!, pullState!))
                         : null,
                   ),
@@ -126,7 +159,7 @@ extension _TimelineSidebar on _TimelineScreenState {
                     key: const Key('sidebar-action-checkout'),
                     icon: Icons.logout,
                     tooltip: '체크아웃',
-                    onPressed: busy
+                    onPressed: busy || multi
                         ? null
                         : isLocal && !current
                         ? () => unawaited(_runLocalCheckout(name))
@@ -140,25 +173,21 @@ extension _TimelineSidebar on _TimelineScreenState {
                   ),
                   // One button, three reaches: the local branch, the remote's
                   // own copy, the tag. The tooltip says which one it is about
-                  // to take, since they are not the same kind of loss.
+                  // to take, since they are not the same kind of loss — and how
+                  // many, once the selection holds more than one.
                   button(
                     key: const Key('sidebar-action-delete'),
                     icon: Icons.delete_outline,
-                    tooltip: switch (section) {
-                      _RefSection.remote => '원격 브랜치 삭제',
-                      _RefSection.tags => '태그 삭제',
-                      _ => '브랜치 삭제',
-                    },
+                    tooltip: deleteTargets.length > 1
+                        ? '${(deleteSection ?? _RefSection.local).noun} '
+                              '${deleteTargets.length}개 삭제'
+                        : '${(deleteSection ?? _RefSection.local).noun} 삭제',
                     color: remoteBehindRed,
-                    onPressed: busy || name == null
+                    onPressed: busy || deleteTargets.isEmpty
                         ? null
-                        : isLocal && !current
-                        ? () => unawaited(_confirmDeleteBranch(name))
-                        : isRemote
-                        ? () => unawaited(_confirmDeleteRemoteBranch(name))
-                        : section == _RefSection.tags
-                        ? () => unawaited(_confirmDeleteTag(name))
-                        : null,
+                        : () => unawaited(
+                            _confirmDeleteRefs(deleteSection!, deleteTargets),
+                          ),
                   ),
                 ],
               );
@@ -175,10 +204,11 @@ extension _TimelineSidebar on _TimelineScreenState {
               return Row(
                 children: [
                   // Nothing selected leaves the slot empty; the disabled
-                  // buttons already say the strip is waiting.
+                  // buttons already say the strip is waiting. A selection of
+                  // several says how many instead of naming one of them.
                   Expanded(
                     child: Text(
-                      name ?? '',
+                      multi ? '${selection.length}개 선택' : name ?? '',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontSize: 11, color: _palette.text),
@@ -195,7 +225,13 @@ extension _TimelineSidebar on _TimelineScreenState {
   }
 
   /// Moves the cursor and mirrors it on the timeline, like clicking the row.
-  void _moveSidebarCursor(int step) {
+  ///
+  /// [extend] is ⇧ held: the row left behind and the row arrived at both join
+  /// the multi-selection, so ⇧↓ walks a run of refs into it. A plain step
+  /// drops the selection — the cursor is on one row again.
+  // ponytail: ⇧ only grows the run; a ⇧ step back does not shrink it. Track an
+  // anchor index here if that turns out to matter.
+  void _moveSidebarCursor(int step, {bool extend = false}) {
     final rows = _visibleRefRows();
     if (rows.isEmpty) return;
     final cursor = _sidebarCursor;
@@ -212,7 +248,17 @@ extension _TimelineSidebar on _TimelineScreenState {
         ? stranded
         : (step > 0 ? 0 : rows.length - 1);
     final (section, name) = rows[next];
-    _rebuild(() => _sidebarCursor = rows[next]);
+    _rebuild(() {
+      if (!extend ||
+          (_checkedRefs.isNotEmpty && _checkedRefs.first.$1 != section)) {
+        _checkedRefs.clear();
+      }
+      if (extend) {
+        if (cursor != null && cursor.$1 == section) _checkedRefs.add(cursor);
+        _checkedRefs.add(rows[next]);
+      }
+      _settleCheckedRefs(rows[next]);
+    });
     _selectRef(
       name,
       remote: section == _RefSection.remote,
@@ -308,6 +354,9 @@ extension _TimelineSidebar on _TimelineScreenState {
     final busy = _pullingRemote != null || _branchApplyBusy;
     final isLocal = section == _RefSection.local;
     final isBase = name == _baseBranch;
+    // A row inside the multi-selection deletes the whole selection; the title
+    // says so, and the dialog names every ref before anything goes.
+    final deleteTargets = _deletionTargets(section, name);
     // The local map holds the difference from the local branch's own point of
     // view — the same value the row's badge reads.
     final difference = isLocal ? _refs.aheadBehind[name] : null;
@@ -378,21 +427,27 @@ extension _TimelineSidebar on _TimelineScreenState {
           RefMenuAction(
             key: Key('sidebar-menu-delete-$name'),
             icon: Icons.delete_outline,
-            title: '브랜치 삭제',
+            title: deleteTargets.length > 1
+                ? '브랜치 ${deleteTargets.length}개 삭제'
+                : '브랜치 삭제',
             subtitle: current ? '체크아웃된 브랜치는 지울 수 없습니다' : null,
             danger: true,
             onPressed: current || busy
                 ? null
-                : () => unawaited(_confirmDeleteBranch(name)),
+                : () => unawaited(_confirmDeleteRefs(section, deleteTargets)),
           ),
         if (section == _RefSection.tags)
           RefMenuAction(
             key: Key('sidebar-menu-delete-$name'),
             icon: Icons.delete_outline,
-            title: '태그 삭제',
+            title: deleteTargets.length > 1
+                ? '태그 ${deleteTargets.length}개 삭제'
+                : '태그 삭제',
             subtitle: _tagRemote == null ? null : '원격에서도 지울지 물어봅니다',
             danger: true,
-            onPressed: busy ? null : () => unawaited(_confirmDeleteTag(name)),
+            onPressed: busy
+                ? null
+                : () => unawaited(_confirmDeleteRefs(section, deleteTargets)),
           ),
       ],
     );
@@ -961,7 +1016,13 @@ extension _TimelineSidebar on _TimelineScreenState {
                                 pointerHovered || _contextMenuRef == name;
                             final cursorHere =
                                 _sidebarCursor == (section, name);
-                            final hovered = pointerActive || cursorHere;
+                            // A checked row reads like the cursor's own: the
+                            // selection is one thing the actions act on, so it
+                            // is painted as one band.
+                            final selected =
+                                cursorHere ||
+                                _checkedRefs.contains((section, name));
+                            final hovered = pointerActive || selected;
                             // The cursor keeps its shape but drains to gray while the
                             // keyboard lives in the timeline, so only one pane's
                             // selection carries color at a time.
@@ -978,11 +1039,27 @@ extension _TimelineSidebar on _TimelineScreenState {
                               // recognizer would hold the gesture arena and delay every
                               // single click on the row and its pull button by 300 ms.
                               onTap: () {
+                                // ⌘ picks rows out one at a time, ⇧ takes the
+                                // run between; either way nothing is checked
+                                // out, pulled, or opened — the click is about
+                                // what the actions will act on.
+                                final keyboard = HardwareKeyboard.instance;
+                                if (keyboard.isMetaPressed ||
+                                    keyboard.isControlPressed) {
+                                  _toggleCheckedRef(section, name);
+                                  return;
+                                }
+                                if (keyboard.isShiftPressed) {
+                                  _extendCheckedRefs(section, name);
+                                  return;
+                                }
                                 // A click moves the keyboard cursor here too, so the
-                                // arrows continue from the clicked row.
-                                _rebuild(
-                                  () => _sidebarCursor = (section, name),
-                                );
+                                // arrows continue from the clicked row, and drops
+                                // whatever the selection held.
+                                _rebuild(() {
+                                  _checkedRefs.clear();
+                                  _sidebarCursor = (section, name);
+                                });
                                 _sidebarFocusNode.requestFocus();
                                 _tapRefRow(section, name);
                               },
@@ -1015,7 +1092,7 @@ extension _TimelineSidebar on _TimelineScreenState {
                                         // Selection paints like the timeline's
                                         // selected row, a plain hover like the
                                         // timeline's hover chip.
-                                        color: cursorHere
+                                        color: selected
                                             ? cursorFill
                                             : pointerActive
                                             ? _palette.neutralChip.withValues(
@@ -1024,10 +1101,10 @@ extension _TimelineSidebar on _TimelineScreenState {
                                             : Colors.transparent,
                                         border: Border(
                                           left: BorderSide(
-                                            color: cursorHere
+                                            color: selected
                                                 ? cursorEdge
                                                 : Colors.transparent,
-                                            width: cursorHere ? 2 : 0,
+                                            width: selected ? 2 : 0,
                                           ),
                                         ),
                                       ),
@@ -1101,8 +1178,12 @@ extension _TimelineSidebar on _TimelineScreenState {
                                                 _selectComparison(name),
                                               ),
                                               onDelete: () => unawaited(
-                                                _confirmDeleteRemoteBranch(
-                                                  name,
+                                                _confirmDeleteRefs(
+                                                  section,
+                                                  _deletionTargets(
+                                                    section,
+                                                    name,
+                                                  ),
                                                 ),
                                               ),
                                             )
@@ -1211,11 +1292,92 @@ extension _TimelineSidebarFlows on _TimelineScreenState {
     return rows;
   }
 
+  /// The checked rows a delete should act on when it was asked for on [name]'s
+  /// row: the whole selection when that row is part of it, and that row alone
+  /// otherwise — an action on a row outside the selection is about that row.
+  List<String> _deletionTargets(_RefSection section, String name) =>
+      _checkedRefs.contains((section, name))
+      ? [
+          for (final (rowSection, rowName) in _checkedRefs)
+            if (rowSection == section) rowName,
+        ]
+      : [name];
+
+  /// [names] minus what git will not delete: the checked-out branch stays where
+  /// it is, so it never counts toward a batch or its dialog.
+  List<String> _deletableNames(_RefSection section, Iterable<String> names) => [
+    for (final name in names)
+      if (!(section == _RefSection.local && name == _refs.current)) name,
+  ];
+
+  /// Keeps the multi-selection at two rows or none: one checked row is not a
+  /// selection, so it collapses onto the cursor and the strip has a single
+  /// place to read what it is about to act on. [landing] is where the cursor
+  /// goes when the selection stands.
+  void _settleCheckedRefs((_RefSection, String) landing) {
+    if (_checkedRefs.length > 1) {
+      _sidebarCursor = landing;
+      return;
+    }
+    final only = _checkedRefs.isEmpty ? landing : _checkedRefs.first;
+    _checkedRefs.clear();
+    _sidebarCursor = only;
+  }
+
+  /// ⌘-click (or ⌃-click): puts a row in the multi-selection, or takes it out.
+  /// The cursor's own row joins first, so the second ⌘-click leaves two rows
+  /// selected rather than one. A row from another section starts the selection
+  /// over — see [_checkedRefs].
+  void _toggleCheckedRef(_RefSection section, String name) {
+    _rebuild(() {
+      if (_checkedRefs.isNotEmpty && _checkedRefs.first.$1 != section) {
+        _checkedRefs.clear();
+      }
+      if (_checkedRefs.isEmpty) {
+        if (_sidebarCursor case final cursor? when cursor.$1 == section) {
+          _checkedRefs.add(cursor);
+        }
+      }
+      if (!_checkedRefs.remove((section, name))) {
+        _checkedRefs.add((section, name));
+      }
+      _settleCheckedRefs((section, name));
+    });
+    _sidebarFocusNode.requestFocus();
+  }
+
+  /// ⇧-click: every row between the cursor and this one, among the rows the
+  /// sidebar is showing. A row in another section on the way is skipped, and
+  /// nothing to anchor on leaves this row alone selected.
+  void _extendCheckedRefs(_RefSection section, String name) {
+    final rows = _visibleRefRows();
+    final cursor = _sidebarCursor;
+    final from = cursor == null ? -1 : rows.indexOf(cursor);
+    final to = rows.indexOf((section, name));
+    _rebuild(() {
+      _checkedRefs.clear();
+      if (from < 0 || to < 0) {
+        _checkedRefs.add((section, name));
+      } else {
+        for (
+          var index = math.min(from, to);
+          index <= math.max(from, to);
+          index++
+        ) {
+          if (rows[index].$1 == section) _checkedRefs.add(rows[index]);
+        }
+      }
+      _settleCheckedRefs((section, name));
+    });
+    _sidebarFocusNode.requestFocus();
+  }
+
   /// Right-click on a local branch row: the delete menu at the pointer.
   Future<void> _showLocalBranchMenu(Offset position, String branch) async {
     final overlay =
         Overlay.of(context).context.findRenderObject()! as RenderBox;
     _rebuild(() => _contextMenuRef = branch);
+    final targets = _deletionTargets(_RefSection.local, branch);
     final action = await showMenu<String>(
       context: context,
       position: RelativeRect.fromRect(
@@ -1227,7 +1389,10 @@ extension _TimelineSidebarFlows on _TimelineScreenState {
           key: Key('sidebar-delete-branch-$branch'),
           value: 'delete',
           height: 34,
-          child: const Text('브랜치 삭제', style: TextStyle(fontSize: 13)),
+          child: Text(
+            targets.length > 1 ? '브랜치 ${targets.length}개 삭제' : '브랜치 삭제',
+            style: const TextStyle(fontSize: 13),
+          ),
         ),
       ],
     );
@@ -1236,7 +1401,9 @@ extension _TimelineSidebarFlows on _TimelineScreenState {
     } else {
       _contextMenuRef = null;
     }
-    if (action == 'delete' && mounted) await _confirmDeleteBranch(branch);
+    if (action == 'delete' && mounted) {
+      await _confirmDeleteRefs(_RefSection.local, targets);
+    }
   }
 
   Iterable<Widget> _refSection(_RefSection section, List<String> names) sync* {

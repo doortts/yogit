@@ -89,6 +89,22 @@ void main() {
     expect(actionOf(tester, 'sidebar-menu-delete-lane'), isNotNull);
   });
 
+  testWidgets('Enter opens the cursor row menu from the keyboard', (
+    tester,
+  ) async {
+    await pump(tester);
+    // 한 번 눌러 커서를 그 행에 세운다 — 두 번째 클릭 없이 ↵만으로 열려야 한다.
+    await tester.tap(find.byKey(const Key('sidebar-ref-lane')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('sidebar-menu-header-lane')), findsNothing);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('sidebar-menu-header-lane')), findsOneWidget);
+    expect(actionOf(tester, 'sidebar-menu-checkout-lane'), isNotNull);
+  });
+
   testWidgets('the checked-out branch keeps its impossible actions in place', (
     tester,
   ) async {

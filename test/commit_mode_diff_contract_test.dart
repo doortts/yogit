@@ -8,7 +8,7 @@ import 'package:yogit/git.dart';
 import 'package:yogit/window_frame.dart';
 import 'package:yogit/working_tree_status.dart';
 
-import 'app_test.dart' show FakeGitRepository, app, commit, workingTreeCommit;
+import 'app_test.dart' show FakeGitRepository, app, commit, workingTreeCommit, togglePreview;
 
 /// 커밋 모드의 diff 연결 — 승인된 시안 docs/commit-mode-mockup.html '동작 정의'
 /// 1·2·3. 파일을 클릭하면 그 파일이 속한 축의 diff가 열리고 커밋 패널은 그대로
@@ -114,7 +114,7 @@ void main() {
       app(repository, controller, fullDiffPreferences: preferences),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('commit-panel')), findsOneWidget);
   }

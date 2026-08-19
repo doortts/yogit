@@ -1627,7 +1627,7 @@ extension _TimelinePreviewFlows on _TimelineScreenState {
     }
   }
 
-  /// Enter and Space toggle the panel; Esc always closes.
+  /// ⌘] toggles the panel; Esc always closes.
   void _togglePreview() {
     final closing =
         _previewController.previewPlacement != PreviewPlacement.closed;

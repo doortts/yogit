@@ -125,14 +125,18 @@ String _groupedNumber(int value) => value.toString().replaceAllMapped(
 );
 
 enum _RefSection {
-  local('LOCAL', Icons.computer_outlined),
-  remote('REMOTE', Icons.cloud_outlined),
-  tags('TAGS', Icons.sell_outlined);
+  local('LOCAL', Icons.computer_outlined, '브랜치'),
+  remote('REMOTE', Icons.cloud_outlined, '원격 브랜치'),
+  tags('TAGS', Icons.sell_outlined, '태그');
 
-  const _RefSection(this.label, this.icon);
+  const _RefSection(this.label, this.icon, this.noun);
 
   final String label;
   final IconData icon;
+
+  /// 이 섹션의 ref를 사람에게 부르는 이름. 삭제 도구 설명과 확인 대화상자가
+  /// 같은 말을 쓰도록 한자리에 둔다.
+  final String noun;
 }
 
 class TimelineScreen extends StatefulWidget {
@@ -462,6 +466,19 @@ class _TimelineScreenState extends State<TimelineScreen>
   /// rows that changed instead of every row on screen.
   final _selectedIndex = ValueNotifier(0);
   final _hoverIndex = ValueNotifier(-1);
+
+  /// ⇧+화살표로 커서와 함께 잡은 커밋들의 sha. 커서가 선 커밋은 이 집합에
+  /// 없어도 늘 함께 센다 — 잡은 것이 하나뿐이면 집합은 비어 있다.
+  final _checkedCommits = <String>{};
+
+  /// 커서가 선 행. ↵가 열 메뉴의 위치를 이 행에서 잰다.
+  final _cursorRowKey = GlobalKey();
+
+  /// 메시지 고치기·합치기 대화창이 함께 쓰는 입력칸.
+  final _commitMessageDraft = TextEditingController();
+  final _authorDraft = TextEditingController();
+  final _dateDraft = TextEditingController();
+  final _branchNameDraft = TextEditingController();
   final _hoveredHeader = ValueNotifier<String?>(null);
   var _loading = false;
   var _end = false;
@@ -1199,6 +1216,10 @@ class _TimelineScreenState extends State<TimelineScreen>
     _clearPendingFullDiffPersistence();
     if (_ownsPreviewController) _previewController.dispose();
     _selectedIndex.removeListener(_selectedCommitChanged);
+    _commitMessageDraft.dispose();
+    _authorDraft.dispose();
+    _dateDraft.dispose();
+    _branchNameDraft.dispose();
     _selectedIndex.dispose();
     _fetchingRemotes.dispose();
     _fetchError.dispose();
@@ -1506,7 +1527,11 @@ class _TimelineScreenState extends State<TimelineScreen>
       // Autorepeat jumps instead of animating: queued animations would lag
       // behind a held key and never catch up.
       if (step != 0 && !editing) {
-        _moveSelection(step, animate: event is KeyDownEvent);
+        _moveSelection(
+          step,
+          animate: event is KeyDownEvent,
+          extend: keyboard.isShiftPressed,
+        );
         return KeyEventResult.handled;
       }
       // ← (or h) walks over to the sidebar while the pane is open.
@@ -1588,9 +1613,17 @@ class _TimelineScreenState extends State<TimelineScreen>
       unawaited(_toggleCommitCursorRow());
       return KeyEventResult.handled;
     }
-    if (event.logicalKey == LogicalKeyboardKey.enter &&
+    // ↵는 커서가 선 커밋의 메뉴다 — 우클릭이 여는 그 메뉴, 그 자리.
+    if ((event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
         !shortcutModifierHeld &&
         _commits.isNotEmpty) {
+      unawaited(_openCursorCommitMenu());
+      return KeyEventResult.handled;
+    }
+    // 미리보기 여닫기는 ↵가 두고 간 자리를 ⌘]로 옮겼다.
+    if (event.logicalKey == LogicalKeyboardKey.bracketRight &&
+        shortcutModifierHeld) {
       _togglePreview();
       return KeyEventResult.handled;
     }
@@ -1623,8 +1656,9 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   /// Steps one entry, walking on past skip-only headings. Running off the end
   /// comes back the other way, so the walk always lands somewhere selectable.
-  void _moveSelection(int delta, {bool animate = true}) {
+  void _moveSelection(int delta, {bool animate = true, bool extend = false}) {
     if (_entries.isEmpty) return;
+    final left = _selectedCommit;
     _arrivedGoingDown = delta > 0;
     final step = delta < 0 ? -1 : 1;
     var next = (_selectedIndex.value + delta).clamp(0, _entries.length - 1);
@@ -1640,7 +1674,32 @@ class _TimelineScreenState extends State<TimelineScreen>
     }
     if (!_selectable(next)) return;
     _selectedIndex.value = next;
+    // ⇧는 지나온 커밋을 함께 잡고, 맨 화살표는 잡은 것을 놓는다. 작업 트리 행은
+    // 커밋이 아니라 어느 쪽으로도 잡히지 않는다.
+    _setCheckedCommits(
+      extend
+          ? {
+              ..._checkedCommits,
+              for (final commit in [left, _selectedCommit])
+                if (commit != null && !commit.isWorkingTree) commit.sha,
+            }
+          : const {},
+    );
     _scrollToSelection(animate: animate);
+  }
+
+  /// 잡은 커밋 목록을 갈아 끼운다. 달라진 것이 없으면 다시 그리지 않는다 —
+  /// 화살표를 누르고 있는 동안 매 걸음이 전체 목록을 다시 그리면 안 된다.
+  void _setCheckedCommits(Set<String> next) {
+    if (next.length == _checkedCommits.length &&
+        next.every(_checkedCommits.contains)) {
+      return;
+    }
+    setState(() {
+      _checkedCommits
+        ..clear()
+        ..addAll(next);
+    });
   }
 
   /// The selection walks the visible rows without moving the list; the list
@@ -1680,7 +1739,55 @@ class _TimelineScreenState extends State<TimelineScreen>
     if (!_selectable(index)) return;
     _arrivedGoingDown = null;
     _selectedIndex.value = index;
+    _setCheckedCommits(const {});
     _focusNode.requestFocus();
+  }
+
+  /// 행을 누른 손: ⌘는 커밋을 하나씩 집어 넣고 빼내고 — 떨어져 있어도 된다 —,
+  /// ⇧는 커서부터 이 행까지를 한 구간으로 잡는다. 맨 클릭은 잡은 것을 놓는다.
+  void _selectRow(int index) {
+    final commit = _commitAt(index);
+    if (commit == null || commit.isWorkingTree) {
+      _select(index);
+      return;
+    }
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isMetaPressed || keyboard.isControlPressed) {
+      final next = {..._checkedCommits, ?_selectedCommit?.sha};
+      if (!next.remove(commit.sha)) next.add(commit.sha);
+      _arrivedGoingDown = null;
+      _selectedIndex.value = index;
+      _setCheckedCommits(next);
+      _focusNode.requestFocus();
+      return;
+    }
+    if (keyboard.isShiftPressed) {
+      final from = _selectedIndex.value;
+      final span = [
+        for (
+          var probe = math.min(from, index);
+          probe <= math.max(from, index);
+          probe++
+        )
+          ?_commitAt(probe),
+      ];
+      _arrivedGoingDown = null;
+      _selectedIndex.value = index;
+      _setCheckedCommits({
+        for (final row in span)
+          if (!row.isWorkingTree) row.sha,
+      });
+      _focusNode.requestFocus();
+      return;
+    }
+    _select(index);
+  }
+
+  /// 그 줄의 커밋. 날짜 머리줄처럼 커밋이 없는 줄은 null이다.
+  GitCommit? _commitAt(int index) {
+    if (index < 0 || index >= _entries.length) return null;
+    final rowIndex = _entries[index].rowIndex;
+    return rowIndex < 0 ? null : _commits[rowIndex];
   }
 
   void _selectedCommitChanged() {
@@ -1759,11 +1866,8 @@ class _TimelineScreenState extends State<TimelineScreen>
   }
 
   /// The commit the selection sits on, or null before the first page lands.
-  GitCommit? get _selectedCommit {
-    if (_entries.isEmpty) return null;
-    final rowIndex = _entries[_selectedIndex.value].rowIndex;
-    return rowIndex < 0 ? null : _commits[rowIndex];
-  }
+  GitCommit? get _selectedCommit =>
+      _entries.isEmpty ? null : _commitAt(_selectedIndex.value);
 
   /// Sidebar click: jump to the newest commit decorated with [name]. Remote
   /// entries also match the branch name without their remote prefix.
@@ -1829,6 +1933,12 @@ class _TimelineScreenState extends State<TimelineScreen>
 
   /// The row the sidebar's keyboard cursor sits on, highlighted like a hover.
   (_RefSection, String)? _sidebarCursor;
+
+  /// The rows a ⌘-click or a ⇧-click has gathered, for the actions that can
+  /// take more than one ref at a time. Empty means the cursor's row stands on
+  /// its own. Every ref in here belongs to one section: deleting a branch and
+  /// deleting a tag are not the same loss, so one selection never mixes them.
+  final _checkedRefs = <(_RefSection, String)>{};
 
   /// One key per named row so the cursor can be scrolled into view.
   final _sidebarRowKeys = <String, GlobalKey>{};
@@ -2371,8 +2481,136 @@ class _TimelineScreenState extends State<TimelineScreen>
     _branchPreviewDropped = false;
   }
 
+  /// ↵가 여는 메뉴: 커서 행의 위치에서, 우클릭이 여는 그 메뉴를 그대로 띄운다.
+  Future<void> _openCursorCommitMenu() async {
+    final commit = _selectedCommit;
+    if (commit == null) return;
+    final box = _cursorRowKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return;
+    await _showCommitMenu(
+      commit,
+      box.localToGlobal(Offset(box.size.width * 0.2, box.size.height * 0.9)),
+    );
+  }
+
+  /// 메뉴가 손댈 커밋들 — 새 것부터 오래된 것 순. 잡아 둔 행 위에서 열었으면 잡은
+  /// 전부, 아니면 그 행 하나다.
+  List<GitCommit> _menuCommits(GitCommit commit) {
+    if (!_checkedCommits.contains(commit.sha)) return [commit];
+    return [
+      for (final row in _commits)
+        if (_checkedCommits.contains(row.sha)) row,
+    ];
+  }
+
+  /// HEAD에서 첫 부모만 따라 [commits]를 모두 지나는 줄 — 새 것부터. 히스토리를
+  /// 다시 쓰는 일은 이 줄 위에서만 한다. 하나라도 줄에서 벗어나면 null이다.
+  List<GitCommit>? _headChain(List<GitCommit> commits) {
+    final current = _refs.current;
+    final tip = current == null ? null : _refs.localTips[current];
+    if (tip == null || _comparison != null || commits.isEmpty) return null;
+    final wanted = {for (final commit in commits) commit.sha};
+    final bySha = {for (final commit in _commits) commit.sha: commit};
+    final chain = <GitCommit>[];
+    var walk = bySha[tip];
+    while (walk != null && !walk.isWorkingTree) {
+      chain.add(walk);
+      wanted.remove(walk.sha);
+      if (wanted.isEmpty) return chain;
+      walk = walk.parents.isEmpty ? null : bySha[walk.parents.first];
+    }
+    return null;
+  }
+
+  /// 잡은 커밋들이 그 줄에서 끊기지 않고 붙어 있는지. 합치기와 순서 뒤집기는
+  /// 붙어 있는 구간만 다룬다 — 사이에 남을 커밋을 어디로 보낼지 정해 줄 사람이
+  /// 없다.
+  bool _contiguousRun(List<GitCommit> chain, List<GitCommit> commits) {
+    final indexes = [
+      for (final commit in commits)
+        chain.indexWhere((row) => row.sha == commit.sha),
+    ]..sort();
+    if (indexes.isEmpty || indexes.first < 0) return false;
+    return indexes.last - indexes.first == indexes.length - 1;
+  }
+
+  /// 히스토리를 다시 쓸 수 있는 상태인지 — 줄 위에 있고, 첫 커밋이 아니고, 작업
+  /// 트리가 깨끗해야 한다. rebase는 더러운 트리를 거부하니 미리 막는다.
+  bool _rewritable(List<GitCommit>? chain) =>
+      chain != null && !_hasWorkingTree && chain.last.parents.length == 1;
+
   Future<void> _showCommitMenu(GitCommit commit, Offset position) async {
-    if (!_canCherryPick(commit)) return;
+    final commits = _menuCommits(commit);
+    final several = commits.length > 1;
+    final chain = _headChain(commits);
+    final rewritable = _rewritable(chain);
+    final run = chain != null && _contiguousRun(chain, commits);
+    final canPick =
+        commits.every(_canCherryPick) && !commit.isWorkingTree;
+    final atHead = chain != null && chain.first.sha == commits.first.sha;
+    final items = <PopupMenuEntry<String>>[
+      if (several)
+        PopupMenuItem(
+          key: const Key('commit-menu-count'),
+          enabled: false,
+          height: 26,
+          child: Text(
+            '커밋 ${commits.length}개',
+            style: TextStyle(fontSize: 11, color: _palette.muted),
+          ),
+        ),
+      _commitMenuItem(
+        key: 'cherry-pick',
+        label: '현재 브랜치로 체리픽',
+        enabled: canPick,
+      ),
+      if (several)
+        _commitMenuItem(
+          key: 'squash',
+          label: '커밋 ${commits.length}개 합치기',
+          enabled: rewritable && run,
+        ),
+      if (!several)
+        _commitMenuItem(
+          key: 'reword',
+          label: '커밋 메시지 고치기',
+          enabled: rewritable,
+        ),
+      if (!several)
+        _commitMenuItem(
+          key: 'identity',
+          label: '작성자 · 시각 고치기',
+          enabled: rewritable,
+        ),
+      if (several)
+        _commitMenuItem(
+          key: 'reorder',
+          label: '선택 구간 순서 뒤집기',
+          enabled: rewritable && run,
+        ),
+      _commitMenuItem(
+        key: 'rebase-onto',
+        label: '다른 브랜치 위로 옮기기',
+        enabled: rewritable && run && atHead && _otherLocalBranches().isNotEmpty,
+      ),
+      const PopupMenuDivider(),
+      if (!several)
+        _commitMenuItem(key: 'branch', label: '이 커밋에서 브랜치 만들기'),
+      if (!several) _commitMenuItem(key: 'copy-sha', label: 'SHA 복사'),
+      _commitMenuItem(
+        key: 'revert',
+        label: several ? '커밋 ${commits.length}개 되돌리기' : '이 커밋 되돌리기',
+        enabled: !commit.isWorkingTree && _cherryPickState == null,
+        danger: true,
+      ),
+      _commitMenuItem(
+        key: 'drop',
+        label: several ? '커밋 ${commits.length}개 버리기' : '이 커밋 버리기',
+        enabled: rewritable,
+        danger: true,
+      ),
+    ];
+    if (commit.isWorkingTree) return;
     final overlay =
         Overlay.of(context).context.findRenderObject()! as RenderBox;
     final action = await showMenu<String>(
@@ -2383,14 +2621,497 @@ class _TimelineScreenState extends State<TimelineScreen>
         overlay.size.width - position.dx,
         overlay.size.height - position.dy,
       ),
-      items: const [
-        PopupMenuItem(value: 'cherry-pick', child: Text('현재 브랜치로 체리픽')),
-      ],
+      items: items,
     );
-    if (action == 'cherry-pick' && mounted) {
-      await _confirmCherryPick(commit);
+    if (!mounted) return;
+    switch (action) {
+      case 'cherry-pick':
+        await _confirmCherryPickAll(commits);
+      case 'reword':
+        await _rewordCommit(commit, chain!);
+      case 'identity':
+        await _editCommitIdentity(commit, chain!);
+      case 'squash':
+        await _squashCommits(commits, chain!);
+      case 'reorder':
+        await _reorderCommits(commits, chain!);
+      case 'rebase-onto':
+        await _rebaseCommitsOnto(commits, position);
+      case 'branch':
+        await _createBranchAtCommit(commit);
+      case 'copy-sha':
+        await Clipboard.setData(ClipboardData(text: commit.sha));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('${commit.shortSha} 복사됨')),
+          );
+        }
+      case 'revert':
+        await _revertCommits(commits);
+      case 'drop':
+        await _dropCommits(commits, chain!);
     }
   }
+
+  PopupMenuItem<String> _commitMenuItem({
+    required String key,
+    required String label,
+    bool enabled = true,
+    bool danger = false,
+  }) => PopupMenuItem(
+    key: Key('commit-menu-$key'),
+    value: key,
+    enabled: enabled,
+    height: 34,
+    child: Text(
+      label,
+      style: TextStyle(
+        fontSize: 13,
+        color: danger && enabled ? YogitAlert.destructiveText : null,
+      ),
+    ),
+  );
+
+  List<String> _otherLocalBranches() => [
+    for (final branch in _refs.local)
+      if (branch != _refs.current) branch,
+  ];
+
+  /// 잡은 커밋들을 차례로 체리픽한다 — 오래된 것부터. 충돌이 나면 그 자리에서
+  /// 멈추고, 남은 것은 기존 체리픽 화면이 이어받는다.
+  Future<void> _confirmCherryPickAll(List<GitCommit> commits) async {
+    if (commits.length == 1) {
+      await _confirmCherryPick(commits.single);
+      return;
+    }
+    final current = _refs.current;
+    if (current == null) return;
+    final approved = await showYogitAlert<bool>(
+      context,
+      YogitAlert(
+        title: '커밋 ${commits.length}개를 체리픽할까요?',
+        boxWidth: YogitAlert.listWidth,
+        body: YogitAlertBlock([
+          for (final commit in commits.reversed)
+            '${commit.shortSha} ${commit.subject}',
+          '→ $current',
+        ]),
+        confirmLabel: '체리픽',
+        confirmKey: const Key('cherry-pick-confirm'),
+      ),
+    );
+    if (approved != true) return;
+    for (final commit in commits.reversed) {
+      if (!mounted || _cherryPickState != null) return;
+      await _runCherryPick(commit.sha);
+    }
+  }
+
+  /// 커밋 메시지를 고친다. HEAD면 amend 한 걸음, 그 아래면 히스토리를 다시 쓴다.
+  Future<void> _rewordCommit(GitCommit commit, List<GitCommit> chain) async {
+    final String loaded;
+    try {
+      loaded = await widget.repository.loadCommitMessage(commit.sha);
+    } catch (error) {
+      if (mounted) _showCommitActionError('메시지를 읽지 못했습니다', error);
+      return;
+    }
+    if (!mounted) return;
+    final pushed = _amendPushedUpstream();
+    final message = await _askCommitMessage(
+      title: '커밋 메시지 고치기',
+      subject: '${commit.shortSha} ${commit.subject}',
+      detail: pushed == null ? null : '$pushed에 올라간 커밋이라 히스토리가 갈립니다.',
+      initial: loaded.trimRight(),
+      confirmLabel: '고치기',
+    );
+    if (message == null || message.trim().isEmpty || !mounted) return;
+    final text = '${message.trim()}\n';
+    if (chain.length == 1) {
+      await _changingRepository(() async {
+        try {
+          await widget.repository.rewordHead(text);
+          if (!mounted) return;
+          await _reloadTimelineAfterCherryPick(null);
+        } catch (error) {
+          if (mounted) _showCommitActionError('메시지 고치기 실패', error);
+        }
+      });
+      return;
+    }
+    await _runRewrite('메시지 고치기', chain, (oldestFirst) {
+      return [
+        for (final row in oldestFirst)
+          RewriteStep(row.sha, message: row.sha == commit.sha ? text : null),
+      ];
+    });
+  }
+
+  /// 작성자와 작성 시각을 고친다. 커밋 내용은 그대로다.
+  Future<void> _editCommitIdentity(
+    GitCommit commit,
+    List<GitCommit> chain,
+  ) async {
+    final identity = await _askCommitIdentity(commit);
+    if (identity == null || !mounted) return;
+    final (author, date) = identity;
+    if (author.isEmpty && date.isEmpty) return;
+    await _runRewrite('작성자 · 시각 고치기', chain, (oldestFirst) {
+      return [
+        for (final row in oldestFirst)
+          RewriteStep(
+            row.sha,
+            author: row.sha == commit.sha && author.isNotEmpty ? author : null,
+            date: row.sha == commit.sha && date.isNotEmpty ? date : null,
+          ),
+      ];
+    });
+  }
+
+  /// 잡은 구간을 하나로 합친다 — 가장 오래된 커밋을 집고 나머지를 그 위에 얹은
+  /// 뒤, 이어 붙인 메시지로 한 번 고친다.
+  Future<void> _squashCommits(
+    List<GitCommit> commits,
+    List<GitCommit> chain,
+  ) async {
+    final oldest = commits.last;
+    final messages = <String>[];
+    try {
+      for (final commit in commits.reversed) {
+        messages.add(
+          (await widget.repository.loadCommitMessage(commit.sha)).trim(),
+        );
+      }
+    } catch (error) {
+      if (mounted) _showCommitActionError('메시지를 읽지 못했습니다', error);
+      return;
+    }
+    if (!mounted) return;
+    final message = await _askCommitMessage(
+      title: '커밋 ${commits.length}개를 하나로',
+      subject: '${oldest.shortSha}..${commits.first.shortSha}',
+      detail: '오래된 것부터 이어 붙인 메시지입니다. 고쳐서 커밋하세요.',
+      initial: messages.join('\n\n'),
+      confirmLabel: '합치기',
+    );
+    if (message == null || message.trim().isEmpty || !mounted) return;
+    final selected = {for (final commit in commits) commit.sha};
+    await _runRewrite('커밋 ${commits.length}개 합치기', chain, (oldestFirst) {
+      return [
+        for (final row in oldestFirst)
+          if (!selected.contains(row.sha))
+            RewriteStep(row.sha)
+          else if (row.sha == oldest.sha)
+            RewriteStep(row.sha, message: '${message.trim()}\n')
+          else
+            RewriteStep(row.sha, action: RewriteAction.fixup),
+      ];
+    });
+  }
+
+  /// 잡은 구간의 순서를 뒤집는다. 구간 밖의 커밋은 제자리에 있는다.
+  Future<void> _reorderCommits(
+    List<GitCommit> commits,
+    List<GitCommit> chain,
+  ) async {
+    final selected = {for (final commit in commits) commit.sha};
+    await _runRewrite('순서 뒤집기', chain, (oldestFirst) {
+      final flipped = [
+        for (final row in oldestFirst)
+          if (selected.contains(row.sha)) row.sha,
+      ].reversed.toList();
+      var next = 0;
+      return [
+        for (final row in oldestFirst)
+          RewriteStep(
+            selected.contains(row.sha) ? flipped[next++] : row.sha,
+          ),
+      ];
+    });
+  }
+
+  /// 잡은 커밋들을 히스토리에서 뺀다. 되돌리기와 달리 흔적이 남지 않는다.
+  Future<void> _dropCommits(
+    List<GitCommit> commits,
+    List<GitCommit> chain,
+  ) async {
+    final approved = await showYogitAlert<bool>(
+      context,
+      YogitAlert(
+        title: commits.length > 1 ? '커밋 ${commits.length}개를 버릴까요?' : '이 커밋을 버릴까요?',
+        boxWidth: YogitAlert.listWidth,
+        body: YogitAlertBlock([
+          for (final commit in commits) '${commit.shortSha} ${commit.subject}',
+        ]),
+        detail: '히스토리에서 사라집니다. 되돌리는 커밋을 남기려면 되돌리기를 쓰세요.',
+        role: YogitAlertRole.destructive,
+        confirmLabel: '버리기',
+        confirmKey: const Key('commit-drop-confirm'),
+      ),
+    );
+    if (approved != true || !mounted) return;
+    final selected = {for (final commit in commits) commit.sha};
+    await _runRewrite('커밋 버리기', chain, (oldestFirst) {
+      return [
+        for (final row in oldestFirst)
+          RewriteStep(
+            row.sha,
+            action: selected.contains(row.sha)
+                ? RewriteAction.drop
+                : RewriteAction.pick,
+          ),
+      ];
+    });
+  }
+
+  /// 잡은 커밋들을 되돌리는 커밋을 쌓는다 — 새 것부터.
+  Future<void> _revertCommits(List<GitCommit> commits) async {
+    final approved = await showYogitAlert<bool>(
+      context,
+      YogitAlert(
+        title: commits.length > 1
+            ? '커밋 ${commits.length}개를 되돌릴까요?'
+            : '이 커밋을 되돌릴까요?',
+        boxWidth: YogitAlert.listWidth,
+        body: YogitAlertBlock([
+          for (final commit in commits) '${commit.shortSha} ${commit.subject}',
+        ]),
+        detail: '되돌리는 커밋이 새로 쌓입니다. 히스토리는 그대로 남습니다.',
+        confirmLabel: '되돌리기',
+        confirmKey: const Key('commit-revert-confirm'),
+      ),
+    );
+    if (approved != true || !mounted) return;
+    await _changingRepository(() async {
+      try {
+        await widget.repository.revertCommits([
+          for (final commit in commits) commit.sha,
+        ]);
+        if (!mounted) return;
+        _setCheckedCommits(const {});
+        await _reloadTimelineAfterCherryPick(null);
+      } catch (error) {
+        if (mounted) _showCommitActionError('되돌리기 실패', error);
+      }
+    });
+  }
+
+  /// 이 커밋을 가리키는 새 브랜치. 체크아웃은 하지 않는다 — 표시만 남긴다.
+  Future<void> _createBranchAtCommit(GitCommit commit) async {
+    final name = await _askBranchName(commit);
+    if (name == null || name.trim().isEmpty || !mounted) return;
+    await _changingRepository(() async {
+      try {
+        await widget.repository.createBranchAt(name.trim(), commit.sha);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${name.trim()} 브랜치 만듦')),
+        );
+        await _reloadTimelineAfterCherryPick(null);
+      } catch (error) {
+        if (mounted) _showCommitActionError('브랜치 만들기 실패', error);
+      }
+    });
+  }
+
+  /// 잡은 구간을 고른 브랜치 위로 옮긴다. 현재 브랜치가 함께 따라간다.
+  Future<void> _rebaseCommitsOnto(
+    List<GitCommit> commits,
+    Offset position,
+  ) async {
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final target = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        overlay.size.width - position.dx,
+        overlay.size.height - position.dy,
+      ),
+      items: [
+        for (final branch in _otherLocalBranches())
+          PopupMenuItem(
+            key: Key('commit-menu-onto-$branch'),
+            value: branch,
+            height: 32,
+            child: Text(branch, style: const TextStyle(fontSize: 13)),
+          ),
+      ],
+    );
+    if (target == null || !mounted) return;
+    await _changingRepository(() async {
+      try {
+        await widget.repository.rebaseRangeOnto(
+          target: target,
+          oldest: commits.last.sha,
+        );
+        if (!mounted) return;
+        _setCheckedCommits(const {});
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$target 위로 옮김')));
+        await _reloadTimelineAfterCherryPick(null);
+      } catch (error) {
+        if (mounted) _showCommitActionError('옮기기 실패', error);
+      }
+    });
+  }
+
+  /// 다시 쓰기 한 걸음: 줄의 가장 오래된 커밋의 부모를 바닥으로 두고, [build]가
+  /// 적은 todo를 돌린다. 충돌은 git이 되돌리고 예외로 올라온다.
+  Future<void> _runRewrite(
+    String label,
+    List<GitCommit> chain,
+    List<RewriteStep> Function(List<GitCommit> oldestFirst) build,
+  ) async {
+    final oldest = chain.last;
+    if (oldest.parents.length != 1) {
+      _showCommitActionError(label, '첫 커밋과 병합 커밋은 다시 쓸 수 없습니다');
+      return;
+    }
+    await _changingRepository(() async {
+      try {
+        await widget.repository.rewriteHistory(
+          base: oldest.parents.first,
+          steps: build(chain.reversed.toList()),
+        );
+        if (!mounted) return;
+        _setCheckedCommits(const {});
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$label 완료')));
+        await _reloadTimelineAfterCherryPick(null);
+      } catch (error) {
+        if (mounted) _showCommitActionError('$label 실패', error);
+      }
+    });
+  }
+
+  void _showCommitActionError(String what, Object error) =>
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$what: ${error.toString().trim()}')),
+      );
+
+  /// 메시지 한 통을 받는 대화창. 고치기와 합치기가 같은 창을 쓴다.
+  Future<String?> _askCommitMessage({
+    required String title,
+    required String subject,
+    required String initial,
+    required String confirmLabel,
+    String? detail,
+  }) {
+    // 대화창이 닫히는 애니메이션이 아직 이 컨트롤러를 읽으니, 창마다 새로 만들고
+    // 버리지 않는다. 화면이 사라질 때 한 번 버린다.
+    _commitMessageDraft.text = initial;
+    return showYogitAlert<String>(
+      context,
+      YogitAlert(
+        title: title,
+        boxWidth: YogitAlert.listWidth,
+        subtitle: _menuSubtitle(subject),
+        detail: detail,
+        confirmLabel: confirmLabel,
+        confirmKey: const Key('commit-message-confirm'),
+        onConfirm: () => _commitMessageDraft.text,
+        body: TextField(
+          key: const Key('commit-message-field'),
+          controller: _commitMessageDraft,
+          autofocus: true,
+          minLines: 3,
+          maxLines: 8,
+          style: TextStyle(fontSize: 13, color: _palette.text),
+          decoration: const InputDecoration(
+            isDense: true,
+            border: OutlineInputBorder(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 작성자와 시각을 받는 대화창. 비워 둔 칸은 손대지 않는다.
+  Future<(String, String)?> _askCommitIdentity(GitCommit commit) {
+    _authorDraft.text = '${commit.author.name} <${commit.author.email}>';
+    _dateDraft.text = DateTime.fromMillisecondsSinceEpoch(
+      commit.authorTimestamp * 1000,
+    ).toIso8601String();
+    return showYogitAlert<(String, String)>(
+      context,
+      YogitAlert(
+        title: '작성자 · 시각 고치기',
+        boxWidth: YogitAlert.listWidth,
+        subtitle: _menuSubtitle('${commit.shortSha} ${commit.subject}'),
+        detail: '비워 둔 칸은 그대로 둡니다.',
+        confirmLabel: '고치기',
+        confirmKey: const Key('commit-identity-confirm'),
+        onConfirm: () => (_authorDraft.text.trim(), _dateDraft.text.trim()),
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _draftField(
+              key: 'commit-author-field',
+              controller: _authorDraft,
+              label: '이름 <메일>',
+              autofocus: true,
+            ),
+            const SizedBox(height: 8),
+            _draftField(
+              key: 'commit-date-field',
+              controller: _dateDraft,
+              label: '2024-03-04T05:06:07+09:00',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<String?> _askBranchName(GitCommit commit) {
+    _branchNameDraft.text = '';
+    return showYogitAlert<String>(
+      context,
+      YogitAlert(
+        title: '이 커밋에서 브랜치 만들기',
+        boxWidth: YogitAlert.listWidth,
+        subtitle: _menuSubtitle('${commit.shortSha} ${commit.subject}'),
+        confirmLabel: '만들기',
+        confirmKey: const Key('commit-branch-confirm'),
+        onConfirm: () => _branchNameDraft.text,
+        body: _draftField(
+          key: 'commit-branch-field',
+          controller: _branchNameDraft,
+          label: 'feature/이름',
+          autofocus: true,
+        ),
+      ),
+    );
+  }
+
+  Widget _menuSubtitle(String text) => Text(
+    text,
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+    style: TextStyle(fontSize: 11, color: _palette.muted),
+  );
+
+  Widget _draftField({
+    required String key,
+    required TextEditingController controller,
+    required String label,
+    bool autofocus = false,
+  }) => TextField(
+    key: Key(key),
+    controller: controller,
+    autofocus: autofocus,
+    style: TextStyle(fontSize: 13, color: _palette.text),
+    decoration: InputDecoration(
+      isDense: true,
+      border: const OutlineInputBorder(),
+      hintText: label,
+      hintStyle: TextStyle(fontSize: 12, color: _palette.muted),
+    ),
+  );
 
   /// The local branch whose context menu is open; its row keeps the hover
   /// highlight while the popup covers the pointer.
@@ -2568,6 +3289,111 @@ class _TimelineScreenState extends State<TimelineScreen>
       done: alsoRemote ? '$tag 태그 삭제됨 · $remote에서도 삭제' : '$tag 태그 삭제됨',
       failed: '태그 삭제 실패',
     );
+  }
+
+  /// Several refs at once, from the sidebar's multi-selection: one dialog that
+  /// names every one of them, then git once per ref, so a refusal on one — a
+  /// branch git will not drop, a remote that says no — takes only that one down
+  /// and the rest still go.
+  ///
+  /// One ref falls back to its own dialog: the worktree follow-up question and
+  /// the tag's remote question only make sense a ref at a time.
+  Future<void> _confirmDeleteRefs(
+    _RefSection section,
+    List<String> names,
+  ) async {
+    final targets = _deletableNames(section, names);
+    if (targets.isEmpty) return;
+    if (targets.length == 1) {
+      return switch (section) {
+        _RefSection.local => _confirmDeleteBranch(targets.single),
+        _RefSection.remote => _confirmDeleteRemoteBranch(targets.single),
+        _RefSection.tags => _confirmDeleteTag(targets.single),
+      };
+    }
+    final noun = section.noun;
+    // 태그만 원격에도 같은 것이 남아 있는지를 묻는다 — 단일 삭제와 같은 물음이다.
+    final tagRemote = section == _RefSection.tags ? _tagRemote : null;
+    // 이름이 아주 많으면 목록이 대화상자를 밀어낸다. 앞의 것만 보이고 나머지는 수로.
+    const shown = 8;
+    final answer = await showYogitAlert<Object>(
+      context,
+      YogitAlert(
+        title: '$noun ${targets.length}개를 삭제할까요?',
+        body: YogitAlertBlock([
+          ...targets.take(shown),
+          if (targets.length > shown) '외 ${targets.length - shown}개',
+        ]),
+        detail: switch (section) {
+          _RefSection.local => '병합되지 않은 커밋도 함께 사라집니다.',
+          _RefSection.remote => '같은 원격을 쓰는 다른 사람에게도 사라집니다. 로컬 브랜치는 그대로 남습니다.',
+          _RefSection.tags =>
+            tagRemote == null
+                ? '이 저장소에서 태그가 사라집니다. 태그가 가리키던 커밋은 그대로 남습니다.'
+                : '로컬에서만 지우면 $tagRemote에 남은 같은 태그가 다음 fetch에 돌아옵니다.',
+        },
+        role: tagRemote == null
+            ? YogitAlertRole.destructive
+            : YogitAlertRole.normal,
+        confirmLabel: tagRemote == null ? '삭제' : '로컬에서만 삭제',
+        confirmKey: const Key('delete-refs-confirm'),
+        destructiveLabel: tagRemote == null ? null : '원격에서도 삭제',
+        destructiveKey: const Key('delete-refs-remote-confirm'),
+      ),
+    );
+    if (answer == null || !mounted) return;
+    final alsoRemote = answer == 'destructive' && tagRemote != null;
+    final failed = <String>[];
+    await _changingRepository(() async {
+      for (final name in targets) {
+        try {
+          switch (section) {
+            case _RefSection.local:
+              await widget.repository.deleteLocalBranch(name);
+            case _RefSection.remote:
+              final split = splitRemoteBranchName(name, _refs.remoteNames);
+              if (split == null) {
+                failed.add(name);
+              } else {
+                await widget.repository.deleteRemoteRef(
+                  split.remote,
+                  'refs/heads/${split.branch}',
+                );
+              }
+            case _RefSection.tags:
+              // 원격이 먼저다 — 거절당하면 태그는 양쪽에 그대로 남아, 다시
+              // 해 볼 자리가 하나로 남는다.
+              if (alsoRemote) {
+                await widget.repository.deleteRemoteRef(
+                  tagRemote,
+                  'refs/tags/$name',
+                );
+              }
+              await widget.repository.deleteTag(name);
+          }
+        } on ProcessException {
+          failed.add(name);
+        }
+      }
+      if (!mounted) return;
+      final done = targets.length - failed.length;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            failed.isEmpty
+                ? '$noun $done개 삭제됨'
+                : '$noun $done개 삭제됨 · ${failed.length}개 실패: ${failed.join(', ')}',
+          ),
+        ),
+      );
+      // 지운 ref가 기준이었거나 적재된 줄을 꾸미고 있었을 수 있으니 페이지째 다시 읽는다.
+      await _reloadTimelineAfterCherryPick(null);
+    });
+    if (mounted) {
+      _rebuild(_checkedRefs.clear);
+    } else {
+      _checkedRefs.clear();
+    }
   }
 
   /// Runs a ref deletion and reloads the page whole: the ref that just died may

@@ -8,7 +8,7 @@ import 'package:yogit/git.dart';
 import 'package:yogit/typography.dart';
 import 'package:yogit/window_frame.dart';
 
-import 'app_test.dart' show FakeGitRepository, app, commit;
+import 'app_test.dart' show FakeGitRepository, app, commit, togglePreview;
 
 /// The preview header names the commit, not the pane.
 ///
@@ -106,7 +106,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
   }
 
@@ -375,7 +375,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
 
     final body = find.byKey(const Key('preview-commit-body'));

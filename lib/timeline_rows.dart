@@ -107,12 +107,15 @@ extension _TimelineRows on _TimelineScreenState {
     int index,
     double commitWidth,
     double graphWidth,
-    bool selected,
+    bool cursorRow,
     bool hovered,
   ) {
     final entry = _entries[index];
     final row = entry.row;
     final commit = row.commit;
+    // ⇧로 함께 잡은 행은 커서 행과 한 덩어리로 읽혀야 한다 — 메뉴가 그 전부에
+    // 걸리니 띠도 하나로 이어 칠한다.
+    final selected = cursorRow || _checkedCommits.contains(commit.sha);
     final commonBoundary =
         _comparison?.commits.any(
           (entry) =>
@@ -276,7 +279,7 @@ extension _TimelineRows on _TimelineScreenState {
             ? Key('selected-row-${commit.sha}')
             : null,
         behavior: HitTestBehavior.opaque,
-        onTap: () => _select(index),
+        onTap: () => _selectRow(index),
         onSecondaryTapDown: (details) =>
             unawaited(_showCommitMenu(commit, details.globalPosition)),
         child: Container(
@@ -512,6 +515,8 @@ extension _TimelineRows on _TimelineScreenState {
         ? KeyedSubtree(key: _rebaseConflictRowContextKey, child: searched)
         : rebaseApplying
         ? KeyedSubtree(key: _rebaseApplyRowContextKey, child: searched)
+        : cursorRow
+        ? KeyedSubtree(key: _cursorRowKey, child: searched)
         : searched;
     if (!_canCherryPick(commit)) return focusableContent;
     return Draggable<GitCommit>(

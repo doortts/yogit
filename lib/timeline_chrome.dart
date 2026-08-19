@@ -228,7 +228,7 @@ extension _TimelineChrome on _TimelineScreenState {
       final open =
           _previewController.previewPlacement != PreviewPlacement.closed;
       return Tooltip(
-        message: open ? '미리보기 닫기 (Enter)' : '미리보기 열기 (Enter)',
+        message: open ? '미리보기 닫기 (⌘])' : '미리보기 열기 (⌘])',
         waitDuration: Duration.zero,
         child: SizedBox(
           width: 28,

@@ -8,7 +8,7 @@ import 'package:yogit/git.dart';
 import 'package:yogit/timeline.dart';
 import 'package:yogit/window_frame.dart';
 
-import 'app_test.dart' show FakeGitRepository, app, commit;
+import 'app_test.dart' show FakeGitRepository, app, commit, togglePreview;
 
 /// One keyboard, three panes.
 ///
@@ -64,7 +64,7 @@ void main() {
     });
     await tester.pumpWidget(app(repository(), controller));
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
   }
 
@@ -204,7 +204,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
 
     await press(tester, LogicalKeyboardKey.arrowRight);
@@ -328,7 +328,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     await press(tester, LogicalKeyboardKey.arrowRight);
     await press(tester, LogicalKeyboardKey.arrowLeft);
@@ -373,7 +373,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
 
     ScrollPosition listPosition() => tester

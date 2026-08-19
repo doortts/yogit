@@ -8,7 +8,7 @@ import 'package:yogit/full_diff_workspace.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/window_frame.dart';
 
-import 'app_test.dart' show FakeGitRepository, app, commit;
+import 'app_test.dart' show FakeGitRepository, app, commit, togglePreview;
 
 /// W3 contract — the History pane, the commit line, and the couplings.
 ///
@@ -79,7 +79,7 @@ void main() {
     });
     await tester.pumpWidget(app(repository(commits: commits), controller));
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
     await tester.pumpAndSettle();

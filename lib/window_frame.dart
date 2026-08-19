@@ -49,15 +49,11 @@ class WindowFrameController extends ChangeNotifier {
     super.dispose();
   }
 
+  /// 미리보기는 창 안에서 열고 닫는다. 창 크기는 사용자 몫이라 건드리지 않는다.
   Future<void> setPreview(PreviewPlacement placement) async {
     if (placement == previewPlacement) return;
     previewPlacement = placement;
     notifyListeners();
-    try {
-      await _channel.invokeMethod<void>('setPreview', placement.name);
-    } on MissingPluginException {
-      // Dart-only platforms keep the Flutter layout behavior.
-    }
   }
 
   /// The native folder chooser: the picked path, or null when the user cancels.

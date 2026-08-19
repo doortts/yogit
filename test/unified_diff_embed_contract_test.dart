@@ -5,7 +5,7 @@ import 'package:yogit/full_diff_workspace.dart';
 import 'package:yogit/git.dart';
 import 'package:yogit/window_frame.dart';
 
-import 'app_test.dart' show FakeGitRepository, app, commit;
+import 'app_test.dart' show FakeGitRepository, app, commit, togglePreview;
 
 /// W2 contract — the preview's file list opens the real Full Diff in place.
 ///
@@ -57,7 +57,7 @@ void main() {
     await tester.pumpWidget(app(repository(), controller));
     await tester.pumpAndSettle();
     // 첫 커밋 선택 + 미리보기 열기.
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
   }
 

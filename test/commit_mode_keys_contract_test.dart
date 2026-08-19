@@ -7,7 +7,7 @@ import 'package:yogit/local_state_signature.dart';
 import 'package:yogit/window_frame.dart';
 import 'package:yogit/working_tree_status.dart';
 
-import 'app_test.dart' show FakeGitRepository, app, commit, workingTreeCommit;
+import 'app_test.dart' show FakeGitRepository, app, commit, workingTreeCommit, togglePreview;
 
 /// 커밋 모드의 키보드와 갱신 — 승인된 시안 docs/commit-mode-mockup.html '동작
 /// 정의' 9. Space가 커서 행을 축 사이로 옮기고, ⌘↵이 커밋하고, ↑↓이 두 섹션을
@@ -137,7 +137,7 @@ void main() {
     });
     await tester.pumpWidget(app(repository, controller));
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('commit-panel')), findsOneWidget);
   }
@@ -477,7 +477,7 @@ void main() {
 
     // 수식키가 없는 Enter는 여전히 판을 여닫는다.
     await focusTimeline(tester);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('commit-panel')), findsNothing);
     expect(commits, hasLength(2));

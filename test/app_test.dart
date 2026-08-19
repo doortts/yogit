@@ -36,6 +36,14 @@ import 'package:yogit/typography.dart';
 import 'package:yogit/window_frame.dart';
 import 'package:yogit/working_tree_status.dart';
 
+/// 미리보기는 ⌘]로 여닫는다 — ↵는 커밋 메뉴로 옮겨 갔다.
+Future<void> togglePreview(WidgetTester tester) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
+  await tester.sendKeyEvent(LogicalKeyboardKey.bracketRight);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
+  await tester.pump();
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -410,15 +418,15 @@ void main() {
     expect(bandRect.left, greaterThan(refsRect.right));
     expect(bandRect.right, tester.getRect(selected).right);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('preview-surface')), findsOneWidget);
 
     // Enter toggles: a second press closes what the first opened.
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('preview-surface')), findsNothing);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('preview-surface')), findsOneWidget);
 
@@ -443,7 +451,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('preview-surface')), findsNothing);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('preview-surface')), findsOneWidget);
     expect(
@@ -453,7 +461,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('preview-surface')), findsNothing);
   });
@@ -618,12 +626,14 @@ void main() {
     expect(find.byKey(const Key('selected-row-2')), findsOneWidget);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowUp);
 
-    // Enter and Space ignore repeats, so a held key opens the panel once.
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
-    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.enter);
+    // ⌘]와 Space는 반복을 무시하니, 눌러 둔 키가 판을 한 번만 연다.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.bracketRight);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.bracketRight);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('preview-surface')), findsOneWidget);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.bracketRight);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
   });
 
   testWidgets('graph viewport resize does not scale lane coordinates', (
@@ -703,7 +713,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
 
     final before = tester.getSize(find.byKey(const Key('preview-panel')));
@@ -732,7 +742,7 @@ void main() {
     await tester.pumpWidget(app(repository, controller));
     await tester.pumpAndSettle();
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
 
     final preview = find.byKey(const Key('preview-panel'));
@@ -781,7 +791,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await togglePreview(tester);
       await tester.pumpAndSettle();
       expect(find.byType(FullDiffWorkspace), findsNothing);
       final previewWidth = tester
@@ -849,7 +859,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
     await tester.pumpAndSettle();
@@ -865,7 +875,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('preview-surface')), findsNothing);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('preview-state-lib/a.dart')));
     await tester.pumpAndSettle();
@@ -915,7 +925,7 @@ void main() {
     await tester.pumpWidget(app(repository, controller));
     await tester.pumpAndSettle();
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     expect(find.text('lib/first.dart'), findsOneWidget);
     expect(find.byType(FullDiffWorkspace), findsNothing);
@@ -986,7 +996,7 @@ void main() {
     await tester.pump();
 
     tester.view.physicalSize = const Size(1088, 600);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
 
     final rightLayout = find.byKey(const Key('preview-layout-right'));
@@ -2040,7 +2050,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
 
     // Nothing pins the title column, so it takes whatever is left over.
@@ -2062,7 +2072,7 @@ void main() {
     // open, which is the whole point of flexing.
     tester.view.physicalSize = const Size(1280, 760);
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     expect(titleWidth(), 285);
     expect(nameRight(), lessThanOrEqualTo(1280 - 288));
@@ -2111,7 +2121,7 @@ void main() {
       screen(FakeGitRepository((_, _) async => [commit('1', 'first commit')])),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
 
     Rect viewport() =>
@@ -5545,7 +5555,7 @@ void main() {
     await tester.pumpAndSettle();
     // The preview pane covers the timeline once it opens with the
     // comparison, so close it before dragging the list.
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     await tester.drag(
       find.byKey(const Key('timeline-list')),
@@ -5683,7 +5693,7 @@ void main() {
 
     // The preview pane covers the timeline once it opens with the
     // comparison, so close it before dragging the list.
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     await tester.drag(
       find.byKey(const Key('timeline-list')),
@@ -8973,7 +8983,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
 
     // The status bar legend carries the other 'WIP' label.
@@ -9038,7 +9048,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
 
     // 'N file changed' is singular for one file.
@@ -9086,7 +9096,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
 
     final preview = find.byKey(const Key('preview-panel'));
@@ -11646,7 +11656,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('placement-PreviewPlacement.left')));
     await tester.pumpAndSettle();
@@ -11926,7 +11936,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
@@ -12042,7 +12052,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(calls, 2);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     // Timeline row plus the opened preview title.
     expect(find.text('recovered commit'), findsNWidgets(2));
@@ -12972,12 +12982,12 @@ void main() {
     );
   });
 
-  test('native close clamps the saved frame to a current visible screen', () {
+  test('the native window picks a folder and never resizes itself', () {
     final source = File(
       'macos/Runner/MainFlutterWindow.swift',
     ).readAsStringSync();
 
-    // The folder picker rides the same channel as the frame calls.
+    // The folder picker rides the same channel the toolbar uses.
     for (final line in [
       'case "pickRepository":',
       'panel.canChooseDirectories = true',
@@ -12988,19 +12998,10 @@ void main() {
     ]) {
       expect(source, contains(line));
     }
-    expect(
-      source,
-      contains(
-        'setFrame(clamped(baseFrame, to: visibleFrame), display: true, animate: true)',
-      ),
-    );
-    expect(
-      source,
-      contains(
-        'private func clamped(_ frame: NSRect, to visibleFrame: NSRect) -> NSRect',
-      ),
-    );
-    expect(source, isNot(contains('baseFrame.intersection(visibleFrame)')));
+    // 미리보기는 창 안에서만 열린다. 창 크기를 앱이 바꾸는 흔적이 남으면 안 된다.
+    expect(source, isNot(contains('setPreview')));
+    expect(source, isNot(contains('previewBaseFrame')));
+    expect(source, isNot(contains('visibleFrame')));
   });
 
   test('settings persist only the supported fields', () async {
@@ -13981,7 +13982,7 @@ void main() {
       const Offset(30, 0),
     );
     await tester.pump();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     expect(controller.previewPlacement, PreviewPlacement.right);
     expect(store.saveCount, 0);
@@ -13999,7 +14000,7 @@ void main() {
     expect(store.saveCount, 2);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     expect(controller.previewPlacement, PreviewPlacement.bottom);
   });
@@ -14031,7 +14032,7 @@ void main() {
     await tester.pump();
     expect(savedWidths?.graph, greaterThan(210));
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     expect(controller.previewPlacement, PreviewPlacement.bottom);
   });
@@ -14315,7 +14316,7 @@ void main() {
     expect(band.color, TimelineThemePalette.systemGraphite.selectedRow);
 
     // It has no commit, so the preview falls back to its empty state.
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     expect(find.text('No commit selected'), findsOneWidget);
     expect(find.byKey(const Key('refs-modal')), findsNothing);
@@ -15124,7 +15125,7 @@ void main() {
     await tester.tap(find.byKey(const Key('preview-toggle')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('preview-surface')), findsNothing);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('preview-surface')), findsOneWidget);
 
@@ -15414,7 +15415,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     // 배치 버튼은 미리보기 머리줄에 사니, 판을 세워야 잴 수 있다.
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
 
     final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
@@ -15760,7 +15761,7 @@ void main() {
 
     // The preview person block spells it out under the social line. The working
     // tree leads the list, so the commit is two rows down.
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
@@ -15947,7 +15948,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
 
     final preview = find.byKey(const Key('preview-panel'));
@@ -16029,7 +16030,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
 
     double previewWidth() =>
@@ -16740,7 +16741,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
 
     final filesScrollable = find.byKey(const Key('preview-files-scroll'));
@@ -16793,7 +16794,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('preview-state-lib/file0.dart')));
     await tester.pumpAndSettle();
@@ -17518,7 +17519,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(historyCalls, [0, 500]);
       await tester.tap(find.text('commit 500'));
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await togglePreview(tester);
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('selected-row-500')), findsOneWidget);
       expect(find.byKey(const Key('preview-surface')), findsOneWidget);
@@ -18246,7 +18247,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
 
     final preview = find.byKey(const Key('preview-panel'));
@@ -18388,7 +18389,7 @@ void main() {
       app(FakeGitRepository((_, _) async => [blankEmailCommit]), controller),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
 
     final author = find.byKey(const Key('preview-author'));
@@ -18455,7 +18456,7 @@ void main() {
     expect(find.byKey(const Key('selected-row-1')), findsOneWidget);
     expect(find.byKey(const Key('preview-surface')), findsNothing);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
     expect(find.byType(FullDiffWorkspace), findsNothing);
 
@@ -18539,7 +18540,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await togglePreview(tester);
     await tester.pumpAndSettle();
 
     final filesViewport = find.byKey(const Key('preview-content-scroll'));
@@ -18638,7 +18639,6 @@ void main() {
     }
     // The window keeps its own handles: resizing and the menu bar still work.
     expect(source, isNot(contains('styleMask.remove(.resizable)')));
-    expect(source, contains('case "setPreview":'));
     expect(source, contains('case "pickRepository":'));
   });
 

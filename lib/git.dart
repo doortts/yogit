@@ -1139,6 +1139,30 @@ class CherryPickState {
   bool get canContinue => conflicts.isEmpty;
 }
 
+/// rebase todo의 한 줄. [message]·[author]·[date] 중 무엇이든 있으면 그 커밋을
+/// 집은 뒤 `git commit --amend`가 한 번 더 돈다.
+enum RewriteAction { pick, fixup, drop }
+
+class RewriteStep {
+  const RewriteStep(
+    this.sha, {
+    this.action = RewriteAction.pick,
+    this.message,
+    this.author,
+    this.date,
+  });
+
+  final String sha;
+  final RewriteAction action;
+  final String? message;
+
+  /// `Name <mail@example.com>` 꼴 그대로.
+  final String? author;
+
+  /// git이 받는 날짜 문자열 그대로 — ISO 8601이면 안전하다.
+  final String? date;
+}
+
 class CherryPickResult {
   const CherryPickResult({required this.outcome, this.state, this.headSha});
 
@@ -3594,6 +3618,185 @@ class GitRepository implements FullDiffRepository {
       'core.editor=true',
       'commit',
       if (amend) '--amend',
+      '-m',
+      message,
+    ]);
+    if (result.exitCode != 0) {
+      throw GitRepositoryException(
+        root,
+        _commitFailureMessage(result.stdout, result.stderr, result.exitCode),
+      );
+    }
+    return (await _run(const ['rev-parse', 'HEAD'])).trim();
+  }
+
+  /// [base] 위의 커밋들을 [steps]가 적은 대로 다시 쓴다 — 오래된 것부터 차례로.
+  /// 편집기는 열리지 않는다: todo 파일은 GIT_SEQUENCE_EDITOR가 `cp`로 덮어쓰고,
+  /// 메시지를 고치는 커밋은 `exec git commit --amend -F`가 파일에서 읽는다.
+  ///
+  /// 충돌이나 실패는 rebase를 되돌린 뒤 예외로 나간다 — 반쯤 멈춘 rebase를 두고
+  /// 화면만 갱신하면 사용자가 터미널에서 수습해야 한다.
+  // ponytail: 충돌은 되돌리고 끝난다. 화면에서 풀게 하려면 rebase 미리보기 세션의
+  // 충돌 흐름을 여기에 이어야 한다.
+  Future<void> rewriteHistory({
+    required String base,
+    required List<RewriteStep> steps,
+  }) async {
+    final directory = await Directory.systemTemp.createTemp('yogit_rewrite_');
+    try {
+      final todo = <String>[];
+      for (final (index, step) in steps.indexed) {
+        if (step.action == RewriteAction.drop) {
+          todo.add('drop ${step.sha}');
+          continue;
+        }
+        todo.add('${step.action.name} ${step.sha}');
+        final amend = <String>[
+          if (step.author != null) "--author '${_shellSingle(step.author!)}'",
+          if (step.date != null) "--date '${_shellSingle(step.date!)}'",
+        ];
+        if (step.message != null) {
+          final file = File('${directory.path}/message-$index');
+          await file.writeAsString(step.message!);
+          amend.add("-F '${_shellSingle(file.path)}'");
+        } else if (amend.isNotEmpty) {
+          amend.add('--no-edit');
+        }
+        if (amend.isEmpty) continue;
+        todo.add('exec git commit --amend --only ${amend.join(' ')}');
+      }
+      final todoFile = File('${directory.path}/todo');
+      await todoFile.writeAsString('${todo.join('\n')}\n');
+      final result = await runner(
+        gitExecutable,
+        [
+          '-c',
+          'core.hooksPath=/dev/null',
+          '-c',
+          'rebase.autoStash=false',
+          '-c',
+          'rebase.updateRefs=false',
+          '-c',
+          'commit.gpgSign=false',
+          'rebase',
+          '-i',
+          '--no-autostash',
+          base,
+        ],
+        workingDirectory: root,
+        environment: {
+          ...Platform.environment,
+          'GIT_EDITOR': 'true',
+          'GIT_SEQUENCE_EDITOR': "cp '${_shellSingle(todoFile.path)}'",
+          'GIT_TERMINAL_PROMPT': '0',
+        },
+      );
+      if (result.exitCode != 0) {
+        await runner(gitExecutable, const [
+          'rebase',
+          '--abort',
+        ], workingDirectory: root);
+        throw GitRepositoryException(
+          root,
+          _commitFailureMessage(result.stdout, result.stderr, result.exitCode),
+        );
+      }
+    } finally {
+      await directory.delete(recursive: true);
+    }
+  }
+
+  /// todo의 `exec` 줄은 셸이 읽으니, 홑따옴표 안에 들어갈 값은 그 따옴표만 막아
+  /// 준다.
+  static String _shellSingle(String value) => value.replaceAll("'", "'\\''");
+
+  /// 커밋들을 되돌린다 — 새 것부터 차례로, 커밋 하나씩. 충돌이 나면 되돌리기를
+  /// 취소하고 예외로 나간다.
+  Future<void> revertCommits(List<String> shas) async {
+    final result = await _runWithoutEditor([
+      '-c',
+      'core.editor=true',
+      'revert',
+      '--no-edit',
+      ...shas,
+    ]);
+    if (result.exitCode != 0) {
+      await runner(gitExecutable, const [
+        'revert',
+        '--abort',
+      ], workingDirectory: root);
+      throw GitRepositoryException(
+        root,
+        _commitFailureMessage(result.stdout, result.stderr, result.exitCode),
+      );
+    }
+  }
+
+  /// 커밋 하나를 가리키는 새 브랜치. 체크아웃은 하지 않는다.
+  Future<void> createBranchAt(String branch, String sha) async {
+    final result = await runner(gitExecutable, [
+      'branch',
+      branch,
+      sha,
+    ], workingDirectory: root);
+    if (result.exitCode != 0) {
+      throw GitRepositoryException(
+        root,
+        _commitFailureMessage(result.stdout, result.stderr, result.exitCode),
+      );
+    }
+  }
+
+  /// [oldest]부터 HEAD까지를 [target] 위로 옮긴다. 현재 브랜치가 함께 따라간다.
+  Future<void> rebaseRangeOnto({
+    required String target,
+    required String oldest,
+  }) async {
+    final result = await runner(
+      gitExecutable,
+      [
+        '-c',
+        'core.hooksPath=/dev/null',
+        '-c',
+        'rebase.autoStash=false',
+        '-c',
+        'rebase.updateRefs=false',
+        'rebase',
+        '--no-autostash',
+        '--onto',
+        target,
+        '$oldest^',
+      ],
+      workingDirectory: root,
+      environment: {
+        ...Platform.environment,
+        'GIT_EDITOR': 'true',
+        'GIT_SEQUENCE_EDITOR': 'true',
+        'GIT_TERMINAL_PROMPT': '0',
+      },
+    );
+    if (result.exitCode != 0) {
+      await runner(gitExecutable, const [
+        'rebase',
+        '--abort',
+      ], workingDirectory: root);
+      throw GitRepositoryException(
+        root,
+        _commitFailureMessage(result.stdout, result.stderr, result.exitCode),
+      );
+    }
+  }
+
+  /// Rewrites HEAD's message and returns the new HEAD. `--only` with no paths
+  /// keeps the index out of it: 올려둔 변경은 그 자리에 그대로 남고 메시지만
+  /// 바뀐다.
+  Future<String> rewordHead(String message) async {
+    final result = await _runWithoutEditor([
+      '-c',
+      'core.editor=true',
+      'commit',
+      '--amend',
+      '--only',
       '-m',
       message,
     ]);

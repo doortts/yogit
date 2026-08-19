@@ -21,7 +21,7 @@ import 'package:yogit/timeline.dart';
 import 'package:yogit/window_frame.dart';
 
 import '../tool/full_diff_visual_diff.dart';
-import 'app_test.dart' show FakeGitRepository, commit;
+import 'app_test.dart' show FakeGitRepository, commit, togglePreview;
 import 'support/full_diff_fixtures.dart';
 import 'support/full_diff_qa_harness.dart';
 
@@ -1584,7 +1584,7 @@ Future<void> _releaseTimeline(WidgetTester tester) async {
 /// Drives the timeline into diff mode on the first file, the way a user does.
 Future<void> _enterDiffMode(WidgetTester tester) async {
   await tester.pumpAndSettle();
-  await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+  await togglePreview(tester);
   await tester.pumpAndSettle();
   await tester.tap(find.byKey(const Key('preview-state-src/drlua.pas')));
   await tester.pumpAndSettle();

@@ -10,7 +10,7 @@ import 'package:yogit/timeline_theme.dart';
 import 'package:yogit/window_frame.dart';
 import 'package:yogit/working_tree_status.dart';
 
-import 'app_test.dart' show FakeGitRepository, app, commit, workingTreeCommit;
+import 'app_test.dart' show FakeGitRepository, app, commit, workingTreeCommit, togglePreview;
 
 /// 커밋 패널 — 승인된 시안 docs/commit-mode-mockup.html '동작 정의' 1·4·5·6·7·8을
 /// 한 줄씩 계약으로 못 박는다. 두 섹션과 그 hover 동작, Discard 확인창, 커밋 폼의
@@ -88,7 +88,7 @@ void main() {
     // 판이 이미 열려 있으면(같은 시험에서 두 번째 저장소를 태우는 경우) Enter는
     // 도로 닫는 쪽이다.
     if (find.byKey(const Key('commit-panel')).evaluate().isEmpty) {
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await togglePreview(tester);
       await tester.pumpAndSettle();
     }
   }
