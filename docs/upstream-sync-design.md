@@ -133,7 +133,7 @@ Future<void> pushBranch(String remote, String branch, {bool setUpstream = false}
   A에서 B로 움직입니다" + [그만두기 | Push].
 - 주황: 제목 "받아 얹은 뒤 Push할까요? (Pull Rebase and Push)", 블록 둘
   (pull --rebase 들어옴 / push 올라감) + "충돌 없음은 방금 재연으로 확인했습니다.
-  얹힌 커밋은 해시가 달라집니다." + [그만두기 | 받아 얹고 Push].
+  얹힌 커밋은 해시가 달라집니다." + [그만두기 | Pull Rebase and Push].
 - 커밋 목록은 `loadMovedCommits(remoteTip, localTip)` 한 번 — `<`가 들어올 커밋,
   `>`가 올라갈 커밋. 9개 초과는 기존 규칙대로 '외 N개'.
 

@@ -66,7 +66,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
               loadIncomingRest: _upstreamRestLoader(state, pushSide: false),
             ),
             footer: CommandPreview(_upstreamRebaseCommands(state)),
-            confirmLabel: '받아 얹기',
+            confirmLabel: 'Pull and Rebase',
             confirmKey: const Key('upstream-rebase-pull-confirm'),
           ),
         );
@@ -180,7 +180,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
               ..._upstreamRebaseCommands(state),
               _upstreamPushCommand(state, state.virtualTip!),
             ]),
-            confirmLabel: '받아 얹고 Push',
+            confirmLabel: 'Pull Rebase and Push',
             confirmKey: const Key('upstream-rebase-push-confirm'),
           ),
         );

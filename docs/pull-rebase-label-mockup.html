@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>확인창 버튼 이름 — '받아 얹기' 대신 'Pull and Rebase' 시안</title>
+<style>
+  :root {
+    --page:#141416; --raised:#2c2c2e; --surface:#232325; --border:#38383a;
+    --text:#f5f5f7; --muted:#8a8a90; --dim:#6a6a70;
+    --green:#8ad6a1; --amber:#f0a35e; --blue:#6ea8fe; --hash:#ef6c63; --primary:#0a84ff;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:32px 28px 72px; background:var(--page); color:var(--text);
+    font:13px/1.55 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  }
+  h1 { font-size:19px; margin:0 0 4px; font-weight:650; }
+  .lede { color:var(--muted); margin:0 0 26px; max-width:84ch; }
+  .lede b { color:var(--text); font-weight:600; }
+  h2 { font-size:14px; margin:38px 0 8px; font-weight:650; display:flex; align-items:baseline; gap:9px; }
+  h2 .tag { font-size:10px; font-weight:600; letter-spacing:.04em; padding:2px 7px; border-radius:999px;
+            background:rgba(110,168,254,.16); color:var(--blue); }
+  .note { color:var(--muted); margin:0 0 14px; max-width:84ch; }
+  .note b { color:var(--text); font-weight:600; }
+  .caption { color:var(--dim); font-size:11px; margin:8px 0 26px; max-width:84ch; }
+  code { font-family:ui-monospace, Menlo, monospace; font-size:12px; background:var(--surface); padding:1px 5px; border-radius:3px; }
+  ul.rules { max-width:84ch; padding-left:20px; margin:0 0 18px; }
+  ul.rules li { margin-bottom:7px; color:var(--muted); }
+  ul.rules li b { color:var(--text); font-weight:600; }
+  .row { display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start; }
+  .stamp { display:inline-block; font-size:10px; font-weight:600; letter-spacing:.04em;
+           padding:2px 7px; margin-bottom:8px; background:rgba(138,214,161,.16); color:var(--green); }
+  .stamp.old { background:rgba(240,163,94,.16); color:var(--amber); }
+  .stamp.b { background:rgba(110,168,254,.16); color:var(--blue); }
+
+  .alert { background:var(--raised); border:.5px solid var(--border); border-radius:22px;
+           padding:16px; width:470px; box-shadow:0 12px 40px rgba(0,0,0,.5); }
+  .alert .title { font-size:13px; font-weight:700; line-height:1.35; }
+  .alert .ask { font-size:11px; line-height:1.5; opacity:.82; margin-top:9px; }
+  .alert .buttons { display:flex; gap:7px; margin-top:13px; width:300px; margin-left:auto; margin-right:auto; }
+  .alert .btn { flex:1; text-align:center; padding:7px 0; font-size:13px; font-weight:600; border-radius:999px; }
+  .alert .btn.quiet { background:#3a3a3c; }
+  .alert .btn.go { background:var(--primary); color:#fff; }
+  .origin { display:flex; align-items:baseline; gap:8px; margin-top:4px; font-size:11px; color:var(--muted); white-space:nowrap; }
+  .origin .url { font-family:ui-monospace, Menlo, monospace; font-size:11px; color:var(--muted); }
+  .block { margin-top:9px; padding:8px 10px; background:rgba(28,28,30,.5); border-radius:6px; }
+  .summary { display:flex; align-items:center; white-space:nowrap; font-size:12.5px; padding-bottom:6px; }
+  .summary + .items { border-top:1px solid var(--border); padding-top:6px; }
+  .sep { color:var(--dim); margin:0 6px; }
+  .op { font-family:ui-monospace, Menlo, monospace; font-size:11.5px; color:var(--blue); }
+  .in { color:var(--green); } .up { color:var(--blue); }
+  .name { font-weight:600; }
+  .item { display:flex; align-items:baseline; gap:7px; padding:1px 0; white-space:nowrap; font-family:ui-monospace, Menlo, monospace; }
+  .item .mark { width:8px; font-weight:700; color:var(--blue); }
+  .item.plus .mark { color:var(--green); }
+  .item .id { font-size:11.5px; color:var(--hash); }
+  .item .subject { font-size:12px; overflow:hidden; text-overflow:ellipsis; }
+  .more { margin-top:3px; padding-left:15px; font-size:12px; color:var(--blue); }
+  .cmd { margin-top:10px; padding:7px 9px; background:rgba(20,20,22,.75); border:.5px solid var(--border);
+         border-radius:6px; font-family:ui-monospace, Menlo, monospace; font-size:11.5px; line-height:1.7;
+         white-space:pre; overflow-x:auto; }
+  .cmd .lbl { display:block; font-family:-apple-system, sans-serif; font-size:10px; letter-spacing:.04em;
+              color:var(--dim); margin-bottom:3px; }
+  .cmd .note2 { color:var(--dim); }
+</style>
+</head>
+<body>
+
+<h1>확인창 버튼 이름 — <b>Pull and Rebase</b></h1>
+<p class="lede">
+  주황 Pull 확인창의 파란 버튼만 <b>받아 얹기 → Pull and Rebase</b>로 바꾼다.
+  누르면 도는 일이 <code>pull --rebase</code>라는 것을 버튼 자리에서 바로 읽는다.
+  캡슐 툴팁과 설명 산문의 &lsquo;받아 얹기&rsquo;는 <b>그대로 둔다</b> — 버튼은 명령 이름,
+  산문은 그 명령이 무슨 일인지를 말하는 자리다.
+</p>
+
+<h2>1 · 주황 Pull 확인창 <span class="tag">이 시안의 본체</span></h2>
+<div class="row">
+  <div>
+    <span class="stamp old">지금</span>
+    <div class="alert">
+      <div class="title">받아 얹을까요? (Pull --rebase)</div>
+      <div class="block">
+        <div class="summary"><span class="name">main</span><span class="sep">·</span><span class="op">pull --rebase</span><span class="sep">·</span>커밋&nbsp;<span class="in">8개 들어옴</span></div>
+        <div class="items">
+          <div class="item plus"><span class="mark">+</span><span class="id">67549ce5</span><span class="subject">docs(sync-spec): the writer keys are read as s…</span></div>
+          <div class="item plus"><span class="mark">+</span><span class="id">c31f2de2</span><span class="subject">fix(sync): hold a file's claimed writer to wha…</span></div>
+        </div>
+        <div class="more">외 6개</div>
+      </div>
+      <div class="ask">충돌 없음은 방금 재연으로 확인했습니다. 얹힌 커밋은 해시가 달라집니다.</div>
+      <div class="cmd"><span class="lbl">실행할 명령</span>git update-ref refs/heads/main 8f600ce 78e26c8
+git reset --hard</div>
+      <div class="buttons"><span class="btn quiet">취소</span><span class="btn go">받아 얹기</span></div>
+    </div>
+  </div>
+  <div>
+    <span class="stamp">시안 — 버튼만 바뀐다</span>
+    <div class="alert">
+      <div class="title">받아 얹을까요? (Pull --rebase)</div>
+      <div class="block">
+        <div class="summary"><span class="name">main</span><span class="sep">·</span><span class="op">pull --rebase</span><span class="sep">·</span>커밋&nbsp;<span class="in">8개 들어옴</span></div>
+        <div class="items">
+          <div class="item plus"><span class="mark">+</span><span class="id">67549ce5</span><span class="subject">docs(sync-spec): the writer keys are read as s…</span></div>
+          <div class="item plus"><span class="mark">+</span><span class="id">c31f2de2</span><span class="subject">fix(sync): hold a file's claimed writer to wha…</span></div>
+        </div>
+        <div class="more">외 6개</div>
+      </div>
+      <div class="ask">충돌 없음은 방금 재연으로 확인했습니다. 얹힌 커밋은 해시가 달라집니다.</div>
+      <div class="cmd"><span class="lbl">실행할 명령</span>git update-ref refs/heads/main 8f600ce 78e26c8
+git reset --hard</div>
+      <div class="buttons"><span class="btn quiet">취소</span><span class="btn go">Pull and Rebase</span></div>
+    </div>
+  </div>
+</div>
+<p class="caption">
+  제목은 손대지 않는다. 제목의 <code>(Pull --rebase)</code>는 실제 git 옵션 표기이고
+  버튼은 사람이 읽는 동사라, 둘이 겹쳐 보여도 말하는 층이 다르다.
+</p>
+
+<h2>2 · 옆 창(주황 Push)은 어떻게 할까 <span class="tag" style="background:rgba(240,163,94,.16);color:var(--amber)">고르는 자리</span></h2>
+<p class="note">
+  같은 주황 상태의 Push 확인창에는 <b>받아 얹고 Push</b> 버튼이 있다. 이 창을 그대로
+  두면 두 확인창의 버튼 언어가 갈린다. 아래 둘 중에 골라 주세요.
+</p>
+<div class="row">
+  <div>
+    <span class="stamp b">가 · 짝을 맞춘다(권장)</span>
+    <div class="alert">
+      <div class="title">받아 얹은 뒤 Push할까요? (Pull Rebase and Push)</div>
+      <div class="origin"><span>origin:</span><span class="url">https://github.com/doortts/yogit</span></div>
+      <div class="block">
+        <div class="summary"><span class="name">main</span><span class="sep">·</span><span class="op">pull --rebase</span><span class="sep">·</span>커밋&nbsp;<span class="in">8개 들어옴</span></div>
+        <div class="items">
+          <div class="item plus"><span class="mark">+</span><span class="id">67549ce5</span><span class="subject">docs(sync-spec): the writer keys are read as s…</span></div>
+        </div>
+        <div class="more">외 7개</div>
+      </div>
+      <div class="block">
+        <div class="summary"><span class="name">main</span><span class="sep">·</span><span class="op">push</span><span class="sep">·</span>커밋&nbsp;<span class="up">2개 올라감</span></div>
+        <div class="items">
+          <div class="item"><span class="mark">↑</span><span class="id">f1862dc</span><span class="subject">fix(ui): ask for a fixed-width family that exi…</span></div>
+        </div>
+        <div class="more">외 1개</div>
+      </div>
+      <div class="ask">충돌 없음은 방금 재연으로 확인했습니다. 얹힌 커밋은 해시가 달라집니다.</div>
+      <div class="cmd"><span class="lbl">실행할 명령</span>git update-ref refs/heads/main ddd4444 aaa1111
+git reset --hard
+git push origin ddd4444:refs/heads/main</div>
+      <div class="buttons"><span class="btn quiet">취소</span><span class="btn go">Pull Rebase and Push</span></div>
+    </div>
+  </div>
+  <div>
+    <span class="stamp old">나 · 이 창은 그대로 둔다</span>
+    <div class="alert">
+      <div class="title">받아 얹은 뒤 Push할까요? (Pull Rebase and Push)</div>
+      <div class="origin"><span>origin:</span><span class="url">https://github.com/doortts/yogit</span></div>
+      <div class="block">
+        <div class="summary"><span class="name">main</span><span class="sep">·</span><span class="op">pull --rebase</span><span class="sep">·</span>커밋&nbsp;<span class="in">8개 들어옴</span></div>
+        <div class="items">
+          <div class="item plus"><span class="mark">+</span><span class="id">67549ce5</span><span class="subject">docs(sync-spec): the writer keys are read as s…</span></div>
+        </div>
+        <div class="more">외 7개</div>
+      </div>
+      <div class="block">
+        <div class="summary"><span class="name">main</span><span class="sep">·</span><span class="op">push</span><span class="sep">·</span>커밋&nbsp;<span class="up">2개 올라감</span></div>
+        <div class="items">
+          <div class="item"><span class="mark">↑</span><span class="id">f1862dc</span><span class="subject">fix(ui): ask for a fixed-width family that exi…</span></div>
+        </div>
+        <div class="more">외 1개</div>
+      </div>
+      <div class="ask">충돌 없음은 방금 재연으로 확인했습니다. 얹힌 커밋은 해시가 달라집니다.</div>
+      <div class="cmd"><span class="lbl">실행할 명령</span>git update-ref refs/heads/main ddd4444 aaa1111
+git reset --hard
+git push origin ddd4444:refs/heads/main</div>
+      <div class="buttons"><span class="btn quiet">취소</span><span class="btn go">받아 얹고 Push</span></div>
+    </div>
+  </div>
+</div>
+<p class="caption">
+  &lsquo;가&rsquo;는 제목 괄호에 이미 적혀 있는 <code>Pull Rebase and Push</code>를 버튼이
+  그대로 받는다 — 두 창의 버튼이 같은 언어로 선다.
+</p>
+
+<h2>규칙</h2>
+<ul class="rules">
+  <li>바뀌는 것은 <b>확인창 버튼 글자뿐</b>이다. 도는 명령, 판정, 캡슐, 툴팁, 흐름은 그대로다.</li>
+  <li>캡슐 툴팁과 문서의 &lsquo;받아 얹기&rsquo;는 <b>남는다</b> — 무슨 일이 벌어지는지 설명하는 자리다.</li>
+  <li>초록 Pull은 확인창 없이 즉시 실행이므로 <b>이 시안과 무관</b>하다.</li>
+  <li>흐름 계약 테스트의 버튼 글자도 함께 옮긴다(<code>test/upstream_sync_flow_contract_test.dart</code>).</li>
+</ul>
+
+</body>
+</html>
