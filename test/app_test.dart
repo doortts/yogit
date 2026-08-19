@@ -7035,7 +7035,7 @@ void main() {
   ) async {
     const compareRef = 'fix/docs';
     final comparison = branchComparison(compareRef: compareRef);
-    // 옮길 커밋이 없으면 그 위에 얹을 머지 커밋도 없다.
+    // 옮길 커밋이 없으면 그 위에 새로 만들 머지 커밋도 없다.
     final preview = RebasePreviewResult(
       status: RebasePreviewStatus.clean,
       baseTip: comparison.baseTip,
@@ -7180,7 +7180,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('실제 적용하기'), findsOneWidget);
-    // 원격 기준은 옮길 수 없으니 머지 커밋을 얹는 착지는 사라진다.
+    // 원격 기준은 옮길 수 없으니 'Rebase 후 Merge 커밋' 선택지가 아예 나오지 않는다.
     expect(
       find.byKey(const Key('branch-preview-option-rebase-merge')),
       findsNothing,
@@ -7970,7 +7970,7 @@ void main() {
     expect(find.byKey(const Key('branch-preview-apply-card')), findsNothing);
     expect(find.byKey(const Key('branch-preview-apply')), findsOneWidget);
     expect(find.byKey(const Key('branch-preview-drop')), findsOneWidget);
-    // 충돌을 지나왔다고 착지가 하나로 줄어들 이유는 없다. 이 카드가 적용 카드를
+    // 충돌을 지나왔다고 고를 방식이 하나로 줄어들 이유는 없다. 이 카드가 적용 카드를
     // 대신하므로 두 갈래도 여기 있어야 한다.
     expect(
       find.byKey(const Key('branch-preview-option-rebase')),
@@ -7996,7 +7996,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 220));
     await tester.pumpAndSettle();
 
-    expect(landing, BranchApplyMode.rebaseMerge, reason: '고른 대로 착지해야 한다');
+    expect(landing, BranchApplyMode.rebaseMerge, reason: '고른 대로 적용돼야 한다');
   });
 
   testWidgets('commit rows wear only the badges their git facts earned', (
@@ -17313,7 +17313,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('selected-row-middle')), findsOneWidget);
-    // 자기 ref 칩은 없다. 대신 그 줄의 이름이 흐린 칩으로 얹힌다 — 작업 트리 행이
+    // 자기 ref 칩은 없다. 대신 그 줄의 이름을 흐린 칩으로 겹쳐 그린다 — 작업 트리 행이
     // 맨 위에 있어도 마찬가지다.
     expect(find.byKey(const Key('ref-chip-middle-$long')), findsNothing);
     expect(

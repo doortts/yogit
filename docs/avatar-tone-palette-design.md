@@ -85,7 +85,7 @@ all-or-nothing 검증(settings.dart:753)에 새 필드를 끼우면 리셋 폭�
 사람인 행 — GitHub UI squash 머지가 남기는 `GitHub <noreply@github.com>`이 그 커미터다 —
 은 `resolve()`의 캐시 경로를 못 타고 `_load()`까지 내려간다. 서버 응답에는 tone이 없으니
 그대로 덮어쓰면 복원한 값이 메모리에서 사라지고 `_persist()`가 그 상태를 파일에 적는다.
-그래서 `_load()`는 같은 URL인 얼굴에 한해 알고 있던 tone을 새 응답에 얹어 둔다 — 위 흐름
+그래서 `_load()`는 같은 URL인 얼굴에 한해 알고 있던 tone을 새 응답에 실어 둔다 — 위 흐름
 표의 '재실행' 줄이 사실이기 위한 조건이다. 사진이 바뀌면(URL이 달라지면) tone은 버리고
 다시 읽는다.
 

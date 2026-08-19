@@ -1586,7 +1586,7 @@ void main() {
 
   test('the forecast never warns about a commit rebase would drop', () async {
     // 옛 브랜치 tip 모양: feature의 첫 커밋이 이미 main에 들어갔고 main이 그 뒤로
-    // 같은 파일을 또 고쳤다. 그 커밋만 단독으로 다시 얹으면 충돌하지만 — 변경이 이미
+    // 같은 파일을 또 고쳤다. 그 커밋만 단독으로 다시 Rebase하면 충돌하지만 — 변경이 이미
     // 적용돼 있으니 충돌한다 — 순차 재배치는 그 커밋을 아예 재생하지 않는다.
     final root = await Directory.systemTemp.createTemp('yogit_forecast_drop_');
     addTearDown(() => root.delete(recursive: true));
@@ -4773,7 +4773,7 @@ void main() {
     const message =
         "Merge branch 'feature' into main\n"
         '\n'
-        '재배치한 커밋 위에 얹은 머지입니다.\n'
+        '재배치한 커밋 위에 만든 머지입니다.\n'
         'Reviewed-by: 채수원';
 
     await repository.applyRebaseThenMerge(
@@ -4820,7 +4820,7 @@ void main() {
       await expectLater(
         repository.applyRebaseThenMerge(
           comparison: fixture.comparison,
-          // 재배치하지 않은 브랜치는 기준 위에 얹혀 있지 않다.
+          // 재배치하지 않은 브랜치는 기준 위로 Rebase되어 있지 않다.
           virtualTip: fixture.comparison.compareTip,
         ),
         throwsA(
@@ -5177,7 +5177,7 @@ void main() {
         fixture.remoteTip,
         reason: '로컬 커밋이 원격 끝 위로 Rebase되어 있다 — 버려진 것이 아니라',
       );
-      // 얹힌 뒤에는 force 없이 push가 된다 — 로컬이 원격 끝을 품었으니까.
+      // Rebase된 뒤에는 force 없이 push가 된다 — 로컬이 원격 끝을 품었으니까.
       await repository.pushBranch('origin', 'main');
       expect(
         (await _git(fixture.remote, ['rev-parse', 'main'])).trim(),

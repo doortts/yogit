@@ -5,7 +5,7 @@ part of 'timeline.dart';
 ///
 /// 승인된 시안: docs/commit-mode-mockup.html.
 
-/// 커밋 버튼의 전경. 시안의 `#0F1A13`으로, 초록 위에 얹는 이 어두운 글자색을
+/// 커밋 버튼의 전경. 시안의 `#0F1A13`으로, 초록 위에 겹쳐 그리는 이 어두운 글자색을
 /// 담을 토큰이 팔레트에 없다.
 const _commitButtonForeground = Color(0xFF0F1A13);
 

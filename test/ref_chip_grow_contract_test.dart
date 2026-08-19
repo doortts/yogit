@@ -122,7 +122,7 @@ void main() {
     final grown =
         tester.widget<Container>(whole(long)).decoration! as BoxDecoration;
 
-    // 판은 불투명해졌지만 눈에는 같은 색이다 — 원래 색을 행 위에 얹은 값이다.
+    // 판은 불투명해졌지만 눈에는 같은 색이다 — 원래 색을 행 위에 겹쳐 그린 값이다.
     expect(
       grown.color,
       Color.alphaBlend(cut.color!, const Color(0xFF1C1C1E)),

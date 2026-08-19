@@ -151,7 +151,7 @@ void main() {
       );
 
       // 한 프레임에 들어온 두 행: 맨 위는 아직 푸시하지 않은 커밋, 그 아래는 서버에
-      // 있는 커밋이다. 아래 행은 위 행의 요청에 얹혀 기다린다.
+      // 있는 커밋이다. 아래 행은 위 행의 요청에 실려 기다린다.
       final top = fake.service.resolve('local11', author: ada, committer: cam);
       final below = fake.service.resolve(
         'bbb2222',

@@ -1012,7 +1012,7 @@ extension _TimelineBranchPreview on _TimelineScreenState {
             fontWeight: FontWeight.w600,
           ),
         ),
-        // 충돌을 지나온 재배치도 착지는 두 가지다. 이 카드가 적용 카드를
+        // 충돌을 지나온 재배치도 고를 방식은 두 가지다. 이 카드가 적용 카드를
         // 대신하는 자리라, 여기에 없으면 고를 데가 어디에도 없어 'Rebase만'으로
         // 굳는다.
         if (_branchPreviewMode == BranchPreviewMode.rebase)
@@ -2091,8 +2091,8 @@ extension _TimelineBranchPreviewFlows on _TimelineScreenState {
   /// selected is what both graphs draw and what the button applies.
   List<Widget> _branchPreviewApplyOptions() {
     final comparison = _comparison;
-    // 옮길 커밋이 하나도 없으면 재배치 결과가 곧 기준 브랜치라 얹을 머지 커밋이
-    // 없다. 고를 것이 하나뿐이면 라디오도 내보내지 않는다.
+    // 옮길 커밋이 하나도 없으면 재배치해도 결과가 기준 브랜치 그대로다. 그러면
+    // 위에 새로 만들 머지 커밋도 없다. 고를 것이 하나뿐이니 라디오도 내보내지 않는다.
     if (comparison == null || (_rebasePreview?.rewritten.isEmpty ?? true)) {
       return const [];
     }
@@ -2193,7 +2193,7 @@ extension _TimelineBranchPreviewFlows on _TimelineScreenState {
             '${comparison.compareRef}를 ${comparison.baseRef} 위로 재배치합니다. '
             '${comparison.baseRef}은 움직이지 않습니다.',
       ),
-      // 기준이 원격이면 머지 커밋을 얹어도 옮길 로컬 기준 브랜치가 없다.
+      // 기준이 원격이면 머지 커밋을 만들어도 그걸 가리키게 할 로컬 기준 브랜치가 없다.
       if (!_baseBranchIsRemote)
         option(
           key: const Key('branch-preview-option-rebase-merge'),

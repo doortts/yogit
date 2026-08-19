@@ -765,7 +765,7 @@ class _TimelineScreenState extends State<TimelineScreen>
     final generation = _deletedBranchLookupGeneration;
     final repository = widget.repository;
     final names = await repository.loadReflogBranchNames();
-    // 저장소가 바뀌었으면 앞 저장소의 이름을 새 화면에 얹지 않는다.
+    // 저장소가 바뀌었으면 앞 저장소에서 읽던 이름을 새 저장소 화면에 보여주지 않는다.
     if (!mounted ||
         names.isEmpty ||
         generation != _deletedBranchLookupGeneration ||
@@ -2109,7 +2109,7 @@ class _TimelineScreenState extends State<TimelineScreen>
               ),
             ),
             _console(),
-            // 알림은 오버레이로 뜬다. 화면 구조에 Stack을 얹으면 미리보기 판이
+            // 알림은 오버레이로 뜬다. 화면 구조를 Stack으로 감싸면 미리보기 판이
             // 겹쳐 놓인 것이 되어, 그것이 나란한 형제라는 약속이 깨진다.
             _localChangeNoticeHost(),
             _statusBar(),
@@ -3711,7 +3711,8 @@ class _TimelineScreenState extends State<TimelineScreen>
       _branchApplyStatus == BranchApplyStatus.reverting;
 
   /// 기준 브랜치가 원격 추적 브랜치인지. 그러면 기준을 옮기는 적용은 받을 로컬
-  /// 브랜치가 없어 성립하지 않는다: Merge도, 재배치 위에 머지 커밋을 얹는 쪽도.
+  /// 브랜치가 없어 성립하지 않는다: Merge도, 재배치한 커밋 위에 머지 커밋을 하나 더
+  /// 만드는 쪽도.
   bool get _baseBranchIsRemote {
     final base = _comparison?.baseRef ?? _baseBranch;
     return base != null &&
@@ -3719,8 +3720,8 @@ class _TimelineScreenState extends State<TimelineScreen>
         _refs.remote.contains(base);
   }
 
-  /// 카드가 고른 착지. 기준이 원격이면 머지 커밋을 얹을 수 없으니 'Rebase만'으로
-  /// 고정된다.
+  /// 카드에서 고른 적용 방식. 기준이 원격이면 머지 커밋을 만들 수 없으니
+  /// 'Rebase만'으로 고정된다.
   bool get _rebaseApplyMergeEffective =>
       _rebaseApplyMerge && !_baseBranchIsRemote;
 
@@ -4195,7 +4196,7 @@ class _TimelineScreenState extends State<TimelineScreen>
           ),
         ];
       }
-      // 머지 커밋을 얹으면 기준 브랜치는 이 가상 노드로 옮겨간다.
+      // 머지 커밋을 만들면 기준 브랜치가 이 가상 노드로 옮겨간다.
       if (previewKind == PreviewGraphNodeKind.virtualRebaseMerge) {
         return [GitRef(name: comparison.baseRef, isHead: true)];
       }

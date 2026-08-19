@@ -3183,7 +3183,7 @@ class GitRepository implements FullDiffRepository {
     if (rewrittenTip == comparison.baseTip) {
       throw GitRepositoryException(root, '재배치 결과가 기준 브랜치와 같아 만들 머지 커밋이 없습니다.');
     }
-    // 재배치 결과가 기준 브랜치 위에 얹혀 있어야 그 트리가 곧 병합 결과다.
+    // 재배치 결과가 기준 브랜치 위로 Rebase되어 있어야 그 트리가 곧 병합 결과다.
     final ancestry = await runner(gitExecutable, [
       'merge-base',
       '--is-ancestor',

@@ -316,8 +316,8 @@ BranchPreviewGraph layoutRebasePreviewGraph(
           nextLaneBranches: {base.lane: base.branch, chainLane: base.branch},
         );
   // 체인이 기준 브랜치 HEAD보다 위에 남은 원본 줄들을 지나가야 하면 그 줄들에 체인
-  // 레인과 기준 브랜치 레인을 함께 얹는다. 원본 줄에는 기준 브랜치 선이 없을 수도
-  // 있어서, 얹지 않으면 가상 머지의 첫 부모 선이 HEAD에 닿기 전에 끊긴다. 버블이면
+  // 레인과 기준 브랜치 레인을 함께 겹쳐 그린다. 원본 줄에는 기준 브랜치 선이 없을
+  // 수도 있어서, 겹쳐 그리지 않으면 가상 머지의 첫 부모 선이 HEAD에 닿기 전에 끊긴다. 버블이면
   // HEAD 바로 윗줄에서 HEAD 노드로 꺾고, 인라인이면 레인이 같아 그대로 내려간다.
   final carried = {...baseRail, chainLane};
   List<int> sortedLanes(Iterable<int> lanes) => lanes.toSet().toList()..sort();
