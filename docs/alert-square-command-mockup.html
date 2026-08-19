@@ -174,7 +174,7 @@
     </div>
   </div>
   <div>
-    <span class="stamp b">같은 시안 · 받아 얹기 없이 Push만</span>
+    <span class="stamp b">같은 시안 · Rebase 없이 Push만</span>
     <div class="alert">
       <div class="title">main 브랜치를 origin에 Push할까요?</div>
       <div class="origin"><span>origin:</span><span class="url">https://github.com/doortts/yogit</span></div>
@@ -257,30 +257,30 @@
 </div>
 <div class="row">
   <div>
-    <span class="stamp b">받아 얹기 (주황 Pull)</span>
+    <span class="stamp b">Rebase (주황 Pull)</span>
     <div class="alert" style="width:470px">
-      <div class="title">받아 얹을까요? (Pull --rebase)</div>
-      <div class="ask">충돌 없음은 방금 재연으로 확인했습니다. 얹힌 커밋은 해시가 달라집니다.</div>
+      <div class="title">Rebase로 받을까요? (Pull --rebase)</div>
+      <div class="ask">충돌 없음은 방금 재연으로 확인했습니다. Rebase한 커밋은 해시가 달라집니다.</div>
       <div class="cmd"><span class="lbl">실행할 명령</span>git update-ref refs/heads/main ddd4444 aaa1111
 git reset --hard<span class="note2">        # 체크아웃되어 있을 때만</span></div>
-      <div class="buttons"><span class="btn quiet capsule">취소</span><span class="btn go capsule">받아 얹기</span></div>
+      <div class="buttons"><span class="btn quiet capsule">취소</span><span class="btn go capsule">Pull and Rebase</span></div>
     </div>
   </div>
   <div>
-    <span class="stamp b">받아 얹고 Push (주황 Push)</span>
+    <span class="stamp b">Rebase 뒤 Push (주황 Push)</span>
     <div class="alert" style="width:470px">
-      <div class="title">받아 얹은 뒤 Push할까요? (Pull Rebase and Push)</div>
+      <div class="title">Rebase한 뒤 Push할까요? (Pull Rebase and Push)</div>
       <div class="origin"><span>origin:</span><span class="url">https://github.com/doortts/yogit</span></div>
-      <div class="ask">충돌 없음은 방금 재연으로 확인했습니다. 얹힌 커밋은 해시가 달라집니다.</div>
+      <div class="ask">충돌 없음은 방금 재연으로 확인했습니다. Rebase한 커밋은 해시가 달라집니다.</div>
       <div class="cmd"><span class="lbl">실행할 명령</span>git update-ref refs/heads/main ddd4444 aaa1111
 git reset --hard<span class="note2">        # 체크아웃되어 있을 때만</span>
 git push origin ddd4444:refs/heads/main</div>
-      <div class="buttons"><span class="btn quiet capsule">취소</span><span class="btn go capsule">받아 얹고 Push</span></div>
+      <div class="buttons"><span class="btn quiet capsule">취소</span><span class="btn go capsule">Pull Rebase and Push</span></div>
     </div>
   </div>
 </div>
 <p class="caption">
-  받아 얹기가 <code>git rebase</code>로 서지 않는 이유: 재연은 이미 숨은 worktree에서
+  Rebase가 <code>git rebase</code>로 서지 않는 이유: 재연은 이미 숨은 worktree에서
   끝났고(그래서 &lsquo;충돌 없음&rsquo;을 말할 수 있다), 확인을 누른 뒤 남는 일은 <b>브랜치 ref를
   그 결과로 옮기는 것</b>뿐이다. 있지도 않은 <code>git pull --rebase</code>를 적어 두면
   확인창이 거짓을 말한다.

@@ -15,7 +15,7 @@ import 'app_test.dart'
 
 /// 캡슐이 툴바의 기준 브랜치 곁에 서고, refs가 실릴 때마다 판정이 다시 서며,
 /// Push는 오갈 커밋의 목록을 보인 뒤에만 원격을 움직인다. 주황 확인 한 번에
-/// 받아 얹기와 Push 두 걸음이 이어진다. docs/upstream-sync-mockup.html 계약.
+/// Rebase와 Push 두 걸음이 이어진다. docs/upstream-sync-mockup.html 계약.
 void main() {
   late WindowFrameController controller;
 
@@ -211,7 +211,7 @@ void main() {
     await tester.tap(find.byKey(const Key('upstream-sync-push')));
     await tester.pumpAndSettle();
     expect(
-      find.text('받아 얹은 뒤 Push할까요? (Pull Rebase and Push)'),
+      find.text('Rebase한 뒤 Push할까요? (Pull Rebase and Push)'),
       findsOneWidget,
     );
     expect(find.byKey(const Key('push-summary-pull-block')), findsOneWidget);
@@ -224,7 +224,7 @@ void main() {
     expect(walked, [
       'rebase main aaa1111 -> ddd4444',
       'push origin main from null',
-    ], reason: '확인 한 번, 걸음 둘, 순서대로 — 얹은 뒤의 브랜치가 그대로 올라간다');
+    ], reason: '확인 한 번, 걸음 둘, 순서대로 — Rebase한 뒤의 브랜치가 그대로 올라간다');
   });
 
   testWidgets('a conflicted divergence stands red and runs nothing', (
@@ -297,7 +297,7 @@ void main() {
     await tester.tap(find.byKey(const Key('upstream-sync-pull')));
     await tester.pumpAndSettle();
 
-    expect(find.text('받아 얹을까요? (Pull --rebase)'), findsOneWidget);
+    expect(find.text('Rebase로 받을까요? (Pull --rebase)'), findsOneWidget);
     expect(find.byKey(const Key('push-summary-pull-block')), findsOneWidget);
     expect(
       find.textContaining('해시가 달라집니다'),
@@ -672,7 +672,7 @@ void main() {
     expect(previews.single, (
       base: 'origin/main',
       compare: 'main',
-    ), reason: '잰 그 방향 그대로 — upstream 위에 로컬을 얹는다');
+    ), reason: '잰 그 방향 그대로 — upstream 위로 로컬을 Rebase한다');
     expect(find.byKey(const Key('branch-preview-summary')), findsOneWidget);
     expect(
       find.byKey(const Key('upstream-sync-capsule')),

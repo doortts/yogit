@@ -5175,7 +5175,7 @@ void main() {
       expect(
         (await _git(fixture.root, ['rev-parse', 'main^'])).trim(),
         fixture.remoteTip,
-        reason: '로컬 커밋이 원격 끝 위에 얹혀 있다 — 버려진 것이 아니라',
+        reason: '로컬 커밋이 원격 끝 위로 Rebase되어 있다 — 버려진 것이 아니라',
       );
       // 얹힌 뒤에는 force 없이 push가 된다 — 로컬이 원격 끝을 품었으니까.
       await repository.pushBranch('origin', 'main');

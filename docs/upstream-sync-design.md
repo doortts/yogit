@@ -6,7 +6,7 @@
 ## 요약
 
 기준 브랜치와 upstream의 어긋남을 미리 재어 두고, 툴바의 캡슐 두 동사(Pull / Push)가
-판정 색을 입는다. 어긋났을 때의 판정 — 로컬 커밋이 원격 끝 위에 깨끗이 얹히는가 — 은
+판정 색을 입는다. 어긋났을 때의 판정 — 로컬 커밋이 원격 끝 위로 깨끗이 Rebase되는가 — 은
 숨은 worktree 재연 한 번으로 나오고, 그 답이 두 버튼을 동시에 칠한다.
 
 ## 이미 있는 부품
@@ -71,7 +71,7 @@ refs 로드/fetch 완료 ──> ahead·behind 읽기 (공짜)
 - 재연은 **기준 브랜치 하나만, 한 번에 하나만**. 진행 중 tip이 또 움직이면 결과를
   버리고 다시 잰다 (serial 번호 패턴 — `_requestSerial`류, avatars.dart와 동일 수법).
 - clean 판정의 worktree는 **바로 버리지 않는다**: virtualTip은 커밋 객체로 저장소에
-  남으므로 세션은 dispose하고 virtualTip 해시만 보관한다. '받아 얹고 Push' 실행은
+  남으므로 세션은 dispose하고 virtualTip 해시만 보관한다. 'Rebase 뒤 Push' 실행은
   그 tip으로 `_moveLocalBranch(expected: localTip)` — 그 사이 로컬이 움직였으면
   update-ref가 거절하고 재판정한다.
 - 충돌 판정의 세션도 dispose. 해결 흐름은 P4에서 브랜치 diff 모드가 자기 세션을
@@ -106,7 +106,7 @@ Future<void> pushBranch(String remote, String branch, {bool setUpstream = false}
 ```
 
 - Pull(빨리감기): `pullRemoteBranch` 그대로 재사용. 변경 없음.
-- 받아 얹기 실현: `RebasePreviewSession` + `_moveLocalBranch` 재사용. 단
+- Rebase 실현: `RebasePreviewSession` + `_moveLocalBranch` 재사용. 단
   `applyRebasePreview`는 `BranchComparisonResult`에 묶여 있으므로, 얇은 진입로
   `applyUpstreamRebase({branch, expectedTip, virtualTip})`를 추가해 같은
   `_moveLocalBranch`를 부른다. 체크아웃된 브랜치의 작업 트리 갱신 규칙(더러우면
@@ -131,9 +131,9 @@ Future<void> pushBranch(String remote, String branch, {bool setUpstream = false}
   추출해 둘이 같이 쓴다 — 형식이 한 곳에서 관리된다.
 - 초록 Push: 블록 하나(`main · push · 커밋 N개 올라감`, ↑ 표식) + "원격 main이
   A에서 B로 움직입니다" + [그만두기 | Push].
-- 주황: 제목 "받아 얹은 뒤 Push할까요? (Pull Rebase and Push)", 블록 둘
+- 주황: 제목 "Rebase한 뒤 Push할까요? (Pull Rebase and Push)", 블록 둘
   (pull --rebase 들어옴 / push 올라감) + "충돌 없음은 방금 재연으로 확인했습니다.
-  얹힌 커밋은 해시가 달라집니다." + [그만두기 | Pull Rebase and Push].
+  Rebase한 커밋은 해시가 달라집니다." + [그만두기 | Pull Rebase and Push].
 - 커밋 목록은 `loadMovedCommits(remoteTip, localTip)` 한 번 — `<`가 들어올 커밋,
   `>`가 올라갈 커밋. 9개 초과는 기존 규칙대로 '외 N개'.
 
@@ -141,7 +141,7 @@ Future<void> pushBranch(String remote, String branch, {bool setUpstream = false}
 
 - Pull(초록): 확인 없이 `pullRemoteBranch` → refs 재로드 → 타임라인이 말한다.
 - Push(초록/처음): 확인창 → `pushBranch` → refs 재로드.
-- 받아 얹고 Push(주황): 확인창 → `applyUpstreamRebase`(ref 이동) →
+- Rebase 뒤 Push(주황): 확인창 → `applyUpstreamRebase`(ref 이동) →
   `pushBranch` → refs 재로드. 첫걸음이 expected 불일치로 거절되면 중단·재판정.
   push가 거절되면(그 사이 원격 이동) 로컬 rebase는 유지된 채 재판정 —
   다음 판정은 대개 pushOnly거나 다시 diverged다.
@@ -182,7 +182,7 @@ bare 원격 + clone).
 2. 단독 상태는 동사 하나, 개수는 판정 색과 함께
 3. measuring은 무채색, 끝나면 두 동사가 같은 판정을 입는다
 4. Push는 확인창 — 올라갈 커밋 목록과 ref 이동 해시
-5. 주황 확인창은 블록 둘, 제목은 "받아 얹은 뒤 Push할까요? (Pull Rebase and Push)"
+5. 주황 확인창은 블록 둘, 제목은 "Rebase한 뒤 Push할까요? (Pull Rebase and Push)"
 6. Pull은 확인 없이 콜백 즉시
 7. 빨강은 실행 없이 충돌 진입 콜백만
 8. tooltip에 잰 시각

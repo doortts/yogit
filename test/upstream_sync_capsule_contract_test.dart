@@ -138,14 +138,14 @@ void main() {
     expect(pull.textSpan!.toPlainText(), '↓ 2\nPull');
     expect(push.textSpan!.toPlainText(), '↑ 3\nPush');
     expect(pull.style?.color, push.style?.color, reason: '두 동사가 같은 판정을 입는다');
-    expect(push.style?.color, const Color(0xFFF0A35E), reason: '주황 — 얹으면 됨');
+    expect(push.style?.color, const Color(0xFFF0A35E), reason: '주황 — Rebase하면 됨');
     final pushTip = tester.widget<Tooltip>(
       find.ancestor(
         of: find.byKey(const Key('upstream-sync-push')),
         matching: find.byType(Tooltip),
       ),
     );
-    expect(pushTip.message, contains('받아 얹은 뒤'));
+    expect(pushTip.message, contains('Rebase한 뒤'));
   });
 
   testWidgets('the verbs speak to their own callbacks', (tester) async {

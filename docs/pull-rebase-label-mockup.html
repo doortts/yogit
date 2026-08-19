@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>확인창 버튼 이름 — '받아 얹기' 대신 'Pull and Rebase' 시안</title>
+<title>동기화 표기 — '얹다' 대신 Rebase</title>
 <style>
   :root {
     --page:#141416; --raised:#2c2c2e; --surface:#232325; --border:#38383a;
@@ -66,47 +66,29 @@
 </head>
 <body>
 
-<h1>확인창 버튼 이름 — <b>Pull and Rebase</b></h1>
+<h1>동기화 표기 — <b>Rebase</b></h1>
 <p class="lede">
-  주황 Pull 확인창의 파란 버튼만 <b>받아 얹기 → Pull and Rebase</b>로 바꾼다.
-  누르면 도는 일이 <code>pull --rebase</code>라는 것을 버튼 자리에서 바로 읽는다.
-  캡슐 툴팁과 설명 산문의 &lsquo;받아 얹기&rsquo;는 <b>그대로 둔다</b> — 버튼은 명령 이름,
-  산문은 그 명령이 무슨 일인지를 말하는 자리다.
+  upstream 동기화의 우리말 &lsquo;얹다&rsquo;를 걷어내고 <b>Rebase</b>로 통일한다.
+  확인창 버튼은 도는 명령 그대로 <b>Pull and Rebase</b> · <b>Pull Rebase and Push</b>,
+  제목과 툴팁은 그 명령을 한국어 문장 안에서 부른다 — Rebase로 받을까요, Rebase한 뒤 Push,
+  Rebase한 커밋은 해시가 달라집니다.
 </p>
 
-<h2>1 · 주황 Pull 확인창 <span class="tag">이 시안의 본체</span></h2>
+<h2>1 · 주황 Pull 확인창 <span class="tag">Pull and Rebase</span></h2>
 <div class="row">
   <div>
-    <span class="stamp old">지금</span>
+    <span class="stamp">지금 서는 모습</span>
     <div class="alert">
-      <div class="title">받아 얹을까요? (Pull --rebase)</div>
+      <div class="title">Rebase로 받을까요? (Pull --rebase)</div>
       <div class="block">
         <div class="summary"><span class="name">main</span><span class="sep">·</span><span class="op">pull --rebase</span><span class="sep">·</span>커밋&nbsp;<span class="in">8개 들어옴</span></div>
         <div class="items">
-          <div class="item plus"><span class="mark">+</span><span class="id">67549ce5</span><span class="subject">docs(sync-spec): the writer keys are read as s…</span></div>
-          <div class="item plus"><span class="mark">+</span><span class="id">c31f2de2</span><span class="subject">fix(sync): hold a file's claimed writer to wha…</span></div>
+          <div class="item plus"><span class="mark">+</span><span class="id">67549ce5</span><span class="subject">docs(sync-spec): the writer keys are read as s&hellip;</span></div>
+          <div class="item plus"><span class="mark">+</span><span class="id">c31f2de2</span><span class="subject">fix(sync): hold a file's claimed writer to wha&hellip;</span></div>
         </div>
         <div class="more">외 6개</div>
       </div>
-      <div class="ask">충돌 없음은 방금 재연으로 확인했습니다. 얹힌 커밋은 해시가 달라집니다.</div>
-      <div class="cmd"><span class="lbl">실행할 명령</span>git update-ref refs/heads/main 8f600ce 78e26c8
-git reset --hard</div>
-      <div class="buttons"><span class="btn quiet">취소</span><span class="btn go">받아 얹기</span></div>
-    </div>
-  </div>
-  <div>
-    <span class="stamp">시안 — 버튼만 바뀐다</span>
-    <div class="alert">
-      <div class="title">받아 얹을까요? (Pull --rebase)</div>
-      <div class="block">
-        <div class="summary"><span class="name">main</span><span class="sep">·</span><span class="op">pull --rebase</span><span class="sep">·</span>커밋&nbsp;<span class="in">8개 들어옴</span></div>
-        <div class="items">
-          <div class="item plus"><span class="mark">+</span><span class="id">67549ce5</span><span class="subject">docs(sync-spec): the writer keys are read as s…</span></div>
-          <div class="item plus"><span class="mark">+</span><span class="id">c31f2de2</span><span class="subject">fix(sync): hold a file's claimed writer to wha…</span></div>
-        </div>
-        <div class="more">외 6개</div>
-      </div>
-      <div class="ask">충돌 없음은 방금 재연으로 확인했습니다. 얹힌 커밋은 해시가 달라집니다.</div>
+      <div class="ask">충돌 없음은 방금 재연으로 확인했습니다. Rebase한 커밋은 해시가 달라집니다.</div>
       <div class="cmd"><span class="lbl">실행할 명령</span>git update-ref refs/heads/main 8f600ce 78e26c8
 git reset --hard</div>
       <div class="buttons"><span class="btn quiet">취소</span><span class="btn go">Pull and Rebase</span></div>
@@ -114,80 +96,53 @@ git reset --hard</div>
   </div>
 </div>
 <p class="caption">
-  제목은 손대지 않는다. 제목의 <code>(Pull --rebase)</code>는 실제 git 옵션 표기이고
-  버튼은 사람이 읽는 동사라, 둘이 겹쳐 보여도 말하는 층이 다르다.
+  제목의 <code>(Pull --rebase)</code>는 git 옵션 표기 그대로고, 버튼은 눌렀을 때 도는 일의
+  이름이다. 둘 다 같은 낱말을 쓰므로 읽는 사람이 옮겨 읽을 것이 없다.
 </p>
 
-<h2>2 · 옆 창(주황 Push)은 어떻게 할까 <span class="tag" style="background:rgba(240,163,94,.16);color:var(--amber)">고르는 자리</span></h2>
-<p class="note">
-  같은 주황 상태의 Push 확인창에는 <b>받아 얹고 Push</b> 버튼이 있다. 이 창을 그대로
-  두면 두 확인창의 버튼 언어가 갈린다. 아래 둘 중에 골라 주세요.
-</p>
+<h2>2 · 주황 Push 확인창 <span class="tag">Pull Rebase and Push</span></h2>
 <div class="row">
   <div>
-    <span class="stamp b">가 · 짝을 맞춘다(권장)</span>
+    <span class="stamp">지금 서는 모습</span>
     <div class="alert">
-      <div class="title">받아 얹은 뒤 Push할까요? (Pull Rebase and Push)</div>
+      <div class="title">Rebase한 뒤 Push할까요? (Pull Rebase and Push)</div>
       <div class="origin"><span>origin:</span><span class="url">https://github.com/doortts/yogit</span></div>
       <div class="block">
         <div class="summary"><span class="name">main</span><span class="sep">·</span><span class="op">pull --rebase</span><span class="sep">·</span>커밋&nbsp;<span class="in">8개 들어옴</span></div>
         <div class="items">
-          <div class="item plus"><span class="mark">+</span><span class="id">67549ce5</span><span class="subject">docs(sync-spec): the writer keys are read as s…</span></div>
+          <div class="item plus"><span class="mark">+</span><span class="id">67549ce5</span><span class="subject">docs(sync-spec): the writer keys are read as s&hellip;</span></div>
         </div>
         <div class="more">외 7개</div>
       </div>
       <div class="block">
         <div class="summary"><span class="name">main</span><span class="sep">·</span><span class="op">push</span><span class="sep">·</span>커밋&nbsp;<span class="up">2개 올라감</span></div>
         <div class="items">
-          <div class="item"><span class="mark">↑</span><span class="id">f1862dc</span><span class="subject">fix(ui): ask for a fixed-width family that exi…</span></div>
+          <div class="item"><span class="mark">↑</span><span class="id">f1862dc</span><span class="subject">fix(ui): ask for a fixed-width family that exi&hellip;</span></div>
         </div>
         <div class="more">외 1개</div>
       </div>
-      <div class="ask">충돌 없음은 방금 재연으로 확인했습니다. 얹힌 커밋은 해시가 달라집니다.</div>
+      <div class="ask">충돌 없음은 방금 재연으로 확인했습니다. Rebase한 커밋은 해시가 달라집니다.</div>
       <div class="cmd"><span class="lbl">실행할 명령</span>git update-ref refs/heads/main ddd4444 aaa1111
 git reset --hard
 git push origin ddd4444:refs/heads/main</div>
       <div class="buttons"><span class="btn quiet">취소</span><span class="btn go">Pull Rebase and Push</span></div>
     </div>
   </div>
-  <div>
-    <span class="stamp old">나 · 이 창은 그대로 둔다</span>
-    <div class="alert">
-      <div class="title">받아 얹은 뒤 Push할까요? (Pull Rebase and Push)</div>
-      <div class="origin"><span>origin:</span><span class="url">https://github.com/doortts/yogit</span></div>
-      <div class="block">
-        <div class="summary"><span class="name">main</span><span class="sep">·</span><span class="op">pull --rebase</span><span class="sep">·</span>커밋&nbsp;<span class="in">8개 들어옴</span></div>
-        <div class="items">
-          <div class="item plus"><span class="mark">+</span><span class="id">67549ce5</span><span class="subject">docs(sync-spec): the writer keys are read as s…</span></div>
-        </div>
-        <div class="more">외 7개</div>
-      </div>
-      <div class="block">
-        <div class="summary"><span class="name">main</span><span class="sep">·</span><span class="op">push</span><span class="sep">·</span>커밋&nbsp;<span class="up">2개 올라감</span></div>
-        <div class="items">
-          <div class="item"><span class="mark">↑</span><span class="id">f1862dc</span><span class="subject">fix(ui): ask for a fixed-width family that exi…</span></div>
-        </div>
-        <div class="more">외 1개</div>
-      </div>
-      <div class="ask">충돌 없음은 방금 재연으로 확인했습니다. 얹힌 커밋은 해시가 달라집니다.</div>
-      <div class="cmd"><span class="lbl">실행할 명령</span>git update-ref refs/heads/main ddd4444 aaa1111
-git reset --hard
-git push origin ddd4444:refs/heads/main</div>
-      <div class="buttons"><span class="btn quiet">취소</span><span class="btn go">받아 얹고 Push</span></div>
-    </div>
-  </div>
 </div>
-<p class="caption">
-  &lsquo;가&rsquo;는 제목 괄호에 이미 적혀 있는 <code>Pull Rebase and Push</code>를 버튼이
-  그대로 받는다 — 두 창의 버튼이 같은 언어로 선다.
-</p>
+
+<h2>3 · 캡슐 툴팁 <span class="tag">같은 낱말로</span></h2>
+<ul class="rules">
+  <li>주황 Pull — <b>빨리감기는 불가, Rebase로 받습니다 — 충돌 없음</b></li>
+  <li>주황 Push — <b>8개를 Rebase한 뒤 충돌 없이 Push할 수 있습니다</b></li>
+  <li>빨강 — <b>빨리감기는 불가, Rebase하면 lib/a.dart 외 1개가 충돌합니다 — 눌러서 해결</b></li>
+</ul>
 
 <h2>규칙</h2>
 <ul class="rules">
-  <li>바뀌는 것은 <b>확인창 버튼 글자뿐</b>이다. 도는 명령, 판정, 캡슐, 툴팁, 흐름은 그대로다.</li>
-  <li>캡슐 툴팁과 문서의 &lsquo;받아 얹기&rsquo;는 <b>남는다</b> — 무슨 일이 벌어지는지 설명하는 자리다.</li>
-  <li>초록 Pull은 확인창 없이 즉시 실행이므로 <b>이 시안과 무관</b>하다.</li>
-  <li>흐름 계약 테스트의 버튼 글자도 함께 옮긴다(<code>test/upstream_sync_flow_contract_test.dart</code>).</li>
+  <li>바뀌는 것은 <b>글자뿐</b>이다. 도는 명령, 판정, 흐름, 위젯 구조는 그대로다.</li>
+  <li><code>rebase</code>는 <b>옮기지 않는다</b> — 버튼에서도 문장 안에서도 Rebase다.</li>
+  <li>초록 Pull은 확인창 없이 즉시 실행이라 <b>이 표기와 무관</b>하다.</li>
+  <li>계약 테스트는 버튼을 Key로 잡고 제목은 글자로 잡으므로, 제목이 바뀌면 테스트도 함께 옮긴다.</li>
 </ul>
 
 </body>

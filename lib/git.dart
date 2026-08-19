@@ -4590,7 +4590,7 @@ class GitRepository implements FullDiffRepository {
       if (line.startsWith('- ')) line.substring(2).trim(),
   };
 
-  /// P2 — 브랜치 커밋을 하나씩 [baseTip] 위에 단독으로 얹어 보고 충돌 파일을 모은다.
+  /// P2 — 브랜치 커밋을 하나씩 [baseTip] 위로 단독 Rebase해 보고 충돌 파일을 모은다.
   /// 커밋 sha → 충돌 파일 목록. 단독 재생은 순차 재배치와 다르다 — 그 경고는 배지
   /// 툴팁이 한다. [cancelled]가 참이 되면 다음 커밋으로 넘어가지 않고 정리한다.
   ///

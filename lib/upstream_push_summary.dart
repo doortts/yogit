@@ -99,7 +99,7 @@ class CommandPreview extends StatelessWidget {
 
 /// Push 확인창의 몸통: 저장소 변경 알림과 같은 형식으로, 요약줄 아래 오갈
 /// 커밋이 서고 물음은 맨 끝이다 — 무엇이 움직이는지 읽은 뒤에 답하는 순서.
-/// 주황(받아 얹고 Push)일 때는 두 걸음이 블록 둘로 선다.
+/// 주황(Rebase 뒤 Push)일 때는 두 걸음이 블록 둘로 선다.
 /// docs/upstream-sync-mockup.html '누르면' 절이 계약이다.
 class PushSummary extends StatelessWidget {
   const PushSummary({

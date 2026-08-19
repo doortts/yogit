@@ -34,7 +34,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
   );
 
   /// Pull: 초록(빨리감기)은 확인 없이 즉시 — 로컬을 움직이되 역사는 그대로다.
-  /// 주황은 받아 얹기라 로컬 커밋의 해시가 달라지므로, 무엇이 들어오고 무엇이
+  /// 주황은 Rebase라 로컬 커밋의 해시가 달라지므로, 무엇이 들어오고 무엇이
   /// 다시 쓰이는지 오갈 커밋 목록을 보인 뒤에만 움직인다.
   Future<void> _upstreamPull() async {
     final state = _upstreamSync.state;
@@ -54,7 +54,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
           context,
           YogitAlert(
             boxWidth: YogitAlert.listWidth,
-            title: '받아 얹을까요? (Pull --rebase)',
+            title: 'Rebase로 받을까요? (Pull --rebase)',
             body: PushSummary(
               branch: state.branch!,
               incoming: moved.incoming,
@@ -62,7 +62,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
               outgoing: const [],
               footnote:
                   '충돌 없음은 방금 재연으로 확인했습니다. '
-                  '얹힌 커밋은 해시가 달라집니다.',
+                  'Rebase한 커밋은 해시가 달라집니다.',
               loadIncomingRest: _upstreamRestLoader(state, pushSide: false),
             ),
             footer: CommandPreview(_upstreamRebaseCommands(state)),
@@ -163,7 +163,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
           YogitAlert(
             boxWidth: YogitAlert.listWidth,
             subtitle: target,
-            title: '받아 얹은 뒤 Push할까요? (Pull Rebase and Push)',
+            title: 'Rebase한 뒤 Push할까요? (Pull Rebase and Push)',
             body: PushSummary(
               branch: state.branch!,
               incoming: moved.incoming,
@@ -172,7 +172,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
               outgoingTotal: state.ahead,
               footnote:
                   '충돌 없음은 방금 재연으로 확인했습니다. '
-                  '얹힌 커밋은 해시가 달라집니다.',
+                  'Rebase한 커밋은 해시가 달라집니다.',
               loadIncomingRest: _upstreamRestLoader(state, pushSide: false),
               loadOutgoingRest: _upstreamRestLoader(state, pushSide: true),
             ),
@@ -216,7 +216,7 @@ extension _TimelineUpstreamSync on _TimelineScreenState {
     return PushTarget(remote: remote, url: url);
   }
 
-  /// 확인을 누르면 도는 명령 그대로. 받아 얹기가 `git rebase`로 서지 않는 이유는
+  /// 확인을 누르면 도는 명령 그대로. Rebase가 `git rebase`로 서지 않는 이유는
   /// 재연이 이미 숨은 worktree에서 끝났기 때문이다 — 남은 일은 브랜치 ref를 그
   /// 결과로 옮기는 것뿐이고, 체크아웃되어 있을 때만 작업 트리가 따라 움직인다.
   /// 해시는 확인창이 보인 그 해시이므로, 적힌 명령과 도는 명령은 어긋나지 않는다.

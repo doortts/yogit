@@ -178,7 +178,7 @@
   <div class="spacer"></div>
   <div class="wordmark">Yogit</div>
 </div>
-<p class="caption">동기화 캡슐. 두 동사가 각자의 판정 색을 입는다 — 초록: 그대로 됨 · 주황: 받아 얹기(--rebase)를 거치면 됨 · 빨강: 충돌.
+<p class="caption">동기화 캡슐. 두 동사가 각자의 판정 색을 입는다 — 초록: 그대로 됨 · 주황: Rebase를 거치면 됨 · 빨강: 충돌.
   <b>한 자리만 예외다</b>: 충돌 상태의 두 번째 칸은 판정이 아니라 해결 화면으로 나가는 문이라, 그 낱말만 초록을 입고
   <b>해결하기</b>라고 적는다 — 막힌 사실은 빨강이 말하고, 나가는 길은 초록이 말한다.
   개수는 판정에 딸린 사실이라 문 위에서도 빨강으로 남는다.
@@ -188,7 +188,7 @@
 <p class="note">
   판정의 재료는 upstream 대비 <code>ahead</code>(로컬에만 있는 커밋)와
   <code>behind</code>(원격에만 있는 커밋) 둘뿐이고, 어긋났을 때(<code>ahead&gt;0 ∧ behind&gt;0</code>)의
-  물음은 하나로 수렴한다 — <b>로컬 커밋이 원격 끝 위에 깨끗이 얹히는가.</b>
+  물음은 하나로 수렴한다 — <b>로컬 커밋이 원격 끝 위로 깨끗이 Rebase되는가.</b>
   숨은 worktree에서 한 번 재연해 보면(브랜치 diff의 재배치 미리보기와 같은 부품)
   Pull과 Push 두 버튼의 답이 동시에 나온다.
 </p>
@@ -214,7 +214,7 @@
     <span class="act rebase">↓ <span class="n">2</span> Pull</span>
     <span class="act rebase">↑ <span class="n">3</span> Push</span>
   </span>
-  <span class="tip"><span class="dim">tooltip(Push):</span> 2개를 받아 얹은 뒤 충돌 없이 Push할 수 있습니다</span>
+  <span class="tip"><span class="dim">tooltip(Push):</span> 2개를 Rebase한 뒤 충돌 없이 Push할 수 있습니다</span>
 </div>
 <div class="stateline">
   <span class="label"><b>어긋남, 충돌</b> · 3↕2, 재연 실패</span>
@@ -222,7 +222,7 @@
     <span class="act conflict">↓ <span class="n">2</span> 충돌 2</span>
     <span class="act door"><span class="conflictnum">↑ <span class="n">3</span></span> 해결하기</span>
   </span>
-  <span class="tip"><span class="dim">tooltip:</span> 빨리감기는 불가, 받아 얹으면 lib/a.dart 외 1개가 충돌합니다 — 눌러서 해결</span>
+  <span class="tip"><span class="dim">tooltip:</span> 빨리감기는 불가, Rebase하면 lib/a.dart 외 1개가 충돌합니다 — 눌러서 해결</span>
 </div>
 <div class="stateline">
   <span class="label"><b>upstream 없음</b></span>
@@ -261,7 +261,7 @@
 <p class="caption">그대로 Push — 올라갈 커밋이 서고, 원격 ref의 이동이 해시로 적힌다.</p>
 <div class="row">
   <div class="alert">
-    <div class="title">받아 얹은 뒤 Push할까요? (Pull Rebase and Push)</div>
+    <div class="title">Rebase한 뒤 Push할까요? (Pull Rebase and Push)</div>
     <div class="block">
       <div class="summary">
         <span class="name">main</span><span class="sep">·</span><span class="op">pull --rebase</span><span class="sep">·</span>커밋&nbsp;<span class="in">2개 들어옴</span>
@@ -281,13 +281,13 @@
         <div class="item push"><span class="mark">↑</span><span class="id">8a314c6</span><span class="subject">docs: propose reading a commit search by words, not by letters</span></div>
       </div>
     </div>
-    <div class="ask">충돌 없음은 방금 재연으로 확인했습니다. 얹힌 커밋은 해시가 달라집니다.</div>
-    <div class="buttons"><div class="btn quiet">그만두기</div><div class="btn go">받아 얹고 Push</div></div>
+    <div class="ask">충돌 없음은 방금 재연으로 확인했습니다. Rebase한 커밋은 해시가 달라집니다.</div>
+    <div class="buttons"><div class="btn quiet">그만두기</div><div class="btn go">Pull Rebase and Push</div></div>
   </div>
 </div>
 <p class="caption">
-  받아 얹고 Push — 두 걸음이 블록 둘로 서고, 물음은 맨 끝이다. 확인 한 번에 두 걸음이
-  이어서 실행되고, 받아 얹기가 예상과 달리 충돌하면 거기서 멈추고 충돌 해결 흐름이 열린다.
+  Rebase 뒤 Push — 두 걸음이 블록 둘로 서고, 물음은 맨 끝이다. 확인 한 번에 두 걸음이
+  이어서 실행되고, Rebase가 예상과 달리 충돌하면 거기서 멈추고 충돌 해결 흐름이 열린다.
 </p>
 
 <h2>판정표 <span class="tag">git 사실 → 화면</span></h2>
@@ -313,7 +313,7 @@
   <tr>
     <td class="mono">ahead&gt;0 · behind&gt;0 · 재연 깨끗</td>
     <td>주황 · pull --rebase</td>
-    <td>주황 · 받아 얹고 Push</td>
+    <td>주황 · Rebase 뒤 Push</td>
     <td rowspan="2">숨은 worktree 재연 1회<br>(로컬 tip, 원격 tip) 쌍으로 캐시</td>
   </tr>
   <tr>
@@ -339,16 +339,16 @@
   <li>빨간 버튼을 누르면 <b>브랜치 diff의 충돌 해결 흐름</b>이 그대로 열린다: 숨은
       worktree의 재연이 충돌 지점에 멈춰 있고, 충돌 파일 목록에서 파일을 골라 고치고,
       다 풀리면 이어서 진행한다 — 재배치 미리보기가 쓰는 그 화면, 그 부품이다.</li>
-  <li>해결을 마치면 캡슐이 주황으로 돌아온다: 받아 얹기는 이미 실현됐고 남은 것은
+  <li>해결을 마치면 캡슐이 주황으로 돌아온다: Rebase는 이미 실현됐고 남은 것은
       Push뿐이니, Push 확인창에는 올라갈 커밋만 선다.</li>
-  <li>중간에 그만두면 worktree만 버려지고 로컬 브랜치는 그대로다 — 반쯤 얹힌 역사가
+  <li>중간에 그만두면 worktree만 버려지고 로컬 브랜치는 그대로다 — 반쯤 Rebase된 역사가
       남지 않는다.</li>
 </ul>
 
 <h2>실행 방식 — 체크아웃을 옮기지 않는다</h2>
 <ul class="rules">
   <li><b>기준 브랜치가 체크아웃되어 있지 않을 때:</b> Pull(빨리감기)은
-      <code>git fetch origin main:main</code>으로 ref만 전진시키고, 받아 얹기는 브랜치 diff
+      <code>git fetch origin main:main</code>으로 ref만 전진시키고, Rebase는 브랜치 diff
       적용과 같은 숨은 worktree에서 재연을 실현한 뒤 ref만 옮긴다. 작업 트리는 더럽든
       말든 상관없다 — 이 앱의 기존 약속 그대로.</li>
   <li><b>체크아웃되어 있을 때:</b> 작업 트리를 실제로 움직여야 하므로, 트리가 더럽고
@@ -364,7 +364,7 @@
   <li>어긋나면 재연이 끝날 때까지 숫자는 무채색이고, 끝나면 두 버튼이 같은 판정을 입는다.</li>
   <li>Push는 항상 확인을 거치고, 확인창에는 <b>올라갈 커밋의 목록</b>이 저장소 변경 알림과
       같은 형식으로 서고, 원격 ref가 어디서 어디로 움직이는지 해시가 적힌다.</li>
-  <li>받아 얹고 Push는 확인 한 번에 두 걸음이 이어지고, 확인창에 두 걸음이 블록 둘로 선다.</li>
+  <li>Rebase 뒤 Push는 확인 한 번에 두 걸음이 이어지고, 확인창에 두 걸음이 블록 둘로 선다.</li>
   <li>빨간 버튼은 충돌 해결 흐름을 연다. 해결을 마치면 남은 걸음(Push)만 남고, 그만두면
       로컬 브랜치에 아무 자국도 남지 않는다.</li>
   <li>Pull(빨리감기)은 확인 없이 즉시. 완료는 상태바가 아니라 타임라인 자체가 말한다 — 행이 늘어난다.</li>
@@ -373,11 +373,12 @@
 
 <h2>결정 <span class="tag done">확정</span></h2>
 <ol class="rules">
-  <li><b>주황 Push의 한 번 누름</b> — 받아 얹기와 Push를 확인 한 번으로 묶어 실행. ✓</li>
+  <li><b>주황 Push의 한 번 누름</b> — Rebase와 Push를 확인 한 번으로 묶어 실행. ✓</li>
   <li><b>재연 자동 실행</b> — fetch 후 어긋남이 보이면 자동으로 잰다. ✓</li>
   <li><b>충돌의 다음 단계</b> — 목록에서 멈추지 않고 브랜치 diff의 충돌 해결 흐름으로 연결. ✓</li>
-  <li><b>표기</b> — 버튼 동사는 Pull / Push. 설명 산문에서는 &lsquo;받아 얹기(--rebase)&rsquo;
-      같은 우리말이 흐름을 설명한다. ✓</li>
+  <li><b>표기</b> — 캡슐 동사는 Pull / Push, 확인창 버튼은 도는 명령 그대로
+      Pull and Rebase · Pull Rebase and Push. 설명 산문도 <code>rebase</code>를
+      우리말로 옮기지 않고 &lsquo;Rebase&rsquo; 그대로 쓴다. ✓</li>
 </ol>
 
 </body>

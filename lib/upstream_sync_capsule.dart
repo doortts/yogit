@@ -8,7 +8,7 @@ import 'upstream_sync.dart';
 import 'typography.dart';
 
 /// 기준 브랜치 선택기 곁의 동기화 캡슐. 동사는 '무엇을 하겠다'가 아니라 '하면
-/// 어떻게 되는지'를 입는다 — 초록: 그대로 됨, 주황: 받아 얹기를 거치면 됨,
+/// 어떻게 되는지'를 입는다 — 초록: 그대로 됨, 주황: Rebase를 거치면 됨,
 /// 빨강: 충돌(실행 대신 해결 흐름의 문). 동기화 상태는 점 하나가 전부다.
 /// docs/upstream-sync-mockup.html이 계약이다.
 class UpstreamSyncCapsule extends StatelessWidget {
@@ -124,7 +124,7 @@ class UpstreamSyncCapsule extends StatelessWidget {
               count: '↓ ${state.behind}',
               word: 'Pull',
               tooltip:
-                  '빨리감기는 불가, 받아 얹기(--rebase)로 받습니다 — '
+                  '빨리감기는 불가, Rebase로 받습니다 — '
                   '충돌 없음$_measured',
               onTap: onPull,
             ),
@@ -135,7 +135,7 @@ class UpstreamSyncCapsule extends StatelessWidget {
               count: '↑ ${state.ahead}',
               word: 'Push',
               tooltip:
-                  '${state.behind}개를 받아 얹은 뒤 충돌 없이 Push할 수 '
+                  '${state.behind}개를 Rebase한 뒤 충돌 없이 Push할 수 '
                   '있습니다$_measured',
               onTap: onPush,
             ),
@@ -148,7 +148,7 @@ class UpstreamSyncCapsule extends StatelessWidget {
               count: '↓ ${state.behind}',
               word: '충돌 ${state.conflictFiles.length}',
               tooltip:
-                  '빨리감기는 불가, 받아 얹으면 ${_conflictSummary()}에서 '
+                  '빨리감기는 불가, Rebase하면 ${_conflictSummary()}에서 '
                   '충돌합니다 — 눌러서 해결$_measured',
               onTap: onResolveConflict,
             ),

@@ -4,7 +4,7 @@ import 'git.dart';
 
 /// 기준 브랜치와 upstream 사이의 판정. 공짜 사실(ahead/behind)이 대부분을
 /// 정하고, 어긋났을 때만 숨은 worktree 재연이 나머지 하나 — 로컬 커밋이 원격
-/// 끝 위에 깨끗이 얹히는가 — 를 답한다. docs/upstream-sync-design.md.
+/// 끝 위로 깨끗이 Rebase되는가 — 를 답한다. docs/upstream-sync-design.md.
 enum UpstreamSyncKind {
   /// 기준이 없거나 원격 ref다 — 캡슐 자체가 서지 않는다.
   hidden,
@@ -24,7 +24,7 @@ enum UpstreamSyncKind {
   /// 어긋났고, 재연이 아직 답하지 않았다 — 무채색 숫자.
   measuring,
 
-  /// 재연이 깨끗했다 — 받아 얹으면 충돌 없이 Push까지 간다.
+  /// 재연이 깨끗했다 — Rebase하면 충돌 없이 Push까지 간다.
   divergedClean,
 
   /// 재연이 충돌했다 — 실행 대신 해결 흐름이 열린다.
@@ -86,7 +86,7 @@ class UpstreamSyncState {
   final String? measureError;
 }
 
-/// 재연 한 번: [remoteTip] 위에 [localTip]의 전용 커밋을 얹어 본다.
+/// 재연 한 번: [remoteTip] 위에 [localTip]의 전용 커밋을 Rebase해 본다.
 typedef UpstreamRebaseMeasure =
     Future<RebasePreviewResult> Function({
       required String remoteTip,
